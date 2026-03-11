@@ -470,7 +470,7 @@ class TestWaitEngineTimeoutScan:
             "waiting_for_engine": "true",
             "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
             "wait_timeout_s": "120",
-            "runtime": "whisper-cpu",
+            "engine_id": "whisper-cpu",
             "queue_id": "whisper-cpu",
             "stream_message_id": "123-0",
         }
@@ -478,7 +478,7 @@ class TestWaitEngineTimeoutScan:
 
         mock_task = MagicMock()
         mock_task.status = TaskStatus.READY.value
-        mock_task.runtime = "whisper-cpu"
+        mock_task.engine_id = "whisper-cpu"
 
         class MockSession:
             async def get(self, model, key):
@@ -514,7 +514,7 @@ class TestWaitEngineTimeoutScan:
             "waiting_for_engine": "true",
             "wait_deadline_at": (datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
             "wait_timeout_s": "120",
-            "runtime": "whisper-cpu",
+            "engine_id": "whisper-cpu",
             "queue_id": "whisper-cpu",
             "stream_message_id": "123-0",
         }
@@ -523,7 +523,7 @@ class TestWaitEngineTimeoutScan:
 
         mock_task = MagicMock()
         mock_task.status = TaskStatus.READY.value
-        mock_task.runtime = "whisper-cpu"
+        mock_task.engine_id = "whisper-cpu"
 
         class MockSession:
             async def get(self, model, key):

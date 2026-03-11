@@ -26,12 +26,12 @@ def list_models(
             help="Model ID to get details for. If not provided, lists all models.",
         ),
     ] = None,
-    runtime: Annotated[
+    engine_id: Annotated[
         str | None,
         typer.Option(
-            "--runtime",
+            "--engine_id",
             "-r",
-            help="Filter by runtime (e.g., 'nemo', 'faster-whisper').",
+            help="Filter by engine_id (e.g., 'nemo', 'faster-whisper').",
         ),
     ] = None,
     as_json: Annotated[
@@ -45,7 +45,7 @@ def list_models(
     """List available transcription models from the catalog.
 
     Shows all available model variants that can be used with the `model`
-    parameter in transcription requests. Each model maps to a runtime.
+    parameter in transcription requests. Each model maps to a engine_id.
 
     Examples:
 
@@ -53,7 +53,7 @@ def list_models(
 
         dalston models list parakeet-tdt-1.1b
 
-        dalston models list --runtime nemo
+        dalston models list --engine_id nemo
 
         dalston models list --json
     """
@@ -74,8 +74,8 @@ def list_models(
             output = {
                 "id": model.id,
                 "name": model.name,
-                "runtime": model.runtime,
-                "runtime_model_id": model.runtime_model_id,
+                "engine_id": model.engine_id,
+                "loaded_model_id": model.loaded_model_id,
                 "source": model.source,
                 "size_gb": model.size_gb,
                 "stage": model.stage,
@@ -103,8 +103,8 @@ def list_models(
             console.print(f"[bold]{model.id}[/bold]")
             if model.name:
                 console.print(f"  Name: {model.name}")
-            console.print(f"  Runtime: {model.runtime}")
-            console.print(f"  Runtime Model ID: {model.runtime_model_id}")
+            console.print(f"  Runtime: {model.engine_id}")
+            console.print(f"  Runtime Model ID: {model.loaded_model_id}")
 
             if model.source:
                 console.print(f"  Source: {model.source}")
@@ -142,10 +142,10 @@ def list_models(
                 console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
 
-        # Filter by runtime if specified
+        # Filter by engine_id if specified
         models_to_show = model_list.models
-        if runtime:
-            models_to_show = [m for m in models_to_show if m.runtime == runtime]
+        if engine_id:
+            models_to_show = [m for m in models_to_show if m.engine_id == engine_id]
 
         if as_json:
             output = {
@@ -153,8 +153,8 @@ def list_models(
                     {
                         "id": m.id,
                         "name": m.name,
-                        "runtime": m.runtime,
-                        "runtime_model_id": m.runtime_model_id,
+                        "engine_id": m.engine_id,
+                        "loaded_model_id": m.loaded_model_id,
                         "source": m.source,
                         "size_gb": m.size_gb,
                         "languages": m.capabilities.languages,
@@ -175,20 +175,20 @@ def list_models(
             }
             print(json.dumps(output, indent=2))
         else:
-            if runtime:
-                console.print(f"[bold]Models for runtime '{runtime}'[/bold]\n")
+            if engine_id:
+                console.print(f"[bold]Models for engine_id '{engine_id}'[/bold]\n")
             else:
                 console.print("[bold]Available Models[/bold]\n")
 
-            # Group by runtime for better display
-            runtimes: dict[str, list] = {}
+            # Group by engine_id for better display
+            engine_ids: dict[str, list] = {}
             for model in models_to_show:
-                rt = model.runtime or "unknown"
-                if rt not in runtimes:
-                    runtimes[rt] = []
-                runtimes[rt].append(model)
+                rt = model.engine_id or "unknown"
+                if rt not in engine_ids:
+                    engine_ids[rt] = []
+                engine_ids[rt].append(model)
 
-            for rt, rt_models in sorted(runtimes.items()):
+            for rt, rt_models in sorted(engine_ids.items()):
                 console.print(f"  [cyan]{rt}[/cyan]")
                 for model in rt_models:
                     # Language info
@@ -250,7 +250,7 @@ def pull_model(
         raise typer.Exit(code=1) from None
 
     console.print(f"[bold]Model: {model.id}[/bold]")
-    console.print(f"  Runtime: {model.runtime}")
+    console.print(f"  Runtime: {model.engine_id}")
     console.print(f"  Source: {model.source or 'N/A'}")
     if model.size_gb:
         console.print(f"  Size: ~{model.size_gb} GB")
@@ -258,7 +258,7 @@ def pull_model(
 
     # Check if model has a HuggingFace source
     if model.source and ("huggingface.co" in model.source or "/" in model.source):
-        hf_model_id = model.runtime_model_id or model.source
+        hf_model_id = model.loaded_model_id or model.source
 
         console.print("[yellow]Note:[/yellow] Model download requires huggingface_hub.")
         console.print()

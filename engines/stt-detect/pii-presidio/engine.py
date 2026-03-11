@@ -230,11 +230,11 @@ class PIIDetectionEngine(Engine):
         )
         self._analyzer.registry.add_recognizer(oib_recognizer)
 
-    def _load_gliner(self, runtime_model_id: str) -> None:
+    def _load_gliner(self, loaded_model_id: str) -> None:
         """Load GLiNER model for ML-based entity recognition."""
-        if runtime_model_id in self._gliner_models:
-            self._gliner_model = self._gliner_models[runtime_model_id]
-            self._active_gliner_model_id = runtime_model_id
+        if loaded_model_id in self._gliner_models:
+            self._gliner_model = self._gliner_models[loaded_model_id]
+            self._active_gliner_model_id = loaded_model_id
             return
 
         try:
@@ -243,35 +243,35 @@ class PIIDetectionEngine(Engine):
             self.logger.info(
                 "loading_gliner_model",
                 device=self._device,
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
             try:
                 model = GLiNER.from_pretrained(
-                    runtime_model_id,
+                    loaded_model_id,
                     device=self._device,
                 )
             except TypeError:
                 # Backward compatibility for GLiNER versions without device kwarg.
-                model = GLiNER.from_pretrained(runtime_model_id)
+                model = GLiNER.from_pretrained(loaded_model_id)
                 if hasattr(model, "to"):
                     moved = model.to(self._device)
                     if moved is not None:
                         model = moved
 
             self._gliner_model = model
-            self._gliner_models[runtime_model_id] = model
-            self._active_gliner_model_id = runtime_model_id
+            self._gliner_models[loaded_model_id] = model
+            self._active_gliner_model_id = loaded_model_id
             self.logger.info(
                 "gliner_model_loaded",
                 device=self._device,
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
         except ImportError:
             self.logger.warning("gliner_not_available")
         except Exception as e:
             self.logger.warning(
                 "gliner_load_failed",
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
                 error=str(e),
             )
 
@@ -291,23 +291,23 @@ class PIIDetectionEngine(Engine):
         # Get entity types to detect
         entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
         confidence_threshold = config.get("confidence_threshold", 0.5)
-        runtime_model_id = config.get("runtime_model_id")
-        if not runtime_model_id:
+        loaded_model_id = config.get("loaded_model_id")
+        if not loaded_model_id:
             raise ValueError(
-                "Missing required config field 'runtime_model_id' for pii_detect stage."
+                "Missing required config field 'loaded_model_id' for pii_detect stage."
             )
 
         self.logger.info(
             "pii_detection_starting",
             job_id=job_id,
             entity_types=entity_types,
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
         )
 
         # Always load both: Presidio for checksum-validated patterns, GLiNER for NER
         self._load_presidio()
-        self._load_gliner(runtime_model_id)
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        self._load_gliner(loaded_model_id)
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             # Get transcript data from previous stages
             align_output = engine_input.get_align_output()
@@ -378,7 +378,7 @@ class PIIDetectionEngine(Engine):
                 entity_count_by_type=dict(entity_count_by_type),
                 entity_count_by_category=dict(entity_count_by_category),
                 processing_time_ms=processing_time_ms,
-                runtime="pii-presidio",
+                engine_id="pii-presidio",
                 skipped=False,
                 skip_reason=None,
                 warnings=[],
@@ -386,7 +386,7 @@ class PIIDetectionEngine(Engine):
 
             return EngineOutput(data=output)
         finally:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     # Languages supported by Presidio's default NLP models
     PRESIDIO_SUPPORTED_LANGUAGES = {"en", "de", "es", "fr", "it", "pt", "nl", "he"}

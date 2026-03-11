@@ -20,12 +20,12 @@ Current transcription adapters diverged in two ways:
 M73 standardizes both:
 
 - one canonical typed transcribe input (`TranscribeInput`) across batch + RT;
-- class names by runtime + mode (`Batch`/`Realtime`) with no compatibility aliases.
+- class names by engine_id + mode (`Batch`/`Realtime`) with no compatibility aliases.
 
 ## Outcomes
 
 1. Transcribe engines consume one typed params model (`TranscribeInput`) instead of ad-hoc config parsing.
-2. Engine and core class names are consistent by runtime and mode (`Batch`/`Realtime`).
+2. Engine and core class names are consistent by engine_id and mode (`Batch`/`Realtime`).
 3. No behavior regressions in batch/realtime API contracts.
 4. Runtime identifiers in `engine.yaml` remain unchanged.
 
@@ -41,7 +41,7 @@ Delivered:
 
 Deferred to follow-up iteration:
 
-- Voxtral runtime consolidation beyond naming/typed-params scope.
+- Voxtral engine_id consolidation beyond naming/typed-params scope.
 - Broader Voxtral realtime behavior work (audio-state continuity and timestamp
   parity improvements on vLLM path).
 
@@ -49,7 +49,7 @@ Deferred to follow-up iteration:
 
 In scope:
 
-- Rename core + engine classes to runtime-based naming.
+- Rename core + engine classes to engine_id-based naming.
 - Update all internal references (imports, runners, tests, defaults) in the same rollout.
 - Extend `TranscribeInput` with fields required by current transcribe engines.
 - Wire typed params through batch and realtime SDKs.
@@ -73,13 +73,13 @@ Out of scope for this milestone:
 
 ### T1. Core + Engine Class Renames
 
-Apply runtime-based names:
+Apply engine_id-based names:
 
 - Core:
-  - `TranscribeCore` -> `FasterWhisperCore`
+  - `TranscribeCore` -> `FasterWhisperInference`
   - `TranscribeConfig` -> `FasterWhisperConfig`
-  - `ParakeetCore` -> `NemoCore`
-  - `ParakeetOnnxCore` -> `NemoOnnxCore`
+  - `ParakeetCore` -> `NemoInference`
+  - `ParakeetOnnxCore` -> `NemoOnnxInference`
 - Batch:
   - `WhisperEngine` -> `FasterWhisperBatchEngine`
   - `ParakeetEngine` -> `NemoBatchEngine`
@@ -104,11 +104,11 @@ Use `dalston.common.pipeline_types.TranscribeInput` as canonical params model.
 
 Add fields required by current transcribe paths:
 
-- `runtime_model_id: str | None`
+- `loaded_model_id: str | None`
 - `channel: int | None`
 - `word_timestamps: bool | None`
 
-Keep `runtime_model_id` as canonical model-selection key.
+Keep `loaded_model_id` as canonical model-selection key.
 
 Gate:
 
@@ -184,7 +184,7 @@ Optional targeted sweeps during development:
 
 ```bash
 pytest tests/unit/test_engine_sdk_types.py
-pytest tests/unit/test_runtime_executor_contract.py
+pytest tests/unit/test_engine_id_executor_contract.py
 pytest tests/unit/test_faster_whisper_batch_contract.py
 pytest tests/unit/test_faster_whisper_rt_contract.py
 ```
@@ -192,7 +192,7 @@ pytest tests/unit/test_faster_whisper_rt_contract.py
 ## Success Criteria
 
 - All transcribe engines use typed params access instead of direct `config.get(...)`.
-- Class naming is consistent by runtime and mode.
+- Class naming is consistent by engine_id and mode.
 - No root planning document; milestone lives under `docs/plan/milestones/`.
 - Test suite passes without compatibility aliases.
 

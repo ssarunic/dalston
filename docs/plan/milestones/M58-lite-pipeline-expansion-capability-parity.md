@@ -10,24 +10,24 @@
 
 Dependency clarification:
 
-1. M56 provides the runtime substrate (`sqlite + in-memory queue + localfs`) that M58 expands functionally.
+1. M56 provides the engine_id substrate (`sqlite + in-memory queue + localfs`) that M58 expands functionally.
 2. M57 ensures users can access lite mode through one-command UX, which M58 broadens in scope.
 3. M57.1 stabilizes schema evolution and upgrade safety so expanded M58 capabilities do not rely on ad hoc lite schema mutation paths.
-4. M58 does not introduce runtime-isolation redesign; M59 remains responsible for dependency isolation profiles.
+4. M58 does not introduce engine_id-isolation redesign; M59 remains responsible for dependency isolation profiles.
 
 ## Intended Outcomes
 
 ### Functional outcomes
 
 1. Lite mode supports multiple predefined pipeline profiles beyond `prepare -> transcribe -> merge`.
-2. Additional stage/option coverage is explicitly enabled where runtime prerequisites are satisfied.
+2. Additional stage/option coverage is explicitly enabled where engine_id prerequisites are satisfied.
 3. Unsupported features fail fast with deterministic, actionable messages.
 4. Output contracts for supported features remain API-compatible with distributed mode.
 5. Default lite profile is explicit: `core`.
 
 ### Product outcomes
 
-1. Capability boundaries are explicit and discoverable (not implied by runtime failures).
+1. Capability boundaries are explicit and discoverable (not implied by engine_id failures).
 2. Users can choose predictable lite profiles based on quality/speed/features.
 3. The same CLI/API request shape works across lite and distributed for supported features.
 
@@ -46,7 +46,7 @@ Dependency clarification:
 
 ### Success criteria
 
-1. Capability matrix is published and enforced at runtime.
+1. Capability matrix is published and enforced at engine_id.
 2. At least one expanded profile (for example, diarize-enabled) works end-to-end in lite mode.
 3. Unsupported profile/option combinations return deterministic validation errors.
 4. Existing zero-config path remains successful and stable.
@@ -74,7 +74,7 @@ Expand via named profiles rather than ad hoc feature toggles:
 
 ### Strategy 3: Deterministic failure over implicit degradation
 
-If a requested feature is unsupported in the selected profile/runtime, fail explicitly with remediation guidance.
+If a requested feature is unsupported in the selected profile/engine_id, fail explicitly with remediation guidance.
 
 ### Strategy 4: Preserve shared request/output contracts
 
@@ -89,10 +89,10 @@ Enable additional stages incrementally with profile gates, dependency checks, an
 ## What We Will Not Do In M58
 
 1. Do not claim full distributed feature parity.
-2. Do not auto-install heavy runtime dependencies during command execution.
+2. Do not auto-install heavy engine_id dependencies during command execution.
 3. Do not introduce hidden fallback logic that masks unsupported features.
 4. Do not change distributed scheduler semantics to fit lite behavior.
-5. Do not combine runtime isolation redesign (M59) into this milestone.
+5. Do not combine engine_id isolation redesign (M59) into this milestone.
 6. Do not claim `compliance` profile availability on fresh lite installs without preinstalled dependencies.
 
 ---
@@ -167,7 +167,7 @@ Expected files:
 
 1. Add machine-readable capability endpoint/status output for lite mode.
 2. Add human-readable diagnostics command/path for unsupported requests.
-3. Ensure docs and runtime capability data are generated from `dalston/orchestrator/lite_capabilities.py`.
+3. Ensure docs and engine_id capability data are generated from `dalston/orchestrator/lite_capabilities.py`.
 
 Expected files:
 

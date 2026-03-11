@@ -2,7 +2,7 @@
 """Generate engine catalog from engine.yaml files.
 
 The catalog enables:
-- Runtime discovery: What engine runtimes can handle each pipeline stage
+- Runtime discovery: What engine engine_ids can handle each pipeline stage
 - Capability validation: Check job requirements before engines are running
 
 M46: Model metadata has moved to the database (ModelRegistryModel). Models are
@@ -10,7 +10,7 @@ seeded from YAMLs at gateway startup, not via this catalog. This script now
 only generates the engines section.
 
 Sources:
-    engines/**/engine.yaml  - Runtime metadata (all engines have runtime: field)
+    engines/**/engine.yaml  - Runtime metadata (all engines have engine_id: field)
 
 Usage:
     python scripts/generate_catalog.py
@@ -30,15 +30,15 @@ import yaml
 VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
 
 
-def find_runtime_yamls(engines_dir: Path) -> list[Path]:
-    """Find all engine.yaml files (runtime definitions)."""
+def find_engine_id_yamls(engines_dir: Path) -> list[Path]:
+    """Find all engine.yaml files (engine_id definitions)."""
     yamls: list[Path] = []
 
     for yaml_path in engines_dir.glob("**/engine.yaml"):
         # Skip realtime engines for now (separate migration)
         if "stt-rt" in str(yaml_path):
             continue
-        # Merge runtime was replaced by orchestrator transcript assembly.
+        # Merge engine_id was replaced by orchestrator transcript assembly.
         if "stt-merge" in str(yaml_path):
             continue
         yamls.append(yaml_path)
@@ -52,14 +52,14 @@ def load_yaml(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def derive_image_name(runtime_id: str, stage: str, version: str) -> str:
-    """Derive Docker image name from runtime metadata."""
-    return f"dalston/stt-batch-{stage}-{runtime_id}:{version}"
+def derive_image_name(engine_id: str, stage: str, version: str) -> str:
+    """Derive Docker image name from engine_id metadata."""
+    return f"dalston/stt-batch-{stage}-{engine_id}:{version}"
 
 
-def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
-    """Transform engine.yaml data into runtime catalog entry format."""
-    runtime_id = data.get("runtime", data.get("id"))
+def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
+    """Transform engine.yaml data into engine_id catalog entry format."""
+    engine_id = data.get("engine_id", data.get("id"))
     engine_file_id = data.get("id")
     version = data.get("version", "1.0.0")
     stage = data.get("stage")
@@ -105,14 +105,14 @@ def transform_runtime_to_entry(data: dict, yaml_path: Path) -> dict:
     performance = data.get("performance", {})
 
     entry = {
-        "id": runtime_id,
-        "runtime": engine_file_id,  # Engine file ID for capability routing
-        "name": data.get("name", runtime_id),
+        "id": engine_id,
+        "engine_id": engine_file_id,  # Engine file ID for capability routing
+        "name": data.get("name", engine_id),
         "version": version,
         "stage": stage,
         "execution_profile": execution_profile,
         "description": data.get("description", "").strip(),
-        "image": derive_image_name(runtime_id, stage, version),
+        "image": derive_image_name(engine_id, stage, version),
         "capabilities": {
             "stages": stages,
             "languages": languages,
@@ -145,8 +145,8 @@ def generate_catalog(engines_dir: Path) -> dict:
 
     M46: Only generates engine entries. Model metadata has moved to the database.
     """
-    # Load runtime definitions from engine.yaml files
-    runtime_yamls = find_runtime_yamls(engines_dir)
+    # Load engine_id definitions from engine.yaml files
+    runtime_yamls = find_engine_id_yamls(engines_dir)
     if not runtime_yamls:
         raise ValueError(f"No engine.yaml files found in {engines_dir}")
 
@@ -154,11 +154,11 @@ def generate_catalog(engines_dir: Path) -> dict:
     for yaml_path in runtime_yamls:
         try:
             data = load_yaml(yaml_path)
-            entry = transform_runtime_to_entry(data, yaml_path)
-            runtime_id = entry["id"]
+            entry = transform_engine_id_to_entry(data, yaml_path)
+            engine_id = entry["id"]
             # Build engine entry
-            engines[runtime_id] = {
-                "id": runtime_id,
+            engines[engine_id] = {
+                "id": engine_id,
                 "name": entry["name"],
                 "version": entry["version"],
                 "stage": entry["stage"],

@@ -1,6 +1,6 @@
 # Tutorial: Add a New Transcription Engine (Beginner-Friendly)
 
-This guide shows the simplest path to add a new batch transcription runtime after M51.
+This guide shows the simplest path to add a new batch transcription engine after M51.
 
 ## 0. What "Done" Looks Like
 
@@ -38,12 +38,12 @@ python -m dalston.tools.scaffold_engine --list-stages
 
 ## 2. Configure `engine.yaml`
 
-Set realistic capabilities so routing can choose your runtime correctly.
+Set realistic capabilities so routing can choose your engine correctly.
 
 At minimum verify:
 
 1. `stage: transcribe`
-2. `runtime`/`id` naming consistency
+2. `engine_id`/`id` naming consistency
 3. `capabilities.languages`
 4. `capabilities.word_timestamps`
 5. `container.gpu` and hardware section
@@ -53,7 +53,7 @@ Example skeleton:
 ```yaml
 schema_version: "1.1"
 id: my-asr
-runtime: my-asr
+engine_id: my-asr
 stage: transcribe
 name: My ASR Runtime
 version: 1.0.0
@@ -103,7 +103,7 @@ class MyAsrEngine(Engine):
 
     def _load_model(self, config: dict) -> None:
         if self._model is None:
-            # load your runtime model here
+            # load your engine ID model here
             self._model = object()
 
     def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
@@ -141,7 +141,7 @@ class MyAsrEngine(Engine):
             text="hello world",
             segments=segments,
             language=language,
-            runtime="my-asr",
+            engine_id="my-asr",
             timestamp_granularity_requested=TimestampGranularity.WORD,
             timestamp_granularity_actual=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
@@ -184,7 +184,7 @@ def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
         config={},
     )
     ctx = BatchTaskContext(
-        runtime="my-asr",
+        engine_id="my-asr",
         instance="test",
         task_id="task-1",
         job_id="job-1",
@@ -192,7 +192,7 @@ def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
     )
 
     output = engine.process(task_input, ctx)
-    assert output.data.runtime == "my-asr"
+    assert output.data.engine_id == "my-asr"
     assert output.data.text
 ```
 
@@ -252,7 +252,7 @@ If you added new stage-specific tests, include them in the same run.
 
 ## 7. Common Mistakes
 
-1. Importing `dalston.engine_sdk.io` (or `boto3`/`redis`) in engine runtime code.
+1. Importing `dalston.engine_sdk.io` (or `boto3`/`redis`) in engine code.
 2. Building/parsing `s3://...` paths in `process`.
 3. Returning plain dict output when typed `TranscribeOutput` is expected.
 4. Forgetting language/timestamp capability alignment between `engine.py` and `engine.yaml`.
@@ -260,10 +260,10 @@ If you added new stage-specific tests, include them in the same run.
 
 ## 8. If You Also Need Deployment Wiring
 
-If this runtime should run in the stack, add a service in compose by copying an existing transcribe engine service and updating:
+If this engine should run in the stack, add a service in compose by copying an existing transcribe engine service and updating:
 
 1. build context to `engines/stt-transcribe/my-asr`
-2. `DALSTON_RUNTIME=my-asr`
-3. any runtime-specific environment variables
+2. `DALSTON_ENGINE_ID=my-asr`
+3. any engine-specific environment variables
 
 No orchestrator code change is required for normal capability-based selection.

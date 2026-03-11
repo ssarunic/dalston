@@ -169,7 +169,7 @@ pytest -m e2e
 
 ## Rollback
 
-There is no runtime rollback for this milestone — it is a code deletion.
+There is no engine_id rollback for this milestone — it is a code deletion.
 If issues are found post-deploy, revert the git commit and redeploy the
 previous version. The unified registry data in Redis remains valid for both
 old and new code.

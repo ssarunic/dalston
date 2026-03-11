@@ -36,35 +36,35 @@ class TestLibraryToRuntimeMapping:
     """Tests for the LIBRARY_TO_RUNTIME mapping."""
 
     def test_ctranslate2_maps_to_faster_whisper(self):
-        """CTranslate2 library should map to faster-whisper runtime."""
+        """CTranslate2 library should map to faster-whisper engine_id."""
         assert LIBRARY_TO_RUNTIME["ctranslate2"] == "faster-whisper"
 
     def test_nemo_maps_to_nemo(self):
-        """NeMo library should map to nemo runtime."""
+        """NeMo library should map to nemo engine_id."""
         assert LIBRARY_TO_RUNTIME["nemo"] == "nemo"
         assert LIBRARY_TO_RUNTIME["nemo-asr"] == "nemo"
 
     def test_transformers_maps_to_hf_asr(self):
-        """Transformers library should map to hf-asr runtime."""
+        """Transformers library should map to hf-asr engine_id."""
         assert LIBRARY_TO_RUNTIME["transformers"] == "hf-asr"
 
-    def test_all_mappings_have_valid_runtimes(self):
-        """All library mappings should have non-empty runtimes."""
-        for library, runtime in LIBRARY_TO_RUNTIME.items():
+    def test_all_mappings_have_valid_engine_ids(self):
+        """All library mappings should have non-empty engine_ids."""
+        for library, engine_id in LIBRARY_TO_RUNTIME.items():
             assert library, "Library name cannot be empty"
-            assert runtime, f"Runtime for {library} cannot be empty"
+            assert engine_id, f"Runtime for {library} cannot be empty"
 
 
 class TestTagToRuntimeMapping:
     """Tests for the TAG_TO_RUNTIME fallback mapping."""
 
     def test_faster_whisper_tag_maps_correctly(self):
-        """faster-whisper tag should map to faster-whisper runtime."""
+        """faster-whisper tag should map to faster-whisper engine_id."""
         assert TAG_TO_RUNTIME["faster-whisper"] == "faster-whisper"
         assert TAG_TO_RUNTIME["ctranslate2"] == "faster-whisper"
 
     def test_nemo_tag_maps_correctly(self):
-        """nemo tag should map to nemo runtime."""
+        """nemo tag should map to nemo engine_id."""
         assert TAG_TO_RUNTIME["nemo"] == "nemo"
 
     def test_whisper_tag_defaults_to_faster_whisper(self):
@@ -136,26 +136,26 @@ class TestHFResolverGetModelInfo:
 
 
 class TestHFResolverResolveRuntime:
-    """Tests for HFResolver.resolve_runtime."""
+    """Tests for HFResolver.resolve_engine_id."""
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_by_library_name(
+    async def test_resolve_engine_id_by_library_name(
         self,
         resolver: HFResolver,
     ):
-        """Test runtime resolution via library_name (priority 1)."""
+        """Test engine_id resolution via library_name (priority 1)."""
         mock_info = MagicMock()
         mock_info.library_name = "ctranslate2"
         mock_info.tags = []
         mock_info.pipeline_tag = None
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("Systran/faster-whisper-large-v3")
+            result = await resolver.resolve_engine_id("Systran/faster-whisper-large-v3")
 
             assert result == "faster-whisper"
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_by_library_name_case_insensitive(
+    async def test_resolve_engine_id_by_library_name_case_insensitive(
         self,
         resolver: HFResolver,
     ):
@@ -166,12 +166,12 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = None
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("test/model")
+            result = await resolver.resolve_engine_id("test/model")
 
             assert result == "faster-whisper"
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_by_nemo_library(
+    async def test_resolve_engine_id_by_nemo_library(
         self,
         resolver: HFResolver,
     ):
@@ -182,44 +182,44 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = None
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("nvidia/parakeet-tdt-1.1b")
+            result = await resolver.resolve_engine_id("nvidia/parakeet-tdt-1.1b")
 
             assert result == "nemo"
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_by_tag_fallback(
+    async def test_resolve_engine_id_by_tag_fallback(
         self,
         resolver: HFResolver,
     ):
-        """Test runtime resolution via tags when library_name not set."""
+        """Test engine_id resolution via tags when library_name not set."""
         mock_info = MagicMock()
         mock_info.library_name = None
         mock_info.tags = ["automatic-speech-recognition", "nemo", "en"]
         mock_info.pipeline_tag = None
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("some/nemo-model")
+            result = await resolver.resolve_engine_id("some/nemo-model")
 
             assert result == "nemo"
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_by_pipeline_tag_fallback(
+    async def test_resolve_engine_id_by_pipeline_tag_fallback(
         self,
         resolver: HFResolver,
     ):
-        """Test runtime resolution via pipeline_tag (last resort)."""
+        """Test engine_id resolution via pipeline_tag (last resort)."""
         mock_info = MagicMock()
         mock_info.library_name = None
         mock_info.tags = []
         mock_info.pipeline_tag = "automatic-speech-recognition"
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("some/generic-asr-model")
+            result = await resolver.resolve_engine_id("some/generic-asr-model")
 
             assert result == "hf-asr"
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_unknown_returns_none(
+    async def test_resolve_engine_id_unknown_returns_none(
         self,
         resolver: HFResolver,
     ):
@@ -230,18 +230,18 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = "text-generation"
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("some/llm-model")
+            result = await resolver.resolve_engine_id("some/llm-model")
 
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_resolve_runtime_model_not_found(
+    async def test_resolve_loaded_model_not_found(
         self,
         resolver: HFResolver,
     ):
         """Test resolution returns None for missing model."""
         with patch.object(resolver, "get_model_info", return_value=None):
-            result = await resolver.resolve_runtime("nonexistent/model")
+            result = await resolver.resolve_engine_id("nonexistent/model")
 
             assert result is None
 
@@ -258,7 +258,7 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = "automatic-speech-recognition"
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("test/model")
+            result = await resolver.resolve_engine_id("test/model")
 
             # Should use library_name (faster-whisper), not tag (nemo)
             assert result == "faster-whisper"
@@ -276,7 +276,7 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = "text-generation"
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("meta-llama/Llama-2-7b")
+            result = await resolver.resolve_engine_id("meta-llama/Llama-2-7b")
 
             assert result is None
 
@@ -292,7 +292,7 @@ class TestHFResolverResolveRuntime:
         mock_info.pipeline_tag = "automatic-speech-recognition"
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
-            result = await resolver.resolve_runtime("openai/whisper-large-v3")
+            result = await resolver.resolve_engine_id("openai/whisper-large-v3")
 
             assert result == "hf-asr"
 
@@ -309,7 +309,7 @@ class TestHFResolverGetModelMetadata:
         """Test successful metadata extraction."""
         with patch.object(resolver, "get_model_info", return_value=mock_model_info):
             with patch.object(
-                resolver, "resolve_runtime", return_value="faster-whisper"
+                resolver, "resolve_engine_id", return_value="faster-whisper"
             ):
                 result = await resolver.get_model_metadata(
                     "Systran/faster-whisper-large-v3"
@@ -319,7 +319,7 @@ class TestHFResolverGetModelMetadata:
                 assert result.model_id == "Systran/faster-whisper-large-v3"
                 assert result.library_name == "ctranslate2"
                 assert result.pipeline_tag == "automatic-speech-recognition"
-                assert result.resolved_runtime == "faster-whisper"
+                assert result.resolved_engine_id == "faster-whisper"
                 assert result.downloads == 50000
                 assert result.likes == 100
                 assert "en" in result.languages
@@ -351,7 +351,7 @@ class TestHFResolverGetModelMetadata:
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
             with patch.object(
-                resolver, "resolve_runtime", return_value="faster-whisper"
+                resolver, "resolve_engine_id", return_value="faster-whisper"
             ):
                 result = await resolver.get_model_metadata("test/model")
 
@@ -374,7 +374,7 @@ class TestHFResolverGetModelMetadata:
 
         with patch.object(resolver, "get_model_info", return_value=mock_info):
             with patch.object(
-                resolver, "resolve_runtime", return_value="faster-whisper"
+                resolver, "resolve_engine_id", return_value="faster-whisper"
             ):
                 result = await resolver.get_model_metadata("test/model")
 
@@ -385,39 +385,39 @@ class TestHFResolverGetModelMetadata:
 class TestHFResolverHelperMethods:
     """Tests for HFResolver helper methods."""
 
-    def test_get_library_to_runtime_mapping(
+    def test_get_library_to_engine_id_mapping(
         self,
         resolver: HFResolver,
     ):
-        """Test get_library_to_runtime_mapping returns copy."""
-        mapping = resolver.get_library_to_runtime_mapping()
+        """Test get_library_to_engine_id_mapping returns copy."""
+        mapping = resolver.get_library_to_engine_id_mapping()
 
         assert mapping == LIBRARY_TO_RUNTIME
         # Verify it's a copy (modifying it doesn't affect original)
         mapping["test"] = "value"
         assert "test" not in LIBRARY_TO_RUNTIME
 
-    def test_get_tag_to_runtime_mapping(
+    def test_get_tag_to_engine_id_mapping(
         self,
         resolver: HFResolver,
     ):
-        """Test get_tag_to_runtime_mapping returns copy."""
-        mapping = resolver.get_tag_to_runtime_mapping()
+        """Test get_tag_to_engine_id_mapping returns copy."""
+        mapping = resolver.get_tag_to_engine_id_mapping()
 
         assert mapping == TAG_TO_RUNTIME
 
-    def test_get_supported_runtimes(
+    def test_get_supported_engine_ids(
         self,
         resolver: HFResolver,
     ):
-        """Test get_supported_runtimes returns all runtimes."""
-        runtimes = resolver.get_supported_runtimes()
+        """Test get_supported_engine_ids returns all engine_ids."""
+        engine_ids = resolver.get_supported_engine_ids()
 
-        assert "faster-whisper" in runtimes
-        assert "nemo" in runtimes
-        assert "hf-asr" in runtimes
+        assert "faster-whisper" in engine_ids
+        assert "nemo" in engine_ids
+        assert "hf-asr" in engine_ids
         # Should be sorted
-        assert runtimes == sorted(runtimes)
+        assert engine_ids == sorted(engine_ids)
 
 
 class TestHFModelMetadata:
@@ -433,7 +433,7 @@ class TestHFModelMetadata:
             languages=["en"],
             downloads=1000,
             likes=50,
-            resolved_runtime="faster-whisper",
+            resolved_engine_id="faster-whisper",
         )
 
         assert metadata.model_id == "test/model"
@@ -443,7 +443,7 @@ class TestHFModelMetadata:
         assert metadata.languages == ["en"]
         assert metadata.downloads == 1000
         assert metadata.likes == 50
-        assert metadata.resolved_runtime == "faster-whisper"
+        assert metadata.resolved_engine_id == "faster-whisper"
 
     def test_dataclass_optional_fields(self):
         """Test HFModelMetadata with None values."""
@@ -455,11 +455,11 @@ class TestHFModelMetadata:
             languages=[],
             downloads=0,
             likes=0,
-            resolved_runtime=None,
+            resolved_engine_id=None,
         )
 
         assert metadata.library_name is None
-        assert metadata.resolved_runtime is None
+        assert metadata.resolved_engine_id is None
 
 
 class TestHFResolverLazyLoading:

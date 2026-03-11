@@ -28,7 +28,7 @@ Example usage:
                 text=" ".join(s.text for s in seg_list),
                 segments=seg_list,
                 language=info.language,
-                runtime="faster-whisper",
+                engine_id="faster-whisper",
             )
 
     if __name__ == "__main__":

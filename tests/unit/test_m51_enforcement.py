@@ -27,7 +27,7 @@ FORBIDDEN_CALL_PATTERNS = (
 )
 
 
-def test_runtime_engines_have_new_process_signature() -> None:
+def test_engine_id_engines_have_new_process_signature() -> None:
     missing = []
     optional_ctx = []
     for file_path in ENGINE_RUNTIME_FILES:
@@ -53,16 +53,16 @@ def test_runtime_engines_have_new_process_signature() -> None:
     )
 
 
-def test_runtime_engines_do_not_import_storage_clients_or_helpers() -> None:
+def test_engine_id_engines_do_not_import_storage_clients_or_helpers() -> None:
     offenders: list[str] = []
     for file_path in ENGINE_RUNTIME_FILES:
         text = file_path.read_text(encoding="utf-8")
         if any(pattern in text for pattern in FORBIDDEN_IMPORT_PATTERNS):
             offenders.append(str(file_path))
-    assert not offenders, f"Forbidden runtime imports in engine modules: {offenders}"
+    assert not offenders, f"Forbidden engine_id imports in engine modules: {offenders}"
 
 
-def test_runtime_engines_have_no_uri_literals_or_uri_helpers() -> None:
+def test_engine_id_engines_have_no_uri_literals_or_uri_helpers() -> None:
     offenders: list[str] = []
     for file_path in ENGINE_RUNTIME_FILES:
         text = file_path.read_text(encoding="utf-8")
@@ -70,4 +70,4 @@ def test_runtime_engines_have_no_uri_literals_or_uri_helpers() -> None:
             pattern in text for pattern in FORBIDDEN_CALL_PATTERNS
         ):
             offenders.append(str(file_path))
-    assert not offenders, f"URI coupling remains in engine runtime files: {offenders}"
+    assert not offenders, f"URI coupling remains in engine engine_id files: {offenders}"

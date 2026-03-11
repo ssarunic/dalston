@@ -79,8 +79,8 @@ class ModelResponse(BaseModel):
     id: str
     object: Literal["model"] = "model"
     name: str
-    runtime: str
-    runtime_model_id: str
+    engine_id: str
+    loaded_model_id: str
     source: str | None = None
     size_gb: float | None = None
     stage: str | None = None
@@ -113,8 +113,8 @@ class ModelRegistryResponse(BaseModel):
     id: str
     object: Literal["model"] = "model"
     name: str | None = None
-    runtime: str
-    runtime_model_id: str
+    engine_id: str
+    loaded_model_id: str
     stage: str
     status: str  # not_downloaded, downloading, ready, failed
     download_path: str | None = None
@@ -151,16 +151,16 @@ class ModelRegistryListResponse(BaseModel):
     summary="List models",
     description=(
         "List all available models from the registry. "
-        "Each model maps to a runtime that can load it. "
+        "Each model maps to a engine_id that can load it. "
         "Use the model ID with the `model` parameter in transcription requests."
     ),
 )
 async def list_models(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
-    runtime: str | None = Query(
+    engine_id: str | None = Query(
         default=None,
-        description="Filter by runtime (e.g., 'nemo', 'faster-whisper')",
+        description="Filter by engine_id (e.g., 'nemo', 'faster-whisper')",
     ),
     stage: str | None = Query(
         default=None,
@@ -175,7 +175,7 @@ async def list_models(
     """List all models from the registry.
 
     Returns all models that can be used with the `model` parameter in
-    transcription requests. Each model is served by a specific runtime.
+    transcription requests. Each model is served by a specific engine_id.
     """
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.MODEL_READ)
@@ -183,7 +183,7 @@ async def list_models(
     models = await service.list_models(
         db,
         stage=stage,
-        runtime=runtime,
+        engine_id=engine_id,
         status=status,
     )
 
@@ -191,8 +191,8 @@ async def list_models(
         ModelRegistryResponse(
             id=m.id,
             name=m.name,
-            runtime=m.runtime,
-            runtime_model_id=m.runtime_model_id,
+            engine_id=m.engine_id,
+            loaded_model_id=m.loaded_model_id,
             stage=m.stage,
             status=m.status,
             download_path=m.download_path,
@@ -321,8 +321,8 @@ async def update_model(
     return ModelRegistryResponse(
         id=model.id,
         name=model.name,
-        runtime=model.runtime,
-        runtime_model_id=model.runtime_model_id,
+        engine_id=model.engine_id,
+        loaded_model_id=model.loaded_model_id,
         stage=model.stage,
         status=model.status,
         download_path=model.download_path,
@@ -517,16 +517,16 @@ class HFModelMetadataResponse(BaseModel):
     languages: list[str] = []
     downloads: int = 0
     likes: int = 0
-    resolved_runtime: str | None = None
+    resolved_engine_id: str | None = None
     can_route: bool = False
 
 
 class HFRoutingMappingsResponse(BaseModel):
     """Response for HuggingFace routing mappings."""
 
-    library_to_runtime: dict[str, str]
-    tag_to_runtime: dict[str, str]
-    supported_runtimes: list[str]
+    library_to_engine_id: dict[str, str]
+    tag_to_engine_id: dict[str, str]
+    supported_engine_ids: list[str]
 
 
 @router.post(
@@ -534,11 +534,11 @@ class HFRoutingMappingsResponse(BaseModel):
     response_model=HFModelMetadataResponse,
     summary="Resolve HuggingFace model",
     description=(
-        "Fetch metadata from HuggingFace Hub and determine which Dalston runtime "
+        "Fetch metadata from HuggingFace Hub and determine which Dalston engine_id "
         "can load the model. Uses library_name, tags, and pipeline_tag for routing."
     ),
     responses={
-        200: {"description": "Model metadata with resolved runtime"},
+        200: {"description": "Model metadata with resolved engine_id"},
         404: {"description": "Model not found on HuggingFace Hub"},
     },
 )
@@ -548,17 +548,17 @@ async def resolve_hf_model(
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
 ) -> HFModelMetadataResponse:
-    """Resolve a HuggingFace model ID to determine compatible runtime.
+    """Resolve a HuggingFace model ID to determine compatible engine_id.
 
     This endpoint:
     1. Fetches model info from HuggingFace Hub
     2. Extracts library_name, tags, and pipeline_tag
-    3. Determines which Dalston runtime can load the model
+    3. Determines which Dalston engine_id can load the model
     4. Optionally auto-registers the model in the registry
 
     The routing priority is:
     1. library_name (most reliable) - e.g., "ctranslate2" -> "faster-whisper"
-    2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" runtime
+    2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" engine_id
     3. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
     """
     security_manager = get_security_manager()
@@ -575,21 +575,21 @@ async def resolve_hf_model(
             detail=Err.MODEL_NOT_ON_HF.format(model_id=request.model_id),
         )
 
-    # Auto-register if requested and runtime was resolved
-    if request.auto_register and metadata.resolved_runtime:
-        # Check if model already exists in registry (by ID or by runtime_model_id)
+    # Auto-register if requested and engine_id was resolved
+    if request.auto_register and metadata.resolved_engine_id:
+        # Check if model already exists in registry (by ID or by loaded_model_id)
         existing = await service.get_model(db, request.model_id)
         if existing is None:
-            # Also check if a model with this runtime_model_id already exists
-            # (catalog models may have different IDs but same runtime_model_id)
-            existing = await service.get_model_by_runtime_model_id(db, request.model_id)
+            # Also check if a model with this loaded_model_id already exists
+            # (catalog models may have different IDs but same loaded_model_id)
+            existing = await service.get_model_by_loaded_model_id(db, request.model_id)
 
         if existing is None:
             await service.register_model(
                 db,
                 model_id=request.model_id,
-                runtime=metadata.resolved_runtime,
-                runtime_model_id=request.model_id,
+                engine_id=metadata.resolved_engine_id,
+                loaded_model_id=request.model_id,
                 stage="transcribe",
                 source=request.model_id,
                 library_name=metadata.library_name,
@@ -611,8 +611,8 @@ async def resolve_hf_model(
         languages=metadata.languages,
         downloads=metadata.downloads,
         likes=metadata.likes,
-        resolved_runtime=metadata.resolved_runtime,
-        can_route=metadata.resolved_runtime is not None,
+        resolved_engine_id=metadata.resolved_engine_id,
+        can_route=metadata.resolved_engine_id is not None,
     )
 
 
@@ -637,9 +637,9 @@ async def get_hf_routing_mappings(
 
     resolver = HFResolver()
     return HFRoutingMappingsResponse(
-        library_to_runtime=resolver.get_library_to_runtime_mapping(),
-        tag_to_runtime=resolver.get_tag_to_runtime_mapping(),
-        supported_runtimes=resolver.get_supported_runtimes(),
+        library_to_engine_id=resolver.get_library_to_engine_id_mapping(),
+        tag_to_engine_id=resolver.get_tag_to_engine_id_mapping(),
+        supported_engine_ids=resolver.get_supported_engine_ids(),
     )
 
 
@@ -680,8 +680,8 @@ async def get_model(
     return ModelRegistryResponse(
         id=model.id,
         name=model.name,
-        runtime=model.runtime,
-        runtime_model_id=model.runtime_model_id,
+        engine_id=model.engine_id,
+        loaded_model_id=model.loaded_model_id,
         stage=model.stage,
         status=model.status,
         download_path=model.download_path,

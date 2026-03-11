@@ -2,7 +2,7 @@
 
 Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
-to NemoOnnxCore.
+to NemoOnnxInference.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.cores.nemo_onnx_core import (
-    NemoOnnxCore,
+from dalston.engine_sdk.inference.nemo_onnx_inference import (
+    NemoOnnxInference,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
@@ -56,7 +56,7 @@ def _build_rt_engine(core_result: OnnxTranscriptionResult):
     sys.modules["m63_parakeet_onnx_rt"] = module
     spec.loader.exec_module(module)
 
-    mock_core = MagicMock(spec=NemoOnnxCore)
+    mock_core = MagicMock(spec=NemoOnnxInference)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result
@@ -76,7 +76,7 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
         )
 
         assert output.text == "hello world"
@@ -96,7 +96,7 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
         )
 
         words = [w for seg in output.segments for w in (seg.words or [])]
@@ -112,7 +112,7 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
         )
 
         assert output.text == ""
@@ -125,9 +125,7 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         engine.transcribe(
             audio,
-            TranscribeInput(
-                language="en", runtime_model_id="parakeet-onnx-tdt-0.6b-v3"
-            ),
+            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-tdt-0.6b-v3"),
         )
 
         call_args = engine._core.transcribe.call_args
@@ -137,10 +135,10 @@ class TestOnnxRTOutputShape:
 class TestOnnxRTEngineMetadata:
     """Verify engine metadata methods."""
 
-    def test_get_runtime(self) -> None:
+    def test_get_engine_id(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.get_runtime() == "nemo-onnx"
+        assert engine.get_engine_id() == "nemo-onnx"
 
     def test_get_languages(self) -> None:
         result = _make_core_result()

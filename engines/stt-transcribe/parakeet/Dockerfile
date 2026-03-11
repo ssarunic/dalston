@@ -1,7 +1,7 @@
 # NVIDIA Parakeet Transcription Engine (Runtime)
 #
 # FastConformer transcription with CTC or TDT decoders using NeMo toolkit.
-# M36: Single runtime image that loads any Parakeet model variant on demand.
+# M36: Single engine_id image that loads any Parakeet model variant on demand.
 #
 # Build from repo root:
 #   docker compose build stt-batch-transcribe-nemo
@@ -9,7 +9,7 @@
 # Or directly:
 #   docker build -t dalston/stt-batch-transcribe-nemo:1.0.0 -f engines/stt-transcribe/parakeet/Dockerfile .
 #
-# Models are downloaded at runtime to /models/nemo volume.
+# Models are downloaded at engine_id to /models/nemo volume.
 # Supported models: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
 #                   nvidia/parakeet-tdt-0.6b-v3, nvidia/parakeet-tdt-1.1b
 
@@ -70,7 +70,7 @@ ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
-# Copy runtime-level engine.yaml (not variant-specific)
+# Copy engine_id-level engine.yaml (not variant-specific)
 COPY engines/stt-transcribe/parakeet/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-transcribe/parakeet/engine.py .
 

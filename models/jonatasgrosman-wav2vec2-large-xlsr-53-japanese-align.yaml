@@ -1,7 +1,7 @@
 schema_version: "1.1"
 id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
-runtime: phoneme-align
-runtime_model_id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
+engine_id: phoneme-align
+loaded_model_id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
 
 name: Wav2Vec2 XLSR Japanese (Alignment)
 source: jonatasgrosman/wav2vec2-large-xlsr-53-japanese

@@ -1,7 +1,7 @@
 schema_version: "1.1"
 id: pyannote/speaker-diarization-community-1
-runtime: pyannote-4.0
-runtime_model_id: pyannote/speaker-diarization-community-1
+engine_id: pyannote-4.0
+loaded_model_id: pyannote/speaker-diarization-community-1
 
 name: Pyannote Speaker Diarization Community-1
 source: pyannote/speaker-diarization-community-1
@@ -10,7 +10,7 @@ stage: diarize
 
 description: |
   Speaker diarization pipeline for pyannote-audio.
-  Used by the pyannote-4.0 runtime for batch diarization.
+  Used by the pyannote-4.0 engine_id for batch diarization.
 
 languages: null
 

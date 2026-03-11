@@ -1,6 +1,6 @@
 """Engines command for listing running engines (M36).
 
-Shows the status of running engine runtimes and their loaded models.
+Shows the status of running engine engine_ids and their loaded models.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from dalston_cli.output import console
 
 
 def engines(
-    runtime: Annotated[
+    engine_id: Annotated[
         str | None,
         typer.Option(
-            "--runtime",
+            "--engine_id",
             "-r",
-            help="Filter by runtime ID (e.g., 'nemo', 'faster-whisper').",
+            help="Filter by engine_id ID (e.g., 'nemo', 'faster-whisper').",
         ),
     ] = None,
     stage: Annotated[
@@ -48,14 +48,14 @@ def engines(
 ) -> None:
     """List running engines and their status.
 
-    Shows all engine runtimes with their current status, loaded model,
+    Shows all engine engine_ids with their current status, loaded model,
     and available models that can be loaded.
 
     Examples:
 
         dalston engines
 
-        dalston engines --runtime nemo
+        dalston engines --engine_id nemo
 
         dalston engines --stage transcribe
 
@@ -77,8 +77,8 @@ def engines(
     # Apply filters
     engines_to_show = engine_list.engines
 
-    if runtime:
-        engines_to_show = [e for e in engines_to_show if e.id == runtime]
+    if engine_id:
+        engines_to_show = [e for e in engines_to_show if e.id == engine_id]
 
     if stage:
         engines_to_show = [e for e in engines_to_show if e.stage == stage]

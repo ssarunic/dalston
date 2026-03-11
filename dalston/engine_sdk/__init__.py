@@ -23,7 +23,7 @@ Example usage:
                 text=result.text,
                 segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
-                runtime="my-engine",
+                engine_id="my-engine",
             ))
 
     if __name__ == "__main__":

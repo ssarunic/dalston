@@ -485,7 +485,7 @@ No legacy retention fields are consulted.
 1. Implement V2 endpoints and schema only (no compatibility layer)
 2. Run one-time backfill of existing jobs/sessions into `artifact_objects`
 3. Switch cleanup worker to artifact-only mode
-4. Remove V1 retention fields and policy assumptions from runtime code
+4. Remove V1 retention fields and policy assumptions from engine_id code
 5. Migrate SDK/CLI to send explicit retention map
 6. Update web console to template + per-request override model
 7. Add conformance tests for the 10 canonical scenarios above

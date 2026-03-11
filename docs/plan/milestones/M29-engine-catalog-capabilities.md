@@ -21,7 +21,7 @@ M28 introduced a batch engine registry where engines heartbeat to Redis and the 
 This milestone adds two layers:
 
 1. **Catalog** (static, deploy-time) — declares what engines *could* be started, their images, capabilities, and resource requirements. Available even when nothing is running.
-2. **Rich registry** (runtime) — engines include their capabilities in heartbeats. The orchestrator validates job requirements against what's actually running.
+2. **Rich registry** (engine_id) — engines include their capabilities in heartbeats. The orchestrator validates job requirements against what's actually running.
 
 ### The three layers after M29
 
@@ -71,7 +71,7 @@ def get_capabilities(self) -> EngineCapabilities:
 
 ### 29.3: Parakeet implements get_capabilities()
 
-Start with Parakeet only — it's the engine that's registered and tested from M28. Hardcode the capabilities in Python (don't parse engine.yaml at runtime):
+Start with Parakeet only — it's the engine that's registered and tested from M28. Hardcode the capabilities in Python (don't parse engine.yaml at engine_id):
 
 ```python
 def get_capabilities(self) -> EngineCapabilities:
@@ -162,7 +162,7 @@ The error messages should be distinct so operators know whether to fix their cat
 ## What NOT to do
 
 - Don't build dynamic routing between multiple engines for the same stage — that's a future milestone
-- Don't parse engine.yaml at runtime in engines — capabilities are declared in code via `get_capabilities()`
+- Don't parse engine.yaml at engine_id in engines — capabilities are declared in code via `get_capabilities()`
 - Don't add capabilities to realtime engines — batch only for now
 - Don't change the DAG builder or pipeline stage order — the catalog is a validation layer, not a routing replacement
 - Don't build the auto-scaling / engine boot logic — the catalog enables it but the scheduler that acts on it is a separate milestone

@@ -26,7 +26,7 @@ class TestStageResponse:
         stage = StageResponse(
             stage="transcribe",
             task_id=UUID("12345678-1234-1234-1234-123456789abc"),
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             status="completed",
             required=True,
             started_at=now,
@@ -37,7 +37,7 @@ class TestStageResponse:
         )
 
         assert stage.stage == "transcribe"
-        assert stage.runtime == "faster-whisper"
+        assert stage.engine_id == "faster-whisper"
         assert stage.status == "completed"
         assert stage.required is True
         assert stage.duration_ms == 5000
@@ -49,7 +49,7 @@ class TestStageResponse:
         stage = StageResponse(
             stage="diarize",
             task_id=UUID("12345678-1234-1234-1234-123456789abc"),
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
             status="pending",
             required=False,
         )
@@ -65,7 +65,7 @@ class TestStageResponse:
         stage = StageResponse(
             stage="diarize",
             task_id=UUID("12345678-1234-1234-1234-123456789abc"),
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
             status="failed",
             required=False,
             error="Too many speakers detected (>20)",
@@ -85,7 +85,7 @@ class TestTaskResponse:
         task = TaskResponse(
             task_id=UUID("22222222-2222-2222-2222-222222222222"),
             stage="transcribe",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             status="completed",
             required=True,
             dependencies=[dep_id],
@@ -102,7 +102,7 @@ class TestTaskResponse:
         task = TaskResponse(
             task_id=UUID("22222222-2222-2222-2222-222222222222"),
             stage="prepare",
-            runtime="audio-prepare",
+            engine_id="audio-prepare",
             status="completed",
             required=True,
             dependencies=[],
@@ -124,7 +124,7 @@ class TestTaskListResponse:
                 TaskResponse(
                     task_id=UUID("11111111-1111-1111-1111-111111111111"),
                     stage="prepare",
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     status="completed",
                     required=True,
                     dependencies=[],
@@ -132,7 +132,7 @@ class TestTaskListResponse:
                 TaskResponse(
                     task_id=UUID("22222222-2222-2222-2222-222222222222"),
                     stage="transcribe",
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     status="running",
                     required=True,
                     dependencies=[UUID("11111111-1111-1111-1111-111111111111")],
@@ -155,7 +155,7 @@ class TestTaskArtifactResponse:
             task_id=UUID("11111111-1111-1111-1111-111111111111"),
             job_id=UUID("22222222-2222-2222-2222-222222222222"),
             stage="transcribe",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             status="completed",
             input={
                 "audio_uri": "s3://bucket/audio.wav",
@@ -178,7 +178,7 @@ class TestTaskArtifactResponse:
             task_id=UUID("11111111-1111-1111-1111-111111111111"),
             job_id=UUID("22222222-2222-2222-2222-222222222222"),
             stage="diarize",
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
             status="failed",
             input={"config": {"num_speakers": None}},
             output=None,
@@ -209,7 +209,7 @@ class TestTopologicalSort:
         task.stage = stage
         task.dependencies = dependencies
         task.status = status
-        task.runtime = f"engine-{stage}"
+        task.engine_id = f"engine-{stage}"
         task.required = True
         task.started_at = None
         task.completed_at = None

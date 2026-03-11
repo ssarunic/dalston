@@ -31,12 +31,12 @@ The compatibility contract for this milestone has three sources:
 
 - Public OpenAI docs for the intended product surface
 - The official `openai-python` SDK for the concrete client request/response contract
-- Recorded traces against the real OpenAI API for runtime behavior the SDK does not
+- Recorded traces against the real OpenAI API for engine_id behavior the SDK does not
   fully specify, especially realtime event ordering and session payload nuances
 
 When docs and SDK wording are ambiguous, Dalston should match the pinned
 `openai-python` surface for request serialization, response parsing, and header
-behavior. When the SDK does not fully describe runtime semantics, use real API traces.
+behavior. When the SDK does not fully describe engine_id semantics, use real API traces.
 
 The OpenAI docs are currently inconsistent in a few places, especially on realtime
 request/session shapes. This milestone therefore starts by freezing a **docs-backed,

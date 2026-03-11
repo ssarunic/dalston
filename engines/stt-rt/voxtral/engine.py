@@ -62,7 +62,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         self._llm = None
         self._loaded_model_id: str | None = None
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "vllm-asr")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
 
         self._gpu_memory_utilization = float(
             os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")
@@ -93,15 +93,15 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         logger.info(
             "voxtral_rt_engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model_id=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
             cuda_device_count=torch.cuda.device_count(),
         )
 
-    def _resolve_runtime_model_id(self, requested: str | None) -> str:
-        """Resolve user/runtime model identifiers to a HF model ID."""
+    def _resolve_loaded_model_id(self, requested: str | None) -> str:
+        """Resolve user/engine_id model identifiers to a HF model ID."""
         if not requested:
             return self._default_model_id
 
@@ -221,7 +221,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
         """Transcribe one audio window using vLLM."""
-        model_id = self._resolve_runtime_model_id(params.runtime_model_id)
+        model_id = self._resolve_loaded_model_id(params.loaded_model_id)
         self._ensure_model_loaded(model_id)
 
         language = params.language
@@ -246,7 +246,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         raw_text, adapter_transcript = transcribe_audio_array(
             llm=self._llm,
-            runtime_model_id=model_id,
+            loaded_model_id=model_id,
             audio=audio,
             language=language,
             sample_rate=16000,
@@ -283,7 +283,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=text,
             segments=segments,
             language=detected_language,
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             language_confidence=0.95,
             alignment_method=(
                 AlignmentMethod.ATTENTION if include_words else AlignmentMethod.UNKNOWN
@@ -305,8 +305,8 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_languages(self) -> list[str]:
         return self.SUPPORTED_LANGUAGES
 
-    def get_runtime(self) -> str:
-        return self._runtime
+    def get_engine_id(self) -> str:
+        return self._engine_id
 
     def get_gpu_memory_usage(self) -> str:
         if torch.cuda.is_available():
@@ -330,7 +330,7 @@ class VoxtralRealtimeEngine(BaseRealtimeTranscribeEngine):
             **base_health,
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "device": self._device,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,

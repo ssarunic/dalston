@@ -39,7 +39,7 @@ class LocalRunner:
                 task_id=task_id,
                 job_id=job_id,
                 stage=stage,
-                runtime="local",
+                engine_id="local",
                 instance="local-runner",
                 config=config,
                 previous_outputs=previous_outputs,

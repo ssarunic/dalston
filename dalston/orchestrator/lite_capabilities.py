@@ -39,7 +39,7 @@ PROFILE_ENV_VAR = "DALSTON_LITE_PROFILE"
 DEFAULT_PROFILE = "core"
 
 # Prerequisite Python packages required by each profile.
-# Checked via importlib at runtime; absent packages disable the profile.
+# Checked via importlib at engine_id; absent packages disable the profile.
 _COMPLIANCE_PREREQS = ("presidio_analyzer", "presidio_anonymizer")
 
 # Speaker detection mode values.

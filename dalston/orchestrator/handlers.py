@@ -94,9 +94,9 @@ def _serialize_engine_error(
     return str(e)
 
 
-def _get_runtime_execution_profile(runtime: str) -> str:
+def _get_engine_id_execution_profile(engine_id: str) -> str:
     """Resolve the catalog-declared execution profile for metrics/logging."""
-    entry = get_catalog().get_engine(runtime)
+    entry = get_catalog().get_engine(engine_id)
     if entry is None:
         return "unknown"
     return entry.execution_profile
@@ -211,8 +211,8 @@ async def handle_job_created(
             db=db,
         )
     except NoDownloadedModelError as e:
-        # No downloaded models for the auto-selected runtime
-        log.warning("no_downloaded_model", runtime=e.runtime, error=str(e))
+        # No downloaded models for the auto-selected engine_id
+        log.warning("no_downloaded_model", engine_id=e.engine_id, error=str(e))
         job.status = JobStatus.FAILED.value
         job.error = str(e)
         job.completed_at = datetime.now(UTC)
@@ -237,7 +237,7 @@ async def handle_job_created(
             code=e.code,
             stage=e.stage,
             model_id=e.model_id,
-            runtime=e.runtime,
+            engine_id=e.engine_id,
             error=str(e),
         )
         job.status = JobStatus.FAILED.value
@@ -262,13 +262,13 @@ async def handle_job_created(
                 "creating_task",
                 task_id=str(task.id),
                 stage=task.stage,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
             )
             task_model = TaskModel(
                 id=task.id,
                 job_id=task.job_id,
                 stage=task.stage,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 status=task.status.value,
                 config=task_config,
                 input_uri=task.input_uri,
@@ -357,16 +357,16 @@ async def handle_job_created(
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
-                    runtime=getattr(e, "runtime", None),
+                    engine_id=getattr(e, "engine_id", None),
                     stage=getattr(e, "stage", None),
                 )
                 return
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(
-                task.runtime,
+                task.engine_id,
                 task.stage,
-                _get_runtime_execution_profile(task.runtime),
+                _get_engine_id_execution_profile(task.engine_id),
             )
 
             log.info("queued_initial_task", task_id=str(task.id), stage=task.stage)
@@ -375,7 +375,7 @@ async def handle_job_created(
 async def handle_task_started(
     task_id: UUID,
     db: AsyncSession,
-    runtime: str | None = None,
+    engine_id: str | None = None,
 ) -> None:
     """Handle task.started event with atomic claim.
 
@@ -391,9 +391,9 @@ async def handle_task_started(
     Args:
         task_id: UUID of the started task
         db: Database session
-        runtime: ID of the runtime claiming the task (for logging)
+        engine_id: ID of the engine_id claiming the task (for logging)
     """
-    log = logger.bind(task_id=str(task_id), runtime=runtime)
+    log = logger.bind(task_id=str(task_id), engine_id=engine_id)
     log.info("handling_task_started")
 
     # Atomic UPDATE: only transition READY -> RUNNING
@@ -496,9 +496,9 @@ async def handle_task_completed(
 
         # Record task completion metric (M20) - only on first completion
         dalston.metrics.inc_orchestrator_tasks_completed(
-            task.runtime,
+            task.engine_id,
             "success",
-            _get_runtime_execution_profile(task.runtime),
+            _get_engine_id_execution_profile(task.engine_id),
         )
 
     # M67: Track post-processing enrichment status.
@@ -633,16 +633,16 @@ async def handle_task_completed(
                 log.error(
                     "job_failed_engine_error",
                     error_type=type(e).__name__,
-                    runtime=getattr(e, "runtime", None),
+                    engine_id=getattr(e, "engine_id", None),
                     stage=getattr(e, "stage", None),
                 )
                 return
 
             # Record task scheduled metric (M20)
             dalston.metrics.inc_orchestrator_tasks_scheduled(
-                dependent.runtime,
+                dependent.engine_id,
                 dependent.stage,
-                _get_runtime_execution_profile(dependent.runtime),
+                _get_engine_id_execution_profile(dependent.engine_id),
             )
 
             log.info(
@@ -812,7 +812,7 @@ async def handle_task_failed(
             log.error(
                 "job_failed_engine_error_on_retry",
                 error_type=type(e).__name__,
-                runtime=getattr(e, "runtime", None),
+                engine_id=getattr(e, "engine_id", None),
                 stage=getattr(e, "stage", None),
             )
             return
@@ -849,9 +849,9 @@ async def handle_task_failed(
 
     # Record task failure metric (M20)
     dalston.metrics.inc_orchestrator_tasks_completed(
-        task.runtime,
+        task.engine_id,
         "failure",
-        _get_runtime_execution_profile(task.runtime),
+        _get_engine_id_execution_profile(task.engine_id),
     )
 
     job = await db.get(JobModel, job_id)
@@ -888,7 +888,7 @@ async def handle_task_wait_timeout(
         return
 
     job_id = task.job_id
-    log = log.bind(job_id=str(job_id), stage=task.stage, runtime=task.runtime)
+    log = log.bind(job_id=str(job_id), stage=task.stage, engine_id=task.engine_id)
 
     if task.status == TaskStatus.SKIPPED.value:
         # Replay case: SKIPPED persisted but side effects were interrupted.
@@ -932,9 +932,9 @@ async def handle_task_wait_timeout(
     await db.commit()
 
     dalston.metrics.inc_orchestrator_tasks_completed(
-        task.runtime,
+        task.engine_id,
         "failure",
-        _get_runtime_execution_profile(task.runtime),
+        _get_engine_id_execution_profile(task.engine_id),
     )
 
     await _ensure_job_failed_side_effects(
@@ -1013,7 +1013,7 @@ async def _ensure_retry_enqueued(
         log.error(
             "job_failed_engine_error_on_retry_replay",
             error_type=type(e).__name__,
-            runtime=getattr(e, "runtime", None),
+            engine_id=getattr(e, "engine_id", None),
             stage=getattr(e, "stage", None),
         )
 
@@ -1322,16 +1322,16 @@ async def _check_job_completion(
         dalston.metrics.inc_orchestrator_jobs("failed")
     else:
         dalston.metrics.inc_orchestrator_jobs("completed")
-        # Record job duration with runtime/model from transcribe task
+        # Record job duration with engine_id/model from transcribe task
         if job.started_at:
             duration = (datetime.now(UTC) - job.started_at).total_seconds()
             transcribe_task = next(
                 (t for t in pipeline_tasks if t.stage == "transcribe"), None
             )
-            job_runtime = transcribe_task.runtime if transcribe_task else ""
+            job_engine_id = transcribe_task.engine_id if transcribe_task else ""
             job_model = (job.parameters or {}).get("model", "")
             dalston.metrics.observe_orchestrator_job_duration(
-                job_runtime, job_model, duration
+                job_engine_id, job_model, duration
             )
 
         # Extract and store result stats from transcript

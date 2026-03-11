@@ -4,14 +4,14 @@
 |---|---|
 | **Goal** | Deliver installation/distribution experience that matches zero-config UX goals across supported platforms |
 | **Duration** | 6-10 days |
-| **Dependencies** | M57 (zero-config CLI bootstrap), M59 (runtime isolation profiles) |
+| **Dependencies** | M57 (zero-config CLI bootstrap), M59 (engine_id isolation profiles) |
 | **Deliverable** | Distribution channels (pip + installer/binary path as scoped), one-line install bootstrap, reproducible artifacts, and cross-platform smoke validation |
 | **Status** | Planned |
 
 Dependency clarification:
 
 1. M57 defines desired first-run behavior; M60 packages and distributes that behavior safely.
-2. M59 stabilizes runtime execution profiles so packaging targets and prerequisites are explicit.
+2. M59 stabilizes engine_id execution profiles so packaging targets and prerequisites are explicit.
 3. M58 capability matrix remains a transitive input to docs/claims for packaged lite behavior.
 4. Release automation baseline is delivered inside M60 (Phase 3), not an external prerequisite.
 
@@ -63,7 +63,7 @@ Freeze supported channels and platform scope before implementation:
 1. pip/wheel path (mandatory)
 2. Docker lite container (`dalston:lite` / `dalston:lite-gpu`) — single-container deployment with no compose or external infra
 3. optional binary/installer path (scoped by platform readiness)
-4. runtime scope per channel (`lite core` first-run path; distributed path documented separately)
+4. engine_id scope per channel (`lite core` first-run path; distributed path documented separately)
 
 ### Strategy 2: Reproducible packaging pipeline
 
@@ -73,9 +73,9 @@ Use pinned build inputs, deterministic versioning, and artifact checksums/signat
 
 Install flow should include a deterministic first-run verification step and diagnostics output.
 
-### Strategy 4: Separate packaging from runtime behavior
+### Strategy 4: Separate packaging from engine_id behavior
 
-M60 packages stable runtime behavior; it does not redefine server/model bootstrap contracts.
+M60 packages stable engine_id behavior; it does not redefine server/model bootstrap contracts.
 
 ### Strategy 5: Release-gated smoke validation
 
@@ -96,7 +96,7 @@ Define upgrade/rollback semantics separately per channel:
 1. Do not expand feature scope beyond packaged distribution concerns.
 2. Do not add unsupported platform claims without CI smoke coverage.
 3. Do not rely on unsigned/unverified release artifacts.
-4. Do not merge runtime isolation redesign work into packaging implementation.
+4. Do not merge engine_id isolation redesign work into packaging implementation.
 5. Do not deprecate existing developer install paths without migration guidance.
 
 ---
@@ -107,8 +107,8 @@ Define upgrade/rollback semantics separately per channel:
 
 1. Define supported OS/arch matrix per channel.
 2. Freeze installer scope for first release:
-   - installs CLI plus required local server runtime for M57 lite-core first-run path
-   - no claim of full distributed runtime provisioning
+   - installs CLI plus required local server engine_id for M57 lite-core first-run path
+   - no claim of full distributed engine_id provisioning
 3. Define coordinated release policy for multi-package chain:
    - package set: `dalston`, `dalston-sdk`, `dalston-cli`
    - versioning policy and publish order (`dalston-sdk` + `dalston` before `dalston-cli`)
@@ -132,7 +132,7 @@ Expected files:
 ### Phase 1: Pip/Wheel Channel Hardening
 
 1. Ensure package extras and dependency constraints align with M59 profile support for the scoped channel:
-   - define minimal end-user runtime extra/profile set required for one-line local flow
+   - define minimal end-user engine_id extra/profile set required for one-line local flow
    - keep advanced profile extras explicit and optional
 2. Ensure CLI install path includes functional local-server bootstrap prerequisites for M57 path (not CLI-only proxy behavior).
 3. Align/freeze Python version constraints across released packages for supported channel.
@@ -153,10 +153,10 @@ Expected files:
 ### Phase 2: Docker Lite Container Channel
 
 Single-container image that bundles `DALSTON_MODE=lite` with gateway, orchestrator, and
-engine runtimes — no compose, no external Redis/Postgres, zero host dependencies beyond Docker.
+engine engine_ids — no compose, no external Redis/Postgres, zero host dependencies beyond Docker.
 
-1. Build `dalston:lite` (CPU) and `dalston:lite-gpu` (NVIDIA runtime) images:
-   - Base: `python:3.11-slim` (CPU) / `nvidia/cuda:...-runtime` (GPU)
+1. Build `dalston:lite` (CPU) and `dalston:lite-gpu` (NVIDIA engine_id) images:
+   - Base: `python:3.11-slim` (CPU) / `nvidia/cuda:...-engine_id` (GPU)
    - Installs `dalston[lite]`, pre-creates `.dalston/` structure
    - Entrypoint: `dalston serve --host 0.0.0.0`
    - `DALSTON_MODE=lite` baked in; profile/S3/model config via env vars
@@ -164,7 +164,7 @@ engine runtimes — no compose, no external Redis/Postgres, zero host dependenci
 3. S3 integration via environment variables (optional — local filesystem default for non-AWS use).
 4. First-run model auto-download behavior inherited from M57 bootstrap path.
 5. Health check endpoint for container orchestrators (`HEALTHCHECK CMD curl -f http://localhost:8000/health`).
-6. GPU variant adds NVIDIA runtime requirement and enables GPU-accelerated engine profiles.
+6. GPU variant adds NVIDIA engine_id requirement and enables GPU-accelerated engine profiles.
 7. Add smoke test: `docker run --rm dalston:lite dalston transcribe --smoke`.
 8. Integrate with `dalston-aws setup --lite` as primary deployment path for single-instance AWS.
 
@@ -179,7 +179,7 @@ Expected files:
 ### Phase 3: Installer/Binary Channel (Scoped)
 
 1. Implement installer script and/or packaged binary build path for selected targets.
-2. Ensure install places CLI and required runtime assets predictably for scoped lite-core bootstrap.
+2. Ensure install places CLI and required engine_id assets predictably for scoped lite-core bootstrap.
 3. Add uninstall/cleanup semantics.
 4. Add explicit upgrade + rollback semantics for installer/binary channel.
 

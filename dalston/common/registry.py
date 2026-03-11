@@ -6,7 +6,7 @@ Migration scaffolding (DALSTON_ENGINE_REGISTRY_MODE) removed in M69.
 Redis key schema:
     dalston:engine:instances              SET of all instance IDs
     dalston:engine:instance:{id}          HASH with EngineRecord fields
-    dalston:engine:runtime:{runtime}      SET of instance IDs per runtime
+    dalston:engine:engine_id:{engine_id}      SET of instance IDs per engine_id
     dalston:engine:stage:{stage}          SET of instance IDs per stage
     dalston:engine:events                 PUB/SUB channel for lifecycle events
 
@@ -36,7 +36,7 @@ logger = structlog.get_logger()
 # Redis key patterns
 UNIFIED_INSTANCE_SET_KEY = "dalston:engine:instances"
 UNIFIED_INSTANCE_KEY_PREFIX = "dalston:engine:instance:"
-UNIFIED_RUNTIME_SET_PREFIX = "dalston:engine:runtime:"
+UNIFIED_RUNTIME_SET_PREFIX = "dalston:engine:engine_id:"
 UNIFIED_STAGE_SET_PREFIX = "dalston:engine:stage:"
 UNIFIED_EVENTS_CHANNEL = "dalston:engine:events"
 
@@ -54,7 +54,7 @@ class EngineRecord:
 
     Attributes:
         instance: Unique instance identifier (e.g., "faster-whisper-a1b2c3d4")
-        runtime: Inference framework (e.g., "faster-whisper", "nemo")
+        engine_id: Inference framework (e.g., "faster-whisper", "nemo")
         stage: Pipeline stage (e.g., "transcribe", "diarize")
         status: Current status (idle, processing, ready, busy, draining, offline)
         interfaces: Supported I/O modes (["batch"], ["realtime"], ["batch", "realtime"])
@@ -77,7 +77,7 @@ class EngineRecord:
     """
 
     instance: str
-    runtime: str
+    engine_id: str
     stage: str
     status: str
     interfaces: list[str]
@@ -146,7 +146,7 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
     now = datetime.now(UTC).isoformat()
     mapping: dict[str, str] = {
         "instance": record.instance,
-        "runtime": record.runtime,
+        "engine_id": record.engine_id,
         "stage": record.stage,
         "status": record.status,
         "interfaces": json.dumps(record.interfaces),
@@ -189,9 +189,9 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
 
     Returns None if critical fields are missing (quarantines the instance).
     """
-    runtime = data.get("runtime")
-    if not runtime:
-        logger.error("unified_registry_missing_runtime", instance=instance)
+    engine_id = data.get("engine_id")
+    if not engine_id:
+        logger.error("unified_registry_missing_engine_id", instance=instance)
         return None
 
     stage = data.get("stage", "unknown")
@@ -242,7 +242,7 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
 
     return EngineRecord(
         instance=data.get("instance", instance),
-        runtime=runtime,
+        engine_id=engine_id,
         stage=stage,
         status=data.get("status", "offline"),
         interfaces=interfaces,
@@ -320,10 +320,10 @@ class UnifiedEngineRegistry:
         await self._redis.hset(instance_key, mapping=mapping)
         await self._redis.expire(instance_key, HEARTBEAT_TTL)
 
-        # Index by instance set, runtime, and stage
+        # Index by instance set, engine_id, and stage
         await self._redis.sadd(UNIFIED_INSTANCE_SET_KEY, record.instance)
         await self._redis.sadd(
-            f"{UNIFIED_RUNTIME_SET_PREFIX}{record.runtime}", record.instance
+            f"{UNIFIED_RUNTIME_SET_PREFIX}{record.engine_id}", record.instance
         )
         await self._redis.sadd(
             f"{UNIFIED_STAGE_SET_PREFIX}{record.stage}", record.instance
@@ -332,7 +332,7 @@ class UnifiedEngineRegistry:
         logger.debug(
             "unified_registry_registered",
             instance=record.instance,
-            runtime=record.runtime,
+            engine_id=record.engine_id,
             interfaces=record.interfaces,
         )
 
@@ -376,16 +376,16 @@ class UnifiedEngineRegistry:
         """Remove engine from unified registry."""
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
 
-        # Read runtime and stage before deletion for index cleanup
-        data = await self._redis.hmget(instance_key, "runtime", "stage")
-        runtime = data[0]
+        # Read engine_id and stage before deletion for index cleanup
+        data = await self._redis.hmget(instance_key, "engine_id", "stage")
+        engine_id = data[0]
         stage = data[1]
 
         await self._redis.delete(instance_key)
         await self._redis.srem(UNIFIED_INSTANCE_SET_KEY, instance)
 
-        if runtime:
-            await self._redis.srem(f"{UNIFIED_RUNTIME_SET_PREFIX}{runtime}", instance)
+        if engine_id:
+            await self._redis.srem(f"{UNIFIED_RUNTIME_SET_PREFIX}{engine_id}", instance)
         if stage:
             await self._redis.srem(f"{UNIFIED_STAGE_SET_PREFIX}{stage}", instance)
 
@@ -409,9 +409,11 @@ class UnifiedEngineRegistry:
                 records.append(record)
         return records
 
-    async def get_by_runtime(self, runtime: str) -> list[EngineRecord]:
-        """Get all instances for a runtime."""
-        instances = await self._redis.smembers(f"{UNIFIED_RUNTIME_SET_PREFIX}{runtime}")
+    async def get_by_engine_id(self, engine_id: str) -> list[EngineRecord]:
+        """Get all instances for a engine_id."""
+        instances = await self._redis.smembers(
+            f"{UNIFIED_RUNTIME_SET_PREFIX}{engine_id}"
+        )
         records = []
         for instance in instances:
             record = await self.get_by_instance(instance)
@@ -434,28 +436,28 @@ class UnifiedEngineRegistry:
         *,
         stage: str | None = None,
         interface: str | None = None,
-        runtime: str | None = None,
+        engine_id: str | None = None,
         language: str | None = None,
         model: str | None = None,
-        valid_runtimes: set[str] | None = None,
+        valid_engine_ids: set[str] | None = None,
     ) -> list[EngineRecord]:
         """Get available engines matching filters.
 
         Args:
             stage: Filter by pipeline stage
             interface: Filter by interface ("batch" or "realtime")
-            runtime: Filter by runtime framework
+            engine_id: Filter by engine_id framework
             language: Filter by language support
             model: Filter by loaded model
-            valid_runtimes: Only consider engines with these runtimes
+            valid_engine_ids: Only consider engines with these engine_ids
 
         Returns:
             Available engines sorted by available capacity (descending)
         """
         if stage:
             candidates = await self.get_by_stage(stage)
-        elif runtime:
-            candidates = await self.get_by_runtime(runtime)
+        elif engine_id:
+            candidates = await self.get_by_engine_id(engine_id)
         else:
             candidates = await self.get_all()
 
@@ -467,10 +469,13 @@ class UnifiedEngineRegistry:
             if interface and not record.supports_interface(interface):
                 continue
 
-            if runtime and record.runtime != runtime:
+            if engine_id and record.engine_id != engine_id:
                 continue
 
-            if valid_runtimes is not None and record.runtime not in valid_runtimes:
+            if (
+                valid_engine_ids is not None
+                and record.engine_id not in valid_engine_ids
+            ):
                 continue
 
             if language and language != "auto":
@@ -480,7 +485,7 @@ class UnifiedEngineRegistry:
             if model is not None:
                 if record.models_loaded and model in record.models_loaded:
                     pass  # Model already loaded
-                elif runtime and record.runtime == runtime:
+                elif engine_id and record.engine_id == engine_id:
                     pass  # Runtime matches, can load model dynamically
                 elif (
                     record.capabilities
@@ -506,9 +511,9 @@ class UnifiedEngineRegistry:
 
         return available
 
-    async def get_engine(self, runtime: str) -> EngineRecord | None:
-        """Get first available instance for a runtime (compat with batch registry)."""
-        instances = await self.get_by_runtime(runtime)
+    async def get_engine(self, engine_id: str) -> EngineRecord | None:
+        """Get first available instance for a engine_id (compat with batch registry)."""
+        instances = await self.get_by_engine_id(engine_id)
         if not instances:
             return None
         for inst in instances:
@@ -516,9 +521,9 @@ class UnifiedEngineRegistry:
                 return inst
         return instances[0]
 
-    async def is_engine_available(self, runtime: str) -> bool:
-        """Check if a runtime has at least one healthy instance."""
-        instances = await self.get_by_runtime(runtime)
+    async def is_engine_available(self, engine_id: str) -> bool:
+        """Check if a engine_id has at least one healthy instance."""
+        instances = await self.get_by_engine_id(engine_id)
         return any(inst.is_healthy for inst in instances)
 
     async def mark_instance_offline(self, instance: str) -> None:
@@ -560,7 +565,7 @@ class UnifiedRegistryWriter:
         r.hset(instance_key, mapping=mapping)
         r.expire(instance_key, HEARTBEAT_TTL)
         r.sadd(UNIFIED_INSTANCE_SET_KEY, record.instance)
-        r.sadd(f"{UNIFIED_RUNTIME_SET_PREFIX}{record.runtime}", record.instance)
+        r.sadd(f"{UNIFIED_RUNTIME_SET_PREFIX}{record.engine_id}", record.instance)
         r.sadd(f"{UNIFIED_STAGE_SET_PREFIX}{record.stage}", record.instance)
 
     def heartbeat(
@@ -570,12 +575,12 @@ class UnifiedRegistryWriter:
         status: str | None = None,
         active_batch: int | None = None,
         loaded_model: str | None = None,
-        runtime: str | None = None,
+        engine_id: str | None = None,
         stage: str | None = None,
     ) -> None:
         """Update heartbeat (sync).
 
-        runtime and stage are written on every heartbeat so that if the Redis key
+        engine_id and stage are written on every heartbeat so that if the Redis key
         expires and is re-created by the heartbeat, the critical static fields are
         always present (preventing silent quarantine by _mapping_to_record).
         """
@@ -590,8 +595,8 @@ class UnifiedRegistryWriter:
             mapping["active_batch"] = str(active_batch)
         if loaded_model is not None:
             mapping["loaded_model"] = loaded_model
-        if runtime is not None:
-            mapping["runtime"] = runtime
+        if engine_id is not None:
+            mapping["engine_id"] = engine_id
         if stage is not None:
             mapping["stage"] = stage
 
@@ -603,15 +608,15 @@ class UnifiedRegistryWriter:
         r = self._get_redis()
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
 
-        data = r.hmget(instance_key, "runtime", "stage")
-        runtime = data[0]
+        data = r.hmget(instance_key, "engine_id", "stage")
+        engine_id = data[0]
         stage = data[1]
 
         r.delete(instance_key)
         r.srem(UNIFIED_INSTANCE_SET_KEY, instance)
 
-        if runtime:
-            r.srem(f"{UNIFIED_RUNTIME_SET_PREFIX}{runtime}", instance)
+        if engine_id:
+            r.srem(f"{UNIFIED_RUNTIME_SET_PREFIX}{engine_id}", instance)
         if stage:
             r.srem(f"{UNIFIED_STAGE_SET_PREFIX}{stage}", instance)
 

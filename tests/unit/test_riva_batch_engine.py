@@ -24,7 +24,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -175,7 +175,7 @@ class TestRivaBatchOutputShape:
         assert data.text == "hello world"
         assert data.language == "en"
         assert len(data.segments) == 1
-        assert data.runtime == "riva"
+        assert data.engine_id == "riva"
 
     def test_output_segment_has_word_timestamps(
         self, engine_with_mock, tmp_path
@@ -448,9 +448,9 @@ class TestRivaBatchShutdown:
         engine.shutdown()
         mock_channel.close.assert_called_once()
 
-    def test_get_runtime(self, engine_with_mock) -> None:
+    def test_get_engine_id(self, engine_with_mock) -> None:
         engine, _ = engine_with_mock
-        assert engine.get_runtime() == "riva"
+        assert engine.get_engine_id() == "riva"
 
 
 class TestRivaBatchWordConfidence:

@@ -410,7 +410,7 @@ CMD ["python", "-m", "dalston.orchestrator.main"]
 ### docker/Dockerfile.base (Engine Base Image)
 
 ```dockerfile
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1-engine_id-ubuntu22.04
 
 # Install Python and system dependencies
 RUN apt-get update && apt-get install -y \
@@ -656,7 +656,7 @@ docker stats gateway orchestrator stt-batch-transcribe-whisper-cpu
 ### GPU Not Available
 
 ```bash
-# Check NVIDIA runtime
+# Check NVIDIA engine_id
 docker run --rm --gpus all nvidia/cuda:12.1-base nvidia-smi
 
 # If not working, install nvidia-container-toolkit

@@ -11,7 +11,8 @@
         sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
 
 # Python interpreter used for pytest-driven targets.
-PYTHON_TEST ?= python3.12
+# Prefer local virtualenv when present for consistent dependency resolution.
+PYTHON_TEST ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3.12; fi)
 PYTEST_CMD = $(PYTHON_TEST) -m pytest
 
 # Default target

@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to NemoCore.
+timestamp behavior is preserved after delegation to NemoInference.
 
 These tests mock the NeMo model to avoid GPU/model dependencies.
 """
@@ -24,7 +24,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -75,7 +75,7 @@ def _make_rnnt_hypothesis(
 
 
 def _build_engine_with_mock_core(hypothesis):
-    """Create a NemoBatchEngine with a mocked NemoCore."""
+    """Create a NemoBatchEngine with a mocked NemoInference."""
     mock_core = MagicMock()
     mock_core.device = "cpu"
 
@@ -86,11 +86,11 @@ def _build_engine_with_mock_core(hypothesis):
     mock_core.manager.release = MagicMock()
 
     # Mock core.transcribe to call transcribe_with_model with the mock model
-    from dalston.engine_sdk.cores.nemo_core import NemoCore
+    from dalston.engine_sdk.inference.nemo_inference import NemoInference
 
-    # Use a real NemoCore._parse_hypothesis for result
-    segments, words = NemoCore._parse_hypothesis(hypothesis, hypothesis.text)
-    from dalston.engine_sdk.cores.nemo_core import NeMoTranscriptionResult
+    # Use a real NemoInference._parse_hypothesis for result
+    segments, words = NemoInference._parse_hypothesis(hypothesis, hypothesis.text)
+    from dalston.engine_sdk.inference.nemo_inference import NeMoTranscriptionResult
 
     result = NeMoTranscriptionResult(
         text=hypothesis.text.strip(),
@@ -106,7 +106,7 @@ def _build_engine_with_mock_core(hypothesis):
         engine = _ParakeetEngine.__new__(_ParakeetEngine)
         engine._core = mock_core
         engine._default_model_id = "nvidia/parakeet-tdt-1.1b"
-        engine._runtime = "nemo"
+        engine._engine_id = "nemo"
         engine.logger = MagicMock()
     return engine
 
@@ -135,7 +135,7 @@ class TestParakeetBatchOutputShape:
         assert data.language == "en"
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
-        assert data.runtime == "nemo"
+        assert data.engine_id == "nemo"
 
     def test_tdt_word_timestamps(self) -> None:
         hypothesis = _make_tdt_hypothesis(
@@ -230,7 +230,7 @@ class TestParakeetBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"runtime_model_id": "nvidia/parakeet-ctc-0.6b"},
+                config={"loaded_model_id": "nvidia/parakeet-ctc-0.6b"},
             ),
             _ctx(task_id, job_id),
         )
@@ -248,7 +248,7 @@ class TestParakeetBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"runtime_model_id": "nvidia/parakeet-tdt-1.1b"},
+                config={"loaded_model_id": "nvidia/parakeet-tdt-1.1b"},
             ),
             _ctx(task_id, job_id),
         )

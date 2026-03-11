@@ -37,7 +37,7 @@ class _NoopEngine(Engine):
 
     def get_capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
-            runtime="container-runtime",
+            engine_id="container-engine_id",
             version="test",
             stages=["transcribe"],
         )
@@ -66,7 +66,7 @@ def sample_task():
         id=uuid4(),
         job_id=uuid4(),
         stage="transcribe",
-        runtime="container-runtime",
+        engine_id="container-engine_id",
         status=TaskStatus.READY,
         input_uri="s3://bucket/audio.wav",
         created_at=datetime.now(UTC),
@@ -75,12 +75,12 @@ def sample_task():
     )
 
 
-def _catalog_entry(runtime: str, execution_profile: str) -> CatalogEntry:
+def _catalog_entry(engine_id: str, execution_profile: str) -> CatalogEntry:
     return CatalogEntry(
-        runtime=runtime,
-        image=f"dalston/{runtime}:latest",
+        engine_id=engine_id,
+        image=f"dalston/{engine_id}:latest",
         capabilities=EngineCapabilities(
-            runtime=runtime,
+            engine_id=engine_id,
             version="test",
             stages=["transcribe"],
             languages=None,
@@ -94,7 +94,7 @@ async def test_queue_task_records_container_execution_profile(
     mock_redis, mock_registry, sample_task
 ) -> None:
     catalog = EngineCatalog(
-        {"container-runtime": _catalog_entry("container-runtime", "container")}
+        {"container-engine_id": _catalog_entry("container-engine_id", "container")}
     )
 
     with (
@@ -122,11 +122,11 @@ async def test_queue_task_records_container_execution_profile(
 
 
 @pytest.mark.asyncio
-async def test_queue_task_rejects_non_container_runtime_on_distributed_path(
+async def test_queue_task_rejects_non_container_engine_id_on_distributed_path(
     mock_redis, mock_registry, sample_task
 ) -> None:
     catalog = EngineCatalog(
-        {"container-runtime": _catalog_entry("container-runtime", "venv")}
+        {"container-engine_id": _catalog_entry("container-engine_id", "venv")}
     )
 
     with (
@@ -153,13 +153,13 @@ async def test_queue_task_rejects_non_container_runtime_on_distributed_path(
     add_task.assert_not_called()
 
 
-def test_engine_runner_rejects_non_container_runtime() -> None:
-    with patch.dict("os.environ", {"DALSTON_RUNTIME": "container-runtime"}):
+def test_engine_runner_rejects_non_container_engine_id() -> None:
+    with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "container-engine_id"}):
         runner = EngineRunner(_NoopEngine())
 
     registry = MagicMock()
     catalog = MagicMock()
-    catalog.get_engine.return_value = _catalog_entry("container-runtime", "venv")
+    catalog.get_engine.return_value = _catalog_entry("container-engine_id", "venv")
 
     with (
         patch.object(runner, "_setup_signal_handlers"),

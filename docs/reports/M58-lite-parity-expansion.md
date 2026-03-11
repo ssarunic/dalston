@@ -27,7 +27,7 @@ Key exports:
 - `MATRIX_VERSION = "1.0.0"` — semver for schema compatibility
 - `resolve_profile(name)` — validate and resolve a profile name
 - `validate_request(profile, parameters)` — enforce capability guardrails
-- `check_prerequisites(profile)` — detect missing runtime packages
+- `check_prerequisites(profile)` — detect missing engine_id packages
 - `get_matrix_as_dict()` — serialise matrix for API/docs
 
 ### Phase 1 — Profile-Aware Planner and Validation
@@ -106,7 +106,7 @@ artifact store contract.
 
 | Criterion | Status |
 |-----------|--------|
-| Lite capability matrix implemented and enforced at runtime | ✅ |
+| Lite capability matrix implemented and enforced at engine_id | ✅ |
 | At least one expanded profile (`speaker`) works end-to-end | ✅ |
 | Unsupported features fail deterministically with clear guidance | ✅ |
 | M57 zero-config default path still passes unchanged | ✅ |
@@ -130,6 +130,6 @@ pass without modification.
 
 **Compliance profile is conditional, not absent**: The profile exists in the
 matrix with clear prerequisite documentation.  `check_prerequisites()` returns
-the missing packages at runtime.  The `GET /v1/lite/capabilities` response
+the missing packages at engine_id.  The `GET /v1/lite/capabilities` response
 includes `missing_prereqs` so tooling can surface actionable guidance without
 requiring a failed API call.

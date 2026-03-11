@@ -388,7 +388,7 @@ class RealtimeSessionInfo:
     status: RealtimeSessionStatus
     language: str | None
     model: str | None
-    runtime: str | None
+    engine_id: str | None
     audio_duration_seconds: float
     segment_count: int
     word_count: int
@@ -466,12 +466,12 @@ class Model:
     stage: str  # Pipeline stage (e.g., "transcribe")
     capabilities: ModelCapabilities
     hardware: HardwareRequirements | None = None
-    # M36: New fields for runtime model management
+    # M36: New fields for engine_id model management
     name: str | None = None  # Human-readable name
-    runtime: str | None = (
+    engine_id: str | None = (
         None  # Runtime that loads this model (e.g., "nemo", "faster-whisper")
     )
-    runtime_model_id: str | None = None  # Native model ID for loading
+    loaded_model_id: str | None = None  # Native model ID for loading
     source: str | None = None  # Download source (e.g., HuggingFace model ID)
     size_gb: float | None = None  # Estimated model size
 
@@ -511,16 +511,16 @@ class EnginePerformance:
 class Engine:
     """Running engine information (M36).
 
-    Represents an engine runtime with its current status and loaded model.
+    Represents an engine engine_id with its current status and loaded model.
     """
 
-    id: str  # Engine/runtime identifier (e.g., "nemo", "faster-whisper")
+    id: str  # Engine/engine_id identifier (e.g., "nemo", "faster-whisper")
     stage: str  # Pipeline stage (e.g., "transcribe", "diarize")
     version: str
     status: str  # "running" | "available" | "unhealthy"
     capabilities: EngineCapabilities
     name: str | None = None
-    loaded_model: str | None = None  # Currently loaded runtime_model_id
+    loaded_model: str | None = None  # Currently loaded loaded_model_id
     available_models: list[str] | None = None  # Models on disk, ready to load
     hardware: HardwareRequirements | None = None
     performance: EnginePerformance | None = None

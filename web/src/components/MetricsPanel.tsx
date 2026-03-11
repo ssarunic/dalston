@@ -155,9 +155,9 @@ function EngineTable({ engines }: { engines: EngineMetric[] }) {
                 </td>
               </tr>
               {group.engines.map((e) => (
-                <tr key={e.runtime} className="hover:bg-accent/50 transition-colors border-t border-border">
+                <tr key={e.engine_id} className="hover:bg-accent/50 transition-colors border-t border-border">
                   <td className="py-1.5">
-                    <span className="font-mono text-xs">{e.runtime}</span>
+                    <span className="font-mono text-xs">{e.engine_id}</span>
                   </td>
                   <td className="py-1.5 text-right tabular-nums">{e.completed}</td>
                   <td className="py-1.5 text-right tabular-nums">

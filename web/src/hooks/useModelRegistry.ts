@@ -80,7 +80,7 @@ export function usePurgeModel() {
 }
 
 /**
- * Resolve a HuggingFace model to determine compatible runtime.
+ * Resolve a HuggingFace model to determine compatible engine_id.
  * Used for the "Add Model from HuggingFace" input.
  */
 export function useResolveHFModel() {
@@ -98,7 +98,7 @@ export function useResolveHFModel() {
 }
 
 /**
- * Get HuggingFace library/tag to runtime mappings.
+ * Get HuggingFace library/tag to engine_id mappings.
  * Used for debugging and displaying routing rules.
  */
 export function useHFMappings() {

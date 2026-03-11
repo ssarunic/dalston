@@ -1,4 +1,4 @@
-"""Mode-aware task queue backends for distributed (Redis) and lite (in-memory) runtimes."""
+"""Mode-aware task queue backends for distributed (Redis) and lite (in-memory) engine_ids."""
 
 from __future__ import annotations
 

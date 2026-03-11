@@ -80,7 +80,7 @@ Tasks are atomic units of work. Each task:
 Runtime isolation is policy-driven from `CatalogEntry.execution_profile`.
 
 - `container` (default): scheduler and Redis stream dispatch stay unchanged; long-running engine workers execute tasks as they do today
-- `venv`: lite mode runs the task in a runtime-specific virtualenv via subprocess
+- `venv`: lite mode runs the task in an engine-specific virtualenv via subprocess
 - `inproc`: lite mode runs the task directly inside the orchestrator process
 
 Selection rules:

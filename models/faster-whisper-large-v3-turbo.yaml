@@ -1,10 +1,10 @@
 # Model catalog entry for faster-whisper-large-v3-turbo
-# This file defines the model variant metadata for runtime model management (M36)
+# This file defines the model variant metadata for engine_id model management (M36)
 
 schema_version: "1.1"
 id: Systran/faster-whisper-large-v3-turbo
-runtime: faster-whisper
-runtime_model_id: "large-v3-turbo"  # String passed to WhisperModel()
+engine_id: faster-whisper
+loaded_model_id: "large-v3-turbo"  # String passed to WhisperModel()
 
 name: Faster Whisper Large V3 Turbo
 source: Systran/faster-whisper-large-v3-turbo

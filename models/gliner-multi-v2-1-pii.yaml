@@ -1,7 +1,7 @@
 schema_version: "1.1"
 id: urchade/gliner_multi-v2.1
-runtime: pii-presidio
-runtime_model_id: urchade/gliner_multi-v2.1
+engine_id: pii-presidio
+loaded_model_id: urchade/gliner_multi-v2.1
 
 name: GLiNER Multi v2.1 (PII)
 source: urchade/gliner_multi-v2.1

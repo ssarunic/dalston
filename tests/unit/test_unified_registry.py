@@ -35,7 +35,7 @@ class TestEngineRecord:
     def _make_record(self, **overrides) -> EngineRecord:
         defaults = {
             "instance": "faster-whisper-abc123",
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": ["batch"],
@@ -129,7 +129,7 @@ class TestRecordSerialization:
     def test_round_trip_batch(self):
         now = datetime.now(UTC)
         caps = EngineCapabilities(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             version="1.0",
             stages=["transcribe"],
             languages=["en"],
@@ -137,7 +137,7 @@ class TestRecordSerialization:
         )
         original = EngineRecord(
             instance="fw-abc123",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             status="idle",
             interfaces=["batch"],
@@ -157,7 +157,7 @@ class TestRecordSerialization:
 
         assert restored is not None
         assert restored.instance == original.instance
-        assert restored.runtime == original.runtime
+        assert restored.engine_id == original.engine_id
         assert restored.stage == original.stage
         assert restored.status == original.status
         assert restored.interfaces == original.interfaces
@@ -172,7 +172,7 @@ class TestRecordSerialization:
         now = datetime.now(UTC)
         original = EngineRecord(
             instance="rt-whisper-xyz789",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             status="ready",
             interfaces=["realtime"],
@@ -198,8 +198,8 @@ class TestRecordSerialization:
         assert restored.languages == ["en", "auto"]
         assert restored.gpu_memory_used == "4.2GB"
 
-    def test_mapping_to_record_missing_runtime(self):
-        """Missing runtime quarantines the instance."""
+    def test_mapping_to_record_missing_engine_id(self):
+        """Missing engine_id quarantines the instance."""
         result = _mapping_to_record("bad-inst", {"stage": "transcribe"})
         assert result is None
 
@@ -208,7 +208,7 @@ class TestRecordSerialization:
         result = _mapping_to_record(
             "inst-1",
             {
-                "runtime": "test",
+                "engine_id": "test",
                 "interfaces": "not-json",
                 "models_loaded": "{bad}",
                 "languages": "also-bad",
@@ -240,7 +240,7 @@ class TestUnifiedEngineRegistry:
     async def test_register(self, registry, mock_redis):
         record = EngineRecord(
             instance="fw-abc123",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             status="idle",
             interfaces=["batch"],
@@ -312,7 +312,7 @@ class TestUnifiedEngineRegistry:
         now = datetime.now(UTC).isoformat()
         mock_redis.hgetall.return_value = {
             "instance": "fw-abc123",
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
@@ -327,7 +327,7 @@ class TestUnifiedEngineRegistry:
 
         assert record is not None
         assert record.instance == "fw-abc123"
-        assert record.runtime == "faster-whisper"
+        assert record.engine_id == "faster-whisper"
         assert record.capacity == 4
         assert record.active_batch == 1
 
@@ -347,7 +347,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "fw-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -355,7 +355,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "fw-2" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "processing",
                     "interfaces": '["batch"]',
@@ -370,21 +370,21 @@ class TestUnifiedEngineRegistry:
         assert len(records) == 2
 
     @pytest.mark.asyncio
-    async def test_get_by_runtime(self, registry, mock_redis):
+    async def test_get_by_engine_id(self, registry, mock_redis):
         now = datetime.now(UTC).isoformat()
         mock_redis.smembers.return_value = {"fw-1"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
             "last_heartbeat": now,
         }
 
-        records = await registry.get_by_runtime("faster-whisper")
+        records = await registry.get_by_engine_id("faster-whisper")
 
         assert len(records) == 1
-        assert records[0].runtime == "faster-whisper"
+        assert records[0].engine_id == "faster-whisper"
         mock_redis.smembers.assert_called_with(
             f"{UNIFIED_RUNTIME_SET_PREFIX}faster-whisper"
         )
@@ -394,7 +394,7 @@ class TestUnifiedEngineRegistry:
         now = datetime.now(UTC).isoformat()
         mock_redis.smembers.return_value = {"fw-1"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
@@ -414,7 +414,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "batch-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -425,7 +425,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "rt-1" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "ready",
                     "interfaces": '["realtime"]',
@@ -460,7 +460,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "en-only" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -472,7 +472,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "multilingual" in key:
                 return {
-                    "runtime": "nemo",
+                    "engine_id": "nemo",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -500,10 +500,10 @@ class TestUnifiedEngineRegistry:
         self, registry, mock_redis
     ):
         """Workers declaring a model in capabilities.model_variants should be
-        included even when runtime is not provided and model is not yet loaded."""
+        included even when engine_id is not provided and model is not yet loaded."""
         now = datetime.now(UTC).isoformat()
         caps = EngineCapabilities(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             version="1.0",
             stages=["transcribe"],
             model_variants=["large-v3", "large-v3-turbo", "base"],
@@ -513,7 +513,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "fw-dynamic" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["realtime"]',
@@ -529,7 +529,7 @@ class TestUnifiedEngineRegistry:
 
         mock_redis.hgetall.side_effect = mock_hgetall
 
-        # Request large-v3-turbo without runtime hint — should match via model_variants
+        # Request large-v3-turbo without engine_id hint — should match via model_variants
         available = await registry.get_available(
             interface="realtime",
             model="large-v3-turbo",
@@ -554,7 +554,7 @@ class TestUnifiedEngineRegistry:
         async def mock_hgetall(key):
             if "low-cap" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -565,7 +565,7 @@ class TestUnifiedEngineRegistry:
                 }
             elif "high-cap" in key:
                 return {
-                    "runtime": "faster-whisper",
+                    "engine_id": "faster-whisper",
                     "stage": "transcribe",
                     "status": "idle",
                     "interfaces": '["batch"]',
@@ -587,7 +587,7 @@ class TestUnifiedEngineRegistry:
         now = datetime.now(UTC).isoformat()
         mock_redis.smembers.return_value = {"fw-1"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
@@ -600,7 +600,7 @@ class TestUnifiedEngineRegistry:
         record = await registry.get_engine("faster-whisper")
 
         assert record is not None
-        assert record.runtime == "faster-whisper"
+        assert record.engine_id == "faster-whisper"
 
     @pytest.mark.asyncio
     async def test_get_engine_not_found(self, registry, mock_redis):
@@ -615,7 +615,7 @@ class TestUnifiedEngineRegistry:
         now = datetime.now(UTC).isoformat()
         mock_redis.smembers.return_value = {"fw-1"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
@@ -629,7 +629,7 @@ class TestUnifiedEngineRegistry:
         old = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
         mock_redis.smembers.return_value = {"fw-1"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
             "interfaces": '["batch"]',
@@ -676,7 +676,7 @@ class TestUnifiedRegistryWriter:
     def test_register(self, writer, mock_redis):
         record = EngineRecord(
             instance="fw-abc123",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             stage="transcribe",
             status="idle",
             interfaces=["batch"],

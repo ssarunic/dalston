@@ -159,7 +159,7 @@ class TestCoreProfileRegressionWithSpeakerModule:
         assert "speakers" not in data
 
     @pytest.mark.asyncio
-    async def test_core_pipeline_rejects_diarize_at_runtime(
+    async def test_core_pipeline_rejects_diarize_at_engine_id(
         self, tmp_path: Path
     ) -> None:
         """Validation inside run_job must also catch unsupported features."""

@@ -1,6 +1,6 @@
 """Unified Parakeet-ONNX runner: one process, one model, both interfaces.
 
-This runner creates a single NemoOnnxCore (one loaded ONNX model) and
+This runner creates a single NemoOnnxInference (one loaded ONNX model) and
 passes it to both the batch engine adapter (queue polling) and the realtime
 engine adapter (WebSocket server). An AdmissionController gates both paths
 to prevent realtime starvation under batch load.
@@ -32,7 +32,7 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
+from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
 
 logger = structlog.get_logger()
 
@@ -41,7 +41,7 @@ class UnifiedParakeetOnnxRunner:
     """Runs batch + realtime Parakeet-ONNX adapters in a single process.
 
     Key properties:
-    - ONE NemoOnnxCore instance (one ONNX session in memory)
+    - ONE NemoOnnxInference instance (one ONNX session in memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -52,7 +52,7 @@ class UnifiedParakeetOnnxRunner:
 
     def __init__(self) -> None:
         # Create single shared core
-        self._core = NemoOnnxCore.from_env()
+        self._core = NemoOnnxInference.from_env()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -89,7 +89,7 @@ class UnifiedParakeetOnnxRunner:
         from engines.stt_rt_parakeet_onnx import NemoOnnxRealtimeEngine
         from engines.stt_transcribe_parakeet_onnx import NemoOnnxBatchEngine
 
-        # Create adapters sharing the same NemoOnnxCore
+        # Create adapters sharing the same NemoOnnxInference
         self._batch_engine = NemoOnnxBatchEngine(core=self._core)
         self._rt_engine = NemoOnnxRealtimeEngine(core=self._core)
 

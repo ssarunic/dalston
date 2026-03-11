@@ -114,4 +114,4 @@ async def test_lite_db_bootstrap_applies_latest_revision(monkeypatch, tmp_path) 
         result = await session.execute(text("SELECT version_num FROM alembic_version"))
         revisions = {row[0] for row in result.fetchall()}
 
-    assert revisions == {"0003_backfill_model_transcribe"}
+    assert revisions == {"0004_rename_runtime_identity_columns"}

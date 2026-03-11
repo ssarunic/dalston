@@ -29,8 +29,8 @@ from dalston.gateway.api.v1.openai_audio import (
     OpenAIEndpoint,
     attach_openai_rate_limit_headers,
     format_openai_response,
+    map_openai_loaded_model,
     map_openai_model,
-    map_openai_runtime_model,
     raise_openai_error,
     validate_openai_request,
 )
@@ -154,9 +154,9 @@ async def create_translation_openai(
         "timestamps_granularity": "segment",
         "task": "translate",  # Enable translation mode
     }
-    runtime_model_id = map_openai_runtime_model(model)
-    if runtime_model_id:
-        parameters[MODEL_PARAM_TRANSCRIBE] = runtime_model_id
+    loaded_model_id = map_openai_loaded_model(model)
+    if loaded_model_id:
+        parameters[MODEL_PARAM_TRANSCRIBE] = loaded_model_id
 
     if prompt:
         parameters["prompt"] = prompt

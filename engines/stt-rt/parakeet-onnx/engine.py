@@ -1,7 +1,7 @@
 """Real-time Parakeet ONNX streaming transcription engine.
 
 Uses ONNX Runtime via the onnx-asr library for low-latency transcription
-of VAD-segmented utterances. Delegates inference to NemoOnnxCore
+of VAD-segmented utterances. Delegates inference to NemoOnnxInference
 (shared with the batch engine).
 
 Unlike the NeMo-based real-time engine, this uses ONNX Runtime which
@@ -33,7 +33,7 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
+from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
@@ -43,13 +43,13 @@ logger = structlog.get_logger()
 class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription using Parakeet via ONNX Runtime.
 
-    Delegates inference to NemoOnnxCore, which is shared with the batch
+    Delegates inference to NemoOnnxInference, which is shared with the batch
     ONNX engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own NemoOnnxCore in load_models().
+    When run standalone, creates its own NemoOnnxInference in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -59,26 +59,26 @@ class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-onnx-ctc-0.6b"
 
-    def __init__(self, core: NemoOnnxCore | None = None) -> None:
+    def __init__(self, core: NemoOnnxInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared NemoOnnxCore. If provided, load_models()
+            core: Optional shared NemoOnnxInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: NemoOnnxCore | None = core
+        self._core: NemoOnnxInference | None = core
 
     def load_models(self) -> None:
-        """Initialize NemoOnnxCore with optional preloading.
+        """Initialize NemoOnnxInference with optional preloading.
 
-        If a NemoOnnxCore was injected via __init__, this method uses it
+        If a NemoOnnxInference was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         if self._core is None:
             # Standalone mode — create own core
-            self._core = NemoOnnxCore.from_env()
+            self._core = NemoOnnxInference.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -94,7 +94,7 @@ class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         )
 
     def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
-        """Transcribe an audio segment via shared NemoOnnxCore.
+        """Transcribe an audio segment via shared NemoOnnxInference.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
@@ -105,11 +105,11 @@ class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         """
         if self._core is None:
             raise RuntimeError(
-                "NemoOnnxCore not initialized — call load_models() first"
+                "NemoOnnxInference not initialized — call load_models() first"
             )
 
         # Use default if no model specified
-        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        model_id = params.loaded_model_id or self.DEFAULT_MODEL
         language = params.language or "auto"
         vocabulary = params.vocabulary
 
@@ -168,7 +168,7 @@ class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=result.text,
             segments=segments,
             language="en",
-            runtime="nemo-onnx",
+            engine_id="nemo-onnx",
             language_confidence=1.0,
         )
 
@@ -196,13 +196,13 @@ class NemoOnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def get_models(self) -> list[str]:
         """Return list of supported model identifiers."""
-        return NemoOnnxCore.SUPPORTED_MODELS
+        return NemoOnnxInference.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""
         return ["en"]
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
         return "nemo-onnx"
 

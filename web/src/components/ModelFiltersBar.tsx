@@ -31,7 +31,7 @@ const STATUSES = [
 ]
 
 export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
-  const hasActiveFilters = !!(filters.search || filters.stage || filters.runtime || filters.status)
+  const hasActiveFilters = !!(filters.search || filters.stage || filters.engine_id || filters.status)
 
   return (
     <div className="flex flex-wrap gap-3 items-center">
@@ -67,8 +67,8 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
 
       {/* Runtime Filter */}
       <Select
-        value={filters.runtime || ''}
-        onValueChange={(v) => onChange({ ...filters, runtime: v || undefined })}
+        value={filters.engine_id || ''}
+        onValueChange={(v) => onChange({ ...filters, engine_id: v || undefined })}
       >
         <SelectTrigger className="w-[160px]">
           <SelectValue placeholder={S.modelFilters.allRuntimes} />

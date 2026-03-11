@@ -279,7 +279,7 @@ def revoke_key(
 
 async def _list_models(
     stage: str | None = None,
-    runtime: str | None = None,
+    engine_id: str | None = None,
     status: str | None = None,
 ) -> list:
     """List models from the registry."""
@@ -289,13 +289,13 @@ async def _list_models(
     async with async_session() as db:
         service = ModelRegistryService()
         models = await service.list_models(
-            db, stage=stage, runtime=runtime, status=status
+            db, stage=stage, engine_id=engine_id, status=status
         )
         return [
             {
                 "id": m.id,
                 "name": m.name,
-                "runtime": m.runtime,
+                "engine_id": m.engine_id,
                 "stage": m.stage,
                 "status": m.status,
                 "size_bytes": m.size_bytes,
@@ -311,9 +311,9 @@ def model_list(
         str | None,
         typer.Option("--stage", "-s", help="Filter by stage (e.g., 'transcribe')"),
     ] = None,
-    runtime: Annotated[
+    engine_id: Annotated[
         str | None,
-        typer.Option("--runtime", "-r", help="Filter by runtime (e.g., 'nemo')"),
+        typer.Option("--engine_id", "-r", help="Filter by engine_id (e.g., 'nemo')"),
     ] = None,
     downloaded: Annotated[
         bool,
@@ -329,14 +329,14 @@ def model_list(
         # List only downloaded models
         python -m dalston.gateway.cli model ls --downloaded
 
-        # Filter by runtime
-        python -m dalston.gateway.cli model ls --runtime nemo
+        # Filter by engine_id
+        python -m dalston.gateway.cli model ls --engine_id nemo
     """
     status_filter = "ready" if downloaded else None
 
     try:
         models = asyncio.run(
-            _list_models(stage=stage, runtime=runtime, status=status_filter)
+            _list_models(stage=stage, engine_id=engine_id, status=status_filter)
         )
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
@@ -361,7 +361,7 @@ def model_list(
             size = f"{size_mb:.1f} MB" if size_mb < 1024 else f"{size_mb / 1024:.1f} GB"
 
         typer.echo(
-            f"{model['id']:<35} {model['runtime']:<18} {model['stage']:<12} "
+            f"{model['id']:<35} {model['engine_id']:<18} {model['stage']:<12} "
             f"{status:<15} {size:<10}"
         )
 
@@ -443,8 +443,8 @@ async def _model_status(model_id: str) -> dict | None:
         return {
             "id": model.id,
             "name": model.name,
-            "runtime": model.runtime,
-            "runtime_model_id": model.runtime_model_id,
+            "engine_id": model.engine_id,
+            "loaded_model_id": model.loaded_model_id,
             "stage": model.stage,
             "status": model.status,
             "download_path": model.download_path,
@@ -485,8 +485,8 @@ def model_status(
     typer.echo(f"Model: {model['id']}")
     typer.echo()
     typer.echo(f"  Name:            {model.get('name') or '-'}")
-    typer.echo(f"  Runtime:         {model['runtime']}")
-    typer.echo(f"  Runtime Model:   {model['runtime_model_id']}")
+    typer.echo(f"  Runtime:         {model['engine_id']}")
+    typer.echo(f"  Runtime Model:   {model['loaded_model_id']}")
     typer.echo(f"  Stage:           {model['stage']}")
     typer.echo(f"  Status:          {model['status']}")
     typer.echo()

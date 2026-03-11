@@ -31,7 +31,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
     The SDK runner handles queue polling, S3 I/O, and event publishing.
 
     The base class provides ``self.logger``, a structlog bound logger
-    pre-configured with the runtime.  Engine authors can use it directly::
+    pre-configured with the engine_id.  Engine authors can use it directly::
 
         self.logger.info("model_loaded", model="large-v3")
 
@@ -69,7 +69,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         # safe despite being created before configure() runs.
         self.logger = structlog.get_logger()
 
-        # Thread-safe runtime state for heartbeat reporting (Phase 1: Runtime Model Management)
+        # Thread-safe engine_id state for heartbeat reporting (Phase 1: Runtime Model Management)
         # The runner's heartbeat loop reads this state each cycle to report
         # the currently loaded model and engine status to the registry.
         self._runtime_state_lock = Lock()
@@ -125,14 +125,14 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
     def _set_runtime_state(
         self, loaded_model: str | None = None, status: str = "idle"
     ) -> None:
-        """Update the engine's runtime state in a thread-safe manner.
+        """Update the engine's engine_id state in a thread-safe manner.
 
         This method is called by engines after loading/unloading models to report
         their current state. The runner's heartbeat loop reads this state to
         report to the registry.
 
         Args:
-            loaded_model: The runtime_model_id of the currently loaded model,
+            loaded_model: The loaded_model_id of the currently loaded model,
                           or None if no model is loaded.
             status: Current engine status ("idle", "loading", "downloading", "processing")
         """
@@ -140,7 +140,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
             self._runtime_state = {"loaded_model": loaded_model, "status": status}
 
     def get_runtime_state(self) -> dict[str, Any]:
-        """Get the current runtime state in a thread-safe manner.
+        """Get the current engine_id state in a thread-safe manner.
 
         Called by the runner's heartbeat loop to get the current state for
         inclusion in heartbeat payloads.
@@ -178,7 +178,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                runtime=getattr(self, "runtime", "unknown"),
+                engine_id=getattr(self, "engine_id", "unknown"),
                 version="unknown",
                 stages=[],
             )
@@ -210,7 +210,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         stages = [stage] if stage else []
 
         return EngineCapabilities(
-            runtime=card.get("runtime") or card.get("id", "unknown"),
+            engine_id=card.get("engine_id") or card.get("id", "unknown"),
             version=card.get("version", "unknown"),
             stages=stages,
             languages=languages,

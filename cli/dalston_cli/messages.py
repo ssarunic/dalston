@@ -1,7 +1,7 @@
 """Centralized user-facing strings for the Dalston CLI.
 
 Internal to dalston_cli — do not import from other packages (gateway,
-orchestrator, engines).  Package install boundaries enforce this at runtime.
+orchestrator, engines).  Package install boundaries enforce this at engine_id.
 
 Usage:
 

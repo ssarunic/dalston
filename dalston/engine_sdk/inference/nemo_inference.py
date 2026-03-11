@@ -4,7 +4,7 @@ Extracts common model loading and transcription logic so that both the
 batch engine (queue-based) and the realtime engine (WebSocket-based) can
 share a single loaded model and inference path.
 
-This module owns the NeMoModelManager and provides a runtime-neutral
+This module owns the NeMoModelManager and provides a engine_id-neutral
 interface for transcription. Each engine adapter (batch / realtime) is
 responsible for formatting the raw results into its own output contract.
 """
@@ -25,7 +25,7 @@ logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
-# Result types — runtime-neutral, no dependency on batch or RT SDK types
+# Result types — engine_id-neutral, no dependency on batch or RT SDK types
 # ---------------------------------------------------------------------------
 
 
@@ -60,11 +60,11 @@ class NeMoTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# NemoCore — shared inference logic
+# NemoInference — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class NemoCore:
+class NemoInference:
     """Shared inference logic for NeMo Parakeet batch and realtime.
 
     Owns the NeMoModelManager and provides a unified transcription interface.
@@ -93,7 +93,7 @@ class NemoCore:
         )
 
         logger.info(
-            "nemo_core_init",
+            "nemo_inference_init",
             device=device,
             ttl_seconds=ttl_seconds,
             max_loaded=max_loaded,
@@ -467,14 +467,14 @@ class NemoCore:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("nemo_core_shutdown")
+        logger.info("nemo_inference_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> NemoCore:
-        """Create a NemoCore configured from environment variables.
+    def from_env(cls) -> NemoInference:
+        """Create a NemoInference configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from dalston.gateway.services.console import ConsoleService
 
 
-def _make_task(stage: str, runtime: str = "", config: dict | None = None):
+def _make_task(stage: str, engine_id: str = "", config: dict | None = None):
     return SimpleNamespace(
         stage=stage,
-        runtime=runtime,
+        engine_id=engine_id,
         config=config or {},
     )
 
@@ -36,11 +36,11 @@ class TestResolveModelDisplay:
 
         assert result == "whisper-large-v3"
 
-    def test_auto_with_runtime_model_id(self):
+    def test_auto_with_loaded_model_id(self):
         task = _make_task(
             "transcribe",
-            runtime="faster-whisper-base",
-            config={"runtime_model_id": "faster-whisper-large-v3"},
+            engine_id="faster-whisper-base",
+            config={"loaded_model_id": "faster-whisper-large-v3"},
         )
         job = _make_job(tasks=[task])
 
@@ -48,8 +48,8 @@ class TestResolveModelDisplay:
 
         assert result == "Auto (faster-whisper-large-v3)"
 
-    def test_auto_with_task_runtime_fallback(self):
-        task = _make_task("transcribe", runtime="faster-whisper-base")
+    def test_auto_with_task_engine_id_fallback(self):
+        task = _make_task("transcribe", engine_id="faster-whisper-base")
         job = _make_job(tasks=[task])
 
         result = ConsoleService._resolve_model_display(job)
@@ -85,7 +85,7 @@ class TestResolveModelDisplay:
         assert result == "Auto"
 
     def test_per_channel_transcribe_task(self):
-        task = _make_task("transcribe_ch0", runtime="parakeet-0.6b")
+        task = _make_task("transcribe_ch0", engine_id="parakeet-0.6b")
         job = _make_job(tasks=[task])
 
         result = ConsoleService._resolve_model_display(job)
@@ -93,11 +93,11 @@ class TestResolveModelDisplay:
         assert result == "Auto (parakeet-0.6b)"
 
     def test_prefers_transcribe_over_transcribe_ch(self):
-        ch_task = _make_task("transcribe_ch0", runtime="parakeet-0.6b")
+        ch_task = _make_task("transcribe_ch0", engine_id="parakeet-0.6b")
         main_task = _make_task(
             "transcribe",
-            runtime="faster-whisper-base",
-            config={"runtime_model_id": "faster-whisper-large-v3"},
+            engine_id="faster-whisper-base",
+            config={"loaded_model_id": "faster-whisper-large-v3"},
         )
         job = _make_job(tasks=[ch_task, main_task])
 
@@ -105,11 +105,11 @@ class TestResolveModelDisplay:
 
         assert result == "Auto (faster-whisper-large-v3)"
 
-    def test_runtime_model_id_preferred_over_runtime(self):
+    def test_loaded_model_id_preferred_over_engine_id(self):
         task = _make_task(
             "transcribe",
-            runtime="generic-runtime",
-            config={"runtime_model_id": "specific-model"},
+            engine_id="generic-engine_id",
+            config={"loaded_model_id": "specific-model"},
         )
         job = _make_job(tasks=[task])
 
@@ -125,7 +125,7 @@ class TestResolveModelDisplay:
         assert result == "Auto"
 
     def test_empty_model_transcribe_treated_as_auto(self):
-        task = _make_task("transcribe", runtime="fw-base")
+        task = _make_task("transcribe", engine_id="fw-base")
         job = _make_job(parameters={"model_transcribe": ""}, tasks=[task])
 
         result = ConsoleService._resolve_model_display(job)
@@ -133,7 +133,7 @@ class TestResolveModelDisplay:
         assert result == "Auto (fw-base)"
 
     def test_non_transcribe_tasks_ignored(self):
-        task = _make_task("diarize", runtime="pyannote-3.1")
+        task = _make_task("diarize", engine_id="pyannote-3.1")
         job = _make_job(tasks=[task], status="completed")
 
         result = ConsoleService._resolve_model_display(job)

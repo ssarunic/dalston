@@ -20,7 +20,7 @@
 In scope:
 
 - Introduce async post-processing orchestration for PII jobs.
-- Add runtime flag for mode selection and compatibility behavior.
+- Add engine_id flag for mode selection and compatibility behavior.
 - Parity tests between pipeline mode and post-process mode.
 
 Out of scope:
@@ -148,7 +148,7 @@ pytest -m integration
 - **Post-processing engines wired**: `DEFAULT_ENGINES` retains `"pii_detect":
   "pii-presidio"` and `"audio_redact": "audio-redactor"` for post-processing
   dispatch. Pipeline mode (`pii_mode=pipeline`) is no longer the default.
-- Note: the `DALSTON_PII_MODE` flag was not implemented as a runtime toggle;
+- Note: the `DALSTON_PII_MODE` flag was not implemented as a engine_id toggle;
   post-process mode is the sole path.
 
 ## References

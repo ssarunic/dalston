@@ -83,25 +83,25 @@ export function RealtimeLive() {
   const { data: statusData } = useRealtimeStatus()
   const { data: registryData } = useModelRegistry({ stage: 'transcribe' })
 
-  // Get runtimes from available RT workers
+  // Get engine_ids from available RT workers
   const rtRuntimes = useMemo(() => {
     if (!enginesData?.realtime_engines) return new Set<string>()
-    const runtimes = new Set<string>()
+    const engine_ids = new Set<string>()
     for (const worker of enginesData.realtime_engines) {
-      if (worker.runtime) {
-        runtimes.add(worker.runtime)
+      if (worker.engine_id) {
+        engine_ids.add(worker.engine_id)
       }
     }
-    return runtimes
+    return engine_ids
   }, [enginesData])
 
-  // Get models that are downloaded (ready) and match an RT worker's runtime
+  // Get models that are downloaded (ready) and match an RT worker's engine_id
   const availableModels = useMemo(() => {
     if (!registryData?.data || rtRuntimes.size === 0) return []
     return registryData.data
-      .filter((m) => m.status === 'ready' && rtRuntimes.has(m.runtime))
+      .filter((m) => m.status === 'ready' && rtRuntimes.has(m.engine_id))
       .map((m) => ({
-        id: m.runtime_model_id,  // Use runtime_model_id for the request
+        id: m.loaded_model_id,  // Use loaded_model_id for the request
         label: m.name || m.id,   // Display name
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
@@ -136,22 +136,22 @@ export function RealtimeLive() {
       return { supported: false, text: 'No available engines support vocabulary boosting' }
     }
 
-    // Find the runtime for the selected model
-    const selectedModel = registryData?.data?.find((m) => m.runtime_model_id === model)
+    // Find the engine_id for the selected model
+    const selectedModel = registryData?.data?.find((m) => m.loaded_model_id === model)
     if (!selectedModel) {
       return { supported: null, text: null }
     }
 
-    // Find workers with matching runtime
+    // Find workers with matching engine_id
     const workersForRuntime = enginesData.realtime_engines.filter(
-      (w) => w.runtime === selectedModel.runtime
+      (w) => w.engine_id === selectedModel.engine_id
     )
 
     if (workersForRuntime.length === 0) {
       return { supported: null, text: null }
     }
 
-    // Check if any worker with this runtime supports vocabulary
+    // Check if any worker with this engine_id supports vocabulary
     const supportsVocab = workersForRuntime.some((w) => w.supports_vocabulary)
     if (supportsVocab) {
       return { supported: true, text: null }

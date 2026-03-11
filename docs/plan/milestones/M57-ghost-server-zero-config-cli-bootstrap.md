@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Goal** | Make first-run UX truly zero-config: `dalston transcribe <file>` automatically boots local runtime prerequisites and returns output without manual server/model steps |
+| **Goal** | Make first-run UX truly zero-config: `dalston transcribe <file>` automatically boots local engine_id prerequisites and returns output without manual server/model steps |
 | **Duration** | 5-8 days |
-| **Dependencies** | M56 (lite infra backends), M13 (CLI baseline), M36/M40 (runtime model management + model registry) |
+| **Dependencies** | M56 (lite infra backends), M13 (CLI baseline), M36/M40 (engine_id model management + model registry) |
 | **Deliverable** | CLI bootstrap state machine that auto-checks/starts local server, auto-ensures default model, runs transcription immediately, and presents clear progress/error UX |
 | **Status** | Completed |
 
@@ -112,7 +112,7 @@ M57 is a UX layer over existing control-plane behavior. Distributed mode semanti
 ## What We Will Not Do In M57
 
 1. Do not implement full cross-platform service-manager installation (systemd/launchd/Windows service).
-2. Do not auto-provision GPU drivers/CUDA/runtime stacks.
+2. Do not auto-provision GPU drivers/CUDA/engine_id stacks.
 3. Do not auto-start remote servers.
 4. Do not expand lite-mode feature parity beyond the scoped M56 path.
 5. Do not bundle one-line binary packaging (deferred to M60).

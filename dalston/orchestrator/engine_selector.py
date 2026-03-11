@@ -8,7 +8,7 @@ This module replaces hardcoded engine defaults with dynamic selection based on:
 Example:
     requirements = extract_requirements(job_parameters)
     selection = await select_engine("transcribe", requirements, registry, catalog)
-    # selection.runtime = "parakeet"
+    # selection.engine_id = "parakeet"
     # selection.capabilities.supports_word_timestamps = True
 """
 
@@ -36,33 +36,33 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
-# Stages that require explicit runtime model resolution from the registry.
+# Stages that require explicit engine_id model resolution from the registry.
 MODEL_BACKED_STAGES = {"transcribe", "diarize", "align", "pii_detect"}
 
 
 class NoDownloadedModelError(Exception):
-    """No downloaded model available for the selected runtime.
+    """No downloaded model available for the selected engine_id.
 
     Raised when auto model selection is used but no models are downloaded
-    for the selected transcription runtime.
+    for the selected transcription engine_id.
     """
 
     def __init__(
         self,
-        runtime: str,
+        engine_id: str,
         stage: str = "transcribe",
-        attempted_runtimes: list[str] | None = None,
+        attempted_engine_ids: list[str] | None = None,
     ) -> None:
-        self.runtime = runtime
+        self.engine_id = engine_id
         self.stage = stage
-        self.attempted_runtimes = attempted_runtimes or [runtime]
+        self.attempted_engine_ids = attempted_engine_ids or [engine_id]
         attempted_suffix = (
-            f" Attempted runtimes: {', '.join(self.attempted_runtimes)}."
-            if len(self.attempted_runtimes) > 1
+            f" Attempted engine_ids: {', '.join(self.attempted_engine_ids)}."
+            if len(self.attempted_engine_ids) > 1
             else ""
         )
         super().__init__(
-            f"No downloaded models available for runtime '{runtime}'. "
+            f"No downloaded models available for engine_id '{engine_id}'. "
             f"Please download a model from the Models page or specify a model explicitly."
             f"{attempted_suffix}"
         )
@@ -84,21 +84,21 @@ class ModelSelectionError(Exception):
         code: str,
         stage: str,
         model_id: str,
-        runtime: str | None = None,
+        engine_id: str | None = None,
         detail: str | None = None,
     ) -> None:
         self.code = code
         self.stage = stage
         self.model_id = model_id
-        self.runtime = runtime
+        self.engine_id = engine_id
         self.detail = detail
         parts = [
             f"Model selection failed ({code})",
             f"stage={stage}",
             f"model_id={model_id}",
         ]
-        if runtime:
-            parts.append(f"runtime={runtime}")
+        if engine_id:
+            parts.append(f"engine_id={engine_id}")
         if detail:
             parts.append(detail)
         super().__init__(", ".join(parts))
@@ -109,17 +109,17 @@ class EngineSelectionResult:
     """Result of engine selection.
 
     Attributes:
-        runtime: Selected engine identifier (runtime ID, e.g., "nemo", "faster-whisper")
+        engine_id: Selected engine identifier (engine_id ID, e.g., "nemo", "faster-whisper")
         capabilities: Engine's declared capabilities
         selection_reason: Human-readable explanation of why this engine was selected
-        runtime_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
+        loaded_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
                          Only set when user requested a specific model variant.
     """
 
-    runtime: str
+    engine_id: str
     capabilities: EngineCapabilities
     selection_reason: str
-    runtime_model_id: str | None = None
+    loaded_model_id: str | None = None
 
 
 @dataclass
@@ -173,7 +173,7 @@ class NoCapableEngineError(Exception):
             lines.append(f"  Running engines for '{self.stage}':")
             for engine in self.candidates:
                 mismatch = self._explain_mismatch(engine)
-                lines.append(f"    - {engine.runtime}: {mismatch}")
+                lines.append(f"    - {engine.engine_id}: {mismatch}")
         else:
             lines.append(f"  No engines running for stage '{self.stage}'.")
 
@@ -181,9 +181,9 @@ class NoCapableEngineError(Exception):
             lines.append("")
             lines.append("  Available in catalog (not running):")
             for alt in self.catalog_alternatives:
-                lines.append(f"    - {alt.runtime}")
+                lines.append(f"    - {alt.engine_id}")
                 lines.append(
-                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.runtime}"
+                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.engine_id}"
                 )
 
         return "\n".join(lines)
@@ -224,42 +224,42 @@ class NoCapableEngineError(Exception):
             "stage": self.stage,
             "requirements": self.requirements,
             "running_engines": [
-                {"id": e.runtime, "reason": self._explain_mismatch(e)}
+                {"id": e.engine_id, "reason": self._explain_mismatch(e)}
                 for e in self.candidates
             ],
             "catalog_alternatives": [
-                {"id": a.runtime, "languages": a.capabilities.languages}
+                {"id": a.engine_id, "languages": a.capabilities.languages}
                 for a in self.catalog_alternatives
             ],
         }
 
 
-def _resolve_runtime_model_id(model: ModelRegistryModel, stage: str) -> str:
-    """Resolve the task-level runtime_model_id from a registry model."""
+def _resolve_loaded_model_id(model: ModelRegistryModel, stage: str) -> str:
+    """Resolve the task-level loaded_model_id from a registry model."""
     # Transcribe uses source IDs for S3-backed artifact lookup compatibility.
     if stage == "transcribe":
         return model.source or model.id
 
-    return model.runtime_model_id
+    return model.loaded_model_id
 
 
 async def _find_best_downloaded_model(
-    runtime: str,
+    engine_id: str,
     stage: str,
     requirements: dict,
     db: AsyncSession,
 ) -> ModelRegistryModel | None:
-    """Find the best downloaded model for a runtime.
+    """Find the best downloaded model for a engine_id.
 
     Queries the model registry for models with status='ready' for the given
-    runtime, then ranks them by suitability for the job requirements.
+    engine_id, then ranks them by suitability for the job requirements.
 
     Ranking criteria:
     1. Language compatibility (if language specified)
     2. Model size (larger models generally better quality)
 
     Args:
-        runtime: The runtime/engine ID (e.g., "faster-whisper", "nemo")
+        engine_id: The engine_id/engine ID (e.g., "faster-whisper", "nemo")
         requirements: Job requirements from extract_requirements()
         db: Database session for model registry lookup
 
@@ -268,10 +268,10 @@ async def _find_best_downloaded_model(
     """
     from sqlalchemy import select
 
-    # Query downloaded models for this runtime
+    # Query downloaded models for this engine_id
     result = await db.execute(
         select(ModelRegistryModel).where(
-            ModelRegistryModel.runtime == runtime,
+            ModelRegistryModel.engine_id == engine_id,
             ModelRegistryModel.status == "ready",
             ModelRegistryModel.stage == stage,
         )
@@ -327,14 +327,14 @@ async def _find_best_downloaded_model(
     ranked = sorted(models, key=score_model, reverse=True)
     best = ranked[0]
 
-    runtime_model_id = _resolve_runtime_model_id(best, stage)
+    loaded_model_id = _resolve_loaded_model_id(best, stage)
 
     logger.info(
         "auto_model_selected",
-        runtime=runtime,
+        engine_id=engine_id,
         stage=stage,
         selected_model=best.id,
-        runtime_model_id=runtime_model_id,
+        loaded_model_id=loaded_model_id,
         model_id=best.id,
         candidates=len(models),
         language_requirement=requested_language,
@@ -465,10 +465,10 @@ def _rank_and_select(
         reasons.append(f"ranked first of {len(capable)}")
 
     return EngineSelectionResult(
-        runtime=winner.runtime,
+        engine_id=winner.engine_id,
         capabilities=winner.capabilities
         or EngineCapabilities(
-            runtime=winner.runtime, version="unknown", stages=[winner.stage]
+            engine_id=winner.engine_id, version="unknown", stages=[winner.stage]
         ),
         selection_reason=", ".join(reasons) or "best available",
     )
@@ -487,7 +487,7 @@ async def select_engine(
     """Select best engine for a pipeline stage.
 
     Selection process:
-    1. If user specified a model ID, resolve it to runtime + runtime_model_id
+    1. If user specified a model ID, resolve it to engine_id + loaded_model_id
     2. If user specified an engine ID, validate it can handle requirements
     3. Get all running engines for the stage from registry
     4. Filter by hard requirements (language, streaming)
@@ -499,13 +499,13 @@ async def select_engine(
         requirements: Job requirements from extract_requirements()
         registry: Batch engine registry (running engines)
         catalog: Engine catalog (all available engines)
-        user_preference: Optional model ID or runtime ID from user
+        user_preference: Optional model ID or engine_id ID from user
         db: Optional database session for HF model lookup
         user_preference_is_model: If True, user preference must resolve to a
             model registry ID for this stage.
 
     Returns:
-        EngineSelectionResult with selected engine and optional runtime_model_id
+        EngineSelectionResult with selected engine and optional loaded_model_id
 
     Raises:
         NoCapableEngineError: If no running engine can handle requirements
@@ -533,7 +533,7 @@ async def select_engine(
                     code="model_stage_mismatch",
                     stage=stage,
                     model_id=user_preference,
-                    runtime=db_model.runtime,
+                    engine_id=db_model.engine_id,
                     detail=f"model stage is '{db_model.stage}'",
                 )
 
@@ -542,20 +542,20 @@ async def select_engine(
                     code="model_not_ready",
                     stage=stage,
                     model_id=user_preference,
-                    runtime=db_model.runtime,
+                    engine_id=db_model.engine_id,
                     detail=f"status is '{db_model.status}'",
                 )
 
-            runtime_id = db_model.runtime
-            runtime_model_id = _resolve_runtime_model_id(db_model, stage)
+            engine_id = db_model.engine_id
+            loaded_model_id = _resolve_loaded_model_id(db_model, stage)
 
-            engine = await registry.get_engine(runtime_id)
+            engine = await registry.get_engine(engine_id)
             if engine is None or not engine.is_healthy:
                 raise ModelSelectionError(
                     code="runtime_unavailable",
                     stage=stage,
                     model_id=user_preference,
-                    runtime=runtime_id,
+                    engine_id=engine_id,
                 )
 
             # Check model's language requirements
@@ -575,20 +575,20 @@ async def select_engine(
             logger.info(
                 "engine_selected",
                 stage=stage,
-                selected_engine=runtime_id,
-                runtime_model_id=runtime_model_id,
+                selected_engine=engine_id,
+                loaded_model_id=loaded_model_id,
                 selection_reason="database model lookup",
                 original_model_id=user_preference,
             )
 
             return EngineSelectionResult(
-                runtime=runtime_id,
+                engine_id=engine_id,
                 capabilities=engine.capabilities
                 or EngineCapabilities(
-                    runtime=runtime_id, version="unknown", stages=[stage]
+                    engine_id=engine_id, version="unknown", stages=[stage]
                 ),
                 selection_reason="database model lookup",
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
 
         if user_preference_is_model:
@@ -623,10 +623,10 @@ async def select_engine(
             )
 
         return EngineSelectionResult(
-            runtime=engine.runtime,
+            engine_id=engine.engine_id,
             capabilities=engine.capabilities
             or EngineCapabilities(
-                runtime=engine.runtime, version="unknown", stages=[stage]
+                engine_id=engine.engine_id, version="unknown", stages=[stage]
             ),
             selection_reason="user preference",
         )
@@ -660,7 +660,7 @@ async def select_engine(
             catalog_alternatives=catalog_alts,
         )
 
-    # 5. Select engine (single match or ranked), then resolve runtime_model_id if needed.
+    # 5. Select engine (single match or ranked), then resolve loaded_model_id if needed.
     ranked_capable = (
         capable if len(capable) == 1 else _rank_capable_engines(capable, requirements)
     )
@@ -675,11 +675,11 @@ async def select_engine(
 
     if stage in MODEL_BACKED_STAGES and db is not None:
         selected_model: ModelRegistryModel | None = None
-        attempted_runtimes: list[str] = []
+        attempted_engine_ids: list[str] = []
         for idx, candidate in enumerate(ranked_capable):
-            attempted_runtimes.append(candidate.runtime)
+            attempted_engine_ids.append(candidate.engine_id)
             model = await _find_best_downloaded_model(
-                runtime=candidate.runtime,
+                engine_id=candidate.engine_id,
                 stage=stage,
                 requirements=requirements,
                 db=db,
@@ -693,24 +693,24 @@ async def select_engine(
                 selection_reason = (
                     ranked_reason
                     if idx == 0
-                    else f"{ranked_reason}; fallback to runtime with ready model"
+                    else f"{ranked_reason}; fallback to engine_id with ready model"
                 )
             break
 
         if selected_model is None:
             raise NoDownloadedModelError(
-                runtime=ranked_capable[0].runtime,
+                engine_id=ranked_capable[0].engine_id,
                 stage=stage,
-                attempted_runtimes=attempted_runtimes,
+                attempted_engine_ids=attempted_engine_ids,
             )
 
-        auto_model_id = _resolve_runtime_model_id(selected_model, stage)
+        auto_model_id = _resolve_loaded_model_id(selected_model, stage)
 
     logger.info(
         "engine_selected",
         stage=stage,
-        selected_engine=engine.runtime,
-        runtime_model_id=auto_model_id,
+        selected_engine=engine.engine_id,
+        loaded_model_id=auto_model_id,
         selection_reason=selection_reason,
         candidates_evaluated=len(candidates),
         capable_count=len(capable),
@@ -718,13 +718,13 @@ async def select_engine(
     )
 
     return EngineSelectionResult(
-        runtime=engine.runtime,
+        engine_id=engine.engine_id,
         capabilities=engine.capabilities
         or EngineCapabilities(
-            runtime=engine.runtime, version="unknown", stages=[stage]
+            engine_id=engine.engine_id, version="unknown", stages=[stage]
         ),
         selection_reason=selection_reason,
-        runtime_model_id=auto_model_id,
+        loaded_model_id=auto_model_id,
     )
 
 
@@ -869,7 +869,7 @@ async def select_pipeline_engines(
                         if isinstance(exc, NoDownloadedModelError)
                         else "no_capable_align_engine"
                     ),
-                    transcribe_runtime=selections["transcribe"].runtime,
+                    transcribe_engine_id=selections["transcribe"].engine_id,
                 )
 
         # Diarization (conditional on parameters and transcriber capabilities)
@@ -910,9 +910,11 @@ async def select_pipeline_engines(
 
         # Record selection results on span
         transcribe_sel = selections["transcribe"]
-        dalston.telemetry.set_span_attribute("dalston.runtime", transcribe_sel.runtime)
         dalston.telemetry.set_span_attribute(
-            "dalston.model", transcribe_sel.runtime_model_id or ""
+            "dalston.engine_id", transcribe_sel.engine_id
+        )
+        dalston.telemetry.set_span_attribute(
+            "dalston.model", transcribe_sel.loaded_model_id or ""
         )
         dalston.telemetry.set_span_attribute(
             "dalston.selection.reason", transcribe_sel.selection_reason
@@ -924,7 +926,7 @@ async def select_pipeline_engines(
     logger.info(
         "pipeline_engines_selected",
         stages=list(selections.keys()),
-        engines={stage: sel.runtime for stage, sel in selections.items()},
+        engines={stage: sel.engine_id for stage, sel in selections.items()},
         alignment_included="align" in selections,
         diarization_included="diarize" in selections,
         pii_detection_included="pii_detect" in selections,

@@ -134,7 +134,7 @@ export interface ConsoleJobDetail {
 export interface Task {
   id: string
   stage: string
-  runtime: string
+  engine_id: string
   status: TaskStatus
   required?: boolean
   dependencies: string[]
@@ -154,7 +154,7 @@ export interface TaskArtifact {
   task_id: string
   job_id: string
   stage: string
-  runtime: string
+  engine_id: string
   status: TaskStatus
   required: boolean
   started_at?: string
@@ -177,7 +177,7 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]  // M43: Currently loaded models (dynamic)
   languages: string[]
-  runtime?: string | null  // M43: Model runtime (e.g., "faster-whisper")
+  engine_id?: string | null  // M43: Model engine_id (e.g., "faster-whisper")
   supports_vocabulary?: boolean
 }
 
@@ -282,7 +282,7 @@ export interface APIKeyCreatedResponse {
 export type EngineStatus = 'idle' | 'processing' | 'loading' | 'downloading' | 'error' | 'offline' | 'stale'
 
 export interface BatchEngine {
-  runtime: string
+  engine_id: string
   stage: string
   status: EngineStatus
   queue_depth: number
@@ -356,7 +356,7 @@ export interface RealtimeSessionSummary {
   status: RealtimeSessionStatus
   language: string | null
   model: string | null
-  runtime: string | null
+  engine_id: string | null
   audio_duration_seconds: number
   segment_count: number
   word_count: number
@@ -520,7 +520,7 @@ export interface SuccessRate {
 }
 
 export interface EngineMetric {
-  runtime: string
+  engine_id: string
   stage: string
   completed: number
   failed: number
@@ -646,8 +646,8 @@ export interface Model {
   id: string
   object: 'model'
   name: string
-  runtime: string
-  runtime_model_id: string
+  engine_id: string
+  loaded_model_id: string
   source: string | null
   size_gb: number | null
   stage: string | null
@@ -668,8 +668,8 @@ export type ModelStatus = 'not_downloaded' | 'downloading' | 'ready' | 'failed'
 export interface ModelRegistryEntry {
   id: string
   name: string | null
-  runtime: string
-  runtime_model_id: string
+  engine_id: string
+  loaded_model_id: string
   stage: string
   status: ModelStatus
   download_path: string | null
@@ -712,7 +712,7 @@ export interface ModelRegistryListResponse {
 
 export interface ModelFilters {
   stage?: string
-  runtime?: string
+  engine_id?: string
   status?: ModelStatus
   search?: string
 }
@@ -725,7 +725,7 @@ export interface HFResolveRequest {
 export interface HFResolveResponse {
   model_id: string
   can_route: boolean
-  resolved_runtime: string | null
+  resolved_engine_id: string | null
   library_name: string | null
   pipeline_tag: string | null
   languages: string[]
@@ -735,8 +735,8 @@ export interface HFResolveResponse {
 }
 
 export interface HFMappingsResponse {
-  library_to_runtime: Record<string, string>
-  tag_to_runtime: Record<string, string>
+  library_to_engine_id: Record<string, string>
+  tag_to_engine_id: Record<string, string>
 }
 
 export interface PullModelResponse {

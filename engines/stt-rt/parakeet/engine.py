@@ -4,7 +4,7 @@ Uses NVIDIA NeMo Parakeet FastConformer with cache-aware streaming
 for low-latency real-time transcription. Achieves ~100ms end-to-end
 latency with native word-level timestamps.
 
-Delegates inference to NemoCore (shared with the batch engine).
+Delegates inference to NemoInference (shared with the batch engine).
 Supports dynamic model loading via NeMoModelManager (M44).
 
 M71: RNNT/TDT models use cache-aware streaming inference to emit
@@ -36,7 +36,7 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.nemo_core import NemoCore
+from dalston.engine_sdk.inference.nemo_inference import NemoInference
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
@@ -46,13 +46,13 @@ logger = structlog.get_logger()
 class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Parakeet with dynamic model loading.
 
-    Delegates inference to NemoCore, which is shared with the batch
+    Delegates inference to NemoInference, which is shared with the batch
     Parakeet engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own NemoCore in load_models().
+    When run standalone, creates its own NemoInference in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -70,30 +70,30 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-rnnt-0.6b"
 
-    def __init__(self, core: NemoCore | None = None) -> None:
+    def __init__(self, core: NemoInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared NemoCore. If provided, load_models()
+            core: Optional shared NemoInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: NemoCore | None = core
+        self._core: NemoInference | None = core
 
         # M71: Cache-aware streaming configuration
         self._rnnt_chunk_ms = int(os.environ.get("DALSTON_RNNT_CHUNK_MS", "160"))
 
     def load_models(self) -> None:
-        """Initialize NemoCore with optional preloading.
+        """Initialize NemoInference with optional preloading.
 
-        If a NemoCore was injected via __init__, this method uses it
+        If a NemoInference was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         is_shared = self._core is not None
         if self._core is None:
             # Standalone mode — create own core
-            self._core = NemoCore.from_env()
+            self._core = NemoInference.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -109,7 +109,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         )
 
     def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
-        """Transcribe an audio segment via shared NemoCore.
+        """Transcribe an audio segment via shared NemoInference.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
@@ -119,10 +119,12 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             Transcript with text, words, language, confidence
         """
         if self._core is None:
-            raise RuntimeError("NemoCore not initialized — call load_models() first")
+            raise RuntimeError(
+                "NemoInference not initialized — call load_models() first"
+            )
 
         # Use default if no model specified
-        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        model_id = params.loaded_model_id or self.DEFAULT_MODEL
         language = params.language or "auto"
         vocabulary = params.vocabulary
 
@@ -183,7 +185,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=result.text,
             segments=segments,
             language="en",
-            runtime="nemo",
+            engine_id="nemo",
             language_confidence=1.0,
         )
 
@@ -225,7 +227,9 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             Transcript for each newly decoded word
         """
         if self._core is None:
-            raise RuntimeError("NemoCore not initialized — call load_models() first")
+            raise RuntimeError(
+                "NemoInference not initialized — call load_models() first"
+            )
 
         model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
 
@@ -259,7 +263,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
                     )
                 ],
                 language="en",
-                runtime="nemo",
+                engine_id="nemo",
                 language_confidence=confidence,
             )
 
@@ -319,13 +323,13 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def get_models(self) -> list[str]:
         """Return list of supported model identifiers."""
-        return NemoCore.SUPPORTED_MODELS
+        return NemoInference.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages. Parakeet only supports English."""
         return ["en"]
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
         return "nemo"
 

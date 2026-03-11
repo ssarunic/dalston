@@ -50,7 +50,7 @@ This allows direct use of HuggingFace model IDs and unambiguous identification.
 
 ### Runtime Architecture
 
-Models are served by **runtimes** - containerized engines that can load any compatible model:
+Models are served by **engine_ids** - containerized engines that can load any compatible model:
 
 | Runtime | Library | Description |
 |---------|---------|-------------|
@@ -71,8 +71,8 @@ Models are defined in `models/*.yaml`:
 ```yaml
 schema_version: "1.1"
 id: nvidia/parakeet-tdt-1.1b              # Namespaced model ID
-runtime: nemo                              # Engine runtime
-runtime_model_id: "nvidia/parakeet-tdt-1.1b"  # HF ID for from_pretrained()
+engine_id: nemo                              # Engine engine_id
+loaded_model_id: "nvidia/parakeet-tdt-1.1b"  # HF ID for from_pretrained()
 
 name: NVIDIA Parakeet TDT 1.1B
 source: nvidia/parakeet-tdt-1.1b           # HuggingFace repo
@@ -121,8 +121,8 @@ Returns static catalog entries. Use for discovering available models.
       "id": "nvidia/parakeet-tdt-1.1b",
       "object": "model",
       "name": "NVIDIA Parakeet TDT 1.1B",
-      "runtime": "nemo",
-      "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+      "engine_id": "nemo",
+      "loaded_model_id": "nvidia/parakeet-tdt-1.1b",
       "source": "nvidia/parakeet-tdt-1.1b",
       "size_gb": 4.2,
       "stage": "transcribe",
@@ -159,8 +159,8 @@ The `models` table tracks download status:
 |--------|------|-------------|
 | `id` | String(200) | Namespaced model ID (PK) |
 | `name` | String(200) | Human-readable name |
-| `runtime` | String(50) | Engine runtime |
-| `runtime_model_id` | String(200) | HF model ID for engine |
+| `engine_id` | String(50) | Engine engine_id |
+| `loaded_model_id` | String(200) | HF model ID for engine |
 | `stage` | String(50) | Pipeline stage |
 | `status` | String(20) | `not_downloaded`, `downloading`, `ready`, `failed` |
 | `download_path` | Text | S3 URI |
@@ -207,8 +207,8 @@ POST   /v1/models/sync                     # Sync registry with S3
       "id": "nvidia/parakeet-tdt-1.1b",
       "object": "model",
       "name": "NVIDIA Parakeet TDT 1.1B",
-      "runtime": "nemo",
-      "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+      "engine_id": "nemo",
+      "loaded_model_id": "nvidia/parakeet-tdt-1.1b",
       "stage": "transcribe",
       "status": "ready",
       "download_path": "s3://dalston-artifacts/models/nvidia/parakeet-tdt-1.1b/",
@@ -234,7 +234,7 @@ POST   /v1/models/sync                     # Sync registry with S3
 
 ## HuggingFace Auto-Routing
 
-Dalston can automatically route arbitrary HuggingFace models to the appropriate runtime.
+Dalston can automatically route arbitrary HuggingFace models to the appropriate engine_id.
 
 ### Routing Priority
 
@@ -279,7 +279,7 @@ GET  /v1/models/hf/mappings
   "languages": [],
   "downloads": 1500000,
   "likes": 3200,
-  "resolved_runtime": "faster-whisper",
+  "resolved_engine_id": "faster-whisper",
   "can_route": true
 }
 ```
@@ -324,7 +324,7 @@ Selection rules:
 1. Stage model IDs must exist in the model registry.
 2. `model.stage` must match the requested stage (`model_stage_mismatch` on mismatch).
 3. Model status must be `ready` (`model_not_ready` otherwise).
-4. Selected runtime must be available (`runtime_unavailable` otherwise).
+4. Selected engine_id must be available (`runtime_unavailable` otherwise).
 
 ### Auto-Selection
 
@@ -351,7 +351,7 @@ When `model=auto`:
 1. Query registry for `status=ready` models matching requirements
 2. Filter by language support (if specified)
 3. Rank by: word timestamps → diarization → language specificity → RTF
-4. Select best match and route to appropriate runtime
+4. Select best match and route to appropriate engine_id
 
 ---
 
@@ -402,7 +402,7 @@ The Models page (`/models`) provides:
 
 ### Filters
 
-- Search: Text search across ID, name, runtime
+- Search: Text search across ID, name, engine_id
 - Stage: transcribe, diarize, align, etc.
 - Runtime: faster-whisper, nemo, etc.
 - Status: ready, not_downloaded, downloading, failed
@@ -411,7 +411,7 @@ The Models page (`/models`) provides:
 
 1. Click "Add from HF" button
 2. Search HuggingFace Hub (live autocomplete)
-3. Select model → auto-resolve runtime
+3. Select model → auto-resolve engine_id
 4. Model added to registry with `not_downloaded` status
 
 ---
@@ -447,7 +447,7 @@ The Models page (`/models`) provides:
 {
   "error": {
     "type": "service_unavailable",
-    "message": "No engine available for runtime 'nemo'. Start an engine with: docker compose up -d stt-batch-transcribe-nemo"
+    "message": "No engine available for engine_id 'nemo'. Start an engine with: docker compose up -d stt-batch-transcribe-nemo"
   }
 }
 ```
@@ -486,7 +486,7 @@ The `.complete` marker ensures atomic uploads - a model is only considered ready
 
 Engines load models on demand:
 
-1. **Job arrives** with `runtime_model_id` in config
+1. **Job arrives** with `loaded_model_id` in config
 2. **Engine checks** if model is loaded in memory
 3. **If different model**: Unload current, free GPU memory, load new
 4. **If model not on disk**: Download from S3 to local cache

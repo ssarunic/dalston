@@ -2,7 +2,7 @@
 
 ## Scope
 
-Implemented runtime-model selection and propagation for non-transcribe model-backed stages:
+Implemented engine_id-model selection and propagation for non-transcribe model-backed stages:
 
 - `diarize` (`model_diarize`)
 - `align` (`model_align`)
@@ -22,17 +22,17 @@ Implemented runtime-model selection and propagation for non-transcribe model-bac
 
 2. Orchestrator/DAG propagation
 
-- DAG now propagates `runtime_model_id` per stage, not only for transcribe.
-- `runtime_model_id` is injected for:
+- DAG now propagates `loaded_model_id` per stage, not only for transcribe.
+- `loaded_model_id` is injected for:
   - standard: `diarize`, `align`, `pii_detect`
   - per-channel: `align_ch*`, `pii_detect_ch*`
 
 3. Engine refactors
 
-- `pyannote-4.0`: consumes `input.config["runtime_model_id"]`, caches by model ID, reports active model.
-- `nemo-msdd`: consumes `runtime_model_id`, resolves component model set by runtime model, reports active model.
-- `phoneme-align`: consumes `runtime_model_id`, caches by model ID, reports cached models.
-- `pii-presidio`: consumes `runtime_model_id` for GLiNER backbone, caches by model ID, reports active model.
+- `pyannote-4.0`: consumes `input.config["loaded_model_id"]`, caches by model ID, reports active model.
+- `nemo-msdd`: consumes `loaded_model_id`, resolves component model set by engine_id model, reports active model.
+- `phoneme-align`: consumes `loaded_model_id`, caches by model ID, reports cached models.
+- `pii-presidio`: consumes `loaded_model_id` for GLiNER backbone, caches by model ID, reports active model.
 
 4. Registry lifecycle updates
 
@@ -44,16 +44,16 @@ Implemented runtime-model selection and propagation for non-transcribe model-bac
 
 5. Registry seed data
 
-- Added non-transcribe model YAML entries in `models/` for diarize, align, and pii detection runtimes.
+- Added non-transcribe model YAML entries in `models/` for diarize, align, and pii detection engine_ids.
 
 6. Specs/docs updates
 
-- Updated model selection and pipeline interface docs to include stage model contract and stage runtime model propagation.
+- Updated model selection and pipeline interface docs to include stage model contract and stage engine_id model propagation.
 
 ## Behavior Changes
 
 1. Stage model ID is now validated against registry stage and status before task creation.
-2. Non-transcribe engines no longer rely on hardcoded runtime model defaults in task processing paths.
+2. Non-transcribe engines no longer rely on hardcoded engine_id model defaults in task processing paths.
 3. Missing or invalid stage model selection fails deterministically with explicit model-selection error codes.
 
 ## Test Evidence

@@ -126,26 +126,26 @@ class ModelRegistryService:
             raise ModelNotFoundError(model_id)
         return model
 
-    async def get_model_by_runtime_model_id(
+    async def get_model_by_loaded_model_id(
         self,
         db: AsyncSession,
-        runtime_model_id: str,
+        loaded_model_id: str,
     ) -> ModelRegistryModel | None:
-        """Get a model by its runtime_model_id.
+        """Get a model by its loaded_model_id.
 
         This is used to check if a HuggingFace model is already registered
         under a different Dalston model ID.
 
         Args:
             db: Database session
-            runtime_model_id: The HuggingFace model ID or runtime-specific model ID
+            loaded_model_id: The HuggingFace model ID or engine_id-specific model ID
 
         Returns:
             Model if found, None otherwise
         """
         result = await db.execute(
             select(ModelRegistryModel).where(
-                ModelRegistryModel.runtime_model_id == runtime_model_id
+                ModelRegistryModel.loaded_model_id == loaded_model_id
             )
         )
         return result.scalar_one_or_none()
@@ -155,7 +155,7 @@ class ModelRegistryService:
         db: AsyncSession,
         *,
         stage: str | None = None,
-        runtime: str | None = None,
+        engine_id: str | None = None,
         status: str | None = None,
     ) -> Sequence[ModelRegistryModel]:
         """List models with optional filters.
@@ -163,7 +163,7 @@ class ModelRegistryService:
         Args:
             db: Database session
             stage: Filter by stage (transcribe, diarize, align, etc.)
-            runtime: Filter by runtime (faster-whisper, nemo, etc.)
+            engine_id: Filter by engine_id (faster-whisper, nemo, etc.)
             status: Filter by status (not_downloaded, downloading, ready, failed)
 
         Returns:
@@ -173,8 +173,8 @@ class ModelRegistryService:
 
         if stage is not None:
             query = query.where(ModelRegistryModel.stage == stage)
-        if runtime is not None:
-            query = query.where(ModelRegistryModel.runtime == runtime)
+        if engine_id is not None:
+            query = query.where(ModelRegistryModel.engine_id == engine_id)
         if status is not None:
             query = query.where(ModelRegistryModel.status == status)
 
@@ -250,10 +250,10 @@ class ModelRegistryService:
             await db.refresh(model)
 
         try:
-            # Use source (HuggingFace repo ID) for download, not runtime_model_id
-            # runtime_model_id is what the engine uses internally (e.g., "base")
+            # Use source (HuggingFace repo ID) for download, not loaded_model_id
+            # loaded_model_id is what the engine uses internally (e.g., "base")
             # source is the HuggingFace repo (e.g., "Systran/faster-whisper-base")
-            hf_repo_id = model.source or model.runtime_model_id
+            hf_repo_id = model.source or model.loaded_model_id
             logger.info(
                 "downloading_model_from_hf",
                 model_id=model_id,
@@ -650,8 +650,8 @@ class ModelRegistryService:
         db: AsyncSession,
         *,
         model_id: str,
-        runtime: str,
-        runtime_model_id: str,
+        engine_id: str,
+        loaded_model_id: str,
         stage: str,
         name: str | None = None,
         source: str | None = None,
@@ -671,8 +671,8 @@ class ModelRegistryService:
         Args:
             db: Database session
             model_id: Dalston model ID
-            runtime: Engine runtime (faster-whisper, nemo, etc.)
-            runtime_model_id: HuggingFace model ID or local path
+            engine_id: Engine engine_id (faster-whisper, nemo, etc.)
+            loaded_model_id: HuggingFace model ID or local path
             stage: Pipeline stage (transcribe, diarize, etc.)
             name: Human-readable name
             source: Model source (huggingface, local)
@@ -692,8 +692,8 @@ class ModelRegistryService:
         model = ModelRegistryModel(
             id=model_id,
             name=name,
-            runtime=runtime,
-            runtime_model_id=runtime_model_id,
+            engine_id=engine_id,
+            loaded_model_id=loaded_model_id,
             stage=stage,
             status="not_downloaded",
             source=source,
@@ -719,7 +719,7 @@ class ModelRegistryService:
         logger.info(
             "model_registered",
             model_id=model_id,
-            runtime=runtime,
+            engine_id=engine_id,
             stage=stage,
         )
 
@@ -787,8 +787,8 @@ class ModelRegistryService:
                 model = ModelRegistryModel(
                     id=entry.id,
                     name=entry.name,
-                    runtime=entry.runtime,
-                    runtime_model_id=entry.runtime_model_id,
+                    engine_id=entry.engine_id,
+                    loaded_model_id=entry.loaded_model_id,
                     stage=entry.stage,
                     status="not_downloaded",
                     source=entry.source,
@@ -822,8 +822,8 @@ class ModelRegistryService:
                     .where(ModelRegistryModel.id == entry.id)
                     .values(
                         name=entry.name,
-                        runtime=entry.runtime,
-                        runtime_model_id=entry.runtime_model_id,
+                        engine_id=entry.engine_id,
+                        loaded_model_id=entry.loaded_model_id,
                         stage=entry.stage,
                         source=entry.source,
                         languages=entry.languages,
@@ -917,7 +917,7 @@ class ModelRegistryService:
         This method enables dynamic model support by:
         1. Checking if the model already exists in the registry
         2. If not, fetching metadata from HuggingFace Hub
-        3. Determining the appropriate runtime based on library_name/tags
+        3. Determining the appropriate engine_id based on library_name/tags
         4. Optionally auto-registering the model in the database
 
         Args:
@@ -955,9 +955,9 @@ class ModelRegistryService:
             )
             return None
 
-        if metadata.resolved_runtime is None:
+        if metadata.resolved_engine_id is None:
             logger.warning(
-                "hf_model_runtime_not_resolved",
+                "hf_model_engine_id_not_resolved",
                 model_id=hf_model_id,
                 library_name=metadata.library_name,
                 pipeline_tag=metadata.pipeline_tag,
@@ -967,7 +967,7 @@ class ModelRegistryService:
         logger.info(
             "hf_model_resolved",
             model_id=hf_model_id,
-            runtime=metadata.resolved_runtime,
+            engine_id=metadata.resolved_engine_id,
             library_name=metadata.library_name,
         )
 
@@ -975,8 +975,8 @@ class ModelRegistryService:
             # Return a transient model object (not persisted)
             return ModelRegistryModel(
                 id=hf_model_id,
-                runtime=metadata.resolved_runtime,
-                runtime_model_id=hf_model_id,
+                engine_id=metadata.resolved_engine_id,
+                loaded_model_id=hf_model_id,
                 stage="transcribe",
                 status="not_downloaded",
                 source=hf_model_id,
@@ -988,8 +988,8 @@ class ModelRegistryService:
         return await self.register_model(
             db,
             model_id=hf_model_id,
-            runtime=metadata.resolved_runtime,
-            runtime_model_id=hf_model_id,
+            engine_id=metadata.resolved_engine_id,
+            loaded_model_id=hf_model_id,
             stage="transcribe",
             source=hf_model_id,
             library_name=metadata.library_name,

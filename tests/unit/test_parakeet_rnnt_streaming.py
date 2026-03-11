@@ -1,8 +1,8 @@
 """Tests for M71: Parakeet RNNT/TDT cache-aware streaming inference.
 
 Covers:
-- NemoCore.decoder_type() and supports_streaming_decode()
-- NemoCore.transcribe_streaming() with mock chunk iterator
+- NemoInference.decoder_type() and supports_streaming_decode()
+- NemoInference.transcribe_streaming() with mock chunk iterator
 - CTC variant raises RuntimeError if transcribe_streaming() called
 - RT engine decoder-aware dispatch (use_streaming_decode, get_streaming_decode_fn)
 - SessionHandler streaming decode integration
@@ -20,8 +20,8 @@ import numpy as np
 import pytest
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.cores.nemo_core import (
-    NemoCore,
+from dalston.engine_sdk.inference.nemo_inference import (
+    NemoInference,
     NeMoSegmentResult,
     NeMoTranscriptionResult,
     NeMoWordResult,
@@ -57,8 +57,8 @@ def _load_rt_engine_module():
 
 
 def _make_mock_core() -> MagicMock:
-    """Create a mocked NemoCore with sensible defaults."""
-    mock_core = MagicMock(spec=NemoCore)
+    """Create a mocked NemoInference with sensible defaults."""
+    mock_core = MagicMock(spec=NemoInference)
     mock_core.device = "cpu"
     mock_core.manager = MagicMock()
     mock_core.transcribe.return_value = NeMoTranscriptionResult(
@@ -79,16 +79,16 @@ def _make_mock_core() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# T1: NemoCore decoder_type and supports_streaming_decode
+# T1: NemoInference decoder_type and supports_streaming_decode
 # ---------------------------------------------------------------------------
 
 
 class TestParakeetCoreDecoderType:
     """Verify decoder_type() returns correct architecture for each model."""
 
-    def _make_core(self) -> NemoCore:
-        """Create a NemoCore with a mocked manager."""
-        core = object.__new__(NemoCore)
+    def _make_core(self) -> NemoInference:
+        """Create a NemoInference with a mocked manager."""
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(
             side_effect=lambda model_id: (
@@ -123,16 +123,16 @@ class TestParakeetCoreDecoderType:
 
 
 # ---------------------------------------------------------------------------
-# T1: NemoCore.transcribe_streaming()
+# T1: NemoInference.transcribe_streaming()
 # ---------------------------------------------------------------------------
 
 
 class TestParakeetCoreTranscribeStreaming:
     """Verify transcribe_streaming() behavior with mocked NeMo model."""
 
-    def _make_core_with_mock_streaming(self) -> NemoCore:
+    def _make_core_with_mock_streaming(self) -> NemoInference:
         """Create a core with a mock manager configured for RNNT streaming."""
-        core = object.__new__(NemoCore)
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.device = "cpu"
 
@@ -141,9 +141,9 @@ class TestParakeetCoreTranscribeStreaming:
 
         return core
 
-    def test_ctc_raises_runtime_error(self) -> None:
+    def test_ctc_raises_engine_id_error(self) -> None:
         """CTC variant must raise RuntimeError if streaming is attempted."""
-        core = object.__new__(NemoCore)
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="ctc")
 
@@ -154,14 +154,14 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_rnnt_acquires_and_releases_model(self) -> None:
         """Verify model acquire/release lifecycle during streaming."""
-        core = object.__new__(NemoCore)
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
 
         # Mock _run_streaming_inference to yield nothing
         with patch.object(
-            NemoCore,
+            NemoInference,
             "_run_streaming_inference",
             return_value=iter([]),
         ):
@@ -177,7 +177,7 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_model_released_on_error(self) -> None:
         """Model must be released even if streaming raises an exception."""
-        core = object.__new__(NemoCore)
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
         core._manager.device = "cpu"
@@ -186,7 +186,7 @@ class TestParakeetCoreTranscribeStreaming:
             raise ValueError("test error")
 
         with patch.object(
-            NemoCore,
+            NemoInference,
             "_run_streaming_inference",
             side_effect=_failing_stream,
         ):
@@ -202,13 +202,13 @@ class TestParakeetCoreTranscribeStreaming:
 
     def test_tdt_also_accepted(self) -> None:
         """TDT models should also be accepted for streaming."""
-        core = object.__new__(NemoCore)
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="tdt")
         core._manager.device = "cpu"
 
         with patch.object(
-            NemoCore,
+            NemoInference,
             "_run_streaming_inference",
             return_value=iter([]),
         ):
@@ -399,7 +399,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         assert result.text == "hello world"
@@ -412,7 +412,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-ctc-0.6b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-ctc-0.6b"),
         )
 
         assert result.text == "hello world"
@@ -461,11 +461,11 @@ class TestChunkMSConfig:
 
 
 class TestBatchEngineUnaffected:
-    """Verify NemoCore.transcribe() is unchanged (batch path)."""
+    """Verify NemoInference.transcribe() is unchanged (batch path)."""
 
     def test_transcribe_unchanged(self) -> None:
-        """NemoCore.transcribe() should work as before."""
-        core = object.__new__(NemoCore)
+        """NemoInference.transcribe() should work as before."""
+        core = object.__new__(NemoInference)
         core._manager = MagicMock()
 
         mock_model = MagicMock()

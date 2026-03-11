@@ -105,7 +105,7 @@ class RealtimeEngine(ABC):
                     text=" ".join(text_parts),
                     segments=[self.build_segment(...)],
                     language=info.language,
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                 )
 
         if __name__ == "__main__":
@@ -215,10 +215,10 @@ class RealtimeEngine(ABC):
         """
         return ["auto"]
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         """Return the inference framework identifier.
 
-        Override to report the runtime (e.g., "faster-whisper", "parakeet").
+        Override to report the engine_id (e.g., "faster-whisper", "parakeet").
         Used when registering with Session Router.
 
         Returns:
@@ -307,7 +307,7 @@ class RealtimeEngine(ABC):
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                runtime=self.get_runtime(),
+                engine_id=self.get_engine_id(),
                 version="unknown",
                 stages=["transcribe"],
                 languages=self.get_languages() or None,
@@ -342,7 +342,7 @@ class RealtimeEngine(ABC):
         stages = [stage] if stage else ["transcribe"]
 
         return EngineCapabilities(
-            runtime=card.get("runtime") or card.get("id", self.get_runtime()),
+            engine_id=card.get("engine_id") or card.get("id", self.get_engine_id()),
             version=card.get("version", "unknown"),
             stages=stages,
             languages=languages,
@@ -444,7 +444,7 @@ class RealtimeEngine(ABC):
         await self._unified_registry.register(
             EngineRecord(
                 instance=self.instance,
-                runtime=capabilities.runtime,
+                engine_id=capabilities.engine_id,
                 stage="transcribe",
                 status="ready",
                 interfaces=["realtime"],
@@ -655,9 +655,9 @@ class RealtimeEngine(ABC):
         # Bind session_id to logging context for this session
         structlog.contextvars.bind_contextvars(session_id=config.session_id)
 
-        # Resolve runtime from capabilities
+        # Resolve engine_id from capabilities
         capabilities = self.get_capabilities()
-        session_runtime = capabilities.runtime or ""
+        session_engine_id = capabilities.engine_id or ""
         session_model = config.model or ""
 
         # Create span for session lifetime (M19)
@@ -665,7 +665,7 @@ class RealtimeEngine(ABC):
             "realtime.session",
             attributes={
                 "dalston.session_id": config.session_id,
-                "dalston.runtime": session_runtime,
+                "dalston.engine_id": session_engine_id,
                 "dalston.model": session_model,
                 "dalston.instance": self.instance,
                 "dalston.language": config.language,
@@ -693,9 +693,9 @@ class RealtimeEngine(ABC):
             duration: Session duration in seconds
             status: End status ("completed" or "error")
         """
-        # Resolve runtime and model for metrics
+        # Resolve engine_id and model for metrics
         capabilities = self.get_capabilities()
-        rt = capabilities.runtime or ""
+        rt = capabilities.engine_id or ""
         # Get model from session config if still tracked
         session = self._sessions.get(session_id)
         model = session.config.model if session and hasattr(session, "config") else ""

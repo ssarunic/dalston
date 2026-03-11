@@ -75,8 +75,8 @@ curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-
 sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
 
-# Configure Docker runtime
-sudo nvidia-ctk runtime configure --runtime=docker
+# Configure Docker engine_id
+sudo nvidia-ctk engine_id configure --engine_id=docker
 sudo systemctl restart docker
 
 # Verify GPU access
@@ -481,8 +481,8 @@ nvidia-smi
 # Verify Docker GPU access
 docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
 
-# Check Docker runtime configuration
-docker info | grep -i runtime
+# Check Docker engine_id configuration
+docker info | grep -i engine_id
 ```
 
 ### Out of memory errors

@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to NemoOnnxCore.
+timestamp behavior is preserved after delegation to NemoOnnxInference.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from uuid import uuid4
 
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.cores.nemo_onnx_core import (
-    NemoOnnxCore,
+from dalston.engine_sdk.inference.nemo_onnx_inference import (
+    NemoOnnxInference,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
@@ -25,7 +25,7 @@ from dalston.engine_sdk.cores.nemo_onnx_core import (
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -74,7 +74,7 @@ def _make_core_result(
 
 
 def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
-    mock_core = MagicMock(spec=NemoOnnxCore)
+    mock_core = MagicMock(spec=NemoOnnxInference)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result
@@ -84,7 +84,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
         engine = _ParakeetOnnxEngine.__new__(_ParakeetOnnxEngine)
         engine._core = mock_core
         engine._default_model_id = "nvidia/parakeet-ctc-0.6b"
-        engine._runtime = "nemo-onnx"
+        engine._engine_id = "nemo-onnx"
         engine.logger = MagicMock()
     return engine
 
@@ -113,7 +113,7 @@ class TestOnnxBatchOutputShape:
         assert data.language == "en"
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
-        assert data.runtime == "nemo-onnx"
+        assert data.engine_id == "nemo-onnx"
 
     def test_output_has_word_timestamps(self) -> None:
         result = _make_core_result(
@@ -177,7 +177,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"runtime_model_id": "nvidia/parakeet-ctc-0.6b"},
+                config={"loaded_model_id": "nvidia/parakeet-ctc-0.6b"},
             ),
             _ctx(task_id, job_id),
         )
@@ -195,7 +195,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"runtime_model_id": "nvidia/parakeet-tdt-0.6b-v3"},
+                config={"loaded_model_id": "nvidia/parakeet-tdt-0.6b-v3"},
             ),
             _ctx(task_id, job_id),
         )
@@ -213,7 +213,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"runtime_model_id": "nvidia/parakeet-rnnt-0.6b"},
+                config={"loaded_model_id": "nvidia/parakeet-rnnt-0.6b"},
             ),
             _ctx(task_id, job_id),
         )

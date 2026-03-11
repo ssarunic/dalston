@@ -103,7 +103,7 @@ def _resolve_effective_model(
     """Resolve auto model for bootstrap-managed local flows.
 
     In distributed CLI mode, managed local bootstrap should pin the default model
-    to avoid remote auto-selection variability. In lite runtime, the local server
+    to avoid remote auto-selection variability. In lite engine_id, the local server
     is authoritative for model auto-selection.
     """
     if requested_model.strip().lower() != "auto":

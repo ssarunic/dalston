@@ -181,7 +181,7 @@ export function RealtimeSessionDetail() {
             </span>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{session.model || session.runtime || '-'}</div>
+            <div className="text-2xl font-bold">{session.model || session.engine_id || '-'}</div>
           </CardContent>
         </Card>
 

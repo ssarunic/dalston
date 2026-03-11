@@ -24,11 +24,11 @@ def format_duration(seconds: float) -> str:
     return f"{mins}m {secs}s"
 
 
-def get_session_runtime(session: object) -> str | None:
-    """Return runtime, with engine as fallback for older SDK objects."""
-    runtime = getattr(session, "runtime", None)
-    if runtime is not None:
-        return runtime
+def get_session_engine_id(session: object) -> str | None:
+    """Return engine_id, with engine as fallback for older SDK objects."""
+    engine_id = getattr(session, "engine_id", None)
+    if engine_id is not None:
+        return engine_id
     return getattr(session, "engine", None)
 
 
@@ -85,7 +85,7 @@ def list_sessions(
                     "status": s.status.value,
                     "language": s.language,
                     "model": s.model,
-                    "runtime": get_session_runtime(s),
+                    "engine_id": get_session_engine_id(s),
                     "audio_duration_seconds": s.audio_duration_seconds,
                     "segment_count": s.segment_count,
                     "word_count": s.word_count,
@@ -123,7 +123,7 @@ def list_sessions(
                     s.id[:12] + "...",
                     f"[{status_color}]{s.status.value}[/{status_color}]",
                     s.model or "-",
-                    get_session_runtime(s) or "-",
+                    get_session_engine_id(s) or "-",
                     format_duration(s.audio_duration_seconds),
                     str(s.segment_count),
                     started,
@@ -172,7 +172,7 @@ def get_session(
                 "status": session.status.value,
                 "language": session.language,
                 "model": session.model,
-                "runtime": get_session_runtime(session),
+                "engine_id": get_session_engine_id(session),
                 "audio_duration_seconds": session.audio_duration_seconds,
                 "segment_count": session.segment_count,
                 "word_count": session.word_count,
@@ -207,7 +207,7 @@ def get_session(
             )
             table.add_row("Language", session.language or "-")
             table.add_row("Model", session.model or "-")
-            table.add_row("Runtime", get_session_runtime(session) or "-")
+            table.add_row("Runtime", get_session_engine_id(session) or "-")
             table.add_row("Duration", format_duration(session.audio_duration_seconds))
             table.add_row("Segments", str(session.segment_count))
             table.add_row("Words", str(session.word_count))

@@ -2,15 +2,15 @@
 
 | | |
 |---|---|
-| **Goal** | Support heterogeneous/incompatible runtime stacks locally and in distributed deployments via explicit execution profiles (`inproc`, `venv`, `container`) |
+| **Goal** | Support heterogeneous/incompatible engine_id stacks locally and in distributed deployments via explicit execution profiles (`inproc`, `venv`, `container`) |
 | **Duration** | 8-12 days |
-| **Dependencies** | M58 (expanded lite capability model), M36/M40 (runtime model lifecycle), existing engine runner contracts |
+| **Dependencies** | M58 (expanded lite capability model), M36/M40 (engine_id model lifecycle), existing engine runner contracts |
 | **Deliverable** | Runtime execution-profile contract, profile-aware dispatch layer, venv/container adapters, and observability/guardrails for profile-based execution |
 | **Status** | Completed |
 
 Dependency clarification:
 
-1. M58 defines what lite can do; M59 defines how runtimes execute safely when dependencies conflict.
+1. M58 defines what lite can do; M59 defines how engine_ids execute safely when dependencies conflict.
 2. M36/M40 remain the model-control plane; M59 changes execution isolation, not model identity contracts.
 3. M52 local runner is the baseline in-proc execution primitive; M59 should reuse/extract from it rather than duplicating dispatch logic.
 4. M59 should start only after M56 lite orchestrator path (`dalston/orchestrator/lite_main.py`) is stable; `inproc`/`venv` execution plugs into lite path, not distributed queue path.
@@ -19,7 +19,7 @@ Dependency clarification:
 
 ### Functional outcomes
 
-1. Each runtime can declare its execution profile (`inproc`, `venv`, or `container`).
+1. Each engine_id can declare its execution profile (`inproc`, `venv`, or `container`).
 2. Scheduler/runner dispatches tasks through a profile-aware executor layer.
 3. Incompatible stacks (for example, NeMo vs other PyTorch/ONNX stacks) can coexist without process-level conflicts.
 4. Failure handling and task output contracts remain consistent across profiles.
@@ -31,27 +31,27 @@ Dependency clarification:
 ### Architecture outcomes
 
 1. One control plane with multiple execution backends.
-2. No runtime-specific branching spread across orchestration business logic.
-3. Profile policy is declarative (catalog/config), not hardcoded by runtime name in multiple places.
+2. No engine_id-specific branching spread across orchestration business logic.
+3. Profile policy is declarative (catalog/config), not hardcoded by engine_id name in multiple places.
 
 ### Operational outcomes
 
-1. Operators can inspect active profile per runtime in status/health output.
+1. Operators can inspect active profile per engine_id in status/health output.
 2. Profile-specific failures are observable and actionable.
 3. Runtime startup/preparation overhead is bounded and cacheable (venv reuse, image reuse).
 
 ### Clean-start outcomes
 
-1. No implicit mixing of incompatible dependencies in one Python process for isolated runtimes.
+1. No implicit mixing of incompatible dependencies in one Python process for isolated engine_ids.
 2. No hidden fallback from isolated profile to in-process execution.
 3. No duplicated pipeline logic per profile.
 
 ### Success criteria
 
-1. At least one runtime per profile executes end-to-end through same task contract.
+1. At least one engine_id per profile executes end-to-end through same task contract.
 2. Profile routing is deterministic and test-covered.
 3. Isolation prevents known dependency conflicts in representative scenarios.
-4. Existing inproc runtimes continue to work unchanged where isolation is not required.
+4. Existing inproc engine_ids continue to work unchanged where isolation is not required.
 
 ---
 
@@ -67,11 +67,11 @@ Lift/reuse logic from `dalston/engine_sdk/local_runner.py` for `InProcExecutor` 
 
 ### Strategy 2: Policy-driven profile assignment
 
-Assign profiles in catalog/config and enforce at startup. Avoid runtime-name conditionals scattered through orchestration code.
+Assign profiles in catalog/config and enforce at startup. Avoid engine_id-name conditionals scattered through orchestration code.
 
 ### Strategy 3: Incremental profile rollout
 
-Start with high-conflict runtimes and expand profile adoption in slices with clear rollback boundaries.
+Start with high-conflict engine_ids and expand profile adoption in slices with clear rollback boundaries.
 
 ### Strategy 4: Keep artifact and task contracts stable
 
@@ -96,7 +96,7 @@ Expose profile and executor metadata in health/status/metrics to simplify debugg
 1. Do not redesign model registry semantics.
 2. Do not introduce profile-specific API contracts.
 3. Do not auto-install arbitrary dependencies at request time.
-4. Do not require container-only execution for all runtimes.
+4. Do not require container-only execution for all engine_ids.
 5. Do not merge packaging/distribution goals (M60) into this milestone.
 
 ---
@@ -124,7 +124,7 @@ Expose profile and executor metadata in health/status/metrics to simplify debugg
    - lite execution delegates to selected `inproc`/`venv` executor
    - distributed container profile remains current Redis-stream worker path
 5. Define model/artifact resolution contract for non-container profiles:
-   - `runtime_model_id` remains the identity contract (M36/M40 unchanged)
+   - `loaded_model_id` remains the identity contract (M36/M40 unchanged)
    - profile-specific caches/materialization paths are execution details, not API changes
 6. Freeze venv invocation mechanics:
    - subprocess-based execution in target venv Python
@@ -154,12 +154,12 @@ Expected files:
 - `scripts/generate_catalog.py`
 - `dalston/orchestrator/scheduler.py`
 - `dalston/orchestrator/lite_main.py`
-- `tests/unit/test_runtime_executor_contract.py` (new)
+- `tests/unit/test_engine_id_executor_contract.py` (new)
 
 ### Phase 2: Venv Profile Implementation
 
 1. Add `VenvExecutor` with environment lifecycle management.
-2. Add deterministic dependency-lock mapping per runtime profile.
+2. Add deterministic dependency-lock mapping per engine_id profile.
 3. Add venv cache and health checks.
 4. Integrate venv profile into lite execution path via executor selection in `lite_main.py` (no distributed scheduler bypass/branch).
 5. Ensure profile-specific model cache/materialization path handling follows Phase 0 contract.
@@ -191,16 +191,16 @@ Expected files:
 
 ### Phase 4: Profile Policy Integration and Migration
 
-1. Populate engine catalog/runtime metadata with `execution_profile` for migrated runtimes (using Phase 1 schema/plumbing).
-2. Add validation at startup and runtime selection points.
-3. Migrate selected runtimes to isolated profiles in controlled order.
-4. Required validation migration target: `nemo-msdd` on `venv` profile as canonical dependency-conflict runtime.
-5. Keep backward compatibility for runtimes missing `execution_profile` by applying default `container` during migration window.
+1. Populate engine catalog/engine_id metadata with `execution_profile` for migrated engine_ids (using Phase 1 schema/plumbing).
+2. Add validation at startup and engine_id selection points.
+3. Migrate selected engine_ids to isolated profiles in controlled order.
+4. Required validation migration target: `nemo-msdd` on `venv` profile as canonical dependency-conflict engine_id.
+5. Keep backward compatibility for engine_ids missing `execution_profile` by applying default `container` during migration window.
 
 Expected files:
 
 - `dalston/orchestrator/catalog.py`
-- `engines/**/engine.yaml` (selected runtime entries)
+- `engines/**/engine.yaml` (selected engine_id entries)
 - `tests/integration/test_runtime_profile_routing.py` (new)
 
 ### Phase 5: Observability and Docs
@@ -214,7 +214,7 @@ Expected files:
 - `dalston/metrics.py`
 - `dalston/gateway/api/v1/engines.py` (or equivalent status endpoints)
 - `docs/specs/OBSERVABILITY.md`
-- `docs/reports/M59-runtime-isolation-profiles.md` (new)
+- `docs/reports/M59-engine_id-isolation-profiles.md` (new)
 
 ---
 
@@ -234,14 +234,14 @@ Expected files:
    - lite executor dispatch selection (`inproc` vs `venv`)
    - distributed container path regression under `execution_profile=container`
 3. Regression tests:
-   - existing inproc runtimes unchanged
-   - existing container runtimes unchanged when `execution_profile` is omitted
+   - existing inproc engine_ids unchanged
+   - existing container engine_ids unchanged when `execution_profile` is omitted
    - output contracts stable across profiles
 
 Suggested command sets:
 
 ```bash
-pytest tests/unit/test_runtime_executor_contract.py \
+pytest tests/unit/test_engine_id_executor_contract.py \
        tests/unit/test_venv_executor.py \
        tests/integration/test_runtime_profile_venv.py \
        tests/integration/test_runtime_profile_container.py \
@@ -254,7 +254,7 @@ pytest -q
 
 ### Manual verification
 
-1. Run one runtime per profile and verify consistent task outputs.
+1. Run one engine_id per profile and verify consistent task outputs.
 2. Simulate a dependency conflict and verify isolated profile prevents system-wide breakage.
 3. Inspect status/metrics and confirm profile visibility.
 
@@ -263,6 +263,6 @@ pytest -q
 ## Exit Criteria
 
 1. Profile-aware execution is active in production codepaths.
-2. At least one runtime per profile is validated end-to-end.
+2. At least one engine_id per profile is validated end-to-end.
 3. No silent fallback between profiles.
 4. Observability and runbooks cover profile-based execution operations.

@@ -75,7 +75,7 @@ class TestParakeetStreamingEngineGetModels:
     def test_get_models_returns_all_supported_models(self, mock_cuda_available):
         """Test that get_models returns all dynamically loadable models.
 
-        M44: NeMo runtime container can load any supported Parakeet model on-demand.
+        M44: NeMo engine_id container can load any supported Parakeet model on-demand.
         """
         NemoRealtimeEngine = load_parakeet_streaming_engine()
         engine = NemoRealtimeEngine()

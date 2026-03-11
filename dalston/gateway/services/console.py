@@ -63,7 +63,7 @@ class SuccessRateWindow:
 class EngineTaskStats:
     """Per-engine task statistics."""
 
-    runtime: str
+    engine_id: str
     stage: str
     completed: int
     failed: int
@@ -111,7 +111,7 @@ class TaskDTO:
 
     id: UUID
     stage: str
-    runtime: str
+    engine_id: str
     status: str
     required: bool
     dependencies: list[UUID]
@@ -343,7 +343,7 @@ class ConsoleService:
             TaskDTO(
                 id=task.id,
                 stage=task.stage,
-                runtime=task.runtime,
+                engine_id=task.engine_id,
                 status=task.status,
                 required=task.required,
                 dependencies=task.dependencies or [],
@@ -493,14 +493,14 @@ class ConsoleService:
     async def get_engine_task_stats(
         self,
         db: AsyncSession,
-        runtime: str,
+        engine_id: str,
         hours: int = 24,
     ) -> EngineTaskStats:
-        """Get task statistics for a specific engine runtime.
+        """Get task statistics for a specific engine engine_id.
 
         Args:
             db: Database session
-            runtime: Engine runtime identifier
+            engine_id: Engine engine_id identifier
             hours: Time window in hours
 
         Returns:
@@ -544,13 +544,13 @@ class ConsoleService:
                 )
                 .label("p95_seconds"),
             )
-            .where(TaskModel.runtime == runtime)
+            .where(TaskModel.engine_id == engine_id)
             .where(TaskModel.started_at >= cutoff)
         )
         row = (await db.execute(query)).one()
 
         return EngineTaskStats(
-            runtime=runtime,
+            engine_id=engine_id,
             stage="",  # Caller provides stage from catalog
             completed=row.completed or 0,
             failed=row.failed or 0,
@@ -594,16 +594,16 @@ class ConsoleService:
                     break
 
         if transcribe_task is not None:
-            # Prefer runtime_model_id from task config
-            runtime_model_id = (
-                transcribe_task.config.get("runtime_model_id")
+            # Prefer loaded_model_id from task config
+            loaded_model_id = (
+                transcribe_task.config.get("loaded_model_id")
                 if transcribe_task.config
                 else None
             )
-            if runtime_model_id:
-                return f"Auto ({runtime_model_id})"
-            if transcribe_task.runtime:
-                return f"Auto ({transcribe_task.runtime})"
+            if loaded_model_id:
+                return f"Auto ({loaded_model_id})"
+            if transcribe_task.engine_id:
+                return f"Auto ({transcribe_task.engine_id})"
 
         # No transcribe task yet — check if job is still in progress
         if job.status in ("pending", "running"):

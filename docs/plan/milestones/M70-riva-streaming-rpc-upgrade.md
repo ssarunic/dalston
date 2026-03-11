@@ -90,7 +90,7 @@ In scope:
 
 Out of scope:
 
-- Cache-aware streaming — that's M71 (Parakeet RNNT, different runtime)
+- Cache-aware streaming — that's M71 (Parakeet RNNT, different engine_id)
 - Merging batch and RT into a unified runner (see architecture rationale above)
 - Changing the Riva NIM container or NGC model configuration
 - Adding new Riva model variants
@@ -101,7 +101,7 @@ Out of scope:
 
 ```yaml
 # engines/stt-transcribe/riva/engine.yaml
-runtime: riva
+engine_id: riva
 stage: transcribe
 version: "1.0.0"
 execution_profile: container
@@ -118,7 +118,7 @@ hardware:
 
 ```yaml
 # engines/stt-rt/riva/engine.yaml
-runtime: riva
+engine_id: riva
 stage: transcribe
 mode: realtime
 version: "1.0.0"
@@ -301,7 +301,7 @@ class RivaRealtimeEngine(RealtimeEngine):
     def get_languages(self) -> list[str]:
         return ["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ru"]
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         return "riva"
 
     def get_supports_vocabulary(self) -> bool:
@@ -394,7 +394,7 @@ stt-batch-transcribe-riva:
     dockerfile: engines/stt-transcribe/riva/Dockerfile
   environment:
     <<: [*common-env, *observability-env]
-    DALSTON_RUNTIME: riva
+    DALSTON_ENGINE_ID: riva
     DALSTON_WORKER_ID: riva-batch-1
     DALSTON_RIVA_URI: riva-nim:50051
   depends_on:
@@ -546,7 +546,7 @@ client WebSocket as partial transcript events.
 - Integration (requires NIM): RT WebSocket session — verify both partial events during
   speech and final segment events at utterance boundaries.
 - Registry: both engines appear in `GET /api/console/engines` response with correct
-  runtime (`riva`), stage (`transcribe`), and status.
+  engine_id (`riva`), stage (`transcribe`), and status.
 
 ### Phase 2 (Streaming upgrade)
 
@@ -573,7 +573,7 @@ client WebSocket as partial transcript events.
 ## Relationship to M71
 
 M71 (Parakeet RNNT cache-aware streaming) addresses the same architectural gap — true
-streaming partials from the model — but for a completely different runtime. After both
+streaming partials from the model — but for a completely different engine_id. After both
 milestones:
 
 | Runtime | Streaming mechanism | Partials |

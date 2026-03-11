@@ -189,7 +189,7 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 - **WER:** ~4.5% with LM on LibriSpeech; ~5-6% streaming
 - **Speed:** Real-time on CPU; sub-500ms latency
 - **Architecture:** Unified Conformer with dynamic chunk attention, CTC/attention hybrid
-- **Features:** Dual streaming/offline mode, production C++ runtime
+- **Features:** Dual streaming/offline mode, production C++ engine_id
 - **Pros:** Open-source, production-ready, flexible language support, Apache license
 - **Cons:** Limited pretrained models, needs ASR expertise to configure, no punctuation
 
@@ -215,7 +215,7 @@ Comprehensive reference for speech-to-text model selection in Dalston's modular 
 - **WER:** ~2.0% LibriSpeech clean, ~5.0% other (nearly no streaming degradation)
 - **Speed:** RTF tiny on GPU; ~0.3-0.5s latency
 - **Architecture:** Zipformer encoder (efficient transformer variant) + RNNT
-- **Features:** C++/ONNX runtime, pre-built binaries
+- **Features:** C++/ONNX engine_id, pre-built binaries
 - **Pros:** SOTA streaming accuracy, matches offline, Apache license, efficient
 - **Cons:** Limited language models available, no punctuation, newer project
 

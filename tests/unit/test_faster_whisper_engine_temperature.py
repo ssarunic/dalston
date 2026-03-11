@@ -15,7 +15,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,
@@ -53,7 +53,7 @@ def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
 
     mock_manager = MagicMock()
     mock_manager.acquire.return_value = mock_model
-    # M63: Engine now delegates to FasterWhisperCore which owns the manager
+    # M63: Engine now delegates to FasterWhisperInference which owns the manager
     engine._core._manager = mock_manager
 
     task_id = str(uuid4())

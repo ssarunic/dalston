@@ -13,12 +13,12 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class ExecutionRequest:
-    """Canonical request envelope for runtime executors."""
+    """Canonical request envelope for engine_id executors."""
 
     task_id: str
     job_id: str
     stage: str
-    runtime: str
+    engine_id: str
     instance: str
     config: dict[str, Any]
     previous_outputs: dict[str, Any]

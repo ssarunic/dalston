@@ -37,7 +37,7 @@ class WorkerStatus:
     active_sessions: int
     models: list[str]
     languages: list[str]
-    runtime: str | None = None
+    engine_id: str | None = None
     supports_vocabulary: bool = False
 
     @classmethod
@@ -51,7 +51,7 @@ class WorkerStatus:
             active_sessions=record.active_realtime,
             models=record.models_loaded or [],
             languages=record.languages or [],
-            runtime=record.runtime,
+            engine_id=record.engine_id,
             supports_vocabulary=False,
         )
 
@@ -151,8 +151,8 @@ class SessionCoordinator:
         language: str,
         model: str | None,
         client_ip: str,
-        runtime: str | None = None,
-        valid_runtimes: set[str] | None = None,
+        engine_id: str | None = None,
+        valid_engine_ids: set[str] | None = None,
     ) -> WorkerAllocation | None:
         """Acquire a worker for a new session.
 
@@ -163,8 +163,8 @@ class SessionCoordinator:
             language: Requested language code or ``"auto"``.
             model: Exact model name or *None* for any.
             client_ip: Client IP address (for logging and session record).
-            runtime: Runtime hint for workers that can load arbitrary models.
-            valid_runtimes: Restrict "any available" routing to this set.
+            engine_id: Runtime hint for workers that can load arbitrary models.
+            valid_engine_ids: Restrict "any available" routing to this set.
 
         Returns:
             :class:`WorkerAllocation` on success, *None* if no capacity.
@@ -175,8 +175,8 @@ class SessionCoordinator:
             language=language,
             model=model,
             client_ip=client_ip,
-            runtime=runtime,
-            valid_runtimes=valid_runtimes,
+            engine_id=engine_id,
+            valid_engine_ids=valid_engine_ids,
         )
 
     async def release_worker(self, session_id: str) -> SessionState | None:

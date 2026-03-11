@@ -1,14 +1,14 @@
 schema_version: "1.1"
 id: nemo
-runtime: nemo
+engine_id: nemo
 stage: transcribe
 name: NVIDIA NeMo Parakeet Runtime
 version: 1.0.0
 description: |
   Runtime engine for NVIDIA NeMo Parakeet transcription models.
-  Can load any Parakeet model at runtime via runtime_model_id.
+  Can load any Parakeet model at engine_id via loaded_model_id.
 
-  M36: This is a runtime-level configuration. The engine loads specific model
+  M36: This is a engine_id-level configuration. The engine loads specific model
   variants on demand, without requiring separate Docker images per variant.
   See models/*.yaml for pre-defined model variants.
 

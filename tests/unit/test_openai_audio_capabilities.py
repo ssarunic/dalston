@@ -14,7 +14,7 @@ from dalston.gateway.api.v1.openai_audio import (
     attach_openai_rate_limit_headers,
     build_openai_rate_limit_headers,
     is_openai_model_supported_for_endpoint,
-    map_openai_runtime_model,
+    map_openai_loaded_model,
     validate_openai_request,
 )
 
@@ -119,9 +119,9 @@ def test_validate_openai_request_accepts_known_speaker_names_for_diarize_model()
     )
 
 
-def test_map_openai_runtime_model_returns_configured_default_variant() -> None:
-    runtime_model_id = map_openai_runtime_model("whisper-1")
-    assert runtime_model_id == "Systran/faster-whisper-base"
+def test_map_openai_loaded_model_returns_configured_default_variant() -> None:
+    loaded_model_id = map_openai_loaded_model("whisper-1")
+    assert loaded_model_id == "Systran/faster-whisper-base"
 
 
 def test_attach_openai_rate_limit_headers_updates_response_for_json_payload() -> None:
@@ -166,7 +166,7 @@ def test_estimate_prompt_tokens_uses_fallback_when_tiktoken_missing(
     assert _estimate_prompt_tokens("one two three") >= 3
 
 
-def test_estimate_prompt_tokens_surfaces_tiktoken_runtime_errors(
+def test_estimate_prompt_tokens_surfaces_tiktoken_engine_id_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _BrokenTokenizer:

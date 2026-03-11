@@ -107,7 +107,7 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
             language_confidence=0.9,
             timestamp_granularity=TimestampGranularity.SEGMENT,
             alignment_method=AlignmentMethod.UNKNOWN,
-            runtime="vllm-asr",
+            engine_id="vllm-asr",
             warnings=[],
         )
 

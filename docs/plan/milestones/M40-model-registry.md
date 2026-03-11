@@ -32,8 +32,8 @@ Transformed model management from static JSON catalog to dynamic PostgreSQL regi
 |--------|------|-------------|
 | `id` | String(200) | Namespaced model ID (PK) |
 | `name` | String(200) | Human-readable name |
-| `runtime` | String(50) | Engine runtime |
-| `runtime_model_id` | String(200) | HF model ID for engine |
+| `engine_id` | String(50) | Engine engine_id |
+| `loaded_model_id` | String(200) | HF model ID for engine |
 | `stage` | String(50) | Pipeline stage |
 | `status` | String(20) | not_downloaded, downloading, ready, failed |
 | `download_path` | Text | S3 URI |
@@ -70,14 +70,14 @@ Transformed model management from static JSON catalog to dynamic PostgreSQL regi
 |--------|-------------|
 | `get_model(db, model_id)` | Lookup by ID |
 | `get_model_or_raise(...)` | Same, raises `ModelNotFoundError` |
-| `list_models(db, stage, runtime, status)` | Filtered listing |
+| `list_models(db, stage, engine_id, status)` | Filtered listing |
 | `register_model(db, ...)` | Create new registry entry |
 | `pull_model(db, model_id, force)` | Download HF → S3, update status |
 | `remove_model(db, model_id, purge)` | Remove S3 files; optionally delete row |
 | `sync_from_s3(db)` | Reconcile DB status with S3 state |
 | `touch_model(db, model_id)` | Update `last_used_at` |
 | `seed_from_catalog(db, update_existing)` | Populate DB from static catalog |
-| `resolve_hf_model(db, hf_model_id, auto_register)` | Fetch HF metadata, determine runtime |
+| `resolve_hf_model(db, hf_model_id, auto_register)` | Fetch HF metadata, determine engine_id |
 | `get_or_resolve_model(db, model_id)` | Try DB first, fall back to HF resolution |
 | `ensure_ready(db, model_id)` | Validate model is downloaded |
 
@@ -115,7 +115,7 @@ s3://dalston-artifacts/
 | `POST` | `/v1/models/{model_id}/pull` | Start background download |
 | `DELETE` | `/v1/models/{model_id}` | Remove files (purge=true deletes entry) |
 | `POST` | `/v1/models/sync` | Reconcile DB with S3 |
-| `POST` | `/v1/models/hf/resolve` | Resolve HF model to runtime |
+| `POST` | `/v1/models/hf/resolve` | Resolve HF model to engine_id |
 | `GET` | `/v1/models/hf/mappings` | Get routing mappings |
 
 **Download Protection**: `remove_model` checks for pending/processing jobs before deletion; raises `ModelInUseError` if in use.
@@ -152,7 +152,7 @@ s3://dalston-artifacts/
   "model_id": "openai/whisper-large-v3",
   "library_name": "ctranslate2",
   "pipeline_tag": "automatic-speech-recognition",
-  "resolved_runtime": "faster-whisper",
+  "resolved_engine_id": "faster-whisper",
   "can_route": true,
   "downloads": 1500000,
   "likes": 3200
@@ -187,7 +187,7 @@ s3://dalston-artifacts/
    - Delete from registry → `DELETE /v1/models/{id}?purge=true`
 
 3. **Filters**
-   - Text search across ID, name, runtime
+   - Text search across ID, name, engine_id
    - Stage dropdown (transcribe, diarize, align)
    - Runtime dropdown (faster-whisper, nemo, etc.)
    - Status dropdown (ready, not_downloaded, downloading, failed)
@@ -195,7 +195,7 @@ s3://dalston-artifacts/
 4. **Add from HuggingFace**
    - Live search of HF Hub API with 300ms debounce
    - Autocomplete dropdown with download counts
-   - Auto-resolve runtime on submit
+   - Auto-resolve engine_id on submit
    - Auto-register to database
 
 5. **Sync with Disk**
@@ -300,7 +300,7 @@ curl -X POST http://localhost:8000/v1/models/nvidia%2Fparakeet-tdt-1.1b/pull
 curl -X POST http://localhost:8000/v1/models/hf/resolve \
   -H "Content-Type: application/json" \
   -d '{"model_id": "openai/whisper-large-v3", "auto_register": true}'
-# {"resolved_runtime": "faster-whisper", "can_route": true, ...}
+# {"resolved_engine_id": "faster-whisper", "can_route": true, ...}
 ```
 
 ### Web Console

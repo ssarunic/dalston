@@ -18,7 +18,7 @@ class BatchTaskContext:
     The context intentionally excludes storage side-effect methods.
     """
 
-    runtime: str
+    engine_id: str
     instance: str
     task_id: str
     job_id: str
@@ -29,7 +29,7 @@ class BatchTaskContext:
     )
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
-        """Return runtime metadata value."""
+        """Return engine_id metadata value."""
         return self.metadata.get(key, default)
 
     def describe_artifact(

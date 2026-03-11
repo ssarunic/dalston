@@ -487,13 +487,13 @@ automatic DLQ replay; replay is manual/operator-driven only.
 
 ## M59 Runtime Isolation Profile Observability
 
-M59 adds explicit runtime-isolation visibility across engine status and
-Prometheus metrics so operators can tell whether a runtime is expected to run
+M59 adds explicit engine-ID isolation visibility across engine status and
+Prometheus metrics so operators can tell whether an engine is expected to run
 `inproc`, in an isolated `venv`, or as a long-running `container` worker.
 
 ### Status Surface
 
-`GET /v1/engines` now returns `execution_profile` for every catalog runtime.
+`GET /v1/engines` now returns `execution_profile` for every catalog engine_id.
 This is the catalog-declared routing policy used by the orchestrator and lite
 pipeline:
 
@@ -519,19 +519,19 @@ Example:
 
 The following metrics now carry an `execution_profile` label:
 
-- `dalston_orchestrator_tasks_scheduled_total{runtime,stage,execution_profile}`
-- `dalston_orchestrator_tasks_completed_total{runtime,status,execution_profile}`
-- `dalston_engine_tasks_processed_total{runtime,model,status,execution_profile}`
-- `dalston_engine_task_duration_seconds{runtime,model,execution_profile}`
-- `dalston_engine_queue_wait_seconds{runtime,execution_profile}`
-- `dalston_engine_s3_download_seconds{runtime,execution_profile}`
-- `dalston_engine_s3_upload_seconds{runtime,execution_profile}`
+- `dalston_orchestrator_tasks_scheduled_total{engine_id,stage,execution_profile}`
+- `dalston_orchestrator_tasks_completed_total{engine_id,status,execution_profile}`
+- `dalston_engine_tasks_processed_total{engine_id,model,status,execution_profile}`
+- `dalston_engine_task_duration_seconds{engine_id,model,execution_profile}`
+- `dalston_engine_queue_wait_seconds{engine_id,execution_profile}`
+- `dalston_engine_s3_download_seconds{engine_id,execution_profile}`
+- `dalston_engine_s3_upload_seconds{engine_id,execution_profile}`
 
 This enables dashboards and alerts such as:
 
-- isolate failing `venv` runtimes without mixing them with container workers
+- isolate failing `venv` engine IDs without mixing them with container workers
 - confirm `inproc` lite stages are staying on the local execution path
-- detect unexpected `container` queue growth for runtimes meant to stay local
+- detect unexpected `container` queue growth for engine IDs meant to stay local
 
 ### Structured Logs
 
@@ -550,7 +550,7 @@ Relevant logs should include the execution profile at the dispatch boundary:
 curl -s http://localhost:8000/v1/engines | jq '.engines[] | {id, stage, execution_profile, status}'
 ```
 
-2. Confirm the runtime is emitting the expected metric labels:
+2. Confirm the engine ID is emitting the expected metric labels:
 
 ```bash
 curl -s http://localhost:9100/metrics | rg 'execution_profile='
@@ -562,15 +562,15 @@ curl -s http://localhost:9100/metrics | rg 'execution_profile='
 Runtime 'nemo-msdd' declares execution_profile 'venv' and cannot start as a distributed container worker.
 ```
 
-stop deploying that runtime as a long-running engine worker. The catalog is
+stop deploying that engine as a long-running engine worker. The catalog is
 declaring it as local-only (`venv`/`inproc`), so it must run through the lite
 executor path instead.
 
 4. If lite execution fails with a missing-executor or venv boot error:
 
-- verify the runtime's `engine.yaml` has the intended `execution_profile`
+- verify the engine `engine.yaml` has the intended `execution_profile`
 - verify the catalog was regenerated after editing engine metadata
-- verify the target virtualenv/interpreter is healthy for the runtime
+- verify the target virtualenv/interpreter is healthy for the engine
 - rerun the failing stage with focused tests before retrying full flows
 
 5. If status and worker behavior disagree:

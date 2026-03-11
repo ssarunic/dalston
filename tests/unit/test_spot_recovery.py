@@ -19,7 +19,7 @@ class TestEngineRunnerInstanceId:
 
     def test_generates_unique_instance(self):
         """Test that each EngineRunner generates a unique instance."""
-        with patch.dict("os.environ", {"DALSTON_RUNTIME": "whisper-cpu"}):
+        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "whisper-cpu"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
@@ -29,9 +29,9 @@ class TestEngineRunnerInstanceId:
             runner1 = EngineRunner(mock_engine)
             runner2 = EngineRunner(mock_engine)
 
-            # Both should have the same logical runtime
-            assert runner1.runtime == "whisper-cpu"
-            assert runner2.runtime == "whisper-cpu"
+            # Both should have the same logical engine_id
+            assert runner1.engine_id == "whisper-cpu"
+            assert runner2.engine_id == "whisper-cpu"
 
             # But different instances
             assert runner1.instance != runner2.instance
@@ -40,7 +40,7 @@ class TestEngineRunnerInstanceId:
 
     def test_instance_is_12_char_hex_suffix(self):
         """Test that instance has expected format."""
-        with patch.dict("os.environ", {"DALSTON_RUNTIME": "faster-whisper"}):
+        with patch.dict("os.environ", {"DALSTON_ENGINE_ID": "faster-whisper"}):
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
@@ -48,8 +48,8 @@ class TestEngineRunnerInstanceId:
 
             runner = EngineRunner(mock_engine)
 
-            # Format: {runtime}-{12_char_hex}
-            # runtime may contain hyphens, so extract suffix by removing prefix
+            # Format: {engine_id}-{12_char_hex}
+            # engine_id may contain hyphens, so extract suffix by removing prefix
             assert runner.instance.startswith("faster-whisper-")
             suffix = runner.instance.replace("faster-whisper-", "")
             assert len(suffix) == 12
@@ -517,7 +517,7 @@ class TestIsEngineAlive:
 
         # Fresh heartbeat
         mock_redis.hgetall.return_value = {
-            "runtime": "whisper-cpu",
+            "engine_id": "whisper-cpu",
             "instance": "whisper-cpu-aliveinst01",
             "status": "idle",
             "last_heartbeat": datetime.now(UTC).isoformat(),
@@ -545,7 +545,7 @@ class TestIsEngineAlive:
                 return {}  # Old instance has no heartbeat
             elif "newinst02" in key:
                 return {
-                    "runtime": "whisper-cpu",
+                    "engine_id": "whisper-cpu",
                     "instance": "whisper-cpu-newinst02",
                     "status": "idle",
                     "last_heartbeat": datetime.now(UTC).isoformat(),
@@ -649,7 +649,7 @@ class TestStaleEngineCleanup:
             if "stale" in key:
                 return {}  # Expired
             return {
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
                 "stage": "transcribe",
                 "status": "idle",
             }  # Alive
@@ -680,7 +680,7 @@ class TestStaleEngineCleanup:
 
         mock_redis.smembers.return_value = {"faster-whisper-abc123"}
         mock_redis.hgetall.return_value = {
-            "runtime": "faster-whisper",
+            "engine_id": "faster-whisper",
             "stage": "transcribe",
             "status": "idle",
         }  # Instance still alive
@@ -736,7 +736,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_task.job_id = job_id
         mock_task.stage = "transcribe"
         mock_task.status = TaskStatus.COMPLETED.value  # Already completed
-        mock_task.runtime = "faster-whisper"
+        mock_task.engine_id = "faster-whisper"
 
         # Dependent task that should be queued
         mock_dependent = MagicMock()
@@ -746,7 +746,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_dependent.status = TaskStatus.PENDING.value
         mock_dependent.dependencies = [task_id]
         mock_dependent.input_uri = None
-        mock_dependent.runtime = "final-merger"
+        mock_dependent.engine_id = "final-merger"
         mock_dependent.config = {}
         mock_dependent.output_uri = "s3://bucket/output.json"
         mock_dependent.required = True
@@ -816,7 +816,7 @@ class TestHandleTaskCompletedReplaySafety:
         mock_task.job_id = job_id
         mock_task.stage = "transcribe"
         mock_task.status = TaskStatus.COMPLETED.value  # Already completed
-        mock_task.runtime = "faster-whisper"
+        mock_task.engine_id = "faster-whisper"
 
         mock_job = MagicMock()
         mock_job.id = job_id
@@ -903,7 +903,7 @@ class TestHandleTaskFailedIdempotency:
         mock_task.retries = 1  # Already incremented by first failure
         mock_task.max_retries = 3
         mock_task.dependencies = []
-        mock_task.runtime = "faster-whisper"
+        mock_task.engine_id = "faster-whisper"
         mock_task.config = {}
         mock_task.input_uri = "s3://bucket/input.wav"
         mock_task.output_uri = "s3://bucket/output.json"
@@ -1170,7 +1170,7 @@ class TestHandleTaskFailedIdempotency:
         mock_task.max_retries = 3
         mock_task.dependencies = []
         # Additional fields needed for Pydantic Task validation
-        mock_task.runtime = "faster-whisper"
+        mock_task.engine_id = "faster-whisper"
         mock_task.config = {}
         mock_task.input_uri = "s3://bucket/input.wav"
         mock_task.output_uri = "s3://bucket/output.json"

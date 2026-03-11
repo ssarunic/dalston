@@ -161,7 +161,7 @@ request/response traces for the exact methods Dalston intends to support:
 
 Store these as locked fixtures under `tests/integration/elevenlabs_fixtures/`.
 
-Also record a small set of raw HTTP/WebSocket traces for runtime details the SDK does not
+Also record a small set of raw HTTP/WebSocket traces for engine_id details the SDK does not
 fully expose, especially polling semantics, webhook payload shapes, and realtime error
 event details.
 
@@ -569,10 +569,10 @@ of ElevenLabs parity.
 | SDK releases drift faster than the docs | Pin one `elevenlabs` version in CI and keep an optional latest-version canary |
 | Existing mock-heavy tests continue asserting stale behavior | Narrow `test_elevenlabs_api.py` to route-level concerns and make the SDK suite the primary contract gate |
 | Gateway starts claiming parity with approximate transcript/token shapes | Reject unsupported combinations until exact `words[]`, `entities`, and webhook shapes are implemented |
-| The SDK does not expose every public route or realtime helper cleanly | Use frozen raw HTTP/WebSocket traces for the non-SDK-visible runtime edges |
+| The SDK does not expose every public route or realtime helper cleanly | Use frozen raw HTTP/WebSocket traces for the non-SDK-visible engine_id edges |
 | Token flow semantics diverge between docs, SDK, and existing Dalston tokens | Freeze the token contract in Phase 0 and adapt the existing token system to that contract instead of adding a second one |
 | Existing webhook infrastructure does not match ElevenLabs payload semantics exactly | Treat webhook work as an adapter layer over the current subsystem and lock payload fixtures before implementation |
-| `ulaw_8000` decoding differs by Python/runtime support | Keep codec handling isolated behind a small helper and pin test coverage for the supported runtime |
+| `ulaw_8000` decoding differs by Python/engine_id support | Keep codec handling isolated behind a small helper and pin test coverage for the supported engine_id |
 
 ---
 

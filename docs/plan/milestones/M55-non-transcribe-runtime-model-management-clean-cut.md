@@ -2,18 +2,18 @@
 
 | | |
 |---|---|
-| **Goal** | Make diarization, alignment, and PII stages fully model-pluggable with runtime model selection and registry-backed model lifecycle, matching the transcribe architecture |
+| **Goal** | Make diarization, alignment, and PII stages fully model-pluggable with engine_id model selection and registry-backed model lifecycle, matching the transcribe architecture |
 | **Duration** | 8-12 days |
-| **Dependencies** | M36 (runtime model management), M40 (model registry), M46 (registry as source of truth) |
-| **Deliverable** | Stage model selection contract (`model_diarize`, `model_align`, `model_pii_detect`), stage-aware orchestrator routing, refactored engines consuming `runtime_model_id`, and removal of legacy transcribe-only assumptions |
+| **Dependencies** | M36 (engine_id model management), M40 (model registry), M46 (registry as source of truth) |
+| **Deliverable** | Stage model selection contract (`model_diarize`, `model_align`, `model_pii_detect`), stage-aware orchestrator routing, refactored engines consuming `loaded_model_id`, and removal of legacy transcribe-only assumptions |
 | **Status** | Completed |
 
 ## Intended Outcomes
 
 ### Functional outcomes
 
-1. Diarize, align, and PII stages can select models at job runtime, not only engine runtime.
-2. The orchestrator passes `runtime_model_id` to all model-backed stages, not just transcribe.
+1. Diarize, align, and PII stages can select models at job engine_id, not only engine engine_id.
+2. The orchestrator passes `loaded_model_id` to all model-backed stages, not just transcribe.
 3. Models for these stages are first-class registry entries with explicit `stage`.
 4. Per-stage model selection works consistently in both standard and per-channel DAGs.
 
@@ -22,12 +22,12 @@
 1. Stage model selection uses one canonical pattern across all model-backed stages.
 2. No hidden hardcoded model IDs remain in engine business logic.
 3. Stage mismatch is impossible at selection time (`model.stage` must equal requested stage).
-4. Control-plane semantics are explicit: model choice resolves to `(runtime, runtime_model_id)` for each stage.
+4. Control-plane semantics are explicit: model choice resolves to `(engine_id, loaded_model_id)` for each stage.
 
 ### Operational outcomes
 
 1. Operators can pull/remove/list non-transcribe models using existing model lifecycle APIs.
-2. Engine heartbeat/runtime state remains observable for active model usage.
+2. Engine heartbeat/engine_id state remains observable for active model usage.
 3. Failure modes are explicit when a selected model is unavailable or stage-incompatible.
 
 ### Clean-start outcomes
@@ -57,7 +57,7 @@ Define one canonical job-parameter contract before code changes:
 3. `model_align`
 4. `model_pii_detect`
 
-Each field is a model registry ID (not runtime ID). The selector resolves model -> `(runtime, runtime_model_id)`.
+Each field is a model registry ID (not engine_id ID). The selector resolves model -> `(engine_id, loaded_model_id)`.
 
 ### Strategy 2: Make model resolution stage-aware everywhere
 
@@ -67,18 +67,18 @@ Enforce `ModelRegistryModel.stage == requested_stage` at selection time. Any mis
 
 Every model-backed task config carries:
 
-1. `runtime_model_id` (resolved loader identifier)
+1. `loaded_model_id` (resolved loader identifier)
 2. Stage-specific tuning fields (existing config keys)
 
 No stage should infer model identity from environment-only defaults.
 
-### Strategy 4: Refactor engines around explicit runtime model IDs
+### Strategy 4: Refactor engines around explicit engine_id model IDs
 
 Each target engine must:
 
-1. Read `input.config["runtime_model_id"]`
+1. Read `input.config["loaded_model_id"]`
 2. Load/cache models based on that ID
-3. Report model identity in runtime state/health
+3. Report model identity in engine_id state/health
 
 ### Strategy 5: Remove obsolete abstractions immediately after cutover
 
@@ -97,7 +97,7 @@ All specs and operational docs must match final behavior before milestone close.
 ## What Not To Do
 
 1. Do not keep dual old/new parameter formats for stage model selection.
-2. Do not allow model IDs to silently act as runtime IDs.
+2. Do not allow model IDs to silently act as engine_id IDs.
 3. Do not silently fallback to wrong-stage models.
 4. Do not leave hardcoded model IDs in diarize/align/PII engines "temporarily."
 5. Do not keep transcribe-only lifecycle checks in registry services.
@@ -134,7 +134,7 @@ Expected files:
    - enforce stage check for DB model lookup
    - stage-aware auto-selection helper (not transcribe-only)
 3. DAG updates:
-   - pass `runtime_model_id` into diarize/align/pii task configs
+   - pass `loaded_model_id` into diarize/align/pii task configs
    - include per-channel variants where applicable
 4. Registry service updates:
    - remove transcribe-only "model in use" checks
@@ -154,13 +154,13 @@ Expected files:
 ### Phase 2: Diarization Engine Refactor
 
 1. `pyannote-4.0`:
-   - replace hardcoded model constant with `runtime_model_id` from config
+   - replace hardcoded model constant with `loaded_model_id` from config
    - add model caching/manager semantics
 2. `nemo-msdd`:
    - remove hardcoded component model paths from static config
-   - make component model set selectable via resolved runtime model
+   - make component model set selectable via resolved engine_id model
 3. Engine YAML:
-   - add `runtime_model_id` to config schema for diarize runtimes
+   - add `loaded_model_id` to config schema for diarize engine_ids
 
 Expected files:
 
@@ -172,11 +172,11 @@ Expected files:
 ### Phase 3: Alignment Engine Refactor
 
 1. `phoneme-align` engine:
-   - accept `runtime_model_id` in task config
+   - accept `loaded_model_id` in task config
    - resolve model choice by explicit ID first, then stage default policy
    - refactor cache keying to reflect chosen model IDs (not language-only)
 2. Config schema:
-   - add `runtime_model_id` support
+   - add `loaded_model_id` support
 3. Model loader:
    - keep deterministic model resolution rules
    - fail loudly on invalid explicit overrides
@@ -190,12 +190,12 @@ Expected files:
 ### Phase 4: PII Engine Refactor
 
 1. `pii-presidio`:
-   - replace hardcoded GLiNER model ID with `runtime_model_id`
+   - replace hardcoded GLiNER model ID with `loaded_model_id`
    - keep Presidio rule path explicit and deterministic
 2. Config schema:
-   - add `runtime_model_id` for NER backbone selection
+   - add `loaded_model_id` for NER backbone selection
 3. Runtime state:
-   - expose active model in health/runtime reporting
+   - expose active model in health/engine_id reporting
 
 Expected files:
 
@@ -205,8 +205,8 @@ Expected files:
 ### Phase 5: Model Registry Data and Catalog Seeding
 
 1. Add non-transcribe model YAML entries for:
-   - diarize runtimes
-   - align runtime defaults/variants
+   - diarize engine_ids
+   - align engine_id defaults/variants
    - pii_detect variants
 2. Ensure seeding populates correct `stage` and metadata.
 3. Verify model list/filter UX for these stages remains coherent.
@@ -219,9 +219,9 @@ Expected files:
 
 ### Phase 6: Legacy Removal (Required Exit Gate)
 
-1. Remove transcribe-only comments/logic implying only transcribe has runtime models.
+1. Remove transcribe-only comments/logic implying only transcribe has engine_id models.
 2. Remove obsolete `engine_*` stage override pathways for diarize/align/pii.
-3. Remove hardcoded model constants superseded by runtime model config.
+3. Remove hardcoded model constants superseded by engine_id model config.
 4. Remove tests that validate legacy behavior and replace with new contract tests.
 
 Expected files:
@@ -236,7 +236,7 @@ Expected files:
 ### Phase 7: Documentation and Spec Updates
 
 1. Update model selection spec to cover all model-backed stages.
-2. Update engine spec for non-transcribe runtime model management.
+2. Update engine spec for non-transcribe engine ID model management.
 3. Update pipeline interfaces where stage config contracts changed.
 4. Add implementation report for M55 with behavior deltas and migration notes.
 
@@ -257,15 +257,15 @@ Expected files:
 Control plane:
 
 1. Selector rejects stage-mismatched model IDs.
-2. Selector returns correct `(runtime, runtime_model_id)` for diarize/align/pii model IDs.
-3. DAG injects `runtime_model_id` into diarize/align/pii configs (including per-channel branch).
+2. Selector returns correct `(engine_id, loaded_model_id)` for diarize/align/pii model IDs.
+3. DAG injects `loaded_model_id` into diarize/align/pii configs (including per-channel branch).
 
 Engines:
 
-1. Pyannote engine uses config `runtime_model_id`.
-2. Nemo diarize engine resolves model set from config `runtime_model_id`.
+1. Pyannote engine uses config `loaded_model_id`.
+2. Nemo diarize engine resolves model set from config `loaded_model_id`.
 3. Align engine model cache/load keyed by selected model identity.
-4. PII engine loads GLiNER from config `runtime_model_id`.
+4. PII engine loads GLiNER from config `loaded_model_id`.
 
 Registry/services:
 
@@ -274,9 +274,9 @@ Registry/services:
 
 ### 2) Integration Tests
 
-1. Submit job with `model_diarize` and verify diarize task receives expected `runtime_model_id`.
+1. Submit job with `model_diarize` and verify diarize task receives expected `loaded_model_id`.
 2. Submit job with `model_align` and verify align output path uses selected model.
-3. Submit job with `model_pii_detect` and verify detected output includes selected model in metadata/runtime state.
+3. Submit job with `model_pii_detect` and verify detected output includes selected model in metadata/engine_id state.
 4. Stage mismatch request fails with deterministic error code.
 
 ### 3) End-to-End Matrix
@@ -324,7 +324,7 @@ pytest \
 ## Exit Criteria
 
 1. Non-transcribe model selection works end-to-end via registry IDs.
-2. Diarize/align/pii engines consume runtime-selected model IDs.
+2. Diarize/align/pii engines consume engine_id-selected model IDs.
 3. Selector enforces stage correctness for model IDs.
 4. Legacy transcribe-only model management assumptions are removed.
 5. Docs/specs/report are updated to reflect final behavior.

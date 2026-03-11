@@ -141,7 +141,7 @@ class AudioPrepareEngine(Engine):
         output = PrepareOutput(
             channel_files=[prepared],
             split_channels=False,
-            runtime="audio-prepare",
+            engine_id="audio-prepare",
         )
 
         return EngineOutput(data=output, produced_artifacts=[produced])
@@ -226,7 +226,7 @@ class AudioPrepareEngine(Engine):
         output = PrepareOutput(
             channel_files=channel_files,
             split_channels=True,
-            runtime="audio-prepare",
+            engine_id="audio-prepare",
         )
 
         return EngineOutput(data=output, produced_artifacts=produced_artifacts)

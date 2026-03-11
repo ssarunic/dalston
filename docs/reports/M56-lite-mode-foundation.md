@@ -2,7 +2,7 @@
 
 Implemented in this milestone:
 
-- Explicit runtime mode contract via `DALSTON_MODE` (`distributed` default, `lite` optional).
+- Explicit engine_id mode contract via `DALSTON_MODE` (`distributed` default, `lite` optional).
 - Mode-aware lazy DB initialization with SQLite bootstrap for lite.
 - Queue abstraction with `RedisStreamsQueue` and `InMemoryQueue`.
 - Storage abstraction with S3 and local filesystem adapters.

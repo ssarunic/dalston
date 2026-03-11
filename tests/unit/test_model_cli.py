@@ -30,7 +30,7 @@ class TestModelList:
             {
                 "id": "nvidia/parakeet-tdt-1.1b",
                 "name": "Parakeet TDT",
-                "runtime": "nemo",
+                "engine_id": "nemo",
                 "stage": "transcribe",
                 "status": "ready",
                 "size_bytes": 4_500_000_000,
@@ -39,7 +39,7 @@ class TestModelList:
             {
                 "id": "Systran/faster-whisper-large-v3",
                 "name": "Whisper Large V3",
-                "runtime": "faster-whisper",
+                "engine_id": "faster-whisper",
                 "stage": "transcribe",
                 "status": "not_downloaded",
                 "size_bytes": None,
@@ -63,7 +63,7 @@ class TestModelList:
         mock_list.return_value = []
 
         result = runner.invoke(
-            app, ["model", "ls", "--stage", "transcribe", "--runtime", "nemo"]
+            app, ["model", "ls", "--stage", "transcribe", "--engine_id", "nemo"]
         )
 
         assert result.exit_code == 0
@@ -160,8 +160,8 @@ class TestModelStatus:
         mock_status.return_value = {
             "id": "nvidia/parakeet-tdt-1.1b",
             "name": "Parakeet TDT 1.1B",
-            "runtime": "nemo",
-            "runtime_model_id": "nvidia/parakeet-tdt-1.1b",
+            "engine_id": "nemo",
+            "loaded_model_id": "nvidia/parakeet-tdt-1.1b",
             "stage": "transcribe",
             "status": "ready",
             "download_path": "/models/hub/models--nvidia--parakeet-tdt-1.1b",
@@ -194,8 +194,8 @@ class TestModelStatus:
         mock_status.return_value = {
             "id": "Systran/faster-whisper-large-v3",
             "name": None,
-            "runtime": "faster-whisper",
-            "runtime_model_id": "Systran/faster-whisper-large-v3",
+            "engine_id": "faster-whisper",
+            "loaded_model_id": "Systran/faster-whisper-large-v3",
             "stage": "transcribe",
             "status": "not_downloaded",
             "download_path": None,

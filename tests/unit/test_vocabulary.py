@@ -16,7 +16,7 @@ from dalston.engine_sdk.context import BatchTaskContext
 
 def _ctx(task_id: str, job_id: str, stage: str = "transcribe") -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_id,
         job_id=job_id,

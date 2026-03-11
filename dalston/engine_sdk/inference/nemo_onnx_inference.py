@@ -4,7 +4,7 @@ Extracts common model loading and transcription logic so that both the
 batch engine (queue-based) and the realtime engine (WebSocket-based) can
 share a single loaded model and inference path via ONNX Runtime.
 
-This module owns the NeMoOnnxModelManager and provides a runtime-neutral
+This module owns the NeMoOnnxModelManager and provides a engine_id-neutral
 interface for transcription using the onnx-asr library.
 """
 
@@ -23,7 +23,7 @@ logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
-# Result types — runtime-neutral, no dependency on batch or RT SDK types
+# Result types — engine_id-neutral, no dependency on batch or RT SDK types
 # ---------------------------------------------------------------------------
 
 
@@ -58,11 +58,11 @@ class OnnxTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# NemoOnnxCore — shared inference logic
+# NemoOnnxInference — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class NemoOnnxCore:
+class NemoOnnxInference:
     """Shared inference logic for ONNX Parakeet batch and realtime.
 
     Owns the NeMoOnnxModelManager and provides a unified transcription
@@ -91,7 +91,7 @@ class NemoOnnxCore:
         self._quantization = quantization
 
         logger.info(
-            "nemo_onnx_core_init",
+            "nemo_onnx_inference_init",
             device=device,
             quantization=quantization,
             ttl_seconds=ttl_seconds,
@@ -327,14 +327,14 @@ class NemoOnnxCore:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("nemo_onnx_core_shutdown")
+        logger.info("nemo_onnx_inference_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> NemoOnnxCore:
-        """Create a NemoOnnxCore configured from environment variables.
+    def from_env(cls) -> NemoOnnxInference:
+        """Create a NemoOnnxInference configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

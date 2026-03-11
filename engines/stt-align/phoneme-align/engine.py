@@ -59,41 +59,41 @@ class PhonemeAlignEngine(Engine):
         return "cpu", "float32"
 
     def _get_align_model(
-        self, language: str, runtime_model_id: str
+        self, language: str, loaded_model_id: str
     ) -> tuple[Any, AlignModelMetadata] | None:
-        """Load or retrieve a cached alignment model by runtime_model_id."""
-        if runtime_model_id in self._align_models:
+        """Load or retrieve a cached alignment model by loaded_model_id."""
+        if loaded_model_id in self._align_models:
             self.logger.debug(
                 "using_cached_alignment_model",
                 language=language,
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
-            return self._align_models[runtime_model_id]
+            return self._align_models[loaded_model_id]
 
         self.logger.info(
             "loading_alignment_model",
             language=language,
             device=self._device,
-            runtime_model_id=runtime_model_id,
+            loaded_model_id=loaded_model_id,
         )
         try:
             model, metadata = load_align_model(
                 language_code=language,
                 device=self._device,
-                model_name=runtime_model_id,
+                model_name=loaded_model_id,
             )
-            self._align_models[runtime_model_id] = (model, metadata)
+            self._align_models[loaded_model_id] = (model, metadata)
             self.logger.info(
                 "alignment_model_loaded",
                 language=language,
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
             )
             return model, metadata
         except Exception as e:
             self.logger.warning(
                 "failed_to_load_alignment_model",
                 language=language,
-                runtime_model_id=runtime_model_id,
+                loaded_model_id=loaded_model_id,
                 error=str(e),
             )
             return None
@@ -139,28 +139,28 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
-        runtime_model_id = engine_input.config.get("runtime_model_id")
-        if not runtime_model_id:
+        loaded_model_id = engine_input.config.get("loaded_model_id")
+        if not loaded_model_id:
             raise ValueError(
-                "Missing required config field 'runtime_model_id' for align stage."
+                "Missing required config field 'loaded_model_id' for align stage."
             )
 
         # Load alignment model
-        model_result = self._get_align_model(language, runtime_model_id)
+        model_result = self._get_align_model(language, loaded_model_id)
         if model_result is None:
             return self._fallback_output(
                 text,
                 raw_segments,
                 language,
                 reason=(
-                    f"Failed to load alignment model '{runtime_model_id}' "
+                    f"Failed to load alignment model '{loaded_model_id}' "
                     f"for language '{language}'"
                 ),
             )
 
         model, metadata = model_result
 
-        self._set_runtime_state(loaded_model=runtime_model_id, status="processing")
+        self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             audio = self._load_audio(audio_path)
 
@@ -215,7 +215,7 @@ class PhonemeAlignEngine(Engine):
                 unaligned_words=[f"word_{i}" for i in range(unaligned_count)],
                 unaligned_ratio=round(unaligned_ratio, 3),
                 granularity_achieved=TimestampGranularity.WORD,
-                runtime="phoneme-align",
+                engine_id="phoneme-align",
                 skipped=False,
                 skip_reason=None,
                 warnings=[],
@@ -232,7 +232,7 @@ class PhonemeAlignEngine(Engine):
                 reason=f"Alignment failed: {e}",
             )
         finally:
-            self._set_runtime_state(loaded_model=runtime_model_id, status="idle")
+            self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def _load_audio(self, audio_path: Path) -> np.ndarray:
         """Load audio file as 16 kHz mono numpy array."""
@@ -333,7 +333,7 @@ class PhonemeAlignEngine(Engine):
             unaligned_words=[],
             unaligned_ratio=0.0,
             granularity_achieved=TimestampGranularity.SEGMENT,
-            runtime="phoneme-align",
+            engine_id="phoneme-align",
             skipped=True,
             skip_reason=reason,
             warnings=[reason],

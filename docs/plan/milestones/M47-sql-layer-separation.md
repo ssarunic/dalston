@@ -110,8 +110,8 @@ class PIIEntityTypeService:
 Add single method:
 
 ```python
-async def get_model_by_runtime_model_id(
-    self, db: AsyncSession, runtime_model_id: str
+async def get_model_by_loaded_model_id(
+    self, db: AsyncSession, loaded_model_id: str
 ) -> ModelRegistryModel | None
 ```
 

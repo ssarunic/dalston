@@ -10,7 +10,7 @@
 
 > Note (2026-03-11): Base `docker-compose.yml` removed split RT services
 > `stt-rt-faster-whisper` and `stt-rt-transcribe-voxtral-mini-4b`.
-> Non-Riva realtime/transcribe flows are currently served by unified runtime services.
+> Non-Riva realtime/transcribe flows are currently served by unified engine_id services.
 
 ## Context
 
@@ -22,7 +22,7 @@ restarting the runner drops all connections.
 M70 introduced a better pattern for Riva: a standalone NIM sidecar owns the GPU
 model, and both engines connect via gRPC. The engines are stateless CPU
 containers with independent lifecycles. This milestone applies the same pattern
-to faster-whisper and parakeet, the two runtimes that currently use the unified
+to faster-whisper and parakeet, the two engine_ids that currently use the unified
 runner.
 
 ### Why sidecar > unified runner
@@ -35,11 +35,11 @@ runner.
 | AWS fit | One fat process needs GPU + Redis + WS | Model server gets GPU; adapters are tiny |
 | Model lifecycle | Tied to runner process | Persistent — survives adapter restarts |
 | Multi-model | LRU in one process, complex | Run multiple server instances per model |
-| Consistency | Three deployment modes (batch-only, RT-only, unified) | One pattern for all runtimes (Riva, FW, parakeet) |
+| Consistency | Three deployment modes (batch-only, RT-only, unified) | One pattern for all engine_ids (Riva, FW, parakeet) |
 
-### Unified architecture across all runtimes
+### Unified architecture across all engine_ids
 
-After M70, M71, and M72, every runtime follows the same sidecar topology:
+After M70, M71, and M72, every engine_id follows the same sidecar topology:
 
 ```
 ┌──────────────┐                    ┌──────────────┐
@@ -65,7 +65,7 @@ After M70, M71, and M72, every runtime follows the same sidecar topology:
    on `:50052`, wrapping `TranscribeCore` with model lifecycle management.
 2. `parakeet-server` runs as a standalone GPU container exposing the same
    gRPC interface on `:50053`, wrapping `ParakeetCore`.
-3. Batch and RT engines for both runtimes are refactored to thin gRPC clients —
+3. Batch and RT engines for both engine_ids are refactored to thin gRPC clients —
    no `torch`, no `faster-whisper`, no `nemo` dependencies, CPU-only images.
 4. Admission control moves into the inference server (it owns the GPU resource).
 5. Unified runners (`engines/stt-unified/`) deprecated and removed.
@@ -164,7 +164,7 @@ message Word {
 message StatusRequest {}
 
 message StatusResponse {
-  string runtime = 1;             // "faster-whisper" or "parakeet"
+  string engine_id = 1;             // "faster-whisper" or "parakeet"
   string device = 2;              // "cuda" or "cpu"
   repeated string loaded_models = 3;
   int32 total_capacity = 4;
@@ -183,7 +183,7 @@ Design notes:
   works over unary gRPC with acceptable latency. A `StreamingTranscribe` RPC
   can be added later for true token-streaming (analogous to Riva's
   `streaming_recognize`), but it's not needed to replace the unified runner.
-- **`model_id` per request** enables runtime model switching without server
+- **`model_id` per request** enables engine_id model switching without server
   restart — the server uses `TranscribeCore`'s existing model manager with
   TTL/LRU eviction.
 
@@ -241,7 +241,7 @@ Key decisions:
   requests. If the server is at capacity, gRPC returns `RESOURCE_EXHAUSTED`
   and the caller (batch or RT adapter) handles backoff.
 - **Registry heartbeat.** The server registers itself in the unified registry
-  so the console Engines page shows the runtime and its loaded models.
+  so the console Engines page shows the engine_id and its loaded models.
 
 Gate: unit tests with mocked core; gRPC server starts and responds to health
 checks.
@@ -251,7 +251,7 @@ checks.
 ```python
 # engines/stt-server/faster-whisper/server.py
 
-from dalston.engine_sdk.cores.faster_whisper_core import TranscribeCore
+from dalston.engine_sdk.inference.faster_whisper_inference import TranscribeCore
 from dalston.engine_sdk.inference_server import InferenceServer
 
 
@@ -262,7 +262,7 @@ class FasterWhisperServer(InferenceServer):
         max_concurrent = int(os.environ.get("DALSTON_MAX_CONCURRENT", "4"))
         super().__init__(core=core, port=port, max_concurrent=max_concurrent)
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         return "faster-whisper"
 
 
@@ -302,7 +302,7 @@ Identical structure to T3, substituting `ParakeetCore` for `TranscribeCore`:
 ```python
 # engines/stt-server/parakeet/server.py
 
-from dalston.engine_sdk.cores.parakeet_core import ParakeetCore
+from dalston.engine_sdk.inference.parakeet_core import ParakeetCore
 from dalston.engine_sdk.inference_server import InferenceServer
 
 
@@ -313,7 +313,7 @@ class ParakeetServer(InferenceServer):
         max_concurrent = int(os.environ.get("DALSTON_MAX_CONCURRENT", "4"))
         super().__init__(core=core, port=port, max_concurrent=max_concurrent)
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         return "parakeet"
 ```
 
@@ -491,7 +491,7 @@ stt-batch-transcribe-faster-whisper:
     dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
   environment:
     <<: [*common-env, *observability-env]
-    DALSTON_RUNTIME: faster-whisper
+    DALSTON_ENGINE_ID: faster-whisper
     DALSTON_WORKER_ID: fwhisper-batch-1
     DALSTON_INFERENCE_URI: faster-whisper-server:50052
   depends_on:
@@ -649,7 +649,7 @@ match the GPU's ability to batch requests. For a single consumer GPU:
 
 - `engines/stt-unified/faster-whisper/runner.py` — current unified runner (to be replaced)
 - `engines/stt-unified/parakeet/runner.py` — current unified runner (to be replaced)
-- `dalston/engine_sdk/cores/faster_whisper_core.py` — `TranscribeCore` (wrapped by server)
+- `dalston/engine_sdk/cores/faster_whisper_inference.py` — `TranscribeCore` (wrapped by server)
 - `dalston/engine_sdk/cores/parakeet_core.py` — `ParakeetCore` (wrapped by server)
 - `dalston/engine_sdk/admission.py` — `AdmissionController` (replaced by server semaphore)
 - `docs/plan/milestones/M63-engine-unification-incremental.md` — unified runner milestone

@@ -4,7 +4,7 @@ Converts job parameters into a directed acyclic graph of tasks.
 Each task represents a processing step executed by a specific engine.
 
 M31/M36: Uses capability-driven engine selection. The selector resolves
-model IDs (e.g., "parakeet-tdt-1.1b") to runtime + runtime_model_id.
+model IDs (e.g., "parakeet-tdt-1.1b") to engine_id + loaded_model_id.
 
 Mono pipeline (non-per-channel):
     prepare → transcribe → [align] → [diarize]
@@ -66,8 +66,8 @@ def _audio_input_binding(
     return [binding.model_dump(exclude_none=True)]
 
 
-# Default engine IDs for each stage (runtime IDs, not model variant IDs)
-# The runtime_model_id is passed separately in task config
+# Default engine IDs for each stage (engine_id IDs, not model variant IDs)
+# The loaded_model_id is passed separately in task config
 DEFAULT_ENGINES = {
     "prepare": "audio-prepare",
     "transcribe": "faster-whisper",
@@ -91,8 +91,8 @@ DEFAULT_TRANSCRIBE_CONFIG = {
 # =============================================================================
 # Model resolution now happens in engine_selector.py via the catalog.
 # The selector resolves model IDs (e.g., "parakeet-tdt-1.1b") to:
-# - runtime: The engine runtime (e.g., "nemo", "faster-whisper")
-# - runtime_model_id: The model ID passed to the underlying library
+# - engine_id: The engine engine_id (e.g., "nemo", "faster-whisper")
+# - loaded_model_id: The model ID passed to the underlying library
 # This information flows through EngineSelectionResult to the DAG builder.
 
 
@@ -154,16 +154,16 @@ async def build_task_dag(
     selections = selection.stages
 
     # Build engines dict from selections
-    engines = {stage: sel.runtime for stage, sel in selections.items()}
+    engines = {stage: sel.engine_id for stage, sel in selections.items()}
 
-    # Extract stage runtime model IDs from selections.
+    # Extract stage engine_id model IDs from selections.
     transcribe_selection = selections["transcribe"]
-    stage_runtime_model_ids = {
-        stage: sel.runtime_model_id
+    stage_loaded_model_ids = {
+        stage: sel.loaded_model_id
         for stage, sel in selections.items()
-        if sel.runtime_model_id is not None
+        if sel.loaded_model_id is not None
     }
-    runtime_model_id = stage_runtime_model_ids.get("transcribe")
+    loaded_model_id = stage_loaded_model_ids.get("transcribe")
 
     # Determine DAG shape from capabilities
     skip_alignment = "align" not in selections
@@ -173,8 +173,8 @@ async def build_task_dag(
     logger.info(
         "dag_shape_decided",
         job_id=str(job_id),
-        transcriber=transcribe_selection.runtime,
-        stage_runtime_model_ids=stage_runtime_model_ids,
+        transcriber=transcribe_selection.engine_id,
+        stage_loaded_model_ids=stage_loaded_model_ids,
         alignment_included=not skip_alignment,
         diarization_included=not skip_diarization,
         stages=list(selections.keys()),
@@ -185,8 +185,8 @@ async def build_task_dag(
         "orchestrator.dag_build",
         attributes={
             "dalston.job_id": str(job_id),
-            "dalston.runtime": transcribe_selection.runtime,
-            "dalston.model": runtime_model_id or "",
+            "dalston.engine_id": transcribe_selection.engine_id,
+            "dalston.model": loaded_model_id or "",
             "dalston.dag.stages": list(selections.keys()),
             "dalston.dag.task_count": len(selections),
             "dalston.dag.has_alignment": not skip_alignment,
@@ -200,8 +200,8 @@ async def build_task_dag(
             engines=engines,
             skip_alignment=skip_alignment,
             skip_diarization=skip_diarization,
-            runtime_model_id=runtime_model_id,
-            stage_runtime_model_ids=stage_runtime_model_ids,
+            loaded_model_id=loaded_model_id,
+            stage_loaded_model_ids=stage_loaded_model_ids,
         )
         dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks
@@ -214,8 +214,8 @@ def _build_dag_with_engines(
     engines: dict[str, str],
     skip_alignment: bool,
     skip_diarization: bool,
-    runtime_model_id: str | None = None,
-    stage_runtime_model_ids: dict[str, str] | None = None,
+    loaded_model_id: str | None = None,
+    stage_loaded_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
     """Build DAG with pre-selected engines.
 
@@ -239,12 +239,12 @@ def _build_dag_with_engines(
         job_id: The job's UUID
         audio_uri: S3 URI to the audio file
         parameters: Job parameters
-        engines: Pre-selected engine IDs by stage (runtime IDs like "nemo", "faster-whisper")
+        engines: Pre-selected engine IDs by stage (engine_id IDs like "nemo", "faster-whisper")
         skip_alignment: Whether to skip the alignment stage
         skip_diarization: Whether to skip diarization even if requested
-        runtime_model_id: Model ID to pass to the transcription engine
+        loaded_model_id: Model ID to pass to the transcription engine
                          (e.g., "nvidia/parakeet-tdt-1.1b"). Already resolved by selector.
-        stage_runtime_model_ids: Runtime model IDs keyed by stage
+        stage_loaded_model_ids: Runtime model IDs keyed by stage
             (e.g., {"transcribe": "...", "align": "..."}).
 
     Returns:
@@ -328,13 +328,13 @@ def _build_dag_with_engines(
     if parameters.get("include_transcription_logprobs"):
         transcribe_config["include_transcription_logprobs"] = True
 
-    # M36: Set runtime_model_id if user requested a specific model variant
-    # The selector already resolved model ID → (runtime, runtime_model_id)
-    stage_runtime_model_ids = dict(stage_runtime_model_ids or {})
-    if runtime_model_id is not None and "transcribe" not in stage_runtime_model_ids:
-        stage_runtime_model_ids["transcribe"] = runtime_model_id
-    if "transcribe" in stage_runtime_model_ids:
-        transcribe_config["runtime_model_id"] = stage_runtime_model_ids["transcribe"]
+    # M36: Set loaded_model_id if user requested a specific model variant
+    # The selector already resolved model ID → (engine_id, loaded_model_id)
+    stage_loaded_model_ids = dict(stage_loaded_model_ids or {})
+    if loaded_model_id is not None and "transcribe" not in stage_loaded_model_ids:
+        stage_loaded_model_ids["transcribe"] = loaded_model_id
+    if "transcribe" in stage_loaded_model_ids:
+        transcribe_config["loaded_model_id"] = stage_loaded_model_ids["transcribe"]
 
     tasks: list[Task] = []
     diarize_task = None
@@ -349,7 +349,7 @@ def _build_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="prepare",
-        runtime=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
+        engine_id=engines.get("prepare", DEFAULT_ENGINES["prepare"]),
         status=TaskStatus.PENDING,
         dependencies=[],
         input_bindings=[],
@@ -375,7 +375,7 @@ def _build_dag_with_engines(
             skip_alignment=skip_alignment,
             num_channels=num_channels,
             parameters=parameters,
-            stage_runtime_model_ids=stage_runtime_model_ids,
+            stage_loaded_model_ids=stage_loaded_model_ids,
         )
 
     # Transcription
@@ -383,7 +383,7 @@ def _build_dag_with_engines(
         id=uuid4(),
         job_id=job_id,
         stage="transcribe",
-        runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+        engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
         status=TaskStatus.PENDING,
         dependencies=[prepare_task.id],
         input_bindings=_audio_input_binding(),
@@ -400,13 +400,13 @@ def _build_dag_with_engines(
     align_task = None
     if word_timestamps and not skip_alignment:
         align_config = {"word_timestamps": True}
-        if "align" in stage_runtime_model_ids:
-            align_config["runtime_model_id"] = stage_runtime_model_ids["align"]
+        if "align" in stage_loaded_model_ids:
+            align_config["loaded_model_id"] = stage_loaded_model_ids["align"]
         align_task = Task(
             id=uuid4(),
             job_id=job_id,
             stage="align",
-            runtime=engines.get("align", DEFAULT_ENGINES["align"]),
+            engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
             status=TaskStatus.PENDING,
             dependencies=[transcribe_task.id],
             input_bindings=_audio_input_binding(),
@@ -431,7 +431,7 @@ def _build_dag_with_engines(
             job_id=job_id,
             engines=engines,
             diarize_config=diarize_config,
-            stage_runtime_model_ids=stage_runtime_model_ids,
+            stage_loaded_model_ids=stage_loaded_model_ids,
             dependencies=diarize_dependencies,
         )
         tasks.append(diarize_task)
@@ -444,18 +444,18 @@ def _create_diarize_task(
     job_id: UUID,
     engines: dict[str, str],
     diarize_config: dict,
-    stage_runtime_model_ids: dict[str, str],
+    stage_loaded_model_ids: dict[str, str],
     dependencies: list[UUID],
 ) -> Task:
     """Create a diarize task with the given dependencies."""
     config = dict(diarize_config)
-    if "diarize" in stage_runtime_model_ids:
-        config["runtime_model_id"] = stage_runtime_model_ids["diarize"]
+    if "diarize" in stage_loaded_model_ids:
+        config["loaded_model_id"] = stage_loaded_model_ids["diarize"]
     return Task(
         id=uuid4(),
         job_id=job_id,
         stage="diarize",
-        runtime=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
+        engine_id=engines.get("diarize", DEFAULT_ENGINES["diarize"]),
         status=TaskStatus.PENDING,
         dependencies=dependencies,
         input_bindings=_audio_input_binding(),
@@ -478,7 +478,7 @@ def _build_per_channel_dag_with_engines(
     skip_alignment: bool,
     num_channels: int = 2,
     parameters: dict | None = None,
-    stage_runtime_model_ids: dict[str, str] | None = None,
+    stage_loaded_model_ids: dict[str, str] | None = None,
 ) -> list[Task]:
     """Build per-channel DAG with pre-selected engines (M31/M68).
 
@@ -503,12 +503,12 @@ def _build_per_channel_dag_with_engines(
         skip_alignment: Whether to skip alignment (transcriber has native support)
         num_channels: Number of audio channels
         parameters: Original job parameters
-        stage_runtime_model_ids: Runtime model IDs keyed by stage
+        stage_loaded_model_ids: Runtime model IDs keyed by stage
 
     Returns:
         Complete task list (no merge stage)
     """
-    stage_runtime_model_ids = stage_runtime_model_ids or {}
+    stage_loaded_model_ids = stage_loaded_model_ids or {}
 
     for channel in range(num_channels):
         channel_transcribe_config = {
@@ -520,7 +520,7 @@ def _build_per_channel_dag_with_engines(
             id=uuid4(),
             job_id=job_id,
             stage=f"transcribe_ch{channel}",
-            runtime=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
+            engine_id=engines.get("transcribe", DEFAULT_ENGINES["transcribe"]),
             status=TaskStatus.PENDING,
             dependencies=[prepare_task.id],
             input_bindings=_audio_input_binding(channel=channel),
@@ -536,13 +536,13 @@ def _build_per_channel_dag_with_engines(
         # Alignment task for this channel
         if word_timestamps and not skip_alignment:
             align_config = {"word_timestamps": True, "channel": channel}
-            if "align" in stage_runtime_model_ids:
-                align_config["runtime_model_id"] = stage_runtime_model_ids["align"]
+            if "align" in stage_loaded_model_ids:
+                align_config["loaded_model_id"] = stage_loaded_model_ids["align"]
             align_task = Task(
                 id=uuid4(),
                 job_id=job_id,
                 stage=f"align_ch{channel}",
-                runtime=engines.get("align", DEFAULT_ENGINES["align"]),
+                engine_id=engines.get("align", DEFAULT_ENGINES["align"]),
                 status=TaskStatus.PENDING,
                 dependencies=[transcribe_task.id],
                 input_bindings=_audio_input_binding(channel=channel),

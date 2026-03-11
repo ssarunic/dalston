@@ -25,8 +25,8 @@ class TestModelRegistryModelAttributes:
 
         # Required columns
         assert table.c.id.nullable is False
-        assert table.c.runtime.nullable is False
-        assert table.c.runtime_model_id.nullable is False
+        assert table.c.engine_id.nullable is False
+        assert table.c.loaded_model_id.nullable is False
         assert table.c.stage.nullable is False
         assert table.c.status.nullable is False
         assert table.c.model_metadata.nullable is False
@@ -92,11 +92,11 @@ class TestModelRegistryModelDefaults:
 class TestModelRegistryModelIndexes:
     """Tests for ModelRegistryModel indexes."""
 
-    def test_has_runtime_index(self):
-        """Test that runtime column has an index."""
+    def test_has_engine_id_index(self):
+        """Test that engine_id column has an index."""
         table = ModelRegistryModel.__table__
         index_names = [idx.name for idx in table.indexes]
-        assert "ix_models_runtime" in index_names
+        assert "ix_models_engine_id" in index_names
 
     def test_has_stage_index(self):
         """Test that stage column has an index."""
@@ -118,14 +118,14 @@ class TestModelRegistryModelInstantiation:
         """Test creating a model with only required fields."""
         model = ModelRegistryModel(
             id="faster-whisper-large-v3",
-            runtime="faster-whisper",
-            runtime_model_id="Systran/faster-whisper-large-v3",
+            engine_id="faster-whisper",
+            loaded_model_id="Systran/faster-whisper-large-v3",
             stage="transcribe",
         )
 
         assert model.id == "faster-whisper-large-v3"
-        assert model.runtime == "faster-whisper"
-        assert model.runtime_model_id == "Systran/faster-whisper-large-v3"
+        assert model.engine_id == "faster-whisper"
+        assert model.loaded_model_id == "Systran/faster-whisper-large-v3"
         assert model.stage == "transcribe"
 
     def test_create_full_model(self):
@@ -135,8 +135,8 @@ class TestModelRegistryModelInstantiation:
         model = ModelRegistryModel(
             id="nvidia/parakeet-tdt-1.1b",
             name="Parakeet TDT 1.1B",
-            runtime="nemo",
-            runtime_model_id="nvidia/parakeet-tdt-1.1b",
+            engine_id="nemo",
+            loaded_model_id="nvidia/parakeet-tdt-1.1b",
             stage="transcribe",
             status="ready",
             download_path="/models/huggingface/hub/models--nvidia--parakeet-tdt-1.1b",
@@ -176,8 +176,8 @@ class TestModelRegistryModelInstantiation:
         for status in valid_statuses:
             model = ModelRegistryModel(
                 id=f"test-model-{status}",
-                runtime="test-runtime",
-                runtime_model_id="test/model",
+                engine_id="test-engine_id",
+                loaded_model_id="test/model",
                 stage="transcribe",
                 status=status,
             )
@@ -190,8 +190,8 @@ class TestModelRegistryModelInstantiation:
         for stage in valid_stages:
             model = ModelRegistryModel(
                 id=f"test-model-{stage}",
-                runtime="test-runtime",
-                runtime_model_id="test/model",
+                engine_id="test-engine_id",
+                loaded_model_id="test/model",
                 stage=stage,
             )
             assert model.stage == stage

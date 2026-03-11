@@ -2,7 +2,7 @@
 
 Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
-to NemoCore.
+to NemoInference.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.cores.nemo_core import (
-    NemoCore,
+from dalston.engine_sdk.inference.nemo_inference import (
+    NemoInference,
     NeMoSegmentResult,
     NeMoTranscriptionResult,
     NeMoWordResult,
@@ -27,7 +27,7 @@ def _make_core_result(
     text: str = "hello world",
     words: list[NeMoWordResult] | None = None,
 ) -> NeMoTranscriptionResult:
-    """Create a mock NemoCore transcription result."""
+    """Create a mock NemoInference transcription result."""
     if words is None:
         words = [
             NeMoWordResult(word="hello", start=0.0, end=0.5),
@@ -62,7 +62,7 @@ def _build_rt_engine(core_result: NeMoTranscriptionResult):
     sys.modules["m63_parakeet_rt"] = module
     spec.loader.exec_module(module)
 
-    mock_core = MagicMock(spec=NemoCore)
+    mock_core = MagicMock(spec=NemoInference)
     mock_core.device = "cpu"
     mock_core.transcribe.return_value = core_result
     mock_core.manager = MagicMock()
@@ -81,7 +81,7 @@ class TestParakeetRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         assert output.text == "hello world"
@@ -101,7 +101,7 @@ class TestParakeetRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         words = [w for seg in output.segments for w in (seg.words or [])]
@@ -117,7 +117,7 @@ class TestParakeetRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="parakeet-tdt-1.1b"),
+            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         assert output.text == ""
@@ -130,7 +130,7 @@ class TestParakeetRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         engine.transcribe(
             audio,
-            TranscribeInput(language="en", runtime_model_id="nvidia/parakeet-tdt-1.1b"),
+            TranscribeInput(language="en", loaded_model_id="nvidia/parakeet-tdt-1.1b"),
         )
 
         # Should normalize to NeMoModelManager format
@@ -141,10 +141,10 @@ class TestParakeetRTOutputShape:
 class TestParakeetRTEngineMetadata:
     """Verify engine metadata methods."""
 
-    def test_get_runtime(self) -> None:
+    def test_get_engine_id(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.get_runtime() == "nemo"
+        assert engine.get_engine_id() == "nemo"
 
     def test_get_languages(self) -> None:
         result = _make_core_result()

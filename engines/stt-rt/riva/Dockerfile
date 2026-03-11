@@ -35,7 +35,7 @@ COPY engines/stt-rt/riva/engine.yaml /etc/dalston/engine.yaml
 
 # Default environment variables
 ENV DALSTON_RIVA_URI=riva-nim:50051
-ENV DALSTON_RUNTIME=riva
+ENV DALSTON_ENGINE_ID=riva
 ENV DALSTON_INSTANCE=stt-rt-riva
 ENV DALSTON_WORKER_PORT=9000
 ENV DALSTON_MAX_SESSIONS=8

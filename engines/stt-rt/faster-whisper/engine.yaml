@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: stt-rt-faster-whisper
-runtime: faster-whisper
+engine_id: faster-whisper
 stage: transcribe
 mode: realtime
 name: Faster Whisper Realtime

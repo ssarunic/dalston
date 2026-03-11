@@ -1,7 +1,7 @@
 """Real-time Whisper streaming transcription engine.
 
 Uses faster-whisper for transcription with Silero VAD for speech detection.
-Delegates inference to FasterWhisperCore (shared with the batch engine).
+Delegates inference to FasterWhisperInference (shared with the batch engine).
 Supports dynamic model loading via ModelManager (M43).
 """
 
@@ -17,9 +17,9 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.faster_whisper_core import (
+from dalston.engine_sdk.inference.faster_whisper_inference import (
     FasterWhisperConfig,
-    FasterWhisperCore,
+    FasterWhisperInference,
 )
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
@@ -30,13 +30,13 @@ logger = structlog.get_logger()
 class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Whisper with dynamic model loading.
 
-    Delegates inference to FasterWhisperCore, which is shared with the batch
+    Delegates inference to FasterWhisperInference, which is shared with the batch
     faster-whisper engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
     - Output formatting to Transcript
 
-    When run standalone, creates its own FasterWhisperCore in load_models().
+    When run standalone, creates its own FasterWhisperInference in load_models().
     When used within a unified runner, accepts an injected core to share a
     single loaded model with the batch adapter.
 
@@ -54,26 +54,26 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
     # Default model when client doesn't specify
     DEFAULT_MODEL = "large-v3-turbo"
 
-    def __init__(self, core: FasterWhisperCore | None = None) -> None:
+    def __init__(self, core: FasterWhisperInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared FasterWhisperCore. If provided, load_models()
+            core: Optional shared FasterWhisperInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
         super().__init__()
-        self._core: FasterWhisperCore | None = core
+        self._core: FasterWhisperInference | None = core
 
     def load_models(self) -> None:
-        """Initialize shared FasterWhisperCore with optional preloading.
+        """Initialize shared FasterWhisperInference with optional preloading.
 
-        If a FasterWhisperCore was injected via __init__, this method uses it
+        If a FasterWhisperInference was injected via __init__, this method uses it
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
         if self._core is None:
             # Standalone mode — create own core
-            self._core = FasterWhisperCore.from_env()
+            self._core = FasterWhisperInference.from_env()
 
         # Wrap the core's manager in AsyncModelManager for heartbeat reporting
         self._model_manager = AsyncModelManager(self._core.manager)
@@ -90,7 +90,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         )
 
     def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
-        """Transcribe an audio segment via shared FasterWhisperCore.
+        """Transcribe an audio segment via shared FasterWhisperInference.
 
         Args:
             audio: Audio samples as float32 numpy array, mono, 16kHz
@@ -101,11 +101,11 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         """
         if self._core is None:
             raise RuntimeError(
-                "FasterWhisperCore not initialized — call load_models() first"
+                "FasterWhisperInference not initialized — call load_models() first"
             )
 
         # Use default if no model specified
-        model_id = params.runtime_model_id or self.DEFAULT_MODEL
+        model_id = params.loaded_model_id or self.DEFAULT_MODEL
         language = params.language or "auto"
         vocabulary = params.vocabulary
 
@@ -167,20 +167,20 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=" ".join(text_parts),
             segments=segments,
             language=result.language,
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             language_confidence=result.language_probability,
             alignment_method=AlignmentMethod.ATTENTION,
         )
 
     def get_models(self) -> list[str]:
         """Return list of supported model variants."""
-        return FasterWhisperCore.SUPPORTED_MODELS
+        return FasterWhisperInference.SUPPORTED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""
         return ["auto"]
 
-    def get_runtime(self) -> str:
+    def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
         return "faster-whisper"
 

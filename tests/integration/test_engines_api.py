@@ -27,11 +27,11 @@ def mock_catalog() -> EngineCatalog:
     """Create a mock engine catalog."""
     entries = {
         "faster-whisper": CatalogEntry(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             image="dalston/stt-batch-transcribe-whisper:1.0.0",
             execution_profile="container",
             capabilities=EngineCapabilities(
-                runtime="faster-whisper",
+                engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=None,  # All languages
@@ -47,11 +47,11 @@ def mock_catalog() -> EngineCatalog:
             ),
         ),
         "parakeet": CatalogEntry(
-            runtime="parakeet",
+            engine_id="parakeet",
             image="dalston/stt-batch-transcribe-parakeet:1.0.0",
             execution_profile="venv",
             capabilities=EngineCapabilities(
-                runtime="parakeet",
+                engine_id="parakeet",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=["en"],
@@ -65,11 +65,11 @@ def mock_catalog() -> EngineCatalog:
             ),
         ),
         "pyannote-4.0": CatalogEntry(
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
             image="dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
             execution_profile="inproc",
             capabilities=EngineCapabilities(
-                runtime="pyannote-4.0",
+                engine_id="pyannote-4.0",
                 version="1.0.0",
                 stages=["diarize"],
                 languages=None,
@@ -91,7 +91,7 @@ def mock_running_engines() -> list[EngineRecord]:
     """Create mock running engine states."""
     return [
         EngineRecord(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             instance="faster-whisper-test-instance",
             stage="transcribe",
             interfaces=["batch"],
@@ -101,7 +101,7 @@ def mock_running_engines() -> list[EngineRecord]:
             last_heartbeat=datetime.now(UTC),
             registered_at=datetime.now(UTC),
             capabilities=EngineCapabilities(
-                runtime="faster-whisper",
+                engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
                 languages=None,

@@ -259,7 +259,7 @@ class TaskModel(Base):
         index=True,
     )
     stage: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    runtime: Mapped[str] = mapped_column(String(100), nullable=False)
+    engine_id: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -620,7 +620,7 @@ class SettingModel(Base):
     """Admin-configurable setting stored in the database.
 
     Settings are organized by namespace (e.g., rate_limits, engines).
-    Database values override environment variable defaults at runtime.
+    Database values override environment variable defaults at engine_id.
     """
 
     __tablename__ = "settings"
@@ -691,7 +691,7 @@ class RealtimeSessionModel(Base):
     # Parameters (immutable after creation)
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     model: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    runtime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    engine_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     encoding: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sample_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -781,9 +781,9 @@ class ModelRegistryModel(Base):
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    # Runtime mapping - which engine runtime loads this model
-    runtime: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    runtime_model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Runtime mapping - which engine engine_id loads this model
+    engine_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    loaded_model_id: Mapped[str] = mapped_column(String(200), nullable=False)
     stage: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
 
     # Download status

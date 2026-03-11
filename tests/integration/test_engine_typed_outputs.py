@@ -27,7 +27,7 @@ from dalston.engine_sdk.types import EngineInput, EngineOutput
 
 def _ctx(task_input: EngineInput) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="test-runtime",
+        engine_id="test-engine_id",
         instance="test-instance",
         task_id=task_input.task_id,
         job_id=task_input.job_id,
@@ -71,7 +71,7 @@ class TestFinalMergerEngineOutput:
                             }
                         ],
                         "split_channels": False,
-                        "runtime": "audio-prepare",
+                        "engine_id": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [
@@ -88,7 +88,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello world",
                         "language": "en",
                         "language_confidence": 0.98,
-                        "runtime": "faster-whisper",
+                        "engine_id": "faster-whisper",
                     },
                     "align": {
                         "segments": [
@@ -115,7 +115,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Hello world",
                         "language": "en",
                         "word_timestamps": True,
-                        "runtime": "phoneme-align",
+                        "engine_id": "phoneme-align",
                     },
                 },
                 config={"speaker_detection": "none", "word_timestamps": True},
@@ -176,7 +176,7 @@ class TestFinalMergerEngineOutput:
                             }
                         ],
                         "split_channels": False,
-                        "runtime": "audio-prepare",
+                        "engine_id": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [
@@ -185,7 +185,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "text": "Hello Hi there",
                         "language": "en",
-                        "runtime": "faster-whisper",
+                        "engine_id": "faster-whisper",
                     },
                     "diarize": {
                         "turns": [
@@ -194,7 +194,7 @@ class TestFinalMergerEngineOutput:
                         ],
                         "speakers": ["SPEAKER_00", "SPEAKER_01"],
                         "num_speakers": 2,
-                        "runtime": "pyannote-4.0",
+                        "engine_id": "pyannote-4.0",
                     },
                 },
                 config={"speaker_detection": "diarize"},
@@ -248,7 +248,7 @@ class TestFinalMergerEngineOutput:
                             },
                         ],
                         "split_channels": True,
-                        "runtime": "audio-prepare",
+                        "engine_id": "audio-prepare",
                     },
                     "transcribe_ch0": {
                         "segments": [
@@ -257,7 +257,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Agent speaking",
                         "language": "en",
                         "channel": 0,
-                        "runtime": "faster-whisper",
+                        "engine_id": "faster-whisper",
                     },
                     "transcribe_ch1": {
                         "segments": [
@@ -266,7 +266,7 @@ class TestFinalMergerEngineOutput:
                         "text": "Customer here",
                         "language": "en",
                         "channel": 1,
-                        "runtime": "faster-whisper",
+                        "engine_id": "faster-whisper",
                     },
                 },
                 config={
@@ -323,20 +323,20 @@ class TestFinalMergerEngineOutput:
                             }
                         ],
                         "split_channels": False,
-                        "runtime": "audio-prepare",
+                        "engine_id": "audio-prepare",
                     },
                     "transcribe": {
                         "segments": [{"start": 0.0, "end": 5.0, "text": "Hello"}],
                         "text": "Hello",
                         "language": "xx",
-                        "runtime": "faster-whisper",
+                        "engine_id": "faster-whisper",
                     },
                     "align": {
                         "segments": [{"start": 0.0, "end": 5.0, "text": "Hello"}],
                         "text": "Hello",
                         "language": "xx",
                         "word_timestamps": False,
-                        "runtime": "phoneme-align",
+                        "engine_id": "phoneme-align",
                         "skipped": True,
                         "skip_reason": "No alignment model for language 'xx'",
                         "warnings": ["No alignment model for language 'xx'"],
@@ -390,7 +390,7 @@ class TestOutputValidation:
             duration=5.0,
             timestamp_granularity=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             warnings=[],
         )
 
@@ -426,7 +426,7 @@ class TestOutputValidation:
             unaligned_words=[],
             unaligned_ratio=0.0,
             granularity_achieved=TimestampGranularity.WORD,
-            runtime="phoneme-align",
+            engine_id="phoneme-align",
         )
 
         data = output.model_dump(mode="json")
@@ -455,7 +455,7 @@ class TestOutputValidation:
             num_speakers=2,
             overlap_duration=0.5,
             overlap_ratio=0.05,
-            runtime="pyannote-4.0",
+            engine_id="pyannote-4.0",
         )
 
         data = output.model_dump(mode="json")
@@ -477,7 +477,7 @@ class TestOutputValidation:
                 )
             ],
             split_channels=False,
-            runtime="audio-prepare",
+            engine_id="audio-prepare",
         )
 
         data = output.model_dump(mode="json")
@@ -508,7 +508,7 @@ class TestOutputValidation:
             language="en",
             language_confidence=0.98,
             timestamp_granularity=TimestampGranularity.WORD,
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
         )
 
         # Serialize to dict (as would be stored in Redis/JSON)

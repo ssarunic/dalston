@@ -1,4 +1,4 @@
-"""NVIDIA Parakeet transcription engine with runtime model swapping.
+"""NVIDIA Parakeet transcription engine with engine_id model swapping.
 
 Uses NVIDIA NeMo Parakeet FastConformer models with CTC or TDT decoders
 for fast English-only speech-to-text transcription with GPU acceleration.
@@ -17,12 +17,12 @@ Vocabulary boosting: Supports GPU-PB (GPU-accelerated Phrase Boosting) for
 biasing recognition toward specific terms without retraining.
 
 Phase 1 (Runtime Model Management):
-    This engine now supports loading any Parakeet model variant at runtime.
-    The model to load is specified via config["runtime_model_id"] in the task,
+    This engine now supports loading any Parakeet model variant at engine_id.
+    The model to load is specified via config["loaded_model_id"] in the task,
     falling back to DALSTON_DEFAULT_MODEL_ID environment variable.
 
 Environment variables:
-    DALSTON_RUNTIME: Runtime engine ID for registration (default: "nemo")
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
     DALSTON_DEFAULT_MODEL_ID: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
@@ -46,11 +46,11 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.nemo_core import NemoCore
+from dalston.engine_sdk.inference.nemo_inference import NemoInference
 
 
 class NemoBatchEngine(BaseBatchTranscribeEngine):
-    """NVIDIA Parakeet transcription engine with runtime model swapping.
+    """NVIDIA Parakeet transcription engine with engine_id model swapping.
 
     Uses FastConformer encoder with CTC or TDT decoder for efficient
     English-only transcription. Automatically produces word-level
@@ -64,14 +64,14 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
     recommended for production use.
 
     Phase 1 (Runtime Model Management):
-        This engine can load any Parakeet model variant at runtime. The model
-        is specified via config["runtime_model_id"] in the task payload. If a
+        This engine can load any Parakeet model variant at engine_id. The model
+        is specified via config["loaded_model_id"] in the task payload. If a
         different model is requested, the current model is unloaded and the
         new one is loaded (with GPU memory cleanup).
     """
 
-    # Valid NeMo model identifiers that this runtime can load
-    # Keys are the runtime_model_id values that can be passed in task config
+    # Valid NeMo model identifiers that this engine_id can load
+    # Keys are the loaded_model_id values that can be passed in task config
     SUPPORTED_MODELS = {
         "nvidia/parakeet-ctc-0.6b",
         "nvidia/parakeet-ctc-1.1b",
@@ -83,38 +83,38 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
     # for Parakeet since it's English-only, so use the highest quality model)
     DEFAULT_MODEL_ID = "nvidia/parakeet-tdt-1.1b"
 
-    def __init__(self, core: NemoCore | None = None) -> None:
+    def __init__(self, core: NemoInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared NemoCore. If provided, the engine uses
+            core: Optional shared NemoInference. If provided, the engine uses
                   it instead of creating its own. This is how the unified
                   runner shares a single model between batch and RT adapters.
         """
         super().__init__()
-        self._core = core if core is not None else NemoCore.from_env()
+        self._core = core if core is not None else NemoInference.from_env()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
 
-        # Get engine ID from environment for registration (runtime ID, not variant ID)
-        self._runtime = os.environ.get("DALSTON_RUNTIME", "nemo")
+        # Get engine ID from environment for registration (engine_id ID, not variant ID)
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
 
         self.logger.info(
             "engine_init",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             shared_core=core is not None,
         )
 
-    def _normalize_model_id(self, runtime_model_id: str) -> str:
+    def _normalize_model_id(self, loaded_model_id: str) -> str:
         """Normalize NGC model IDs to NeMoModelManager format.
 
         Args:
-            runtime_model_id: Model identifier, possibly in NGC format
+            loaded_model_id: Model identifier, possibly in NGC format
                 (e.g. "nvidia/parakeet-tdt-1.1b")
 
         Returns:
@@ -122,9 +122,9 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 (e.g. "parakeet-tdt-1.1b")
         """
         # Strip "nvidia/" prefix if present -- NeMoModelManager uses short IDs
-        if "/" in runtime_model_id:
-            return runtime_model_id.split("/", 1)[1]
-        return runtime_model_id
+        if "/" in loaded_model_id:
+            return loaded_model_id.split("/", 1)[1]
+        return loaded_model_id
 
     def _configure_vocabulary_boosting(
         self, model: Any, vocabulary: list[str], boosting_alpha: float = 0.5
@@ -254,7 +254,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext
     ) -> Transcript:
-        """Transcribe audio using Parakeet CTC or TDT via shared NemoCore.
+        """Transcribe audio using Parakeet CTC or TDT via shared NemoInference.
 
         Args:
             engine_input: Task input with audio file path and config
@@ -268,8 +268,8 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         channel = params.channel
         vocabulary = params.vocabulary
 
-        runtime_model_id = params.runtime_model_id or self._default_model_id
-        model_id = self._normalize_model_id(runtime_model_id)
+        loaded_model_id = params.loaded_model_id or self._default_model_id
+        model_id = self._normalize_model_id(loaded_model_id)
 
         # Extract decoder type for alignment method
         model_parts = model_id.split("-")
@@ -358,7 +358,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             text=core_result.text,
             segments=segments,
             language="en",
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             language_confidence=1.0,
             alignment_method=alignment_method,
             channel=channel,
@@ -380,7 +380,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "runtime": self._runtime,
+            "engine_id": self._engine_id,
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
@@ -393,9 +393,9 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return Parakeet engine capabilities.
 
-        Phase 1: This now returns the runtime ID (e.g., "nemo") instead of
+        Phase 1: This now returns the engine_id ID (e.g., "nemo") instead of
         a variant-specific ID. The engine can load any supported Parakeet
-        model variant at runtime.
+        model variant at engine_id.
 
         Parakeet is an English-only transcription engine with native
         word-level timestamps via CTC or TDT alignment.
@@ -405,7 +405,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         vram_mb = 6000  # Maximum (tdt-1.1b)
 
         return EngineCapabilities(
-            runtime=self._runtime,
+            engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
             languages=["en"],  # English only

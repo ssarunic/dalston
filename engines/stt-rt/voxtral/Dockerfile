@@ -14,7 +14,7 @@
 ARG MODEL_VARIANT=mini-4b
 
 # Use CUDA base image for GPU support (required for realtime)
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
+FROM nvidia/cuda:12.1.1-cudnn8-engine_id-ubuntu22.04 AS base
 
 # Re-declare ARG after FROM
 ARG MODEL_VARIANT=mini-4b

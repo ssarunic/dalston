@@ -266,9 +266,9 @@ def is_openai_model_supported_for_endpoint(
 
 
 def map_openai_model(model: str) -> str:
-    """Map OpenAI model ID to Dalston runtime.
+    """Map OpenAI model ID to Dalston engine_id.
 
-    Returns: runtime identifier
+    Returns: engine_id identifier
 
     Uses explicit mappings from OPENAI_MODEL_MAP if available,
     otherwise falls back to DEFAULT_OPENAI_ENGINE.
@@ -276,8 +276,8 @@ def map_openai_model(model: str) -> str:
     return OPENAI_MODEL_MAP.get(model, DEFAULT_OPENAI_ENGINE)
 
 
-def map_openai_runtime_model(model: str) -> str | None:
-    """Map OpenAI model ID to concrete runtime model variant when configured."""
+def map_openai_loaded_model(model: str) -> str | None:
+    """Map OpenAI model ID to concrete engine_id model variant when configured."""
     return OPENAI_RUNTIME_MODEL_MAP.get(model)
 
 

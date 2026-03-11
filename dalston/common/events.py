@@ -168,7 +168,7 @@ async def publish_job_cancelled(redis: Redis, job_id: UUID) -> None:
 
 async def publish_engine_needed(
     redis: Redis,
-    runtime: str,
+    engine_id: str,
     stage: str,
     job_id: UUID,
     task_id: UUID,
@@ -182,14 +182,14 @@ async def publish_engine_needed(
 
     Args:
         redis: Async Redis client
-        runtime: The runtime that is needed
+        engine_id: The engine_id that is needed
         stage: Pipeline stage (transcribe, align, diarize, etc.)
         job_id: Job UUID waiting for this engine
         task_id: Task UUID waiting for this engine
         language: Requested language (if applicable)
     """
     payload: dict[str, Any] = {
-        "runtime": runtime,
+        "engine_id": engine_id,
         "stage": stage,
         "job_id": job_id,
         "task_id": task_id,

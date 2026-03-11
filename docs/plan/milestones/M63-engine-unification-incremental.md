@@ -2,15 +2,15 @@
 
 | | |
 |---|---|
-| **Goal** | One shared engine instance per runtime/model that serves both batch and realtime interfaces |
+| **Goal** | One shared engine instance per engine_id/model that serves both batch and realtime interfaces |
 | **Duration** | 2-3 weeks (incremental rollout) |
 | **Dependencies** | M36, M40, M43, M44 |
-| **Primary Deliverable** | Unified runtime core + dual interfaces with QoS/admission control |
+| **Primary Deliverable** | Unified engine_id core + dual interfaces with QoS/admission control |
 | **Status** | In Progress (phase 1 complete, phase 2 complete) |
 
 ## Outcomes
 
-1. Batch and realtime for the same runtime/model use one loaded model and one runtime core.
+1. Batch and realtime for the same engine_id/model use one loaded model and one engine_id core.
 2. External API contracts stay stable (no output format break for existing clients).
 3. Realtime latency is protected under batch load (`rt_reservation`, `batch_max_inflight`).
 4. Migration is reversible at every step (compat mode, flags, canary rollout).
@@ -19,7 +19,7 @@
 
 In scope:
 
-- Runtime-by-runtime unification of existing engines.
+- Runtime-by-engine_id unification of existing engines.
 - Registry compatibility needed to represent dual-interface engines.
 - QoS/admission controls for mixed batch+realtime load.
 - Characterization and parity testing before each refactor step.
@@ -34,11 +34,11 @@ Out of scope for this milestone:
 ## Strategy
 
 1. Add test harnesses first and lock behavior.
-2. Extract shared runtime core with no callers.
+2. Extract shared engine_id core with no callers.
 3. Migrate batch adapter to core, verify parity.
 4. Migrate realtime adapter to core, verify parity.
 5. Introduce unified process runner with admission control.
-6. Roll out runtime-by-runtime with canary + rollback flag.
+6. Roll out engine_id-by-engine_id with canary + rollback flag.
 
 Each change is one logical commit. Stop on first regression.
 
@@ -58,10 +58,10 @@ Gate:
 
 ### T2. Shared Runtime Core Extraction
 
-- Introduce runtime-specific core module (for example, `TranscribeCore`) with:
+- Introduce engine_id-specific core module (for example, `TranscribeCore`) with:
   - model loading
   - inference execution
-  - minimal runtime-neutral result shape
+  - minimal engine_id-neutral result shape
 - No production call sites in first commit (dark launch by construction).
 
 Gate:
@@ -93,7 +93,7 @@ Gate:
 
 ### T5. Unified Process + Admission Control
 
-- Single runtime process exposes:
+- Single engine_id process exposes:
   - queue adapter (batch)
   - websocket adapter (realtime)
 - Add admission controller with:
@@ -125,20 +125,20 @@ Gate:
 2. Add parity fixtures and snapshot comparator helper.
 3. Add mixed-load benchmark test harness (offline/integration mark).
 
-## Phase 1: Faster-Whisper Unification (pilot runtime)
+## Phase 1: Faster-Whisper Unification (pilot engine_id)
 
 1. Add `TranscribeCore` module (unused).
 2. Switch batch faster-whisper engine to core.
 3. Switch RT faster-whisper engine to core.
-4. Introduce unified runtime process with both adapters.
+4. Introduce unified engine_id process with both adapters.
 5. Add admission controller + limits.
-6. Canary deploy one runtime pool and compare against legacy.
+6. Canary deploy one engine_id pool and compare against legacy.
 
 ## Phase 2: Remaining Runtimes (repeatable template)
 
-For each runtime (`nemo`, `nemo-onnx`, `hf-asr`, `vllm-asr`):
+For each engine_id (`nemo`, `nemo-onnx`, `hf-asr`, `vllm-asr`):
 
-1. Add runtime core module (unused first).
+1. Add engine_id core module (unused first).
 2. Migrate batch adapter.
 3. Migrate RT adapter.
 4. Enable unified process with admission controls.
@@ -154,7 +154,7 @@ For each runtime (`nemo`, `nemo-onnx`, `hf-asr`, `vllm-asr`):
 
 Required on every step:
 
-- Unit: runtime core + adapter contracts.
+- Unit: engine_id core + adapter contracts.
 - Integration: job execution, RT sessions, mixed-load admission behavior.
 - Compatibility: output parity for transcript/export formats.
 - Resilience: worker restart, heartbeat timeout, reconnect/retry paths.
@@ -175,16 +175,16 @@ pytest -m e2e
 
 ## Rollback and Safety Controls
 
-- `DALSTON_UNIFIED_ENGINE_ENABLED` (runtime-level opt-in).
+- `DALSTON_UNIFIED_ENGINE_ENABLED` (engine_id-level opt-in).
 - `DALSTON_ENGINE_REGISTRY_MODE=dual|legacy|unified`.
-- Keep legacy runtime path deployable until post-canary signoff.
+- Keep legacy engine_id path deployable until post-canary signoff.
 - Rollback rule: if parity or latency SLA fails, flip flag to legacy path and halt rollout.
 
 ## Success Criteria
 
 - No API contract regression across batch and RT endpoints.
 - Realtime p95 latency under mixed load within agreed SLA.
-- Duplicate runtime/model logic reduced without behavior regressions.
+- Duplicate engine_id/model logic reduced without behavior regressions.
 - Unified engine instances visible and routable with stable heartbeats.
 - All changes delivered in small, test-gated commits.
 
@@ -197,8 +197,8 @@ pytest -m e2e
 
 ### Phase 1: Faster-Whisper Unification (complete)
 
-- **TranscribeCore** (`dalston/engine_sdk/cores/faster_whisper_core.py`): shared
-  runtime core with `FasterWhisperModelManager`, runtime-neutral result types,
+- **TranscribeCore** (`dalston/engine_sdk/cores/faster_whisper_inference.py`): shared
+  engine_id core with `FasterWhisperModelManager`, engine_id-neutral result types,
   `transcribe()` accepting both file paths and numpy arrays.
 - **Batch delegation**: `WhisperEngine` (`engines/stt-transcribe/faster-whisper/engine.py`)
   delegates to `TranscribeCore` via optional `core=` injection.
@@ -231,7 +231,7 @@ pytest -m e2e
 - **Promoted to docker-compose**: 8 legacy split services (`stt-batch-transcribe-nemo*`,
   `stt-rt-nemo*`) replaced by 4 unified services (`stt-unified-nemo`,
   `stt-unified-nemo-cpu`, `stt-unified-nemo-onnx-cpu`, `stt-unified-nemo-onnx`).
-- **hf-asr, vllm-asr, voxtral**: batch-only runtimes with no RT counterpart to
+- **hf-asr, vllm-asr, voxtral**: batch-only engine_ids with no RT counterpart to
   unify — no core extraction needed.
 
 ### Phase 3: Registry Cutover (complete — tracked by M64)

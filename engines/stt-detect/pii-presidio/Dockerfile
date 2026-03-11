@@ -10,7 +10,7 @@
 ARG DEVICE=cpu
 
 # Base images for each device type
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base-cuda
+FROM nvidia/cuda:12.1.1-cudnn8-engine_id-ubuntu22.04 AS base-cuda
 FROM python:3.11-slim AS base-cpu
 
 # Select the appropriate base image

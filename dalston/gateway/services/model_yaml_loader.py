@@ -6,7 +6,7 @@ bypassing the intermediate JSON catalog generation step.
 Usage:
     entries = load_model_yamls()
     for entry in entries:
-        print(f"{entry.id}: {entry.runtime}")
+        print(f"{entry.id}: {entry.engine_id}")
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ class ModelYAMLEntry:
     """
 
     id: str
-    runtime: str
-    runtime_model_id: str
+    engine_id: str
+    loaded_model_id: str
     name: str
     stage: str
     source: str | None = None
@@ -137,13 +137,13 @@ def _load_single_yaml(yaml_path: Path) -> ModelYAMLEntry:
     if not model_id:
         raise ValueError("Missing required field: id")
 
-    runtime = data.get("runtime")
-    if not runtime:
-        raise ValueError("Missing required field: runtime")
+    engine_id = data.get("engine_id")
+    if not engine_id:
+        raise ValueError("Missing required field: engine_id")
 
-    runtime_model_id = data.get("runtime_model_id")
-    if not runtime_model_id:
-        raise ValueError("Missing required field: runtime_model_id")
+    loaded_model_id = data.get("loaded_model_id")
+    if not loaded_model_id:
+        raise ValueError("Missing required field: loaded_model_id")
 
     # Normalize languages: ["all"] or null means multilingual
     languages = data.get("languages")
@@ -157,8 +157,8 @@ def _load_single_yaml(yaml_path: Path) -> ModelYAMLEntry:
 
     return ModelYAMLEntry(
         id=model_id,
-        runtime=runtime,
-        runtime_model_id=runtime_model_id,
+        engine_id=engine_id,
+        loaded_model_id=loaded_model_id,
         name=data.get("name", model_id),
         stage=data.get("stage", "transcribe"),
         source=data.get("source"),

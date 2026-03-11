@@ -94,14 +94,14 @@ docs/
 ### Implementation Reference
 
 - [Implementation Patterns](specs/implementations/README.md) — Non-obvious patterns for building Dalston
-- [New Transcription Engine Tutorial](guides/new-transcription-engine-tutorial.md) — Beginner guide for implementing a new `transcribe` runtime (M51 contract)
+- [New Transcription Engine Tutorial](guides/new-transcription-engine-tutorial.md) — Beginner guide for implementing a new `transcribe` engine (M51 contract)
 
 ### Testing Guides
 
 - [M51 Engine Testing Playbook](testing/M51-engine-testing-playbook.md) — Stage-by-stage testing changes after stateless engine + artifact materialization refactor
 - [M52 Local Runner Readiness](reports/M52-local-runner-readiness.md) — Readiness gate summary for align/diarize/pii_detect local-run workflow
 - [M54 Event DLQ Implementation](reports/M54-event-dlq-implementation.md) — Durable orchestrator event retry ceiling, DLQ policy, and operational runbook
-- [M55 Runtime Model Management Implementation](reports/M55-non-transcribe-runtime-model-management-implementation.md) — Implementation notes for diarize/align/pii stage model selection and runtime model propagation
+- [M55 Runtime Model Management Implementation](reports/M55-non-transcribe-runtime-model-management-implementation.md) — Implementation notes for diarize/align/pii stage model selection and engine ID model propagation
 - [M57 Zero-Config CLI Bootstrap](reports/M57-zero-config-cli-bootstrap.md) — Ghost server lifecycle, model auto-ensure, and one-command transcribe UX
 
 ### Implementation Plan

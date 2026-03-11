@@ -3,7 +3,7 @@
 Verifies that the RT engine produces the correct output shape
 (Transcript with text, segments, language) and
 that session lifecycle behavior is preserved after delegation
-to FasterWhisperCore.
+to FasterWhisperInference.
 
 These tests mock the faster-whisper model to avoid GPU/model dependencies.
 """
@@ -80,19 +80,19 @@ def _make_mock_info(
 
 
 def _build_rt_engine_with_mock(segments, info):
-    """Create a FasterWhisperRealtimeEngine with a mocked FasterWhisperCore."""
+    """Create a FasterWhisperRealtimeEngine with a mocked FasterWhisperInference."""
     FasterWhisperRealtimeEngine = _load_rt_engine()
     engine = FasterWhisperRealtimeEngine()
 
     # Simulate load_models() by creating a mock core
-    from dalston.engine_sdk.cores.faster_whisper_core import (
-        FasterWhisperCore,
+    from dalston.engine_sdk.inference.faster_whisper_inference import (
+        FasterWhisperInference,
         SegmentResult,
         TranscriptionResult,
         WordResult,
     )
 
-    engine._core = MagicMock(spec=FasterWhisperCore)
+    engine._core = MagicMock(spec=FasterWhisperInference)
     engine._core.manager = MagicMock()
     engine._core.manager.model_storage = None
     engine._core.device = "cpu"
@@ -146,7 +146,7 @@ def _make_params(
     """Create typed transcribe params for RT calls."""
     return TranscribeInput(
         language=language,
-        runtime_model_id=model_variant,
+        loaded_model_id=model_variant,
         vocabulary=vocabulary,
     )
 
@@ -210,7 +210,7 @@ class TestRTOutputShape:
 
 
 class TestRTConfigPassthrough:
-    """Verify config values reach FasterWhisperCore correctly."""
+    """Verify config values reach FasterWhisperInference correctly."""
 
     def test_language_auto_passed_through(self) -> None:
         segments = [_make_mock_segment()]
@@ -284,9 +284,9 @@ class TestRTConfigPassthrough:
 class TestRTEngineMetadata:
     """Verify engine metadata methods."""
 
-    def test_get_runtime(self) -> None:
+    def test_get_engine_id(self) -> None:
         engine = _load_rt_engine()()
-        assert engine.get_runtime() == "faster-whisper"
+        assert engine.get_engine_id() == "faster-whisper"
 
     def test_get_models(self) -> None:
         engine = _load_rt_engine()()

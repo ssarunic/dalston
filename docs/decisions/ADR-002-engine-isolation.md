@@ -56,7 +56,7 @@ Run each engine in its own venv, communicate via filesystem or IPC.
 
 - Doesn't isolate system libraries
 - Complex venv management
-- Still shares CUDA runtime (version conflicts)
+- Still shares CUDA engine_id (version conflicts)
 - Process management complexity
 
 ### 3. Docker Containers per Engine (Chosen)

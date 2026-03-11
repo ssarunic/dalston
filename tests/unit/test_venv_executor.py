@@ -16,7 +16,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _runtime_python() -> Path:
+def _engine_id_python() -> Path:
     return _repo_root() / ".venv" / "bin" / "python"
 
 
@@ -36,7 +36,7 @@ class VenvEchoEngine(Engine):
                 "config_value": input.config["value"],
                 "payload_value": input.payload["value"],
                 "audio_exists": input.audio_path.exists(),
-                "runtime": ctx.runtime,
+                "engine_id": ctx.engine_id,
             }
         )
 """.strip()
@@ -46,15 +46,15 @@ class VenvEchoEngine(Engine):
     return engine_path
 
 
-def test_env_manager_resolves_and_caches_runtime_python(tmp_path: Path) -> None:
+def test_env_manager_resolves_and_caches_engine_id_python(tmp_path: Path) -> None:
     manager = VenvEnvironmentManager(
-        runtime_pythons={"stub-runtime": _runtime_python()},
+        runtime_pythons={"stub-engine_id": _engine_id_python()},
     )
 
-    environment_1 = manager.ensure_environment("stub-runtime")
-    environment_2 = manager.ensure_environment("stub-runtime")
+    environment_1 = manager.ensure_environment("stub-engine_id")
+    environment_2 = manager.ensure_environment("stub-engine_id")
 
-    assert environment_1.python_executable == _runtime_python().absolute()
+    assert environment_1.python_executable == _engine_id_python().absolute()
     assert environment_1 is environment_2
 
 
@@ -64,7 +64,7 @@ def test_venv_executor_runs_serialized_request(tmp_path: Path) -> None:
     engine_path = _write_engine_module(tmp_path)
 
     manager = VenvEnvironmentManager(
-        runtime_pythons={"stub-runtime": _runtime_python()},
+        runtime_pythons={"stub-engine_id": _engine_id_python()},
     )
     executor = VenvExecutor(
         env_manager=manager,
@@ -77,7 +77,7 @@ def test_venv_executor_runs_serialized_request(tmp_path: Path) -> None:
             task_id="task-1",
             job_id="job-1",
             stage="transcribe",
-            runtime="stub-runtime",
+            engine_id="stub-engine_id",
             instance="lite-test",
             config={"value": 7},
             previous_outputs={},
@@ -92,13 +92,13 @@ def test_venv_executor_runs_serialized_request(tmp_path: Path) -> None:
         "config_value": 7,
         "payload_value": 9,
         "audio_exists": True,
-        "runtime": "stub-runtime",
+        "engine_id": "stub-engine_id",
     }
 
 
 def test_venv_executor_requires_engine_ref(tmp_path: Path) -> None:
     manager = VenvEnvironmentManager(
-        runtime_pythons={"stub-runtime": _runtime_python()},
+        runtime_pythons={"stub-engine_id": _engine_id_python()},
     )
     executor = VenvExecutor(
         env_manager=manager,
@@ -112,7 +112,7 @@ def test_venv_executor_requires_engine_ref(tmp_path: Path) -> None:
                 task_id="task-1",
                 job_id="job-1",
                 stage="transcribe",
-                runtime="stub-runtime",
+                engine_id="stub-engine_id",
                 instance="lite-test",
                 config={},
                 previous_outputs={},
@@ -127,7 +127,7 @@ def test_env_manager_health_check_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = VenvEnvironmentManager(
-        runtime_pythons={"stub-runtime": _runtime_python()},
+        runtime_pythons={"stub-engine_id": _engine_id_python()},
         health_check_timeout_s=1,
     )
 
@@ -140,7 +140,7 @@ def test_env_manager_health_check_timeout(
     )
 
     with pytest.raises(RuntimeError, match="Health check timed out"):
-        manager.ensure_environment("stub-runtime")
+        manager.ensure_environment("stub-engine_id")
 
 
 def test_venv_executor_subprocess_timeout(
@@ -148,7 +148,7 @@ def test_venv_executor_subprocess_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = VenvEnvironmentManager(
-        runtime_pythons={"stub-runtime": _runtime_python()},
+        runtime_pythons={"stub-engine_id": _engine_id_python()},
     )
     executor = VenvExecutor(
         env_manager=manager,
@@ -157,7 +157,7 @@ def test_venv_executor_subprocess_timeout(
         subprocess_timeout_s=1,
     )
     # Warm cache so this test exercises only the executor subprocess timeout.
-    manager.ensure_environment("stub-runtime")
+    manager.ensure_environment("stub-engine_id")
 
     def _timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
@@ -173,7 +173,7 @@ def test_venv_executor_subprocess_timeout(
                 task_id="task-1",
                 job_id="job-1",
                 stage="transcribe",
-                runtime="stub-runtime",
+                engine_id="stub-engine_id",
                 instance="lite-test",
                 config={},
                 previous_outputs={},

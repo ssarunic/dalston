@@ -73,7 +73,7 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
       <CardContent className="flex-1 space-y-3">
         {/* Runtime & Stage */}
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="secondary">{model.runtime}</Badge>
+          <Badge variant="secondary">{model.engine_id}</Badge>
           <Badge variant="outline">{model.stage}</Badge>
         </div>
 
@@ -164,9 +164,9 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
 
       <CardFooter className="pt-2">
         <div className="flex items-center justify-between w-full">
-          {model.source === 'huggingface' && model.runtime_model_id && (
+          {model.source === 'huggingface' && model.loaded_model_id && (
             <a
-              href={`https://huggingface.co/${model.runtime_model_id}`}
+              href={`https://huggingface.co/${model.loaded_model_id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"

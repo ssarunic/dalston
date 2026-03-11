@@ -183,7 +183,7 @@ export function HFModelInput({ onResolve, isLoading, result, error, autoFocus }:
             <div className="space-y-1">
               <p className="font-medium text-green-600 dark:text-green-400 flex items-center gap-2">
                 <Check className="h-4 w-4" />
-                Resolved to runtime: {result.resolved_runtime}
+                Resolved to engine_id: {result.resolved_engine_id}
               </p>
               {result.library_name && (
                 <p className="text-muted-foreground">Library: {result.library_name}</p>
@@ -204,7 +204,7 @@ export function HFModelInput({ onResolve, isLoading, result, error, autoFocus }:
           ) : (
             <p className="text-yellow-600 dark:text-yellow-400 flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" />
-              Could not determine runtime for this model. It may not be a supported ASR model.
+              Could not determine engine_id for this model. It may not be a supported ASR model.
               {result.error && <span className="block text-xs mt-1">{result.error}</span>}
             </p>
           )}

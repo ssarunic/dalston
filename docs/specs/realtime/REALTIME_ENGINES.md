@@ -6,10 +6,10 @@ Real-time engines are WebSocket servers that handle streaming audio transcriptio
 
 ### Runtime Notes (2026-03-11)
 
-- Voxtral realtime runs on the `vllm-asr` runtime and reuses shared helpers in
+- Voxtral realtime runs on the `vllm-asr` engine_id and reuses shared helpers in
   `dalston.vllm_asr` (adapters + audio/inference bridge).
 - Voxtral realtime requires CUDA and vLLM audio support. There is no CPU
-  fallback for this runtime.
+  fallback for this engine_id.
 - When timestamp tokens are absent in streaming output, the engine degrades to
   segment timestamps and emits warnings if word timestamps were requested.
 
@@ -155,7 +155,7 @@ Manages ASR models with dynamic loading and TTL-based eviction (M43).
 | **Dynamic** | Faster-whisper engines | Load on-demand via `ModelManager.acquire()/release()` |
 
 ```python
-# Dynamic model loading (faster-whisper runtime) - M43
+# Dynamic model loading (faster-whisper engine_id) - M43
 from dalston.engine_sdk.managers import FasterWhisperModelManager
 from dalston.realtime_sdk import AsyncModelManager
 
@@ -732,7 +732,7 @@ config_schema:
 ```dockerfile
 # engines/realtime/whisper-streaming/Dockerfile
 
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1-engine_id-ubuntu22.04
 
 # Install Python and dependencies
 RUN apt-get update && apt-get install -y \

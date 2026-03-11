@@ -675,14 +675,14 @@ def test_openai_realtime_endpoint_sends_session_created_event():
         session_id="sess_abc123",
         endpoint="ws://worker.test",
         instance="worker-1",
-        runtime="parakeet",
+        engine_id="parakeet",
     )
     session_router.release_worker.return_value = None
 
     rt = SimpleNamespace(
         routing_model="auto",
-        model_runtime="parakeet",
-        valid_runtimes=["parakeet"],
+        model_engine_id="parakeet",
+        valid_engine_ids=["parakeet"],
         effective_model="gpt-4o-transcribe",
     )
 
@@ -793,14 +793,14 @@ def test_openai_realtime_endpoint_persists_lag_exceeded_reason():
         session_id="sess_lag_123",
         endpoint="ws://worker.test",
         instance="worker-1",
-        runtime="parakeet",
+        engine_id="parakeet",
     )
     session_router.release_worker.return_value = None
 
     rt = SimpleNamespace(
         routing_model="auto",
-        model_runtime="parakeet",
-        valid_runtimes=["parakeet"],
+        model_engine_id="parakeet",
+        valid_engine_ids=["parakeet"],
         effective_model="gpt-4o-transcribe",
     )
 

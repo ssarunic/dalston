@@ -40,7 +40,7 @@ COPY engines/stt-transcribe/vllm-asr/requirements.txt .
 RUN pip install --no-cache-dir soundfile librosa numpy
 
 # M39: Standardized model cache directories
-# Models are downloaded from S3 at runtime via S3ModelStorage
+# Models are downloaded from S3 at engine_id via S3ModelStorage
 ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch

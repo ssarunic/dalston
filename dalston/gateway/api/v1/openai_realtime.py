@@ -693,7 +693,7 @@ async def openai_realtime_transcription(
     # Everything from here must decrement the session counter on exit.
     try:
         # OpenAI model IDs (gpt-4o-transcribe, etc.) are treated as "auto" — resolve
-        # via registry to pick the largest ready model and filter valid runtimes (M48)
+        # via registry to pick the largest ready model and filter valid engine_ids (M48)
         rt = await _resolve_rt_routing(None)
 
         # The connect callback sends transcription_session.created then proxies.

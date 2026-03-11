@@ -101,8 +101,8 @@ export type ModelStatus = 'not_downloaded' | 'downloading' | 'ready' | 'failed';
 export interface ModelRegistryEntry {
   id: string;
   name: string | null;
-  runtime: string;
-  runtime_model_id: string;
+  engine_id: string;
+  loaded_model_id: string;
   stage: string;
   status: ModelStatus;
   size_bytes: number | null;
@@ -141,7 +141,7 @@ export interface HFResolveRequest {
 
 export interface HFResolveResponse {
   model_id: string;
-  resolved_runtime: string | null;
+  resolved_engine_id: string | null;
   library_name: string | null;
   pipeline_tag: string | null;
   languages: string[];
@@ -152,7 +152,7 @@ export interface HFResolveResponse {
 
 export interface ModelFilters {
   stage?: string;
-  runtime?: string;
+  engine_id?: string;
   status?: ModelStatus;
   search?: string;
 }
@@ -167,7 +167,7 @@ export interface ModelFilters {
 getModelRegistry: async (filters?: ModelFilters): Promise<{ data: ModelRegistryEntry[] }> => {
   const params = new URLSearchParams();
   if (filters?.stage) params.set('stage', filters.stage);
-  if (filters?.runtime) params.set('runtime', filters.runtime);
+  if (filters?.engine_id) params.set('engine_id', filters.engine_id);
   if (filters?.status) params.set('status', filters.status);
   return client.get(`v1/models/registry?${params}`).json();
 },
@@ -188,7 +188,7 @@ resolveHFModel: async (request: HFResolveRequest): Promise<HFResolveResponse> =>
   return client.post('v1/models/hf/resolve', { json: request }).json();
 },
 
-getHFMappings: async (): Promise<{ library_to_runtime: Record<string, string>; tag_to_runtime: Record<string, string> }> => {
+getHFMappings: async (): Promise<{ library_to_engine_id: Record<string, string>; tag_to_engine_id: Record<string, string> }> => {
   return client.get('v1/models/hf/mappings').json();
 },
 
@@ -455,7 +455,7 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
       <CardContent className="flex-1 space-y-3">
         {/* Runtime & Stage */}
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="secondary">{model.runtime}</Badge>
+          <Badge variant="secondary">{model.engine_id}</Badge>
           <Badge variant="outline">{model.stage}</Badge>
         </div>
 
@@ -527,9 +527,9 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
 
       <CardFooter className="pt-2">
         <div className="flex items-center justify-between w-full">
-          {model.source === 'huggingface' && model.runtime_model_id && (
+          {model.source === 'huggingface' && model.loaded_model_id && (
             <a
-              href={`https://huggingface.co/${model.runtime_model_id}`}
+              href={`https://huggingface.co/${model.loaded_model_id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
@@ -579,7 +579,7 @@ interface ModelFiltersBarProps {
 
 export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
   const stages = ['transcribe', 'align', 'diarize'];
-  const runtimes = ['faster-whisper', 'nemo', 'whisperx', 'hf-asr'];
+  const engine_ids = ['faster-whisper', 'nemo', 'whisperx', 'hf-asr'];
   const statuses = ['ready', 'downloading', 'not_downloaded', 'failed'];
 
   return (
@@ -610,15 +610,15 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
       </Select>
 
       <Select
-        value={filters.runtime || ''}
-        onValueChange={(v) => onChange({ ...filters, runtime: v || undefined })}
+        value={filters.engine_id || ''}
+        onValueChange={(v) => onChange({ ...filters, engine_id: v || undefined })}
       >
         <SelectTrigger className="w-[160px]">
-          <SelectValue placeholder="All runtimes" />
+          <SelectValue placeholder="All engine_ids" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All runtimes</SelectItem>
-          {runtimes.map(r => (
+          <SelectItem value="">All engine_ids</SelectItem>
+          {engine_ids.map(r => (
             <SelectItem key={r} value={r}>{r}</SelectItem>
           ))}
         </SelectContent>
@@ -639,7 +639,7 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         </SelectContent>
       </Select>
 
-      {(filters.search || filters.stage || filters.runtime || filters.status) && (
+      {(filters.search || filters.stage || filters.engine_id || filters.status) && (
         <Button
           variant="ghost"
           size="sm"
@@ -692,12 +692,12 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
       {result && (
         <div className={cn(
           "p-3 rounded-lg text-sm",
-          result.resolved_runtime ? "bg-green-50 dark:bg-green-900/20" : "bg-yellow-50 dark:bg-yellow-900/20"
+          result.resolved_engine_id ? "bg-green-50 dark:bg-green-900/20" : "bg-yellow-50 dark:bg-yellow-900/20"
         )}>
-          {result.resolved_runtime ? (
+          {result.resolved_engine_id ? (
             <div className="space-y-1">
               <p className="font-medium text-green-700 dark:text-green-300">
-                ✓ Resolved to runtime: {result.resolved_runtime}
+                ✓ Resolved to engine_id: {result.resolved_engine_id}
               </p>
               {result.library_name && (
                 <p className="text-muted-foreground">Library: {result.library_name}</p>
@@ -714,7 +714,7 @@ export function HFModelInput({ onResolve, isLoading, result, error }: HFModelInp
             </div>
           ) : (
             <p className="text-yellow-700 dark:text-yellow-300">
-              Could not determine runtime for this model. It may not be a supported ASR model.
+              Could not determine engine_id for this model. It may not be a supported ASR model.
             </p>
           )}
         </div>
@@ -770,17 +770,17 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
   const models = registryData?.data ?? [];
   const readyModels = models.filter(m => m.status === 'ready');
 
-  // Group by runtime
+  // Group by engine_id
   const groupedModels = readyModels.reduce((acc, model) => {
-    const runtime = model.runtime;
-    if (!acc[runtime]) acc[runtime] = [];
-    acc[runtime].push(model);
+    const engine_id = model.engine_id;
+    if (!acc[engine_id]) acc[engine_id] = [];
+    acc[engine_id].push(model);
     return acc;
   }, {} as Record<string, ModelRegistryEntry[]>);
 
   // Filter by search and language
-  const filteredGroups = Object.entries(groupedModels).map(([runtime, models]) => ({
-    runtime,
+  const filteredGroups = Object.entries(groupedModels).map(([engine_id, models]) => ({
+    engine_id,
     models: models.filter(m => {
       const matchesSearch = !search ||
         m.id.toLowerCase().includes(search.toLowerCase()) ||
@@ -810,7 +810,7 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
             </span>
           ) : selectedModel ? (
             <span className="flex items-center gap-2">
-              <Badge variant="secondary" className="text-xs">{selectedModel.runtime}</Badge>
+              <Badge variant="secondary" className="text-xs">{selectedModel.engine_id}</Badge>
               {selectedModel.id}
             </span>
           ) : value ? (
@@ -857,8 +857,8 @@ export function ModelSelector({ value, onChange, language }: ModelSelectorProps)
             </CommandGroup>
 
             {/* Grouped models */}
-            {filteredGroups.map(({ runtime, models }) => (
-              <CommandGroup key={runtime} heading={runtime}>
+            {filteredGroups.map(({ engine_id, models }) => (
+              <CommandGroup key={engine_id} heading={engine_id}>
                 {models.map(model => (
                   <CommandItem
                     key={model.id}
@@ -1390,7 +1390,7 @@ export function CapabilitiesCard() {
 | `/v1/models/sync` | POST | Sync registry with disk |
 | `/v1/models/registry` | GET | List registry entries with status |
 | `/v1/models/registry/{id}` | GET | Get registry entry |
-| `/v1/models/hf/resolve` | POST | Resolve HF model to runtime |
+| `/v1/models/hf/resolve` | POST | Resolve HF model to engine_id |
 | `/v1/models/hf/mappings` | GET | Get library/tag mappings |
 | `/v1/capabilities` | GET | System-wide capabilities |
 
@@ -1458,7 +1458,7 @@ open http://localhost:5173/models
 
 # Test HuggingFace Resolution
 # Enter "nvidia/parakeet-tdt-1.1b" in the HF input
-# - Should resolve to "nemo" runtime
+# - Should resolve to "nemo" engine_id
 # - Should show metadata (downloads, likes)
 
 # Test Enhanced Job Creation

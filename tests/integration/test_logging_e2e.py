@@ -266,7 +266,7 @@ class TestRequestIdInTaskMetadata:
             id=uuid4(),
             job_id=uuid4(),
             stage="transcribe",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             input_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],
@@ -290,7 +290,7 @@ class TestRequestIdInTaskMetadata:
         assert mapping is not None
         assert mapping["request_id"] == "req_xyz789"
         assert mapping["job_id"] == str(task.job_id)
-        assert mapping["runtime"] == "faster-whisper"
+        assert mapping["engine_id"] == "faster-whisper"
 
         # Cleanup
         structlog.contextvars.clear_contextvars()
@@ -307,7 +307,7 @@ class TestRequestIdInTaskMetadata:
             id=uuid4(),
             job_id=uuid4(),
             stage="transcribe",
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             input_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],

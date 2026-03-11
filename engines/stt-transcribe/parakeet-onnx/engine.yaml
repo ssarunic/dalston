@@ -1,6 +1,6 @@
 schema_version: "1.1"
 id: nemo-onnx
-runtime: nemo-onnx
+engine_id: nemo-onnx
 stage: transcribe
 name: NVIDIA Parakeet ONNX Runtime
 version: 1.0.0
@@ -9,7 +9,7 @@ description: |
   Uses the onnx-asr library for fast inference without the full NeMo toolkit.
   Supports CTC, TDT, and RNNT decoders.
 
-  M41: This runtime provides the same Parakeet model accuracy with significantly
+  M41: This engine_id provides the same Parakeet model accuracy with significantly
   smaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime
   for inference and supports both CPU and GPU execution.
 

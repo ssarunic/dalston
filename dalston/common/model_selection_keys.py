@@ -1,4 +1,4 @@
-"""Shared job parameter keys used for runtime/model selection."""
+"""Shared job parameter keys used for engine_id/model selection."""
 
 # Canonical transcription selector key
 MODEL_PARAM_TRANSCRIBE = "model_transcribe"

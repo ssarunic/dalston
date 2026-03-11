@@ -20,7 +20,7 @@ HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 def _ctx(task_input: EngineInput) -> BatchTaskContext:
     return BatchTaskContext(
-        runtime="hf-asr",
+        engine_id="hf-asr",
         instance="test-instance",
         task_id=task_input.task_id,
         job_id=task_input.job_id,
@@ -87,22 +87,22 @@ class TestHFASREngine:
             engine = HfAsrBatchEngine()
             assert engine._default_model_id == "facebook/wav2vec2-large-960h"
 
-    def test_runtime_from_env(self):
-        """Engine should respect DALSTON_RUNTIME env var."""
+    def test_engine_id_from_env(self):
+        """Engine should respect DALSTON_ENGINE_ID env var."""
         with patch.dict(
-            os.environ, {"DALSTON_RUNTIME": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
+            os.environ, {"DALSTON_ENGINE_ID": "custom-hf-asr", "DALSTON_DEVICE": "cpu"}
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 HfAsrBatchEngine = load_hf_asr_engine()
                 engine = HfAsrBatchEngine()
-                assert engine._runtime == "custom-hf-asr"
+                assert engine._engine_id == "custom-hf-asr"
 
     def test_health_check(self, engine):
         """Health check should return healthy status."""
         health = engine.health_check()
 
         assert health["status"] == "healthy"
-        assert health["runtime"] == "hf-asr"
+        assert health["engine_id"] == "hf-asr"
         assert health["device"] == "cpu"
         assert health["cuda_available"] is False
 
@@ -224,13 +224,13 @@ class TestHFASREngineNormalizeOutput:
 
         assert output.channel == 0
 
-    def test_normalize_output_runtime(self, engine):
+    def test_normalize_output_engine_id(self, engine):
         """Engine ID should be set."""
         result = {"text": "test"}
 
         output = engine._normalize_output(result, "test/model", "en", None)
 
-        assert output.runtime == "hf-asr"
+        assert output.engine_id == "hf-asr"
 
     def test_normalize_output_skips_empty_chunks(self, engine):
         """Empty chunk text should be skipped."""
@@ -260,8 +260,8 @@ class TestHFASREngineProcess:
                 HfAsrBatchEngine = load_hf_asr_engine()
                 return HfAsrBatchEngine()
 
-    def test_process_uses_runtime_model_id(self, engine, tmp_path):
-        """Process should use runtime_model_id from config."""
+    def test_process_uses_loaded_model_id(self, engine, tmp_path):
+        """Process should use loaded_model_id from config."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -274,7 +274,7 @@ class TestHFASREngineProcess:
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
-            config={"runtime_model_id": "facebook/wav2vec2-large-960h"},
+            config={"loaded_model_id": "facebook/wav2vec2-large-960h"},
         )
 
         engine.process(task_input, _ctx(task_input))
@@ -283,7 +283,7 @@ class TestHFASREngineProcess:
         engine._manager.release.assert_called_once_with("facebook/wav2vec2-large-960h")
 
     def test_process_uses_default_model(self, engine, tmp_path):
-        """Process should use default model when runtime_model_id not set."""
+        """Process should use default model when loaded_model_id not set."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -377,7 +377,7 @@ class TestHFASREngineProcess:
         output_dict = result.to_dict()
         assert output_dict["text"] == "Hello world"
         assert len(output_dict["segments"]) == 1
-        assert output_dict["runtime"] == "hf-asr"
+        assert output_dict["engine_id"] == "hf-asr"
 
     def test_process_releases_model_on_error(self, engine, tmp_path):
         """Process should release model even if pipeline raises."""

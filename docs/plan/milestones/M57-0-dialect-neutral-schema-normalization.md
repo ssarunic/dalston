@@ -10,7 +10,7 @@
 
 ## Motivation
 
-Dalston supports two runtime modes — `distributed` (Postgres) and `lite` (SQLite).
+Dalston supports two engine_id modes — `distributed` (Postgres) and `lite` (SQLite).
 Today the ORM models import `JSONB`, `ARRAY`, `INET`, and `PG_UUID` from
 `sqlalchemy.dialects.postgresql`, forcing the lite path to maintain a separate
 hand-rolled DDL bootstrap with manual type mapping.  This creates two problems:
@@ -19,7 +19,7 @@ hand-rolled DDL bootstrap with manual type mapping.  This creates two problems:
    inline DDL in `_init_lite_schema()`), with no compile-time or CI guard that
    they stay in sync.
 2. **Unnecessary coupling** — analysis of the query layer shows almost zero use
-   of Postgres-specific query operators.  The only runtime query that exploits a
+   of Postgres-specific query operators.  The only engine_id query that exploits a
    dialect feature is `WebhookEndpointModel.events.any()`, and several JSONB
    columns store data with known, finite keys that belong in regular columns or
    normalized tables.
@@ -259,6 +259,7 @@ stmt = (
 ```
 
 **Replacement:** Use a dialect-aware helper:
+
 - Postgres: `INSERT ... ON CONFLICT DO NOTHING`
 - SQLite: `INSERT OR IGNORE ...`
 

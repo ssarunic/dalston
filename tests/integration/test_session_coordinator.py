@@ -48,12 +48,12 @@ def _make_worker(
     capacity: int = 4,
     active_sessions: int = 0,
     status: str = "ready",
-    runtime: str = "faster-whisper",
+    engine_id: str = "faster-whisper",
     models_loaded: list[str] | None = None,
 ) -> EngineRecord:
     return EngineRecord(
         instance=instance,
-        runtime=runtime,
+        engine_id=engine_id,
         stage="transcribe",
         interfaces=["realtime"],
         endpoint=endpoint,
@@ -168,7 +168,7 @@ async def test_acquire_and_release_session() -> None:
         instance="worker-1",
         endpoint="ws://localhost:9000",
         session_id="sess_abc123",
-        runtime="faster-whisper",
+        engine_id="faster-whisper",
     )
     mock_allocator.acquire_worker.return_value = expected_allocation
 
@@ -185,8 +185,8 @@ async def test_acquire_and_release_session() -> None:
         language="en",
         model="Systran/faster-whisper-large-v3",
         client_ip="127.0.0.1",
-        runtime=None,
-        valid_runtimes=None,
+        engine_id=None,
+        valid_engine_ids=None,
     )
 
     expected_state = SessionState(
@@ -484,7 +484,7 @@ def test_worker_status_from_engine_record() -> None:
         capacity=8,
         active_sessions=3,
         status="busy",
-        runtime="parakeet",
+        engine_id="parakeet",
         models_loaded=["parakeet-tdt-0.6b-v3"],
     )
     status = WorkerStatus.from_engine_record(worker)
@@ -494,7 +494,7 @@ def test_worker_status_from_engine_record() -> None:
     assert status.capacity == 8
     assert status.active_sessions == 3
     assert status.status == "busy"
-    assert status.runtime == "parakeet"
+    assert status.engine_id == "parakeet"
     assert status.models == ["parakeet-tdt-0.6b-v3"]
     assert status.languages == ["auto"]
 

@@ -31,7 +31,7 @@ from dalston.orchestrator.engine_selector import (
 
 
 def make_capabilities(
-    runtime: str = "test-engine",
+    engine_id: str = "test-engine",
     languages: list[str] | None = None,
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
@@ -40,7 +40,7 @@ def make_capabilities(
 ) -> EngineCapabilities:
     """Create EngineCapabilities for testing."""
     return EngineCapabilities(
-        runtime=runtime,
+        engine_id=engine_id,
         version="1.0.0",
         stages=["transcribe"],
         languages=languages,
@@ -52,7 +52,7 @@ def make_capabilities(
 
 
 def make_engine_state(
-    runtime: str = "test-engine",
+    engine_id: str = "test-engine",
     instance: str | None = None,
     stage: str = "transcribe",
     capabilities: EngineCapabilities | None = None,
@@ -61,11 +61,11 @@ def make_engine_state(
     """Create EngineRecord for testing."""
     now = datetime.now(UTC)
     state = EngineRecord(
-        runtime=runtime,
-        instance=instance or f"{runtime}-abc123",
+        engine_id=engine_id,
+        instance=instance or f"{engine_id}-abc123",
         stage=stage,
         interfaces=["batch"],
-        stream_name=f"dalston:stream:{runtime}",
+        stream_name=f"dalston:stream:{engine_id}",
         status="idle" if is_available else "offline",
         last_heartbeat=now,
         registered_at=now,
@@ -75,14 +75,14 @@ def make_engine_state(
 
 
 def make_catalog_entry(
-    runtime: str = "test-engine",
+    engine_id: str = "test-engine",
     languages: list[str] | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
-        runtime=runtime,
-        image=f"dalston/{runtime}:latest",
-        capabilities=make_capabilities(runtime=runtime, languages=languages),
+        engine_id=engine_id,
+        image=f"dalston/{engine_id}:latest",
+        capabilities=make_capabilities(engine_id=engine_id, languages=languages),
     )
 
 
@@ -178,7 +178,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.runtime == "fast"
+        assert result.engine_id == "fast"
         assert "native word timestamps" in result.selection_reason
 
     def test_prefers_native_diarization(self):
@@ -193,7 +193,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.runtime == "has-diar"
+        assert result.engine_id == "has-diar"
         assert "native diarization" in result.selection_reason
 
     def test_prefers_faster_rtf(self):
@@ -208,7 +208,7 @@ class TestRankAndSelect:
             ),
         ]
         result = _rank_and_select(engines, {})
-        assert result.runtime == "fast"
+        assert result.engine_id == "fast"
 
     def test_prefers_language_specific_over_universal(self):
         """When language is specified, prefer language-specific engines."""
@@ -224,7 +224,7 @@ class TestRankAndSelect:
         ]
         # Specify English - should prefer the English-specific engine
         result = _rank_and_select(engines, {"language": "en"})
-        assert result.runtime == "english-only"
+        assert result.engine_id == "english-only"
 
     def test_prefers_universal_for_auto_detection(self):
         """When no language specified (auto), prefer universal engines for safety."""
@@ -240,7 +240,7 @@ class TestRankAndSelect:
         ]
         # No language specified - should prefer universal for safety
         result = _rank_and_select(engines, {})
-        assert result.runtime == "universal"
+        assert result.engine_id == "universal"
 
 
 # =============================================================================
@@ -271,20 +271,20 @@ class TestSelectEngine:
             "transcribe", {"language": "en"}, mock_registry, mock_catalog
         )
 
-        assert result.runtime == "only-one"
+        assert result.engine_id == "only-one"
         assert result.selection_reason == "only capable engine"
 
     @pytest.mark.asyncio
-    async def test_no_downloaded_model_error_reports_attempted_runtimes(
+    async def test_no_downloaded_model_error_reports_attempted_engine_ids(
         self, mock_registry, mock_catalog, monkeypatch
     ):
-        runtime_a_caps = make_capabilities("runtime-a")
-        runtime_b_caps = make_capabilities("runtime-b")
+        runtime_a_caps = make_capabilities("engine_id-a")
+        runtime_b_caps = make_capabilities("engine_id-b")
         runtime_a = make_engine_state(
-            "runtime-a", stage="align", capabilities=runtime_a_caps
+            "engine_id-a", stage="align", capabilities=runtime_a_caps
         )
         runtime_b = make_engine_state(
-            "runtime-b", stage="align", capabilities=runtime_b_caps
+            "engine_id-b", stage="align", capabilities=runtime_b_caps
         )
 
         mock_registry.get_by_stage.return_value = [runtime_a, runtime_b]
@@ -307,9 +307,9 @@ class TestSelectEngine:
             )
 
         error = exc_info.value
-        assert error.runtime == "runtime-a"
-        assert error.attempted_runtimes == ["runtime-a", "runtime-b"]
-        assert "Attempted runtimes: runtime-a, runtime-b." in str(error)
+        assert error.engine_id == "engine_id-a"
+        assert error.attempted_engine_ids == ["engine_id-a", "engine_id-b"]
+        assert "Attempted engine_ids: engine_id-a, engine_id-b." in str(error)
 
     @pytest.mark.asyncio
     async def test_raises_when_no_capable_engine(self, mock_registry, mock_catalog):
@@ -346,7 +346,7 @@ class TestSelectEngine:
             user_preference="preferred",
         )
 
-        assert result.runtime == "preferred"
+        assert result.engine_id == "preferred"
         assert result.selection_reason == "user preference"
 
     @pytest.mark.asyncio
@@ -372,16 +372,16 @@ class TestSelectEngine:
             id="pyannote/speaker-diarization-community-1",
             stage="diarize",
             status="ready",
-            runtime="pyannote-4.0",
-            runtime_model_id="pyannote/speaker-diarization-community-1",
+            engine_id="pyannote-4.0",
+            loaded_model_id="pyannote/speaker-diarization-community-1",
             source="pyannote/speaker-diarization-community-1",
             languages=None,
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
 
-        runtime = make_engine_state("pyannote-4.0", stage="diarize")
-        mock_registry.get_engine.return_value = runtime
+        engine_id = make_engine_state("pyannote-4.0", stage="diarize")
+        mock_registry.get_engine.return_value = engine_id
 
         result = await select_engine(
             "diarize",
@@ -393,9 +393,9 @@ class TestSelectEngine:
             user_preference_is_model=True,
         )
 
-        assert result.runtime == "pyannote-4.0"
-        # Non-transcribe stages use explicit runtime_model_id from registry.
-        assert result.runtime_model_id == "pyannote/speaker-diarization-community-1"
+        assert result.engine_id == "pyannote-4.0"
+        # Non-transcribe stages use explicit loaded_model_id from registry.
+        assert result.loaded_model_id == "pyannote/speaker-diarization-community-1"
 
     @pytest.mark.asyncio
     async def test_stage_model_not_found(self, mock_registry, mock_catalog):
@@ -422,8 +422,8 @@ class TestSelectEngine:
             id="urchade/gliner_multi-v2.1",
             stage="pii_detect",
             status="ready",
-            runtime="pii-presidio",
-            runtime_model_id="urchade/gliner_multi-v2.1",
+            engine_id="pii-presidio",
+            loaded_model_id="urchade/gliner_multi-v2.1",
             source="urchade/gliner_multi-v2.1",
             languages=None,
         )
@@ -449,8 +449,8 @@ class TestSelectEngine:
             id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
             stage="align",
             status="not_downloaded",
-            runtime="phoneme-align",
-            runtime_model_id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+            engine_id="phoneme-align",
+            loaded_model_id="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
             source="jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
             languages=["ja"],
         )
@@ -471,13 +471,13 @@ class TestSelectEngine:
         assert exc_info.value.code == "model_not_ready"
 
     @pytest.mark.asyncio
-    async def test_stage_model_runtime_unavailable(self, mock_registry, mock_catalog):
+    async def test_stage_model_engine_id_unavailable(self, mock_registry, mock_catalog):
         db_model = SimpleNamespace(
             id="urchade/gliner_multi-v2.1",
             stage="pii_detect",
             status="ready",
-            runtime="pii-presidio",
-            runtime_model_id="urchade/gliner_multi-v2.1",
+            engine_id="pii-presidio",
+            loaded_model_id="urchade/gliner_multi-v2.1",
             source="urchade/gliner_multi-v2.1",
             languages=None,
         )
@@ -507,7 +507,7 @@ class TestSelectEngine:
 class TestShouldAddAlignment:
     def test_needs_alignment_when_no_native_timestamps(self):
         selection = EngineSelectionResult(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -515,7 +515,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_native_timestamps(self):
         selection = EngineSelectionResult(
-            runtime="parakeet",
+            engine_id="parakeet",
             capabilities=make_capabilities(supports_word_timestamps=True),
             selection_reason="test",
         )
@@ -523,7 +523,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_disabled_by_params(self):
         selection = EngineSelectionResult(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -531,7 +531,7 @@ class TestShouldAddAlignment:
 
     def test_skip_alignment_when_segment_granularity(self):
         selection = EngineSelectionResult(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             capabilities=make_capabilities(supports_word_timestamps=False),
             selection_reason="test",
         )
@@ -544,7 +544,7 @@ class TestShouldAddAlignment:
 class TestShouldAddDiarization:
     def test_needs_diarization_when_requested_no_native(self):
         selection = EngineSelectionResult(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             capabilities=make_capabilities(includes_diarization=False),
             selection_reason="test",
         )
@@ -554,7 +554,7 @@ class TestShouldAddDiarization:
 
     def test_skip_diarization_when_native(self):
         selection = EngineSelectionResult(
-            runtime="whisperx-full",
+            engine_id="whisperx-full",
             capabilities=make_capabilities(includes_diarization=True),
             selection_reason="test",
         )
@@ -565,7 +565,7 @@ class TestShouldAddDiarization:
 
     def test_skip_diarization_when_not_requested(self):
         selection = EngineSelectionResult(
-            runtime="faster-whisper",
+            engine_id="faster-whisper",
             capabilities=make_capabilities(includes_diarization=False),
             selection_reason="test",
         )
@@ -656,7 +656,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        runtime=caps.runtime, stage=stage, capabilities=caps
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -683,20 +683,20 @@ class TestSelectPipelineEngines:
         ) as mock_select_engine:
             mock_select_engine.side_effect = [
                 EngineSelectionResult(
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     capabilities=make_capabilities("audio-prepare"),
                     selection_reason="prepare",
                 ),
                 EngineSelectionResult(
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     capabilities=make_capabilities(
                         "faster-whisper", supports_word_timestamps=True
                     ),
                     selection_reason="transcribe",
-                    runtime_model_id="Systran/faster-whisper-base",
+                    loaded_model_id="Systran/faster-whisper-base",
                 ),
                 EngineSelectionResult(
-                    runtime="final-merger",
+                    engine_id="final-merger",
                     capabilities=make_capabilities("final-merger"),
                     selection_reason="merge",
                 ),
@@ -726,7 +726,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        runtime=caps.runtime, stage=stage, capabilities=caps
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -759,7 +759,7 @@ class TestSelectPipelineEngines:
                 caps.stages = [stage]
                 return [
                     make_engine_state(
-                        runtime=caps.runtime, stage=stage, capabilities=caps
+                        engine_id=caps.engine_id, stage=stage, capabilities=caps
                     )
                 ]
             return []
@@ -772,7 +772,7 @@ class TestSelectPipelineEngines:
         selections = selection.stages
 
         assert "diarize" in selections
-        assert selections["diarize"].runtime == "pyannote-4.0"
+        assert selections["diarize"].engine_id == "pyannote-4.0"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_segment_when_align_model_not_downloaded_default(
@@ -785,18 +785,18 @@ class TestSelectPipelineEngines:
         ) as mock_select_engine:
             mock_select_engine.side_effect = [
                 EngineSelectionResult(
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     capabilities=make_capabilities("audio-prepare"),
                     selection_reason="prepare",
                 ),
                 EngineSelectionResult(
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     capabilities=make_capabilities(
                         "faster-whisper", supports_word_timestamps=False
                     ),
                     selection_reason="transcribe",
                 ),
-                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+                NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
             ]
 
             selection = await select_pipeline_engines(
@@ -805,7 +805,7 @@ class TestSelectPipelineEngines:
             selections = selection.stages
 
         assert "align" not in selections
-        assert selections["transcribe"].runtime == "faster-whisper"
+        assert selections["transcribe"].engine_id == "faster-whisper"
         # Mono pipeline: no merge selected
         assert "merge" not in selections
         assert "timestamps_granularity" not in parameters
@@ -823,20 +823,20 @@ class TestSelectPipelineEngines:
         ) as mock_select_engine:
             mock_select_engine.side_effect = [
                 EngineSelectionResult(
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     capabilities=make_capabilities("audio-prepare"),
                     selection_reason="prepare",
                 ),
                 EngineSelectionResult(
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     capabilities=make_capabilities(
                         "faster-whisper", supports_word_timestamps=False
                     ),
                     selection_reason="transcribe",
                 ),
-                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+                NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
                 EngineSelectionResult(
-                    runtime="final-merger",
+                    engine_id="final-merger",
                     capabilities=make_capabilities("final-merger"),
                     selection_reason="merge",
                 ),
@@ -864,12 +864,12 @@ class TestSelectPipelineEngines:
         ) as mock_select_engine:
             mock_select_engine.side_effect = [
                 EngineSelectionResult(
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     capabilities=make_capabilities("audio-prepare"),
                     selection_reason="prepare",
                 ),
                 EngineSelectionResult(
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     capabilities=make_capabilities(
                         "faster-whisper", supports_word_timestamps=False
                     ),
@@ -882,7 +882,7 @@ class TestSelectPipelineEngines:
                     catalog_alternatives=[],
                 ),
                 EngineSelectionResult(
-                    runtime="final-merger",
+                    engine_id="final-merger",
                     capabilities=make_capabilities("final-merger"),
                     selection_reason="merge",
                 ),
@@ -909,18 +909,18 @@ class TestSelectPipelineEngines:
         ) as mock_select_engine:
             mock_select_engine.side_effect = [
                 EngineSelectionResult(
-                    runtime="audio-prepare",
+                    engine_id="audio-prepare",
                     capabilities=make_capabilities("audio-prepare"),
                     selection_reason="prepare",
                 ),
                 EngineSelectionResult(
-                    runtime="faster-whisper",
+                    engine_id="faster-whisper",
                     capabilities=make_capabilities(
                         "faster-whisper", supports_word_timestamps=False
                     ),
                     selection_reason="transcribe",
                 ),
-                NoDownloadedModelError(runtime="phoneme-align", stage="align"),
+                NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
             ]
 
             with pytest.raises(NoDownloadedModelError):

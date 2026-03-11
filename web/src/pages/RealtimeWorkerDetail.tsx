@@ -104,8 +104,8 @@ export function RealtimeWorkerDetail() {
     (w) => w.instance === decodedWorkerId
   )
 
-  // Fetch models from registry filtered by this worker's runtime
-  const { data: registryData } = useModelRegistry({ runtime: worker?.runtime ?? undefined })
+  // Fetch models from registry filtered by this worker's engine_id
+  const { data: registryData } = useModelRegistry({ engine_id: worker?.engine_id ?? undefined })
   const availableModels = useMemo(() => {
     return registryData?.data ?? []
   }, [registryData?.data])
@@ -182,8 +182,8 @@ export function RealtimeWorkerDetail() {
                 <Badge variant={isReady ? 'success' : 'destructive'}>
                   {isReady ? 'Ready' : 'Unhealthy'}
                 </Badge>
-                {worker.runtime && (
-                  <Badge variant="outline">{worker.runtime}</Badge>
+                {worker.engine_id && (
+                  <Badge variant="outline">{worker.engine_id}</Badge>
                 )}
               </div>
             </div>
@@ -278,7 +278,7 @@ export function RealtimeWorkerDetail() {
       </Card>
 
       {/* Available Models (from registry) */}
-      {worker.runtime && (
+      {worker.engine_id && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
@@ -292,12 +292,12 @@ export function RealtimeWorkerDetail() {
           <CardContent>
             {availableModels.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">
-                No models in registry for runtime "{worker.runtime}"
+                No models in registry for engine_id "{worker.engine_id}"
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {availableModels.map((model) => {
-                  const isLoaded = worker.models.includes(model.runtime_model_id) ||
+                  const isLoaded = worker.models.includes(model.loaded_model_id) ||
                     worker.models.includes(model.id) ||
                     worker.models.includes(model.name || '')
                   const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
@@ -324,7 +324,7 @@ export function RealtimeWorkerDetail() {
                             )}
                           </div>
                           <div className="text-xs text-muted-foreground mt-1 truncate">
-                            {model.runtime_model_id}
+                            {model.loaded_model_id}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -372,7 +372,7 @@ export function RealtimeWorkerDetail() {
           />
           <CapabilityRow
             label="Runtime"
-            value={worker.runtime ?? 'Unknown'}
+            value={worker.engine_id ?? 'Unknown'}
           />
           <CapabilityRow
             label="Max Sessions"
@@ -410,7 +410,7 @@ export function RealtimeWorkerDetail() {
         <CardContent className="space-y-1">
           <CapabilityRow label="Instance" value={worker.instance} />
           <CapabilityRow label="Endpoint" value={worker.endpoint} />
-          <CapabilityRow label="Runtime" value={worker.runtime ?? 'Unknown'} />
+          <CapabilityRow label="Runtime" value={worker.engine_id ?? 'Unknown'} />
           <CapabilityRow label="Status" value={isReady ? 'Ready' : 'Unhealthy'} />
         </CardContent>
       </Card>

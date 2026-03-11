@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Goal** | Remove hidden global coupling between engines by making engines stateless and URI-free, with artifact persistence/materialization handled by runtime infrastructure |
+| **Goal** | Remove hidden global coupling between engines by making engines stateless and URI-free, with artifact persistence/materialization handled by engine_id infrastructure |
 | **Duration** | 12-16 days |
 | **Dependencies** | M43 (RT model loading), M48 (RT routing alignment), M49 (terminology unification) |
 | **Deliverable** | Clean-break engine SDK contract (`process(input, ctx)`), runner-side artifact materializer, artifact-reference internal schemas, local runner, RT side-effect adapters |
@@ -79,9 +79,9 @@ Persistence/reads are handled **outside engine logic**, but should remain in run
 ### Functional outcomes
 
 1. Internal task inputs are URI-free for engine logic (artifact references + local materialization).
-2. Engines never import storage I/O helpers in runtime logic.
+2. Engines never import storage I/O helpers in engine_id logic.
 3. Batch runner performs all artifact fetch/persist operations.
-4. RT session/runtime side effects are adapter-driven and swappable.
+4. RT session/engine_id side effects are adapter-driven and swappable.
 5. External APIs/protocols remain unchanged.
 
 ### Engineering outcomes
@@ -141,15 +141,15 @@ Where:
 
 3. `BatchTaskContext` exposes:
    - logging/tracing context
-   - runtime metadata access
-   - deterministic runtime helpers (no storage side effects)
+   - engine_id metadata access
+   - deterministic engine_id helpers (no storage side effects)
 
 4. Typing note:
    - Keep subtype contracts explicit (`Engine[PrepareInputPayload, PrepareOutputPayload]` etc.) and enforce with mypy + `@override` in concrete engines.
 
 ### Stage-specific payload contracts (required)
 
-Use stage contracts, not runtime/vendor contracts.
+Use stage contracts, not engine_id/vendor contracts.
 
 1. Required core models:
    - `PrepareInputPayload` / `PrepareOutputPayload`
@@ -159,7 +159,7 @@ Use stage contracts, not runtime/vendor contracts.
    - `PIIDetectInputPayload` / `PIIDetectOutputPayload`
    - `AudioRedactInputPayload` / `AudioRedactOutputPayload`
    - `MergeInputPayload` / `MergeOutputPayload`
-2. Per-runtime extensions are allowed only for strictly runtime-specific fields and must embed within the stage payload boundary.
+2. Per-engine_id extensions are allowed only for strictly engine_id-specific fields and must embed within the stage payload boundary.
 3. `EngineInput/EngineOutput` remain common envelopes; stage payloads carry domain semantics.
 
 ### Artifact model (new internal shape)
@@ -168,7 +168,7 @@ Introduce artifact references (IDs) as internal dependency links between tasks:
 
 1. `artifact_id` (stable within job)
 2. `kind` (audio, transcript, redacted_audio, task_output, etc.)
-3. `storage_locator` (owned by runtime infra, opaque to engine)
+3. `storage_locator` (owned by engine_id infra, opaque to engine)
 4. `checksum`, `size`, `media_type`
 
 Engines see local paths only after materialization.
@@ -366,15 +366,15 @@ class SessionStorage(ABC):
    - `engines/stt-prepare/audio-prepare/engine.py`
    - `engines/stt-redact/audio-redactor/engine.py`
    - `engines/stt-merge/final-merger/engine.py`
-4. Remove URI construction and direct SDK I/O calls from engine runtime logic.
+4. Remove URI construction and direct SDK I/O calls from engine engine_id logic.
 5. Add regression tests for produced artifact declarations and downstream compatibility.
 6. Update payloads/consumers impacted by prepare output shape migration (`channel_files[].artifact_id`).
 
 **Acceptance criteria**
 
 1. No batch engine builds/parses storage URIs in `process`.
-2. No batch engine imports storage transport helpers in runtime path.
-3. Engines consume/produce stage payload models (no raw dict contracts in runtime path).
+2. No batch engine imports storage transport helpers in engine_id path.
+3. Engines consume/produce stage payload models (no raw dict contracts in engine_id path).
 4. Existing stage outputs remain compatible for downstream consumers.
 5. Prepare-driven per-channel fan-out remains correct in orchestrator dispatch.
 
@@ -423,7 +423,7 @@ class SessionStorage(ABC):
 
 1. RT protocol behavior unchanged.
 2. Session storage and presence registry are swappable adapters.
-3. Direct side-effect concrete coupling reduced/removed in runtime layer.
+3. Direct side-effect concrete coupling reduced/removed in engine_id layer.
 4. Session handler no longer creates S3 client directly.
 
 ---
@@ -433,9 +433,9 @@ class SessionStorage(ABC):
 **Actions**
 
 1. Add CI checks with explicit implementations:
-   - AST check: no `dalston.engine_sdk.io`, `boto3`, or `redis` imports under `engines/**` runtime modules
+   - AST check: no `dalston.engine_sdk.io`, `boto3`, or `redis` imports under `engines/**` engine_id modules
    - grep check: no `s3://` string literals under `engines/**`
-   - AST check: no calls to URI helpers (`build_*_uri`, `parse_s3_uri`) under engine runtime modules
+   - AST check: no calls to URI helpers (`build_*_uri`, `parse_s3_uri`) under engine engine_id modules
    - check for old batch engine signature and raw dict payload access in migrated stages
 2. Add contract tests:
    - adapter parity tests (prod/local)
@@ -454,7 +454,7 @@ class SessionStorage(ABC):
 
 1. Gate A (after Phase 0): contract/schema/interface freeze approved in-repo.
 2. Gate B (after Phase 2): orchestrator resolves artifact-typed bindings correctly in unit + golden tests.
-3. Gate C (after Phase 3): migrated engines have zero runtime storage imports/URI logic and fan-out/fan-in behavior verified.
+3. Gate C (after Phase 3): migrated engines have zero engine_id storage imports/URI logic and fan-out/fan-in behavior verified.
 4. Gate D (after Phase 5): realtime protocol unchanged and `SessionStorage` adapter passes failure-path tests.
 5. Gate E (after Phase 6): CI checks active and blocking on forbidden patterns.
 
@@ -484,7 +484,7 @@ class SessionStorage(ABC):
 20. Add local runner tests for prepare/transcribe/merge.
 21. Add realtime context interfaces and `SessionStorage` adapter implementations.
 22. Refactor RT session storage and presence handling behind adapters.
-23. Add CI static checks (AST + grep) for forbidden runtime patterns.
+23. Add CI static checks (AST + grep) for forbidden engine_id patterns.
 24. Remove dead code, publish migration docs, and lock gates in CI.
 
 ---
@@ -552,7 +552,7 @@ class SessionStorage(ABC):
 
 ## Exit Criteria
 
-1. Engines are stateless and URI-free in runtime logic.
+1. Engines are stateless and URI-free in engine_id logic.
 2. Artifact transport/persistence is owned by runner materializer.
 3. Orchestrator schedules via artifact references, not implicit URI coupling.
 4. URI fields are removed from internal stage payloads where replaced by artifact IDs.

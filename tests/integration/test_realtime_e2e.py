@@ -307,7 +307,7 @@ class TestTranscriptAssemblyE2E:
                     )
                 ],
                 language="en",
-                runtime="test",
+                engine_id="test",
             )
 
         # Simulate receiving multiple utterances from VAD
