@@ -962,6 +962,7 @@ async def get_transcription(
 
         if transcript:
             response.language_code = transcript.get("metadata", {}).get("language")
+            response.languages = transcript.get("metadata", {}).get("languages")
             response.text = transcript.get("text")
             response.words = transcript.get("words")
             response.segments = transcript.get("segments")

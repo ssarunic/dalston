@@ -15,6 +15,7 @@ import structlog
 from dalston.common.pipeline_types import (
     AlignOutput,
     DiarizeOutput,
+    LanguageInfo,
     MergedSegment,
     MergeOutput,
     Segment,
@@ -67,7 +68,9 @@ def assemble_transcript(
     audio_duration, audio_channels, sample_rate = _extract_audio_metadata(prepare_data)
 
     # Extract transcription data
-    text, language, language_confidence = _extract_transcribe_data(transcribe_data)
+    text, language, language_confidence, languages = _extract_transcribe_data(
+        transcribe_data
+    )
 
     # Parse typed outputs — transcribe must be a valid Transcript
     if not transcribe_data:
@@ -120,6 +123,7 @@ def assemble_transcript(
         sample_rate=sample_rate,
         language=language,
         language_confidence=round(language_confidence, 3),
+        languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,
         speaker_detection=SpeakerDetectionMode(speaker_detection),
@@ -150,6 +154,7 @@ def assemble_transcript(
         segment_count=len(segments),
         char_count=len(text),
         language=language,
+        languages_detected=len(languages) if languages else 1,
         word_timestamps=word_timestamps_available,
         speaker_count=len(speakers),
     )
@@ -250,6 +255,7 @@ def assemble_per_channel_transcript(
             end=seg_dict["end"],
             text=seg_dict["text"],
             speaker=seg_dict["speaker"],
+            language=seg_dict.get("language"),
             words=words,
             tokens=seg_dict.get("tokens")
             if isinstance(seg_dict.get("tokens"), list)
@@ -330,6 +336,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "end": seg.end,
             "text": seg.text,
             "words": seg.words,
+            "language": seg.language,
             "tokens": seg.metadata.get("tokens"),
             "temperature": seg.metadata.get("temperature"),
             "avg_logprob": seg.metadata.get("avg_logprob"),
@@ -342,6 +349,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "end": seg.end,
             "text": seg.text,
             "words": seg.words,
+            "language": seg.language,
             "tokens": seg.tokens,
             "temperature": seg.temperature,
             "avg_logprob": seg.avg_logprob,
@@ -414,15 +422,30 @@ def _extract_audio_metadata(
 
 def _extract_transcribe_data(
     transcribe_data: dict[str, Any],
-) -> tuple[str, str, float]:
-    """Extract text, language, and confidence from transcribe output."""
+) -> tuple[str, str, float, list[LanguageInfo] | None]:
+    """Extract text, language, confidence, and languages from transcribe output."""
     text = transcribe_data.get("text", "")
     language = transcribe_data.get("language", "en")
     language_confidence_raw = transcribe_data.get("language_confidence")
     language_confidence = (
         language_confidence_raw if language_confidence_raw is not None else 1.0
     )
-    return text, language, language_confidence
+    # Extract code-switching language list if present
+    raw_languages = transcribe_data.get("languages")
+    languages: list[LanguageInfo] | None = None
+    if isinstance(raw_languages, list) and raw_languages:
+        parsed: list[LanguageInfo] = []
+        for entry in raw_languages:
+            if isinstance(entry, dict):
+                try:
+                    parsed.append(LanguageInfo.model_validate(entry))
+                except Exception:
+                    pass
+            elif isinstance(entry, LanguageInfo):
+                parsed.append(entry)
+        if parsed:
+            languages = parsed
+    return text, language, language_confidence, languages
 
 
 def _parse_transcript(data: dict[str, Any]) -> Transcript:
@@ -571,6 +594,7 @@ def _normalize_transcript_words(words: list) -> list[Word]:
                     end=w.end,
                     confidence=w.confidence,
                     alignment_method=w.alignment_method,
+                    language=w.language,
                 )
             )
         elif isinstance(w, dict):
@@ -628,12 +652,20 @@ def _build_merged_segments(
             else:
                 words = _normalize_words(seg_words)
 
+        # Extract per-segment language (code-switching)
+        seg_language: str | None = None
+        if isinstance(seg, TranscriptSegment):
+            seg_language = seg.language
+        elif isinstance(seg, Segment):
+            seg_language = seg.language
+
         segment = MergedSegment(
             id=f"seg_{idx:03d}",
             start=seg_start,
             end=seg_end,
             text=seg_text,
             speaker=speaker,
+            language=seg_language,
             words=words,
             tokens=seg_tokens if isinstance(seg_tokens, list) else None,
             temperature=seg_temperature,

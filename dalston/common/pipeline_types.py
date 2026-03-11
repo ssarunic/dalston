@@ -68,6 +68,26 @@ class SpeakerDetectionMode(StrEnum):
 # =============================================================================
 
 
+class LanguageInfo(BaseModel):
+    """Detected language with confidence score.
+
+    Used at the transcript level to represent all languages detected in the
+    audio (code-switching).  The ``is_primary`` flag marks the dominant
+    language; remaining entries are secondary languages ordered by
+    descending confidence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(..., description="ISO 639-1 language code (e.g., 'en', 'fr')")
+    confidence: float = Field(
+        ..., ge=0, le=1, description="Detection confidence for this language"
+    )
+    is_primary: bool = Field(
+        default=False, description="True for the dominant language"
+    )
+
+
 class Phoneme(BaseModel):
     """Phoneme-level timing information."""
 
@@ -119,6 +139,10 @@ class Word(BaseModel):
     )
     alignment_method: AlignmentMethod | None = Field(
         default=None, description="How timestamps were produced"
+    )
+    language: str | None = Field(
+        default=None,
+        description="ISO 639-1 code for this word (for code-switching)",
     )
 
 
@@ -269,6 +293,10 @@ class MergedSegment(BaseModel):
         default=None, description="Text with PII redacted (if PII detection enabled)"
     )
     speaker: str | None = Field(default=None, description="Assigned speaker ID")
+    language: str | None = Field(
+        default=None,
+        description="ISO 639-1 language code for this segment (for code-switching)",
+    )
     words: list[Word] | None = Field(default=None, description="Word-level detail")
     tokens: list[int] | None = Field(
         default=None, description="Decoder token IDs when available"
@@ -494,6 +522,10 @@ class TranscriptWord(BaseModel):
         default=AlignmentMethod.UNKNOWN,
         description="How this word's timestamps were produced",
     )
+    language: str | None = Field(
+        default=None,
+        description="ISO 639-1 code for this word (for code-switching)",
+    )
     characters: list[Character] | None = Field(
         default=None, description="Character-level timing (from alignment)"
     )
@@ -525,6 +557,12 @@ class TranscriptSegment(BaseModel):
     )
     language: str | None = Field(
         default=None, description="Per-segment language (for code-switching)"
+    )
+    language_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Per-segment language detection confidence (for code-switching)",
     )
     confidence: float | None = Field(
         default=None, description="Segment-level confidence"
@@ -558,9 +596,17 @@ class Transcript(BaseModel):
     )
     text: str = Field(..., description="Full transcript text")
     segments: list[TranscriptSegment] = Field(..., description="Transcript segments")
-    language: str = Field(..., description="Detected/used language code (ISO 639-1)")
+    language: str = Field(..., description="Primary detected/used language code (ISO 639-1)")
     language_confidence: float | None = Field(
         default=None, ge=0, le=1, description="Language detection confidence"
+    )
+    languages: list[LanguageInfo] | None = Field(
+        default=None,
+        description=(
+            "All languages detected in the audio, ordered by confidence. "
+            "Present when the engine detects code-switching (multiple languages). "
+            "The primary language is marked with is_primary=True."
+        ),
     )
     duration: float | None = Field(
         default=None, ge=0, description="Audio duration in seconds"
@@ -681,6 +727,13 @@ class TranscriptMetadata(BaseModel):
     language: str = Field(..., description="Primary language code")
     language_confidence: float = Field(
         default=1.0, ge=0, le=1, description="Language detection confidence"
+    )
+    languages: list[LanguageInfo] | None = Field(
+        default=None,
+        description=(
+            "All languages detected in the audio (for code-switching). "
+            "Ordered by confidence, primary language marked with is_primary=True."
+        ),
     )
     word_timestamps: bool = Field(
         default=False, description="Whether word timestamps are available"

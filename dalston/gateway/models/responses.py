@@ -132,6 +132,13 @@ class JobResponse(BaseModel):
 
     # Transcript data (if completed) - populated from S3
     language_code: str | None = None
+    languages: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "All detected languages with confidence scores (for code-switching). "
+            "Each entry has 'code', 'confidence', and 'is_primary' fields."
+        ),
+    )
     text: str | None = None
     words: list[dict[str, Any]] | None = None
     segments: list[dict[str, Any]] | None = None

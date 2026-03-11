@@ -592,3 +592,65 @@ class TestTranscriptAssembly:
         assert segment.start == 0.0
         assert segment.end == 2.0
         assert len(segment.words) == 2
+
+    def test_assemble_with_code_switching(self):
+        """Transcript assembly propagates code-switching language data."""
+        from dalston.common.transcript import assemble_transcript
+
+        transcript_data = {
+            "text": "Hello, comment allez-vous?",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "Hello,",
+                    "language": "en",
+                    "language_confidence": 0.95,
+                },
+                {
+                    "start": 1.0,
+                    "end": 3.0,
+                    "text": "comment allez-vous?",
+                    "language": "fr",
+                    "language_confidence": 0.92,
+                },
+            ],
+            "language": "en",
+            "language_confidence": 0.7,
+            "languages": [
+                {"code": "en", "confidence": 0.7, "is_primary": True},
+                {"code": "fr", "confidence": 0.3},
+            ],
+            "runtime": "faster-whisper",
+            "timestamp_granularity": "segment",
+            "alignment_method": "attention",
+        }
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "duration": 3.0,
+                        "channels": 1,
+                        "sample_rate": 16000,
+                        "artifact_id": "a1",
+                        "format": "wav",
+                    }
+                ],
+                "runtime": "ffmpeg",
+            },
+            "transcribe": transcript_data,
+        }
+
+        result = assemble_transcript(
+            job_id="test-cs-job",
+            stage_outputs=stage_outputs,
+        )
+
+        assert result.metadata.language == "en"
+        assert result.metadata.languages is not None
+        assert len(result.metadata.languages) == 2
+        assert result.metadata.languages[0].code == "en"
+        assert result.metadata.languages[0].is_primary is True
+        assert result.metadata.languages[1].code == "fr"
+        assert result.segments[0].language == "en"
+        assert result.segments[1].language == "fr"

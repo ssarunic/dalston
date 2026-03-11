@@ -13,6 +13,7 @@ from dalston.common.pipeline_types import (
     AudioMedia,
     Character,
     DiarizeOutput,
+    LanguageInfo,
     MergedSegment,
     MergeOutput,
     Phoneme,
@@ -459,6 +460,211 @@ class TestTranscript:
         )
         assert out.language == "fr"
         assert out.language_confidence == 0.97
+
+    def test_transcript_with_code_switching_languages(self):
+        """Test transcript with multiple detected languages (code-switching)."""
+        out = Transcript(
+            segments=[
+                TranscriptSegment(
+                    start=0.0,
+                    end=3.0,
+                    text="Hello, comment allez-vous today?",
+                    language="en",
+                    language_confidence=0.7,
+                ),
+            ],
+            text="Hello, comment allez-vous today?",
+            language="en",
+            language_confidence=0.7,
+            languages=[
+                LanguageInfo(code="en", confidence=0.7, is_primary=True),
+                LanguageInfo(code="fr", confidence=0.3),
+            ],
+            runtime="faster-whisper",
+        )
+        assert out.language == "en"
+        assert out.languages is not None
+        assert len(out.languages) == 2
+        assert out.languages[0].code == "en"
+        assert out.languages[0].is_primary is True
+        assert out.languages[1].code == "fr"
+        assert out.languages[1].is_primary is False
+
+    def test_transcript_languages_defaults_to_none(self):
+        """Languages field defaults to None for mono-lingual transcripts."""
+        out = Transcript(
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
+            text="Hello",
+            language="en",
+            runtime="test",
+        )
+        assert out.languages is None
+
+
+class TestCodeSwitching:
+    """Tests for code-switching support across model types."""
+
+    def test_language_info_model(self):
+        """LanguageInfo validates required fields."""
+        info = LanguageInfo(code="en", confidence=0.95, is_primary=True)
+        assert info.code == "en"
+        assert info.confidence == 0.95
+        assert info.is_primary is True
+
+    def test_language_info_defaults(self):
+        """LanguageInfo defaults is_primary to False."""
+        info = LanguageInfo(code="fr", confidence=0.3)
+        assert info.is_primary is False
+
+    def test_language_info_rejects_invalid_confidence(self):
+        """LanguageInfo rejects confidence outside 0-1."""
+        with pytest.raises(ValidationError):
+            LanguageInfo(code="en", confidence=1.5)
+        with pytest.raises(ValidationError):
+            LanguageInfo(code="en", confidence=-0.1)
+
+    def test_language_info_rejects_extra_fields(self):
+        """LanguageInfo rejects unknown fields."""
+        with pytest.raises(ValidationError):
+            LanguageInfo(code="en", confidence=0.9, script="Latin")
+
+    def test_word_level_language(self):
+        """TranscriptWord accepts per-word language for code-switching."""
+        word_en = TranscriptWord(
+            text="hello", start=0.0, end=0.5, language="en"
+        )
+        word_fr = TranscriptWord(
+            text="monde", start=0.5, end=1.0, language="fr"
+        )
+        assert word_en.language == "en"
+        assert word_fr.language == "fr"
+
+    def test_word_language_defaults_to_none(self):
+        """TranscriptWord language defaults to None."""
+        word = TranscriptWord(text="hello", start=0.0, end=0.5)
+        assert word.language is None
+
+    def test_segment_language_confidence(self):
+        """TranscriptSegment accepts per-segment language confidence."""
+        seg = TranscriptSegment(
+            start=0.0,
+            end=2.0,
+            text="Bonjour le world",
+            language="fr",
+            language_confidence=0.65,
+        )
+        assert seg.language == "fr"
+        assert seg.language_confidence == 0.65
+
+    def test_segment_language_confidence_defaults_to_none(self):
+        """TranscriptSegment language_confidence defaults to None."""
+        seg = TranscriptSegment(start=0.0, end=1.0, text="hello")
+        assert seg.language_confidence is None
+
+    def test_merged_segment_language(self):
+        """MergedSegment preserves per-segment language."""
+        seg = MergedSegment(
+            id="seg_000",
+            start=0.0,
+            end=2.0,
+            text="Bonjour world",
+            language="fr",
+        )
+        assert seg.language == "fr"
+
+    def test_merged_segment_language_defaults_to_none(self):
+        """MergedSegment language defaults to None."""
+        seg = MergedSegment(id="seg_000", start=0.0, end=2.0, text="hello")
+        assert seg.language is None
+
+    def test_legacy_word_language(self):
+        """Legacy Word model accepts per-word language."""
+        word = Word(text="bonjour", start=0.0, end=0.5, language="fr")
+        assert word.language == "fr"
+
+    def test_transcript_metadata_languages(self):
+        """TranscriptMetadata accepts languages list."""
+        meta = TranscriptMetadata(
+            audio_duration=10.0,
+            audio_channels=1,
+            sample_rate=16000,
+            language="en",
+            language_confidence=0.7,
+            languages=[
+                LanguageInfo(code="en", confidence=0.7, is_primary=True),
+                LanguageInfo(code="fr", confidence=0.3),
+            ],
+            created_at="2026-01-01T00:00:00Z",
+            completed_at="2026-01-01T00:00:10Z",
+        )
+        assert meta.languages is not None
+        assert len(meta.languages) == 2
+
+    def test_transcript_metadata_languages_defaults_to_none(self):
+        """TranscriptMetadata languages defaults to None."""
+        meta = TranscriptMetadata(
+            audio_duration=10.0,
+            audio_channels=1,
+            sample_rate=16000,
+            language="en",
+            created_at="2026-01-01T00:00:00Z",
+            completed_at="2026-01-01T00:00:10Z",
+        )
+        assert meta.languages is None
+
+    def test_code_switching_round_trip(self):
+        """Full code-switching transcript survives round-trip serialization."""
+        original = Transcript(
+            text="Hello, comment allez-vous?",
+            segments=[
+                TranscriptSegment(
+                    start=0.0,
+                    end=1.0,
+                    text="Hello,",
+                    language="en",
+                    language_confidence=0.95,
+                    words=[
+                        TranscriptWord(
+                            text="Hello,", start=0.0, end=1.0, language="en"
+                        ),
+                    ],
+                ),
+                TranscriptSegment(
+                    start=1.0,
+                    end=3.0,
+                    text="comment allez-vous?",
+                    language="fr",
+                    language_confidence=0.92,
+                    words=[
+                        TranscriptWord(
+                            text="comment", start=1.0, end=1.5, language="fr"
+                        ),
+                        TranscriptWord(
+                            text="allez-vous?", start=1.5, end=3.0, language="fr"
+                        ),
+                    ],
+                ),
+            ],
+            language="en",
+            language_confidence=0.7,
+            languages=[
+                LanguageInfo(code="en", confidence=0.7, is_primary=True),
+                LanguageInfo(code="fr", confidence=0.3),
+            ],
+            runtime="faster-whisper",
+        )
+
+        data = original.model_dump(mode="json")
+        restored = Transcript.model_validate(data)
+
+        assert restored.languages is not None
+        assert len(restored.languages) == 2
+        assert restored.languages[0].code == "en"
+        assert restored.languages[0].is_primary is True
+        assert restored.segments[0].language == "en"
+        assert restored.segments[0].language_confidence == 0.95
+        assert restored.segments[1].language == "fr"
+        assert restored.segments[1].words[0].language == "fr"
 
 
 class TestAlignOutput:
