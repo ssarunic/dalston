@@ -41,7 +41,7 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.parakeet_onnx_core import NemoOnnxCore
+from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
 
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}

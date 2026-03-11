@@ -394,7 +394,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
 
         words = [
             OnnxWordResult(word="Hello", start=0.0, end=0.3),
@@ -412,7 +412,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
 
         words = [
             OnnxWordResult(word="Hello.", start=0.0, end=0.3),
@@ -432,7 +432,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
 
         words = [
             OnnxWordResult(word="What?", start=0.0, end=0.3),
@@ -450,7 +450,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
 
         words = [
             OnnxWordResult(word="hello", start=0.0, end=0.2),
@@ -478,7 +478,7 @@ class TestParakeetOnnxWordsToSegments:
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
         engine = NemoOnnxBatchEngine()
 
-        from dalston.engine_sdk.cores.parakeet_onnx_core import OnnxWordResult
+        from dalston.engine_sdk.cores.nemo_onnx_core import OnnxWordResult
 
         words = [
             OnnxWordResult(word="First.", start=1.0, end=1.5),

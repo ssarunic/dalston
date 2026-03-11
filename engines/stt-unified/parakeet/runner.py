@@ -32,7 +32,7 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.cores.parakeet_core import NemoCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 
 logger = structlog.get_logger()
 

@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.cores.parakeet_onnx_core import (
+from dalston.engine_sdk.cores.nemo_onnx_core import (
     NemoOnnxCore,
     OnnxSegmentResult,
     OnnxTranscriptionResult,

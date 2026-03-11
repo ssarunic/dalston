@@ -36,7 +36,7 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptWord,
 )
-from dalston.engine_sdk.cores.parakeet_core import NemoCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 from dalston.realtime_sdk import AsyncModelManager
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 

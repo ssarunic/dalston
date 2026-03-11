@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.cores.parakeet_core import (
+from dalston.engine_sdk.cores.nemo_core import (
     NemoCore,
     NeMoSegmentResult,
     NeMoTranscriptionResult,

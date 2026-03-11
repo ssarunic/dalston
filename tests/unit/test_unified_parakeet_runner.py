@@ -118,7 +118,7 @@ class TestUnifiedRunnerClassStructure:
     def test_parakeet_runner_uses_parakeet_core(self) -> None:
         """Runner module must import and reference NemoCore."""
         module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_core_ref")
-        from dalston.engine_sdk.cores.parakeet_core import NemoCore
+        from dalston.engine_sdk.cores.nemo_core import NemoCore
 
         assert module.NemoCore is NemoCore
 
@@ -127,7 +127,7 @@ class TestUnifiedRunnerClassStructure:
         module = _load_runner_module(
             _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_core_ref"
         )
-        from dalston.engine_sdk.cores.parakeet_onnx_core import NemoOnnxCore
+        from dalston.engine_sdk.cores.nemo_onnx_core import NemoOnnxCore
 
         assert module.NemoOnnxCore is NemoOnnxCore
 

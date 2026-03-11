@@ -46,7 +46,7 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.cores.parakeet_core import NemoCore
+from dalston.engine_sdk.cores.nemo_core import NemoCore
 
 
 class NemoBatchEngine(BaseBatchTranscribeEngine):

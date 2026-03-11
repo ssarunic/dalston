@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.cores.parakeet_onnx_core import (
+from dalston.engine_sdk.cores.nemo_onnx_core import (
     NemoOnnxCore,
     OnnxSegmentResult,
     OnnxTranscriptionResult,

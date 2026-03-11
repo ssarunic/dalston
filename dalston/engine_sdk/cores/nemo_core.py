@@ -93,7 +93,7 @@ class NemoCore:
         )
 
         logger.info(
-            "parakeet_core_init",
+            "nemo_core_init",
             device=device,
             ttl_seconds=ttl_seconds,
             max_loaded=max_loaded,
@@ -467,7 +467,7 @@ class NemoCore:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("parakeet_core_shutdown")
+        logger.info("nemo_core_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------

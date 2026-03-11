@@ -86,11 +86,11 @@ def _build_engine_with_mock_core(hypothesis):
     mock_core.manager.release = MagicMock()
 
     # Mock core.transcribe to call transcribe_with_model with the mock model
-    from dalston.engine_sdk.cores.parakeet_core import NemoCore
+    from dalston.engine_sdk.cores.nemo_core import NemoCore
 
     # Use a real NemoCore._parse_hypothesis for result
     segments, words = NemoCore._parse_hypothesis(hypothesis, hypothesis.text)
-    from dalston.engine_sdk.cores.parakeet_core import NeMoTranscriptionResult
+    from dalston.engine_sdk.cores.nemo_core import NeMoTranscriptionResult
 
     result = NeMoTranscriptionResult(
         text=hypothesis.text.strip(),

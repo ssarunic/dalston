@@ -91,7 +91,7 @@ class NemoOnnxCore:
         self._quantization = quantization
 
         logger.info(
-            "parakeet_onnx_core_init",
+            "nemo_onnx_core_init",
             device=device,
             quantization=quantization,
             ttl_seconds=ttl_seconds,
@@ -327,7 +327,7 @@ class NemoOnnxCore:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("parakeet_onnx_core_shutdown")
+        logger.info("nemo_onnx_core_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
