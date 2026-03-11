@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import soxr
 import structlog
 
 from dalston.common.audio_defaults import (
@@ -269,19 +270,21 @@ class AudioBuffer:
             raise ValueError(f"Unsupported encoding: {self.encoding}")
 
     def _resample_if_needed(self, samples: np.ndarray) -> np.ndarray:
-        """Resample client audio to worker processing sample rate if needed."""
+        """Resample client audio to worker processing sample rate if needed.
+
+        Uses libsoxr for high-quality polyphase resampling with anti-aliasing
+        filter, avoiding the spectral aliasing that linear interpolation causes
+        when downsampling (e.g. 48 kHz → 16 kHz).
+        """
         if self.client_sample_rate == self.sample_rate or len(samples) == 0:
             return samples
 
-        # TODO(m61): Linear interpolation is fast but can alias when downsampling.
-        # Replace with low-pass + polyphase resampling for production-quality fidelity.
-        target_len = max(
-            1,
-            int(len(samples) * self.sample_rate / self.client_sample_rate),
-        )
-        src = np.linspace(0.0, 1.0, num=len(samples), endpoint=False)
-        dst = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
-        return np.interp(dst, src, samples).astype(np.float32)
+        return soxr.resample(
+            samples,
+            self.client_sample_rate,
+            self.sample_rate,
+            quality="HQ",
+        ).astype(np.float32)
 
 
 # Type alias for transcribe callback

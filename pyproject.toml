@@ -67,6 +67,7 @@ realtime-sdk = [
     "redis>=7.0.0",
     "numpy>=1.24.0",
     "torch>=2.0.0",
+    "soxr>=0.3.0",  # High-quality sample rate conversion (libsoxr)
     "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
     "types-aiobotocore-s3>=2.13.0",
     "audioop-lts>=0.2.1;python_version>='3.13'",  # audioop removed in Python 3.13
