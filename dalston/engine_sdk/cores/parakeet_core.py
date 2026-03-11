@@ -171,7 +171,7 @@ class ParakeetCore:
 
         # Run inference with appropriate context manager
         autocast_ctx = (
-            torch.cuda.amp.autocast()
+            torch.amp.autocast("cuda")
             if self.device == "cuda"
             else torch.inference_mode()
         )
@@ -275,9 +275,7 @@ class ParakeetCore:
 
         model = self._manager.acquire(model_id)
         try:
-            yield from self._run_streaming_inference(
-                model, audio_iter, chunk_ms
-            )
+            yield from self._run_streaming_inference(model, audio_iter, chunk_ms)
         finally:
             self._manager.release(model_id)
 
@@ -315,7 +313,7 @@ class ParakeetCore:
         )
 
         autocast_ctx = (
-            torch.cuda.amp.autocast()
+            torch.amp.autocast("cuda")
             if self.device == "cuda"
             else torch.inference_mode()
         )
@@ -328,18 +326,14 @@ class ParakeetCore:
                     continue
 
                 current_text = (
-                    hypothesis.text
-                    if hasattr(hypothesis, "text")
-                    else str(hypothesis)
+                    hypothesis.text if hasattr(hypothesis, "text") else str(hypothesis)
                 )
 
                 if not current_text:
                     continue
 
                 # Parse full hypothesis and yield only new words
-                segments, all_words = self._parse_hypothesis(
-                    hypothesis, current_text
-                )
+                segments, all_words = self._parse_hypothesis(hypothesis, current_text)
 
                 # Only yield words we haven't emitted yet
                 new_words = all_words[emitted_word_count:]

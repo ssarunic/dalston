@@ -31,15 +31,23 @@ from dalston.engine_sdk.cores.parakeet_core import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_injected_modules():
+    """Remove sys.modules entries injected by _load_rt_engine_module."""
+    keys_before = set(sys.modules)
+    yield
+    for key in list(sys.modules):
+        if key not in keys_before:
+            sys.modules.pop(key, None)
+
+
 def _load_rt_engine_module():
     """Load the RT parakeet engine module via importlib."""
     engine_path = Path("engines/stt-rt/parakeet/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
 
-    spec = importlib.util.spec_from_file_location(
-        "m71_parakeet_rt", engine_path
-    )
+    spec = importlib.util.spec_from_file_location("m71_parakeet_rt", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["m71_parakeet_rt"] = module
@@ -83,11 +91,7 @@ class TestParakeetCoreDecoderType:
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(
             side_effect=lambda model_id: (
-                "rnnt"
-                if "rnnt" in model_id
-                else "tdt"
-                if "tdt" in model_id
-                else "ctc"
+                "rnnt" if "rnnt" in model_id else "tdt" if "tdt" in model_id else "ctc"
             )
         )
         return core
@@ -125,14 +129,8 @@ class TestParakeetCoreDecoderType:
 class TestParakeetCoreTranscribeStreaming:
     """Verify transcribe_streaming() behavior with mocked NeMo model."""
 
-    def _make_core_with_mock_streaming(
-        self, words: list[tuple[str, float, float]]
-    ) -> ParakeetCore:
-        """Create a core with a mock model that yields streaming results.
-
-        Args:
-            words: List of (word, start, end) tuples to yield
-        """
+    def _make_core_with_mock_streaming(self) -> ParakeetCore:
+        """Create a core with a mock manager configured for RNNT streaming."""
         core = object.__new__(ParakeetCore)
         core._manager = MagicMock()
         core._manager.device = "cpu"
@@ -166,10 +164,12 @@ class TestParakeetCoreTranscribeStreaming:
             "_run_streaming_inference",
             return_value=iter([]),
         ):
-            list(core.transcribe_streaming(
-                iter([np.zeros(1600, dtype=np.float32)]),
-                "parakeet-rnnt-1.1b",
-            ))
+            list(
+                core.transcribe_streaming(
+                    iter([np.zeros(1600, dtype=np.float32)]),
+                    "parakeet-rnnt-1.1b",
+                )
+            )
 
         core._manager.acquire.assert_called_once_with("parakeet-rnnt-1.1b")
         core._manager.release.assert_called_once_with("parakeet-rnnt-1.1b")
@@ -190,10 +190,12 @@ class TestParakeetCoreTranscribeStreaming:
             side_effect=_failing_stream,
         ):
             with pytest.raises(ValueError, match="test error"):
-                list(core.transcribe_streaming(
-                    iter([np.zeros(1600, dtype=np.float32)]),
-                    "parakeet-rnnt-1.1b",
-                ))
+                list(
+                    core.transcribe_streaming(
+                        iter([np.zeros(1600, dtype=np.float32)]),
+                        "parakeet-rnnt-1.1b",
+                    )
+                )
 
         core._manager.release.assert_called_once_with("parakeet-rnnt-1.1b")
 
@@ -209,10 +211,12 @@ class TestParakeetCoreTranscribeStreaming:
             "_run_streaming_inference",
             return_value=iter([]),
         ):
-            result = list(core.transcribe_streaming(
-                iter([np.zeros(1600, dtype=np.float32)]),
-                "parakeet-tdt-1.1b",
-            ))
+            result = list(
+                core.transcribe_streaming(
+                    iter([np.zeros(1600, dtype=np.float32)]),
+                    "parakeet-tdt-1.1b",
+                )
+            )
 
         assert result == []
         core._manager.acquire.assert_called_once_with("parakeet-tdt-1.1b")
@@ -303,10 +307,12 @@ class TestRTEngineTranscribeStreaming:
         # Setup streaming to yield word results
         mock_core.supports_streaming_decode.return_value = True
         mock_core.decoder_type.return_value = "rnnt"
-        mock_core.transcribe_streaming.return_value = iter([
-            NeMoWordResult(word="hello", start=0.0, end=0.5, confidence=0.95),
-            NeMoWordResult(word="world", start=0.5, end=1.0, confidence=0.90),
-        ])
+        mock_core.transcribe_streaming.return_value = iter(
+            [
+                NeMoWordResult(word="hello", start=0.0, end=0.5, confidence=0.95),
+                NeMoWordResult(word="world", start=0.5, end=1.0, confidence=0.90),
+            ]
+        )
 
         with patch.dict("os.environ", {
             "DALSTON_RNNT_CHUNK_MS": "160",
@@ -319,9 +325,9 @@ class TestRTEngineTranscribeStreaming:
         engine = self._build_engine()
         audio_iter = iter([np.zeros(1600, dtype=np.float32)])
 
-        results = list(engine.transcribe_streaming(
-            audio_iter, "en", "parakeet-rnnt-1.1b"
-        ))
+        results = list(
+            engine.transcribe_streaming(audio_iter, "en", "parakeet-rnnt-1.1b")
+        )
 
         assert len(results) == 2
         assert results[0].text == "hello"
@@ -339,9 +345,9 @@ class TestRTEngineTranscribeStreaming:
         engine = self._build_engine()
         audio_iter = iter([np.zeros(1600, dtype=np.float32)])
 
-        results = list(engine.transcribe_streaming(
-            audio_iter, "en", "parakeet-rnnt-1.1b"
-        ))
+        results = list(
+            engine.transcribe_streaming(audio_iter, "en", "parakeet-rnnt-1.1b")
+        )
 
         words = [r.text for r in results]
         assert words == ["hello", "world"]
@@ -351,15 +357,15 @@ class TestRTEngineTranscribeStreaming:
         engine = self._build_engine()
         audio_iter = iter([np.zeros(1600, dtype=np.float32)])
 
-        results = list(engine.transcribe_streaming(
-            audio_iter, "en", "parakeet-rnnt-1.1b"
-        ))
+        results = list(
+            engine.transcribe_streaming(audio_iter, "en", "parakeet-rnnt-1.1b")
+        )
 
         for i in range(len(results) - 1):
             current_end = results[i].words[0].end
             next_start = results[i + 1].words[0].start
             assert current_end <= next_start, (
-                f"Word {i} end ({current_end}) > word {i+1} start ({next_start})"
+                f"Word {i} end ({current_end}) > word {i + 1} start ({next_start})"
             )
 
 
@@ -414,6 +420,7 @@ class TestChunkMSConfig:
         with patch.dict("os.environ", {}, clear=False):
             # Remove DALSTON_RNNT_CHUNK_MS if set
             import os
+
             os.environ.pop("DALSTON_RNNT_CHUNK_MS", None)
             engine = module.ParakeetStreamingEngine(core=mock_core)
 
@@ -423,9 +430,12 @@ class TestChunkMSConfig:
         module = _load_rt_engine_module()
         mock_core = _make_mock_core()
 
-        with patch.dict("os.environ", {
-            "DALSTON_RNNT_CHUNK_MS": "320",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DALSTON_RNNT_CHUNK_MS": "320",
+            },
+        ):
             engine = module.ParakeetStreamingEngine(core=mock_core)
 
         assert engine._rnnt_chunk_ms == 320

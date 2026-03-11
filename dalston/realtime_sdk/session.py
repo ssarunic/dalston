@@ -13,7 +13,7 @@ try:
     import audioop  # Python < 3.13
 except ImportError:
     import audioop_lts as audioop  # Python >= 3.13 (PEP 594)
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -294,8 +294,8 @@ TranscribeCallback = Callable[
 # Takes an Iterator[np.ndarray] of audio chunks, language, and model,
 # and yields TranscribeResult for each decoded word.
 StreamingDecodeCallback = Callable[
-    ...,  # (audio_iter, language, model) -> Iterator[TranscribeResult]
-    Any,
+    [Iterator[np.ndarray], str, str],
+    Iterator[TranscribeResult],
 ]
 
 
@@ -658,39 +658,34 @@ class SessionHandler:
             """Blocking iterator that reads from the async queue."""
             while True:
                 future = asyncio.run_coroutine_threadsafe(
-                    self._streaming_chunk_queue.get(), loop  # type: ignore[union-attr]
+                    self._streaming_chunk_queue.get(),
+                    loop,  # type: ignore[union-attr]
                 )
-                chunk = future.result()
+                chunk = future.result(timeout=10.0)
                 if chunk is None:
                     return
                 yield chunk
 
         try:
-            async for result in self._run_streaming_in_thread(
-                _chunk_iterator, loop
-            ):
+            async for result in self._run_streaming_in_thread(_chunk_iterator, loop):
                 if self._ended:
                     break
 
                 if result.text and result.words:
                     self._streaming_session_text_parts.append(result.text)
                     self._streaming_word_results.extend(result.words)
-                    self._streaming_word_count += 1
+                    self._streaming_word_count += len(result.words)
 
                     # Send partial transcript event
                     if self.config.interim_results:
-                        cumulative_text = " ".join(
-                            self._streaming_session_text_parts
-                        )
-                        start_time = self._assembler.current_time
+                        cumulative_text = " ".join(self._streaming_session_text_parts)
                         word = result.words[0]
-                        end_time = start_time + word.end
 
                         await self._send(
                             TranscriptPartialMessage(
                                 text=cumulative_text,
-                                start=start_time,
-                                end=end_time,
+                                start=word.start,
+                                end=word.end,
                             )
                         )
 
@@ -699,8 +694,10 @@ class SessionHandler:
                 logger.error("streaming_decode_error", error=str(e))
 
     async def _run_streaming_in_thread(
-        self, chunk_iterator_factory: Any, loop: asyncio.AbstractEventLoop
-    ) -> Any:
+        self,
+        chunk_iterator_factory: Callable[[], Iterator[np.ndarray]],
+        loop: asyncio.AbstractEventLoop,
+    ) -> AsyncIterator[TranscribeResult]:
         """Run streaming decode in thread and yield results asynchronously.
 
         Args:
@@ -718,17 +715,13 @@ class SessionHandler:
                     self.config.language,
                     self.config.model,
                 ):
-                    asyncio.run_coroutine_threadsafe(
-                        result_queue.put(result), loop
-                    )
+                    asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
             except Exception as e:
                 logger.error("streaming_thread_error", error=str(e))
             finally:
-                asyncio.run_coroutine_threadsafe(
-                    result_queue.put(None), loop
-                )
+                asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
 
-        thread = loop.run_in_executor(None, _thread_target)
+        executor_future = loop.run_in_executor(None, _thread_target)
 
         while True:
             result = await result_queue.get()
@@ -736,7 +729,7 @@ class SessionHandler:
                 break
             yield result
 
-        await thread
+        await executor_future
 
     async def _flush_streaming_final(self) -> None:
         """Send a final transcript from accumulated streaming words.
@@ -755,14 +748,12 @@ class SessionHandler:
 
         # Calculate confidence from word results
         confidences = [w.confidence for w in words if w.confidence]
-        avg_confidence = (
-            sum(confidences) / len(confidences) if confidences else 0.95
-        )
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.95
 
         result = TranscribeResult(
             text=full_text,
             words=words,
-            language="en",
+            language=self.config.language,
             confidence=avg_confidence,
         )
 
@@ -1072,8 +1063,9 @@ class SessionHandler:
             # Clear streaming state
             self._speech_audio_buffer = []
             self._chunks_since_partial = 0
-            # M71: Clear streaming decode accumulated text
+            # M71: Clear streaming decode accumulated state
             self._streaming_session_text_parts = []
+            self._streaming_word_results = []
             self._streaming_word_count = 0
             logger.debug("audio_buffers_cleared")
 
