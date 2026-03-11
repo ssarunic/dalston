@@ -38,6 +38,9 @@ def find_runtime_yamls(engines_dir: Path) -> list[Path]:
         # Skip realtime engines for now (separate migration)
         if "stt-rt" in str(yaml_path):
             continue
+        # Merge runtime was replaced by orchestrator transcript assembly.
+        if "stt-merge" in str(yaml_path):
+            continue
         yamls.append(yaml_path)
 
     return sorted(yamls)
