@@ -2,29 +2,10 @@
 
 Centralises realtime session lifecycle—allocation, keepalive, release,
 orphan reconciliation, and offline detection—in the orchestrator package.
-
-This module has strict behavioural parity with ``dalston.session_router``:
-it shares the same Redis key schema so the two can run side-by-side during
-the parity observation window (Phase 2).  Legacy removal (Phase 3) is
-tracked separately.
-
-Feature flags
--------------
-``DALSTON_SESSION_COORDINATOR_ENABLED=true``
-    Gateway uses ``SessionCoordinator`` for session allocation instead of the
-    legacy ``SessionRouter``.
-
-``DALSTON_SESSION_PARITY_MONITOR_ENABLED=true``
-    Activates ``ParityMonitor``, a **read-only** background loop that samples
-    Redis state and logs capacity drift between the coordinator path and the
-    legacy registry.  It does **not** run health checks, mark workers offline,
-    reconcile orphans, or publish events—those mutations are performed
-    exclusively by the active coordinator.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 import redis.asyncio as redis
@@ -32,7 +13,6 @@ import structlog
 
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
-from dalston.orchestrator.realtime_registry import ACTIVE_SESSIONS_KEY
 from dalston.orchestrator.session_allocator import (
     SessionAllocator,
     SessionState,
@@ -47,8 +27,7 @@ logger = structlog.get_logger()
 class WorkerStatus:
     """Worker status for API and management responses.
 
-    Mirrors ``session_router.router.WorkerStatus`` exactly so the gateway
-    can treat coordinator and legacy router interchangeably.
+    Maintains the gateway-facing response shape used by realtime status APIs.
     """
 
     instance: str
@@ -91,16 +70,10 @@ class CapacityInfo:
 class SessionCoordinator:
     """Orchestrator-side coordinator for real-time worker pool management.
 
-    Behavioural parity with ``session_router.SessionRouter``:
-
     - Atomic capacity reservation + rollback on race.
     - Session TTL management (extend on activity).
     - Orphan reconciliation (crashed Gateway instances).
     - Offline worker detection + pub/sub fan-out.
-
-    The coordinator uses SessionAllocator and HealthMonitor which share
-    Redis key semantics with the legacy session router, allowing both to run
-    concurrently against the same Redis state during the parity window.
 
     Usage::
 
@@ -315,97 +288,3 @@ class SessionCoordinator:
     def is_running(self) -> bool:
         """Whether the coordinator is running."""
         return self._redis is not None
-
-
-class ParityMonitor:
-    """Read-only observer that samples coordinator state for drift detection.
-
-    Runs a background loop that periodically reads worker pool and session
-    counts from Redis and logs any discrepancies.
-
-    **Crucially non-mutating**: it never marks workers offline, reconciles
-    orphan sessions, or publishes pub/sub events.  All mutations are the
-    exclusive responsibility of the active :class:`SessionCoordinator`.
-
-    This avoids the double-side-effect problem that would occur if a second
-    full ``SessionRouter`` (with its own ``HealthMonitor``) ran alongside the
-    coordinator against the same Redis keys.
-
-    Usage::
-
-        monitor = ParityMonitor(coordinator)
-        await monitor.start()
-        # ... run for a while ...
-        await monitor.stop()
-    """
-
-    CHECK_INTERVAL = 30  # seconds between parity snapshots
-
-    def __init__(self, coordinator: SessionCoordinator) -> None:
-        """Initialise parity monitor.
-
-        Args:
-            coordinator: The active :class:`SessionCoordinator` whose Redis
-                client and registry will be used for read-only sampling.
-        """
-        self._coordinator = coordinator
-        self._task: asyncio.Task | None = None
-        self._running = False
-
-    async def start(self) -> None:
-        """Start the background parity sampling loop."""
-        if self._running:
-            return
-        self._running = True
-        self._task = asyncio.create_task(self._run_loop())
-        logger.info("session_parity_monitor_started")
-
-    async def stop(self) -> None:
-        """Stop the background parity sampling loop."""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("session_parity_monitor_stopped")
-
-    async def _run_loop(self) -> None:
-        """Periodic parity snapshot loop."""
-        while self._running:
-            try:
-                await self._snapshot()
-            except Exception as exc:
-                logger.warning("parity_snapshot_error", error=str(exc))
-            await asyncio.sleep(self.CHECK_INTERVAL)
-
-    async def _snapshot(self) -> None:
-        """Read current state and log capacity metrics for drift detection."""
-        registry = self._coordinator._registry
-        redis_client = self._coordinator._redis
-        if registry is None or redis_client is None:
-            return
-
-        workers = [
-            e for e in await registry.get_all() if e.supports_interface("realtime")
-        ]
-        total = sum(w.capacity for w in workers)
-        used = sum(w.active_realtime for w in workers)
-        active_session_count = len(await redis_client.smembers(ACTIVE_SESSIONS_KEY))
-
-        logger.info(
-            "parity_snapshot",
-            worker_count=len(workers),
-            total_capacity=total,
-            used_capacity=used,
-            available_capacity=total - used,
-            active_sessions_index=active_session_count,
-            drift=used - active_session_count,
-        )
-
-    @property
-    def is_running(self) -> bool:
-        """Whether the parity monitor is running."""
-        return self._running
