@@ -45,7 +45,7 @@ class TestBatchEngineYaml:
             data = yaml.safe_load(f)
 
         container = data.get("container", {})
-        assert container.get("gpu") is False
+        assert container.get("gpu") == "none"
 
     def test_schema_version(self) -> None:
         with open(BATCH_YAML) as f:
@@ -87,7 +87,7 @@ class TestRtEngineYaml:
             data = yaml.safe_load(f)
 
         input_cfg = data["input"]
-        assert input_cfg["encoding"] == "pcm_s16le"
+        assert "wav" in input_cfg["audio_formats"]
         assert input_cfg["sample_rate"] == 16000
         assert input_cfg["channels"] == 1
 
@@ -96,7 +96,7 @@ class TestRtEngineYaml:
             data = yaml.safe_load(f)
 
         container = data.get("container", {})
-        assert container.get("gpu") is False
+        assert container.get("gpu") == "none"
 
 
 class TestLanguageParity:

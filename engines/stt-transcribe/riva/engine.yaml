@@ -13,7 +13,7 @@ description: |
   in the Riva NIM sidecar container.
 
 container:
-  gpu: false
+  gpu: none
   memory: 1G
 
 capabilities:

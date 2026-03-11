@@ -13,7 +13,7 @@ description: |
   in the Riva NIM sidecar container.
 
 container:
-  gpu: false
+  gpu: none
   memory: 1G
 
 capabilities:
@@ -34,7 +34,8 @@ capabilities:
   supports_vocabulary: false
 
 input:
-  encoding: pcm_s16le
+  audio_formats:
+    - wav
   sample_rate: 16000
   channels: 1
 
