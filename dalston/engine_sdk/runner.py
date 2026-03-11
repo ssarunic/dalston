@@ -789,33 +789,18 @@ class EngineRunner:
     ) -> None:
         """Validate transcribe-stage output against Transcript.
 
-        During the migration period this logs a warning on failure rather
-        than rejecting the output. Set DALSTON_STRICT_TRANSCRIPT_VALIDATION=true
-        to promote warnings to errors.
+        Raises ValueError if the output does not conform to the Transcript
+        schema. All transcribe engines must return valid Transcript output.
         """
         from dalston.common.pipeline_types import Transcript
-
-        strict = os.environ.get("DALSTON_STRICT_TRANSCRIPT_VALIDATION", "").lower() in (
-            "true",
-            "1",
-            "yes",
-        )
 
         output_dict = output.to_dict()
         try:
             Transcript.model_validate(output_dict)
         except Exception as e:
-            if strict:
-                raise ValueError(
-                    f"Transcribe output failed Transcript validation: {e}"
-                ) from e
-            logger.warning(
-                "transcript_v1_validation_failed",
-                task_id=task_id,
-                error=str(e),
-                hint="Engine output does not conform to Transcript. "
-                "Migrate engine to return Transcript for strict mode.",
-            )
+            raise ValueError(
+                f"Transcribe output failed Transcript validation: {e}"
+            ) from e
 
     def _save_task_output(
         self,

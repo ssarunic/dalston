@@ -803,7 +803,7 @@ class SessionHandler:
             language_confidence=avg_confidence,
             duration=audio_duration,
             timestamp_granularity=TimestampGranularity.WORD,
-            alignment_method=AlignmentMethod.MODEL_NATIVE,
+            alignment_method=AlignmentMethod.UNKNOWN,
             runtime="streaming-decode",
         )
 

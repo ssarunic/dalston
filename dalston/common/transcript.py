@@ -67,22 +67,19 @@ def assemble_transcript(
     audio_duration, audio_channels, sample_rate = _extract_audio_metadata(prepare_data)
 
     # Extract transcription data
-    text, language, language_confidence, raw_segments = _extract_transcribe_data(
-        transcribe_data,
-    )
+    text, language, language_confidence = _extract_transcribe_data(transcribe_data)
 
-    # Parse typed outputs if possible
-    transcript_v1 = (
-        _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
-    )
+    # Parse typed outputs — transcribe must be a valid Transcript
+    if not transcribe_data:
+        raise ValueError("Missing 'transcribe' stage output")
+    transcript_v1 = _parse_transcript(transcribe_data)
     align_output = _try_parse_align(align_data) if align_data else None
     diarize_output = _try_parse_diarize(diarize_data) if diarize_data else None
 
     # Select segment source and determine word timestamp availability
     segments_source, word_timestamps_available, pipeline_warnings = _select_segments(
         align_output=align_output,
-        raw_segments=raw_segments,
-        transcript_v1=transcript_v1,
+        transcript=transcript_v1,
     )
 
     # Build speaker assignments from diarization
@@ -215,17 +212,15 @@ def assemble_per_channel_transcript(
             lc_raw = transcribe_data.get("language_confidence")
             language_confidence = lc_raw if lc_raw is not None else 1.0
 
-        # Select best segment source for this channel — try V1 first
-        transcript_v1 = (
-            _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
-        )
+        # Parse typed outputs — transcribe must be a valid Transcript
+        if not transcribe_data:
+            raise ValueError(f"Missing '{transcribe_key}' stage output")
+        transcript_v1 = _parse_transcript(transcribe_data)
         align_output = _try_parse_align(align_data) if align_data else None
-        raw_segments = transcribe_data.get("segments", []) if transcribe_data else []
 
         segments_source, ch_word_ts, ch_warnings = _select_segments(
             align_output=align_output,
-            raw_segments=raw_segments,
-            transcript_v1=transcript_v1,
+            transcript=transcript_v1,
         )
         if ch_word_ts:
             word_timestamps_available = True
@@ -327,10 +322,9 @@ def assemble_per_channel_transcript(
     return transcript
 
 
-def _extract_segment_fields(seg: Any) -> dict[str, Any]:
-    """Extract segment fields into a plain dict from any segment type."""
+def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
+    """Extract segment fields into a plain dict from a typed segment."""
     if isinstance(seg, TranscriptSegment):
-        # Transcript segment — model-specific fields are in metadata
         return {
             "start": seg.start,
             "end": seg.end,
@@ -354,30 +348,8 @@ def _extract_segment_fields(seg: Any) -> dict[str, Any]:
             "compression_ratio": seg.compression_ratio,
             "no_speech_prob": seg.no_speech_prob,
         }
-    elif hasattr(seg, "start"):
-        return {
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text,
-            "words": getattr(seg, "words", None),
-            "tokens": getattr(seg, "tokens", None),
-            "temperature": getattr(seg, "temperature", None),
-            "avg_logprob": getattr(seg, "avg_logprob", None),
-            "compression_ratio": getattr(seg, "compression_ratio", None),
-            "no_speech_prob": getattr(seg, "no_speech_prob", None),
-        }
     else:
-        return {
-            "start": seg.get("start", 0.0),
-            "end": seg.get("end", 0.0),
-            "text": seg.get("text", ""),
-            "words": seg.get("words"),
-            "tokens": seg.get("tokens"),
-            "temperature": seg.get("temperature"),
-            "avg_logprob": seg.get("avg_logprob"),
-            "compression_ratio": seg.get("compression_ratio"),
-            "no_speech_prob": seg.get("no_speech_prob"),
-        }
+        raise TypeError(f"Unexpected segment type: {type(seg)}")
 
 
 def determine_terminal_stage(
@@ -442,24 +414,20 @@ def _extract_audio_metadata(
 
 def _extract_transcribe_data(
     transcribe_data: dict[str, Any],
-) -> tuple[str, str, float, list]:
-    """Extract text, language, confidence, and raw segments from transcribe output."""
+) -> tuple[str, str, float]:
+    """Extract text, language, and confidence from transcribe output."""
     text = transcribe_data.get("text", "")
     language = transcribe_data.get("language", "en")
     language_confidence_raw = transcribe_data.get("language_confidence")
     language_confidence = (
         language_confidence_raw if language_confidence_raw is not None else 1.0
     )
-    raw_segments = transcribe_data.get("segments", [])
-    return text, language, language_confidence, raw_segments
+    return text, language, language_confidence
 
 
-def _try_parse_transcript_v1(data: dict[str, Any]) -> Transcript | None:
-    """Try to parse transcribe data into a Transcript."""
-    try:
-        return Transcript.model_validate(data)
-    except Exception:
-        return None
+def _parse_transcript(data: dict[str, Any]) -> Transcript:
+    """Parse transcribe data into a Transcript. Raises on invalid data."""
+    return Transcript.model_validate(data)
 
 
 def _try_parse_align(data: dict[str, Any]) -> AlignOutput | None:
@@ -481,9 +449,8 @@ def _try_parse_diarize(data: dict[str, Any]) -> DiarizeOutput | None:
 def _select_segments(
     *,
     align_output: AlignOutput | None,
-    raw_segments: list,
-    transcript_v1: Transcript | None = None,
-) -> tuple[list[Segment] | list[TranscriptSegment] | list[dict], bool, list]:
+    transcript: Transcript,
+) -> tuple[list[Segment] | list[TranscriptSegment], bool, list]:
     """Select the best available segments and determine word timestamp availability.
 
     Returns:
@@ -495,20 +462,16 @@ def _select_segments(
         if align_output.skipped:
             logger.warning("alignment_skipped", reason=align_output.skip_reason)
             pipeline_warnings.extend(align_output.warnings)
-            if transcript_v1 is not None:
-                segments_source: list = list(transcript_v1.segments)
-            else:
-                segments_source = raw_segments
+            segments_source: list[Segment] | list[TranscriptSegment] = list(
+                transcript.segments
+            )
             word_timestamps_available = False
         else:
             segments_source = list(align_output.segments)
             word_timestamps_available = align_output.word_timestamps
-    elif transcript_v1 is not None:
-        segments_source = list(transcript_v1.segments)
-        word_timestamps_available = any(s.words for s in transcript_v1.segments)
     else:
-        segments_source = raw_segments
-        word_timestamps_available = False
+        segments_source = list(transcript.segments)
+        word_timestamps_available = any(s.words for s in transcript.segments)
 
     return segments_source, word_timestamps_available, pipeline_warnings
 
@@ -620,7 +583,7 @@ def _normalize_transcript_words(words: list) -> list[Word]:
 
 def _build_merged_segments(
     *,
-    segments_source: list[Segment] | list[TranscriptSegment] | list[dict],
+    segments_source: list[Segment] | list[TranscriptSegment],
     diarization_turns: list[SpeakerTurn],
     word_timestamps_available: bool,
 ) -> list[MergedSegment]:
@@ -630,7 +593,6 @@ def _build_merged_segments(
     for idx, seg in enumerate(segments_source):
         seg_words: Any = None
         if isinstance(seg, TranscriptSegment):
-            # Transcript segment
             seg_start = seg.start
             seg_end = seg.end
             seg_text = seg.text
@@ -650,27 +612,8 @@ def _build_merged_segments(
             seg_avg_logprob = seg.avg_logprob
             seg_compression_ratio = seg.compression_ratio
             seg_no_speech_prob = seg.no_speech_prob
-        elif isinstance(seg, dict):
-            seg_start = seg.get("start", 0.0)
-            seg_end = seg.get("end", 0.0)
-            seg_text = seg.get("text", "")
-            seg_words = seg.get("words")
-            seg_tokens = seg.get("tokens")
-            seg_temperature = seg.get("temperature")
-            seg_avg_logprob = seg.get("avg_logprob")
-            seg_compression_ratio = seg.get("compression_ratio")
-            seg_no_speech_prob = seg.get("no_speech_prob")
         else:
-            # Pydantic model but not Segment (e.g. from align output)
-            seg_start = getattr(seg, "start", 0.0)
-            seg_end = getattr(seg, "end", 0.0)
-            seg_text = getattr(seg, "text", "")
-            seg_words = getattr(seg, "words", None)
-            seg_tokens = getattr(seg, "tokens", None)
-            seg_temperature = getattr(seg, "temperature", None)
-            seg_avg_logprob = getattr(seg, "avg_logprob", None)
-            seg_compression_ratio = getattr(seg, "compression_ratio", None)
-            seg_no_speech_prob = getattr(seg, "no_speech_prob", None)
+            raise TypeError(f"Unexpected segment type: {type(seg)}")
 
         # Assign speaker based on diarization overlap
         speaker = None

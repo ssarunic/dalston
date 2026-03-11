@@ -101,13 +101,17 @@ class TranscriptAssembler:
                         )
                     )
 
-        # Compute overall confidence from segment confidences
+        # Compute overall confidence from segment confidences, falling back
+        # to transcript-level language_confidence when segments omit it.
         seg_confidences = [
             s.confidence for s in transcript.segments if s.confidence is not None
         ]
-        overall_confidence = (
-            sum(seg_confidences) / len(seg_confidences) if seg_confidences else 0.0
-        )
+        if seg_confidences:
+            overall_confidence = sum(seg_confidences) / len(seg_confidences)
+        elif transcript.language_confidence is not None:
+            overall_confidence = transcript.language_confidence
+        else:
+            overall_confidence = 0.0
 
         segment = Segment(
             id=f"seg_{self._segment_counter:04d}",
