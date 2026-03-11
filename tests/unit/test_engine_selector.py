@@ -675,13 +675,8 @@ class TestSelectPipelineEngines:
         assert "merge" not in selections
 
     @pytest.mark.asyncio
-    async def test_prefers_model_transcribe_over_engine_transcribe(
-        self, mock_registry, mock_catalog
-    ):
-        parameters = {
-            "engine_transcribe": "faster-whisper",
-            "model_transcribe": "Systran/faster-whisper-base",
-        }
+    async def test_uses_model_transcribe_preference(self, mock_registry, mock_catalog):
+        parameters = {"model_transcribe": "Systran/faster-whisper-base"}
 
         with patch(
             "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock

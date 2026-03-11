@@ -150,7 +150,7 @@ async def create_translation_openai(
     # Build Dalston parameters - force English output for translation
     parameters: dict[str, Any] = {
         "language": "en",  # Translation always outputs English
-        "engine_transcribe": map_openai_model(model),
+        MODEL_PARAM_TRANSCRIBE: map_openai_model(model),
         "timestamps_granularity": "segment",
         "task": "translate",  # Enable translation mode
     }

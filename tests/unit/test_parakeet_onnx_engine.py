@@ -253,7 +253,7 @@ class TestParakeetOnnxCatalogIntegration:
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
         parameters = {
-            "engine_transcribe": "parakeet-onnx-ctc-0.6b",
+            "model_transcribe": "parakeet-onnx-ctc-0.6b",
             "timestamps_granularity": "word",
         }
 
@@ -274,7 +274,7 @@ class TestParakeetOnnxCatalogIntegration:
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
         parameters = {
-            "engine_transcribe": "parakeet-onnx-tdt-0.6b-v3",
+            "model_transcribe": "parakeet-onnx-tdt-0.6b-v3",
             "timestamps_granularity": "word",
         }
 
@@ -293,7 +293,7 @@ class TestParakeetOnnxCatalogIntegration:
         job_id = uuid4()
         audio_uri = "s3://test/audio.wav"
         parameters = {
-            "engine_transcribe": "parakeet-onnx-rnnt-0.6b",
+            "model_transcribe": "parakeet-onnx-rnnt-0.6b",
             "timestamps_granularity": "word",
         }
 

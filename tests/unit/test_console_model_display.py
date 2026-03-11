@@ -29,8 +29,8 @@ def _make_job(
 class TestResolveModelDisplay:
     """Tests for ConsoleService._resolve_model_display."""
 
-    def test_explicit_model_returns_as_is(self):
-        job = _make_job(parameters={"engine_transcribe": "whisper-large-v3"})
+    def test_explicit_model_transcribe_returns_as_is(self):
+        job = _make_job(parameters={"model_transcribe": "whisper-large-v3"})
 
         result = ConsoleService._resolve_model_display(job)
 
@@ -124,9 +124,9 @@ class TestResolveModelDisplay:
 
         assert result == "Auto"
 
-    def test_empty_engine_transcribe_treated_as_auto(self):
+    def test_empty_model_transcribe_treated_as_auto(self):
         task = _make_task("transcribe", runtime="fw-base")
-        job = _make_job(parameters={"engine_transcribe": ""}, tasks=[task])
+        job = _make_job(parameters={"model_transcribe": ""}, tasks=[task])
 
         result = ConsoleService._resolve_model_display(job)
 
