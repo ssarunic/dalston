@@ -250,6 +250,20 @@ curl -X POST https://api.dalston.example.com/v1/audio/translations \
 
 ## Real-time Transcription
 
+### REST Session Creation
+
+Dalston also supports OpenAI-style session creation:
+
+`POST /v1/realtime/transcription_sessions`
+
+The create endpoint accepts either:
+
+- flat session fields at the top level, or
+- a wrapped payload under `session`.
+
+Nested payloads of the form `{"session": {"session": ...}}` are rejected with
+`400 invalid_request`.
+
 ### WebSocket /v1/realtime
 
 Real-time streaming transcription using OpenAI's Realtime API protocol.
@@ -269,7 +283,12 @@ OpenAI-Beta: realtime=v1
 
 ### Session Configuration
 
-After connecting, configure the transcription session:
+After connecting, configure the transcription session.
+
+Dalston accepts both OpenAI request variants and normalizes them to one
+internal session config.
+
+Variant A (wrapped):
 
 ```json
 {
@@ -293,6 +312,32 @@ After connecting, configure the transcription session:
   }
 }
 ```
+
+Variant B (flat):
+
+```json
+{
+  "type": "session.update",
+  "input_audio_format": "pcm16",
+  "input_audio_transcription": {
+    "model": "gpt-4o-transcribe",
+    "language": "en",
+    "prompt": "Technical terms: Kubernetes, FastAPI"
+  },
+  "turn_detection": {
+    "type": "server_vad",
+    "threshold": 0.5,
+    "prefix_padding_ms": 300,
+    "silence_duration_ms": 500
+  },
+  "input_audio_noise_reduction": {
+    "type": "near_field"
+  }
+}
+```
+
+Invalid nested payloads such as `{"session": {"session": {...}}}` are rejected
+with `invalid_request_error` (`code: "invalid_request"`).
 
 ### Audio Formats
 

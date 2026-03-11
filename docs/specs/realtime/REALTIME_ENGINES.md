@@ -4,6 +4,15 @@
 
 Real-time engines are WebSocket servers that handle streaming audio transcription. Unlike batch engines that poll Redis queues, real-time engines maintain direct connections with clients.
 
+### Runtime Notes (2026-03-11)
+
+- Voxtral realtime runs on the `vllm-asr` runtime and reuses shared helpers in
+  `dalston.vllm_asr` (adapters + audio/inference bridge).
+- Voxtral realtime requires CUDA and vLLM audio support. There is no CPU
+  fallback for this runtime.
+- When timestamp tokens are absent in streaming output, the engine degrades to
+  segment timestamps and emits warnings if word timestamps were requested.
+
 ---
 
 ## Architecture
@@ -97,7 +106,7 @@ Real-time engines are WebSocket servers that handle streaming audio transcriptio
 │           │ On endpoint: trigger ASR                                            │
 │           ▼                                                                      │
 │   ┌───────────────┐                                                             │
-│   │  ASR Engine   │  Parakeet (streaming) / Whisper (VAD-chunked)              │
+│   │  ASR Engine   │  NeMo / Faster-Whisper / Voxtral (vLLM-ASR)                │
 │   │               │                                                             │
 │   │ • Transcribe  │  Process accumulated speech audio                          │
 │   │               │                                                             │

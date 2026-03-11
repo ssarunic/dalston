@@ -6,7 +6,7 @@
 | **Duration** | 1-2 weeks (incremental, test-gated) |
 | **Dependencies** | M43, M44, M52, M63 |
 | **Primary Deliverable** | Runtime-based class names and shared typed transcriber params (`TranscribeInput`) |
-| **Status** | In Progress |
+| **Status** | Complete |
 
 ## Background
 
@@ -28,6 +28,22 @@ M73 standardizes both:
 2. Engine and core class names are consistent by runtime and mode (`Batch`/`Realtime`).
 3. No behavior regressions in batch/realtime API contracts.
 4. Runtime identifiers in `engine.yaml` remain unchanged.
+
+## Completion Notes (2026-03-11)
+
+Delivered:
+
+- Runtime-based class naming refactor across batch + realtime transcribe engines.
+- Canonical typed transcribe params wiring via `TranscribeInput`.
+- Batch engines migrated to `EngineInput.get_transcribe_params()`.
+- Realtime engine signatures migrated to typed params model.
+- Unit/integration coverage updated for renamed classes and typed params flow.
+
+Deferred to follow-up iteration:
+
+- Voxtral runtime consolidation beyond naming/typed-params scope.
+- Broader Voxtral realtime behavior work (audio-state continuity and timestamp
+  parity improvements on vLLM path).
 
 ## Scope
 

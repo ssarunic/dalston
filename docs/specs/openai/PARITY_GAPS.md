@@ -154,24 +154,27 @@ Translation must be brought under the same capability table as transcription.
 
 ---
 
-### C-3 · Realtime support is tied to an older model/request surface
+### C-3 · Realtime model surface remains narrower than OpenAI's full matrix
 
-**Priority**: P0
-**Feasibility**: 🧪 Contract lock first
+**Priority**: P2
+**Feasibility**: 🔧 Cross-service
 
 Current realtime support in
 [openai_realtime.py](../../dalston/gateway/api/v1/openai_realtime.py)
-accepts only a narrow model list and only the older `transcription_session.update`
-style request shape. It also does not treat the SDK-visible realtime session-create REST
-flow as part of the compatibility contract.
+still exposes a narrower model/runtime surface than OpenAI's full realtime
+matrix.
 
-The current OpenAI docs are inconsistent between the API reference and guide, so the
-problem is not "choose one shape". The correct first step is to freeze SDK traces and
-accept the current documented variants.
+Request-shape normalization work is now in place:
+
+- both wrapped and flat session-update payloads are accepted and normalized
+- nested invalid `{"session":{"session":...}}` payloads fail fast
+- realtime session-create REST shape is handled consistently with websocket
+  normalization
 
 **Conclusion**
 
-Realtime parity needs dual-shape request acceptance with one normalized internal config.
+Realtime request-shape drift is no longer the blocker. Remaining work is model
+surface breadth and capability parity.
 
 ---
 
@@ -469,20 +472,21 @@ lookback behavior rather than a separate ad hoc buffer.
 
 ### R-4 · Realtime request/session shape drift
 
-**Priority**: P0
-**Feasibility**: 🧪 Contract lock first
+**Priority**: P3
+**Feasibility**: ✅ Current
 
 The older analysis assumed only the older `transcription_session.*` shape.
 
-The current docs and guides are inconsistent enough that the real parity gap is broader:
+Implemented behavior now covers documented variants:
 
-- Dalston does not accept the current documented request variants
-- Dalston does not normalize them into one internal config
-- Dalston emits only a sparse older session-created payload
+- Dalston accepts wrapped and flat request variants.
+- Dalston normalizes both into one internal config.
+- Dalston rejects doubly nested `session` payloads explicitly.
 
 **Conclusion**
 
-Contract freeze plus dual-shape input support is required before implementation.
+Request/session shape drift has been addressed. Keep regression tests for both
+variants in place.
 
 ---
 
@@ -615,7 +619,7 @@ This analysis maps directly onto
 | C-0 | No pinned SDK contract suite exists yet | P0 | ✅ Current |
 | C-1 | Model validation is regex-driven | P0 | 🧪 Contract lock first |
 | C-2 | Translation validation is split-brain | P1 | 🧪 Contract lock first |
-| C-3 | Realtime support is tied to older request/model surface | P0 | 🧪 Contract lock first |
+| C-3 | Realtime model surface is narrower than OpenAI matrix (shape normalization fixed) | P2 | 🔧 Cross-service |
 | G-1 | `diarized_json` fallback bug | P0 | ✅ Current |
 | G-2 | `usage` missing and older remedy is stale | P0 | 🧪 Contract lock first |
 | G-3 | `temperature=0` dropped | P0 | ✅ Current |
@@ -632,7 +636,7 @@ This analysis maps directly onto
 | R-1 | `pcm16` 24 kHz mismatch | P0 | 🔧 Cross-service |
 | R-2 | Realtime item-graph events/state are incomplete | P0 | ✅/🔧 |
 | R-3 | `turn_detection` tuning ignored | P1 | 🔧 Cross-service |
-| R-4 | Realtime request/session shape drift | P0 | 🧪 Contract lock first |
+| R-4 | Realtime request/session shape drift fixed (dual-shape normalization) | P3 | ✅ Current |
 | R-5 | `noise_reduction` not implemented | P3 | 🧱 New subsystem |
 | B-1 | OpenAI rate-limit header names missing | P1 | ✅ Current |
 | B-2 | OpenAI 25 MB limit not threaded through URL ingestion | P1 | ✅ Current |

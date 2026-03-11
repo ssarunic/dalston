@@ -355,6 +355,7 @@ from dalston.engine_sdk import (
     TranscribeOutput,
 )
 from dalston.engine_sdk.model_manager import ModelManager
+from dalston.common.pipeline_types import TranscribeInput
 
 class MyTranscribeEngine(Engine):
     """Runtime-based transcription engine."""
@@ -369,10 +370,9 @@ class MyTranscribeEngine(Engine):
     def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
         """Process a single task."""
         del ctx
-        # Get model ID from task config
-        model_id = input.config.get("runtime_model_id")
-        if not model_id:
-            model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID")
+        # Parse canonical typed transcribe params
+        params: TranscribeInput = input.get_transcribe_params()
+        model_id = params.runtime_model_id or os.environ.get("DALSTON_DEFAULT_MODEL_ID")
 
         # Acquire model (loads if needed)
         with self.model_manager.acquire(model_id) as model:
