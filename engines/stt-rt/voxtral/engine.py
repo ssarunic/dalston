@@ -299,7 +299,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
     def get_runtime(self) -> str:
         """Return the inference framework identifier."""
-        return "voxtral"
+        return "vllm-asr"
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

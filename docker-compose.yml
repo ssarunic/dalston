@@ -475,7 +475,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_RUNTIME: voxtral
+      DALSTON_RUNTIME: vllm-asr
       DALSTON_MODEL_VARIANT: mini-3b
     volumes:
       - model-cache:/models
