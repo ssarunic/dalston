@@ -108,7 +108,8 @@ async def test_openai_worker_to_client_translates_protocol_events():
         ]
     )
     client_ws = _FakeClientSink()
-    session_state = OpenAISessionState(current_item_id="item_fixed")
+    session_state = OpenAISessionState()
+    session_state.current_item_id = "item_fixed"
 
     session_end_data = await _openai_worker_to_client(
         worker_ws=worker_ws,
@@ -161,7 +162,8 @@ async def test_openai_worker_to_client_translates_warning_and_lag_error():
         ]
     )
     client_ws = _FakeClientSink()
-    session_state = OpenAISessionState(current_item_id="item_fixed")
+    session_state = OpenAISessionState()
+    session_state.current_item_id = "item_fixed"
 
     await _openai_worker_to_client(
         worker_ws=worker_ws,
@@ -223,7 +225,8 @@ async def test_openai_client_to_worker_translates_protocol_messages():
         ]
     )
     worker_ws = _FakeWorkerSender()
-    session_state = OpenAISessionState(current_item_id="item_orig")
+    session_state = OpenAISessionState()
+    session_state.current_item_id = "item_orig"
     session_config = {
         "language": "auto",
         "encoding": "pcm_s16le",
@@ -257,6 +260,153 @@ async def test_openai_client_to_worker_translates_protocol_messages():
     assert "transcription_session.updated" in client_event_types
     assert "conversation.item.created" in client_event_types
     assert "input_audio_buffer.committed" in client_event_types
+
+    created = next(
+        payload
+        for payload in client_ws.sent_json
+        if payload["type"] == "conversation.item.created"
+    )
+    committed = next(
+        payload
+        for payload in client_ws.sent_json
+        if payload["type"] == "input_audio_buffer.committed"
+    )
+    assert created["item"]["id"] == "item_orig"
+    assert committed["item_id"] == "item_orig"
+    assert created["previous_item_id"] is None
+    assert committed["previous_item_id"] is None
+    assert session_state.previous_item_id == "item_orig"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_to_worker_commit_chains_previous_item_id():
+    """Second commit should reference first commit in previous_item_id."""
+    client_ws = _FakeClientReceiver(
+        [
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({"type": "input_audio_buffer.commit"}),
+            },
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({"type": "input_audio_buffer.commit"}),
+            },
+            {"type": "websocket.disconnect"},
+        ]
+    )
+    worker_ws = _FakeWorkerSender()
+    session_state = OpenAISessionState()
+    session_state.current_item_id = "item_seed"
+    session_config = {
+        "language": "auto",
+        "encoding": "pcm_s16le",
+        "client_sample_rate": 24000,
+        "sample_rate": 16000,
+        "enable_vad": True,
+        "interim_results": True,
+        "word_timestamps": False,
+        "vocabulary": None,
+    }
+
+    await _openai_client_to_worker(
+        client_ws=client_ws,
+        worker_ws=worker_ws,
+        session_id="sess_chain",
+        session_config=session_config,
+        session_state=session_state,
+    )
+
+    created_events = [
+        payload
+        for payload in client_ws.sent_json
+        if payload["type"] == "conversation.item.created"
+    ]
+    committed_events = [
+        payload
+        for payload in client_ws.sent_json
+        if payload["type"] == "input_audio_buffer.committed"
+    ]
+    assert len(created_events) == 2
+    assert len(committed_events) == 2
+    assert created_events[0]["item"]["id"] == "item_seed"
+    assert created_events[0]["previous_item_id"] is None
+    assert committed_events[0]["item_id"] == "item_seed"
+    assert committed_events[0]["previous_item_id"] is None
+
+    second_id = created_events[1]["item"]["id"]
+    assert second_id != "item_seed"
+    assert created_events[1]["previous_item_id"] == "item_seed"
+    assert committed_events[1]["item_id"] == second_id
+    assert committed_events[1]["previous_item_id"] == "item_seed"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_to_worker_accepts_flat_session_update_shape():
+    """Flat session.update payload should normalize and update worker config."""
+    client_ws = _FakeClientReceiver(
+        [
+            {
+                "type": "websocket.receive",
+                "text": json.dumps(
+                    {
+                        "type": "session.update",
+                        "input_audio_format": "g711_ulaw",
+                        "input_audio_transcription": {
+                            "model": "gpt-4o-transcribe",
+                            "language": "fr",
+                            "prompt": "bonjour le monde",
+                        },
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.42,
+                            "silence_duration_ms": 650,
+                            "prefix_padding_ms": 180,
+                        },
+                    }
+                ),
+            },
+            {"type": "websocket.disconnect"},
+        ]
+    )
+    worker_ws = _FakeWorkerSender()
+    session_state = OpenAISessionState()
+    session_config = {
+        "language": "auto",
+        "encoding": "pcm_s16le",
+        "client_sample_rate": 24000,
+        "sample_rate": 16000,
+        "enable_vad": True,
+        "interim_results": True,
+        "word_timestamps": False,
+        "vocabulary": None,
+    }
+
+    await _openai_client_to_worker(
+        client_ws=client_ws,
+        worker_ws=worker_ws,
+        session_id="sess_flat",
+        session_config=session_config,
+        session_state=session_state,
+    )
+
+    text_payloads = [json.loads(p) for p in worker_ws.sent if isinstance(p, str)]
+    config_payload = next(p for p in text_payloads if p.get("type") == "config")
+    assert config_payload["language"] == "fr"
+    assert config_payload["vad_threshold"] == 0.42
+    assert config_payload["min_silence_duration_ms"] == 650
+    assert config_payload["prefix_padding_ms"] == 180
+
+    updated_event = next(
+        payload
+        for payload in client_ws.sent_json
+        if payload["type"] == "transcription_session.updated"
+    )
+    assert updated_event["session"]["input_audio_format"] == "g711_ulaw"
+    assert updated_event["session"]["input_audio_transcription"]["language"] == "fr"
+    assert (
+        updated_event["session"]["input_audio_transcription"]["prompt"]
+        == "bonjour le monde"
+    )
 
 
 def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock]:

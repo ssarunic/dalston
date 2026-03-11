@@ -148,8 +148,77 @@ class OpenAISessionState:
     Used to correlate item_ids between committed events and transcript events.
     """
 
-    current_item_id: str = field(default_factory=generate_item_id)
-    previous_item_id: str | None = None
+    pending_item_id: str = field(default_factory=generate_item_id)
+    active_transcript_item_id: str | None = None
+    last_committed_item_id: str | None = None
+    committed_item_queue: list[str] = field(default_factory=list)
+
+    @property
+    def current_item_id(self) -> str:
+        """Backwards-compatible alias for tests and existing callers."""
+        if self.active_transcript_item_id is not None:
+            return self.active_transcript_item_id
+        return self.pending_item_id
+
+    @current_item_id.setter
+    def current_item_id(self, value: str) -> None:
+        self.pending_item_id = value
+        self.active_transcript_item_id = value
+
+    @property
+    def previous_item_id(self) -> str | None:
+        """Backwards-compatible alias for last committed item id."""
+        return self.last_committed_item_id
+
+    @previous_item_id.setter
+    def previous_item_id(self, value: str | None) -> None:
+        self.last_committed_item_id = value
+
+    def ensure_active_item(self) -> str:
+        """Return active item id, initializing from pending when needed."""
+        if self.active_transcript_item_id is not None:
+            return self.active_transcript_item_id
+        if self.committed_item_queue:
+            self.active_transcript_item_id = self.committed_item_queue[0]
+            return self.active_transcript_item_id
+        self.active_transcript_item_id = self.pending_item_id
+        return self.active_transcript_item_id
+
+    def commit_active_item(self) -> tuple[str, str | None]:
+        """Commit current active item and rotate pending item."""
+        item_id = self.pending_item_id
+        previous_item_id = self.last_committed_item_id
+        self.last_committed_item_id = item_id
+        self.committed_item_queue.append(item_id)
+        if self.active_transcript_item_id is None:
+            self.active_transcript_item_id = item_id
+        self.pending_item_id = generate_item_id()
+        return item_id, previous_item_id
+
+    def finalize_active_item(self) -> None:
+        """Clear active item after final transcript emission."""
+        if self.active_transcript_item_id is None:
+            return
+        active_item_id = self.active_transcript_item_id
+        if self.committed_item_queue and self.committed_item_queue[0] == active_item_id:
+            self.committed_item_queue.pop(0)
+        elif active_item_id in self.committed_item_queue:
+            self.committed_item_queue.remove(active_item_id)
+        self.active_transcript_item_id = (
+            self.committed_item_queue[0] if self.committed_item_queue else None
+        )
+
+    def discard_pending_item(self) -> None:
+        """Discard current active/pending item (input_audio_buffer.clear)."""
+        # Keep committed in-flight item stable if a final transcript is pending.
+        if (
+            self.active_transcript_item_id is not None
+            and self.active_transcript_item_id in self.committed_item_queue
+        ):
+            self.pending_item_id = generate_item_id()
+            return
+        self.active_transcript_item_id = None
+        self.pending_item_id = generate_item_id()
 
 
 # =============================================================================
@@ -684,6 +753,7 @@ async def _proxy_to_worker_openai(
         "enable_vad": True,
         "interim_results": True,
         "word_timestamps": False,
+        "prompt": None,
         "vocabulary": None,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 500,
@@ -802,8 +872,14 @@ def _build_worker_params(session_id: str, config: dict) -> dict[str, str]:
 
 def _normalize_session_update_payload(data: dict) -> dict:
     """Accept both legacy and nested OpenAI session update payload variants."""
-    session = data.get("session", {})
-    if not isinstance(session, dict):
+    raw_session = data.get("session")
+    if raw_session is None:
+        # Accept flat payload shape:
+        # {"type":"transcription_session.update", "input_audio_format":"pcm16", ...}
+        session: dict = {k: v for k, v in data.items() if k not in {"type", "event_id"}}
+    elif isinstance(raw_session, dict):
+        session = dict(raw_session)
+    else:
         return {}
 
     normalized = dict(session)
@@ -884,9 +960,9 @@ async def _openai_client_to_worker(
                         elif msg_type == "input_audio_buffer.commit":
                             # Force processing of buffered audio
                             await worker_ws.send(json.dumps({"type": "flush"}))
-                            current_item_id = generate_item_id()
-                            previous_item_id = session_state.previous_item_id
-                            session_state.current_item_id = current_item_id
+                            current_item_id, previous_item_id = (
+                                session_state.commit_active_item()
+                            )
                             await client_ws.send_json(
                                 {
                                     "type": "conversation.item.created",
@@ -908,11 +984,11 @@ async def _openai_client_to_worker(
                                     "previous_item_id": previous_item_id,
                                 }
                             )
-                            session_state.previous_item_id = current_item_id
 
                         elif msg_type == "input_audio_buffer.clear":
                             # Clear buffer - discard without transcription
                             await worker_ws.send(json.dumps({"type": "clear"}))
+                            session_state.discard_pending_item()
                             await client_ws.send_json(
                                 {
                                     "type": "input_audio_buffer.cleared",
@@ -997,17 +1073,17 @@ async def _handle_session_update(
     session_config.setdefault("noise_reduction", None)
 
     # Update transcription settings
-    transcription = session.get("input_audio_transcription", {})
+    transcription = session.get("input_audio_transcription")
+    if not isinstance(transcription, dict):
+        transcription = {}
     if "language" in transcription:
         session_config["language"] = transcription["language"]
     if "prompt" in transcription:
-        # Convert prompt to vocabulary list
+        # Preserve prompt as free text in session state (not hotword splitting).
         prompt = transcription["prompt"]
-        if prompt:
-            # Split prompt into terms for vocabulary boosting
-            session_config["vocabulary"] = [
-                term.strip() for term in prompt.split(",") if term.strip()
-            ]
+        session_config["prompt"] = (
+            prompt if isinstance(prompt, str) and prompt else None
+        )
 
     # Update turn detection (VAD)
     turn_detection = session.get("turn_detection")
@@ -1054,6 +1130,7 @@ async def _handle_session_update(
                 "input_audio_transcription": {
                     "model": transcription.get("model", "gpt-4o-transcribe"),
                     "language": session_config["language"],
+                    "prompt": session_config.get("prompt"),
                 },
                 "turn_detection": turn_detection,
                 "input_audio_noise_reduction": session_config["noise_reduction"],
@@ -1114,36 +1191,41 @@ async def _openai_worker_to_client(
                     pass
 
                 elif msg_type == "transcript.partial":
+                    item_id = session_state.ensure_active_item()
                     translated = {
                         "type": "conversation.item.input_audio_transcription.delta",
                         "event_id": generate_event_id(),
-                        "item_id": session_state.current_item_id,
+                        "item_id": item_id,
                         "content_index": 0,
                         "delta": data.get("text", ""),
                     }
 
                 elif msg_type == "transcript.final":
+                    item_id = session_state.ensure_active_item()
                     translated = {
                         "type": "conversation.item.input_audio_transcription.completed",
                         "event_id": generate_event_id(),
-                        "item_id": session_state.current_item_id,
+                        "item_id": item_id,
                         "content_index": 0,
                         "transcript": data.get("text", ""),
                     }
+                    session_state.finalize_active_item()
 
                 elif msg_type == "vad.speech_start":
+                    item_id = session_state.ensure_active_item()
                     translated = {
                         "type": "input_audio_buffer.speech_started",
                         "event_id": generate_event_id(),
-                        "item_id": session_state.current_item_id,
+                        "item_id": item_id,
                         "audio_start_ms": int(data.get("timestamp", 0) * 1000),
                     }
 
                 elif msg_type == "vad.speech_end":
+                    item_id = session_state.ensure_active_item()
                     translated = {
                         "type": "input_audio_buffer.speech_stopped",
                         "event_id": generate_event_id(),
-                        "item_id": session_state.current_item_id,
+                        "item_id": item_id,
                         "audio_end_ms": int(data.get("timestamp", 0) * 1000),
                     }
 
