@@ -24,7 +24,12 @@ import riva.client
 import riva.client.proto.riva_asr_pb2 as riva_asr_pb2
 import structlog
 
-from dalston.realtime_sdk import RealtimeEngine, TranscribeResult, Word
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    DalstonTranscriptV1,
+    TranscriptWord,
+)
+from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
@@ -36,7 +41,7 @@ _SAMPLE_RATE = 16000
 _GRPC_TIMEOUT_S = 120
 
 
-class RivaRealtimeEngine(RealtimeEngine):
+class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription engine using Riva NIM gRPC.
 
     Uses offline_recognize() via the SessionHandler's periodic
@@ -61,13 +66,13 @@ class RivaRealtimeEngine(RealtimeEngine):
         self._asr = riva.client.ASRService(self._channel)
         logger.info("riva_nim_channel_ready", uri=self._uri)
 
-    def transcribe(
+    def transcribe_v1(
         self,
         audio: np.ndarray,
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> DalstonTranscriptV1:
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint
@@ -80,7 +85,7 @@ class RivaRealtimeEngine(RealtimeEngine):
             vocabulary: Not supported yet
 
         Returns:
-            TranscribeResult with text, words, language, confidence
+            DalstonTranscriptV1 with text, words, language, confidence
         """
         if self._asr is None:
             raise RuntimeError("ASR service not initialized — call load_models() first")
@@ -104,9 +109,9 @@ class RivaRealtimeEngine(RealtimeEngine):
             audio_bytes, config, timeout=_GRPC_TIMEOUT_S
         )
 
-        words: list[Word] = []
+        segments = []
         text_parts: list[str] = []
-        confidence = 0.0
+        max_confidence = 0.0
 
         for result in response.results:
             if not result.alternatives:
@@ -115,23 +120,39 @@ class RivaRealtimeEngine(RealtimeEngine):
             transcript = alt.transcript.strip()
             if transcript:
                 text_parts.append(transcript)
-            confidence = max(confidence, alt.confidence)
+            max_confidence = max(max_confidence, alt.confidence)
 
+            words: list[TranscriptWord] = []
             for w in alt.words:
                 words.append(
-                    Word(
-                        word=w.word,
+                    self.build_word(
+                        text=w.word,
                         start=w.start_time,
                         end=w.end_time,
                         confidence=w.confidence,
+                        alignment_method=AlignmentMethod.UNKNOWN,
                     )
                 )
 
-        return TranscribeResult(
+            if transcript:
+                seg_start = words[0].start if words else 0.0
+                seg_end = words[-1].end if words else 0.0
+                segments.append(
+                    self.build_segment(
+                        start=seg_start,
+                        end=seg_end,
+                        text=transcript,
+                        words=words if words else None,
+                        confidence=alt.confidence,
+                    )
+                )
+
+        return self.build_transcript(
             text=" ".join(text_parts),
-            words=words,
+            segments=segments,
             language=lang_code,
-            confidence=confidence,
+            runtime=self._runtime,
+            language_confidence=max_confidence,
         )
 
     def supports_streaming(self) -> bool:

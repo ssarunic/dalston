@@ -114,12 +114,17 @@ def __getattr__(name: str):
         from dalston.realtime_sdk.model_manager import AsyncModelManager
 
         return AsyncModelManager
+    elif name == "BaseRealtimeTranscribeEngine":
+        from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
+
+        return BaseRealtimeTranscribeEngine
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     # Core engine (lazy)
+    "BaseRealtimeTranscribeEngine",
     "RealtimeEngine",
     "AsyncModelManager",
     "TranscribeResult",

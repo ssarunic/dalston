@@ -14,6 +14,7 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     AudioRedactOutput,
+    DalstonTranscriptV1,
     DiarizeOutput,
     MergeOutput,
     PIIDetectOutput,
@@ -71,6 +72,12 @@ class MergeInputPayload(BaseModel):
 
 class PrepareOutputPayload(PrepareOutput):
     pass
+
+
+# DalstonTranscriptV1 is the canonical output type for transcription.
+# TranscribeOutputPayload inherits from TranscribeOutput for backward
+# compatibility during the migration period.
+TranscribeOutputPayloadV1 = DalstonTranscriptV1
 
 
 class TranscribeOutputPayload(TranscribeOutput):

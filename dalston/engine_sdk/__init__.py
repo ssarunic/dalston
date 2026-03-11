@@ -46,6 +46,7 @@ from dalston.common.pipeline_types import (
     AlignOutput,
     AudioMedia,
     AudioRedactOutput,
+    DalstonTranscriptV1,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -65,9 +66,12 @@ from dalston.common.pipeline_types import (
     TimestampGranularity,
     TranscribeOutput,
     TranscriptMetadata,
+    TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
@@ -79,6 +83,7 @@ from dalston.engine_sdk.types import (
 
 __all__ = [
     # Core SDK
+    "BaseBatchTranscribeEngine",
     "Engine",
     "EngineCapabilities",
     "LocalRunner",
@@ -106,10 +111,13 @@ __all__ = [
     "SpeechRegion",
     "TaskInputData",
     "TranscriptMetadata",
+    "TranscriptSegment",
+    "TranscriptWord",
     "Word",
     # Stage outputs
     "AlignOutput",
     "AudioRedactOutput",
+    "DalstonTranscriptV1",
     "DiarizeOutput",
     "MergeOutput",
     "PIIDetectOutput",

@@ -13,7 +13,7 @@ Design principles:
 
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -508,6 +508,104 @@ class TranscribeOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
 
+# =============================================================================
+# Unified Transcript Contract (DalstonTranscriptV1)
+# =============================================================================
+
+
+class TranscriptWord(BaseModel):
+    """Word-level timing and confidence for the unified transcript contract.
+
+    Model-specific word-level data (e.g., logprobs) goes in ``metadata``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(..., description="The word text")
+    start: float = Field(..., ge=0, description="Start time in seconds")
+    end: float = Field(..., ge=0, description="End time in seconds")
+    confidence: float | None = Field(
+        default=None, description="0.0-1.0 confidence, None if unavailable"
+    )
+    alignment_method: AlignmentMethod = Field(
+        default=AlignmentMethod.UNKNOWN,
+        description="How this word's timestamps were produced",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Model-specific word data"
+    )
+
+
+class TranscriptSegment(BaseModel):
+    """A contiguous speech segment for the unified transcript contract.
+
+    Model-specific segment-level data (e.g., compression_ratio, no_speech_prob,
+    avg_logprob, tokens, temperature) goes in ``metadata``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(..., ge=0, description="Start time in seconds")
+    end: float = Field(..., ge=0, description="End time in seconds")
+    text: str = Field(..., description="Segment transcript text")
+    words: list[TranscriptWord] | None = Field(
+        default=None, description="Word-level detail"
+    )
+    language: str | None = Field(
+        default=None, description="Per-segment language (for code-switching)"
+    )
+    confidence: float | None = Field(
+        default=None, description="Segment-level confidence"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Model-specific segment data (compression_ratio, no_speech_prob, etc.)",
+    )
+
+
+class DalstonTranscriptV1(BaseModel):
+    """Canonical transcript output — returned by every transcription runtime.
+
+    Subsumes both ``TranscribeOutput`` (batch) and ``TranscribeResult`` (realtime).
+    Model-specific data lives in ``metadata`` dicts at the transcript, segment,
+    and word levels rather than as top-level fields.
+
+    ``schema_version`` enables non-breaking evolution; consumers can branch on it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1"] = Field(
+        default="1", description="Schema version for forward compatibility"
+    )
+    text: str = Field(..., description="Full transcript text")
+    segments: list[TranscriptSegment] = Field(..., description="Transcript segments")
+    language: str = Field(..., description="Detected/used language code (ISO 639-1)")
+    language_confidence: float | None = Field(
+        default=None, ge=0, le=1, description="Language detection confidence"
+    )
+    duration: float | None = Field(
+        default=None, ge=0, description="Audio duration in seconds"
+    )
+    timestamp_granularity: TimestampGranularity = Field(
+        default=TimestampGranularity.SEGMENT,
+        description="Finest granularity of timestamps in this transcript",
+    )
+    alignment_method: AlignmentMethod = Field(
+        default=AlignmentMethod.UNKNOWN,
+        description="Primary alignment method used",
+    )
+    runtime: str = Field(..., description="Runtime identifier (e.g., 'faster-whisper')")
+    channel: int | None = Field(
+        default=None,
+        description="Source audio channel (0=left, 1=right) for per_channel mode",
+    )
+    warnings: list[str] = Field(default_factory=list, description="Runtime warnings")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Runtime-level extras"
+    )
+
+
 class AlignOutput(BaseModel):
     """Output from alignment stage."""
 
@@ -738,6 +836,7 @@ PreviousOutputs = dict[
     str,
     PrepareOutput
     | TranscribeOutput
+    | DalstonTranscriptV1
     | AlignOutput
     | DiarizeOutput
     | PIIDetectOutput

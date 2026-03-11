@@ -7,6 +7,10 @@ managing timestamps relative to session start time.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dalston.common.pipeline_types import DalstonTranscriptV1
 
 
 @dataclass
@@ -44,6 +48,10 @@ class TranscribeResult:
 
     Used as input to TranscriptAssembler.add_utterance().
     Word timestamps are relative to the audio segment (0-based).
+
+    .. deprecated::
+        Prefer returning ``DalstonTranscriptV1`` from engines and using
+        ``TranscriptAssembler.add_transcript()`` instead.
     """
 
     text: str
@@ -114,6 +122,61 @@ class TranscriptAssembler:
             text=result.text,
             words=adjusted_words,
             confidence=result.confidence,
+        )
+
+        self._segments.append(segment)
+        self._segment_counter += 1
+        self._current_time = segment.end
+
+        return segment
+
+    def add_transcript(
+        self,
+        transcript: DalstonTranscriptV1,
+        audio_duration: float,
+    ) -> Segment:
+        """Add a DalstonTranscriptV1 result to the session transcript.
+
+        Extracts words from all transcript segments and adjusts timestamps
+        to the session timeline. This is the preferred method for engines
+        that return the unified transcript contract.
+
+        Args:
+            transcript: Unified transcript from ASR engine
+            audio_duration: Duration of the audio segment in seconds
+
+        Returns:
+            Segment with timestamps adjusted to session timeline
+        """
+        # Collect all words from transcript segments
+        adjusted_words: list[Word] = []
+        for seg in transcript.segments:
+            if seg.words:
+                for w in seg.words:
+                    adjusted_words.append(
+                        Word(
+                            word=w.text,
+                            start=self._current_time + w.start,
+                            end=self._current_time + w.end,
+                            confidence=w.confidence if w.confidence is not None else 0.0,
+                        )
+                    )
+
+        # Compute overall confidence from segment confidences
+        seg_confidences = [
+            s.confidence for s in transcript.segments if s.confidence is not None
+        ]
+        overall_confidence = (
+            sum(seg_confidences) / len(seg_confidences) if seg_confidences else 0.0
+        )
+
+        segment = Segment(
+            id=f"seg_{self._segment_counter:04d}",
+            start=self._current_time,
+            end=self._current_time + audio_duration,
+            text=transcript.text,
+            words=adjusted_words,
+            confidence=overall_confidence,
         )
 
         self._segments.append(segment)

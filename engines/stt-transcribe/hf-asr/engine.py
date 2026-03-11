@@ -28,21 +28,21 @@ from typing import Any
 
 import torch
 
-from dalston.engine_sdk import (
+from dalston.common.pipeline_types import (
     AlignmentMethod,
-    BatchTaskContext,
-    Engine,
-    EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
+    DalstonTranscriptV1,
+    TranscriptSegment,
+    TranscriptWord,
 )
+from dalston.engine_sdk import (
+    BatchTaskContext,
+    EngineInput,
+)
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.managers import HFTransformersModelManager
 
 
-class HFASREngine(Engine):
+class HFASREngine(BaseBatchTranscribeEngine):
     """Generic HuggingFace ASR pipeline engine.
 
     This engine uses HFTransformersModelManager to handle model lifecycle:
@@ -130,14 +130,17 @@ class HFASREngine(Engine):
         )
         return "cpu", torch.float32
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> DalstonTranscriptV1:
         """Transcribe audio using a HuggingFace ASR pipeline.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput containing text, segments, and language
+            DalstonTranscriptV1 with text, segments, and language
         """
         config = engine_input.config
 
@@ -180,16 +183,16 @@ class HFASREngine(Engine):
             # Run ASR pipeline
             result = pipe(str(engine_input.audio_path), **pipe_kwargs)
 
-            # Normalize output to Dalston format
-            output = self._normalize_output(result, runtime_model_id, language, channel)
+            # Normalize output to DalstonTranscriptV1 format
+            transcript = self._normalize_output(result, runtime_model_id, language, channel)
 
             self.logger.info(
                 "transcription_complete",
-                segment_count=len(output.segments),
-                char_count=len(output.text),
+                segment_count=len(transcript.segments),
+                char_count=len(transcript.text),
             )
 
-            return EngineOutput(data=output)
+            return transcript
 
         finally:
             # Always release the model reference
@@ -202,8 +205,8 @@ class HFASREngine(Engine):
         model_id: str,
         language: str | None,
         channel: int | None,
-    ) -> TranscribeOutput:
-        """Normalize HuggingFace pipeline output to Dalston TranscribeOutput.
+    ) -> DalstonTranscriptV1:
+        """Normalize HuggingFace pipeline output to DalstonTranscriptV1.
 
         HF pipeline returns different formats based on model architecture:
         - Whisper: {"text": "...", "chunks": [{"text": "...", "timestamp": (start, end)}]}
@@ -217,17 +220,17 @@ class HFASREngine(Engine):
             channel: Audio channel index or None
 
         Returns:
-            Normalized TranscribeOutput
+            Normalized DalstonTranscriptV1
         """
         text = result.get("text", "").strip()
         chunks = result.get("chunks", [])
 
-        segments: list[Segment] = []
+        segments: list[TranscriptSegment] = []
         has_word_timestamps = False
 
         if chunks:
             # Process chunks with timestamps
-            words: list[Word] = []
+            words: list[TranscriptWord] = []
 
             for chunk in chunks:
                 chunk_text = chunk.get("text", "").strip()
@@ -239,7 +242,7 @@ class HFASREngine(Engine):
                 end = timestamp[1] if timestamp and timestamp[1] is not None else 0.0
 
                 words.append(
-                    Word(
+                    self.build_word(
                         text=chunk_text,
                         start=round(start, 3),
                         end=round(end, 3),
@@ -254,7 +257,7 @@ class HFASREngine(Engine):
                 # Group words into segments (one segment for now; downstream
                 # stages like alignment or merge can re-segment)
                 segments.append(
-                    Segment(
+                    self.build_segment(
                         start=round(words[0].start, 3),
                         end=round(words[-1].end, 3),
                         text=text,
@@ -263,7 +266,7 @@ class HFASREngine(Engine):
                 )
             else:
                 segments.append(
-                    Segment(
+                    self.build_segment(
                         start=0.0,
                         end=0.0,
                         text=text,
@@ -272,33 +275,22 @@ class HFASREngine(Engine):
         else:
             # No timestamps - create single segment
             segments.append(
-                Segment(
+                self.build_segment(
                     start=0.0,
                     end=0.0,
                     text=text,
                 )
             )
 
-        timestamp_granularity_actual = (
-            TimestampGranularity.WORD
-            if has_word_timestamps
-            else TimestampGranularity.NONE
-        )
-
-        return TranscribeOutput(
+        return self.build_transcript(
             text=text,
             segments=segments,
             language=language or "auto",
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=timestamp_granularity_actual,
+            runtime=self._runtime,
             alignment_method=(
-                AlignmentMethod.ATTENTION if has_word_timestamps else None
+                AlignmentMethod.ATTENTION if has_word_timestamps else AlignmentMethod.UNKNOWN
             ),
             channel=channel,
-            runtime=self._runtime,
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
         )
 
     def health_check(self) -> dict[str, Any]:

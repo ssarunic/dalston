@@ -16,20 +16,19 @@ from typing import Any
 
 import torch
 
-from dalston.engine_sdk import (
+from dalston.common.pipeline_types import (
     AlignmentMethod,
+    DalstonTranscriptV1,
+)
+from dalston.engine_sdk import (
     BatchTaskContext,
-    Engine,
     EngineCapabilities,
     EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
 )
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 
 
-class VoxtralEngine(Engine):
+class VoxtralEngine(BaseBatchTranscribeEngine):
     """Mistral Voxtral transcription engine.
 
     Uses Voxtral models for multilingual transcription.
@@ -146,14 +145,17 @@ class VoxtralEngine(Engine):
 
         self.logger.info("model_loaded_successfully", model_name=model_name)
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> DalstonTranscriptV1:
         """Transcribe audio using Voxtral.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput containing text and segments
+            DalstonTranscriptV1 with text and segments
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -203,7 +205,7 @@ class VoxtralEngine(Engine):
 
         # Create a single segment (Voxtral batch doesn't provide word timestamps)
         segments = [
-            Segment(
+            self.build_segment(
                 start=0.0,
                 end=0.0,
                 text=full_text,
@@ -224,22 +226,16 @@ class VoxtralEngine(Engine):
                 f"Vocabulary boosting ({len(vocabulary)} terms) not supported by Voxtral engine"
             )
 
-        output = TranscribeOutput(
+        return self.build_transcript(
             text=full_text,
             segments=segments,
             language=language,
+            runtime=f"voxtral-{self._model_variant}",
             language_confidence=0.9,
-            timestamp_granularity_requested=TimestampGranularity.SEGMENT,
-            timestamp_granularity_actual=TimestampGranularity.SEGMENT,
             alignment_method=AlignmentMethod.UNKNOWN,
             channel=channel,
-            runtime=f"voxtral-{self._model_variant}",
-            skipped=False,
-            skip_reason=None,
             warnings=warnings,
         )
-
-        return EngineOutput(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including GPU availability."""

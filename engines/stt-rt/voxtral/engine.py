@@ -18,12 +18,17 @@ import numpy as np
 import structlog
 import torch
 
-from dalston.realtime_sdk import RealtimeEngine, TranscribeResult, Word
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    DalstonTranscriptV1,
+    TranscriptWord,
+)
+from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class VoxtralStreamingEngine(RealtimeEngine):
+class VoxtralStreamingEngine(BaseRealtimeTranscribeEngine):
     """Real-time streaming transcription using Voxtral.
 
     Uses Voxtral-Mini-4B-Realtime for multilingual streaming transcription
@@ -169,7 +174,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
 
         logger.info("voxtral_model_loaded", model_id=self._hf_model_id)
 
-    def _parse_streaming_output(self, text: str) -> tuple[str, list[Word]]:
+    def _parse_streaming_output(self, text: str) -> tuple[str, list[TranscriptWord]]:
         """Parse Voxtral realtime timestamp output.
 
         Voxtral Realtime outputs timestamps as: <|0.00|>word<|0.08|>
@@ -184,7 +189,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
         timestamp_pattern = r"<\|(\d+\.\d+)\|>"
         clean_text = re.sub(timestamp_pattern, "", text).strip()
 
-        words: list[Word] = []
+        words: list[TranscriptWord] = []
         parts = re.split(timestamp_pattern, text)
 
         current_time = 0.0
@@ -206,23 +211,24 @@ class VoxtralStreamingEngine(RealtimeEngine):
                             continue
 
                     words.append(
-                        Word(
-                            word=word_text,
+                        self.build_word(
+                            text=word_text,
                             start=round(current_time, 3),
                             end=round(next_time, 3),
                             confidence=0.95,
+                            alignment_method=AlignmentMethod.ATTENTION,
                         )
                     )
 
         return clean_text, words
 
-    def transcribe(
+    def transcribe_v1(
         self,
         audio: np.ndarray,
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> DalstonTranscriptV1:
         """Transcribe an audio segment.
 
         Args:
@@ -232,7 +238,7 @@ class VoxtralStreamingEngine(RealtimeEngine):
             vocabulary: List of terms to boost recognition (not supported)
 
         Returns:
-            TranscribeResult with text, words, language, confidence
+            DalstonTranscriptV1 with text, words, language, confidence
         """
         if self._model is None:
             raise RuntimeError("Model not loaded. Call load_models() first.")
@@ -278,11 +284,25 @@ class VoxtralStreamingEngine(RealtimeEngine):
         if detected_language not in self.SUPPORTED_LANGUAGES:
             detected_language = "en"
 
-        return TranscribeResult(
+        # Build a single segment from the full utterance
+        seg_start = words[0].start if words else 0.0
+        seg_end = words[-1].end if words else 0.0
+        segments = [
+            self.build_segment(
+                start=seg_start,
+                end=seg_end,
+                text=clean_text,
+                words=words if words else None,
+            )
+        ]
+
+        return self.build_transcript(
             text=clean_text,
-            words=words,
+            segments=segments,
             language=detected_language,
-            confidence=0.95,
+            runtime=f"voxtral-{self._model_variant}",
+            language_confidence=0.95,
+            alignment_method=AlignmentMethod.ATTENTION,
         )
 
     def supports_streaming(self) -> bool:

@@ -6,7 +6,7 @@ model-specific adapters.
 
 Audio LLMs produce text-only output without timestamps. If word-level
 timing is required, the orchestrator chains the alignment stage after
-this engine: vllm-asr (transcribe) → phoneme-align (add timestamps).
+this engine: vllm-asr (transcribe) -> phoneme-align (add timestamps).
 
 Features:
     - TTL-based model management with LRU eviction
@@ -38,13 +38,18 @@ import torch
 if TYPE_CHECKING:
     from dalston.engine_sdk.model_storage import S3ModelStorage
 
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    DalstonTranscriptV1,
+    TranscriptSegment,
+    TranscriptWord,
+)
 from dalston.engine_sdk import (
     BatchTaskContext,
-    Engine,
     EngineCapabilities,
     EngineInput,
-    EngineOutput,
 )
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 
 # Add engine directory to path for adapter imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,7 +58,7 @@ from adapters import ADAPTER_REGISTRY, get_adapter
 logger = structlog.get_logger()
 
 
-class VLLMASREngine(Engine):
+class VLLMASREngine(BaseBatchTranscribeEngine):
     """vLLM-based ASR engine for audio-capable LLMs.
 
     This engine uses vLLM to serve audio LLMs (Voxtral, Qwen2-Audio) for
@@ -207,14 +212,17 @@ class VLLMASREngine(Engine):
             model_path=model_path,
         )
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> DalstonTranscriptV1:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context for tracing/logging
 
         Returns:
-            EngineOutput with TranscribeOutput containing text and segments
+            DalstonTranscriptV1 with text and segments
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -281,15 +289,59 @@ class VLLMASREngine(Engine):
                 char_count=len(raw_text),
             )
 
-            # Parse output using adapter
-            result = adapter.parse_output(raw_text, language)
+            # Parse output using adapter (returns old-style TranscribeOutput)
+            adapter_result = adapter.parse_output(raw_text, language)
 
-            # Override runtime and add channel/warnings
-            result.runtime = self._runtime
-            result.channel = channel
-            result.warnings = warnings + (result.warnings or [])
+            # Convert adapter result segments to TranscriptSegment
+            segments: list[TranscriptSegment] = []
+            for seg in adapter_result.segments:
+                seg_words: list[TranscriptWord] | None = None
+                if seg.words:
+                    seg_words = [
+                        self.build_word(
+                            text=w.text,
+                            start=w.start,
+                            end=w.end,
+                            confidence=w.confidence,
+                            alignment_method=(
+                                w.alignment_method
+                                if w.alignment_method is not None
+                                else AlignmentMethod.UNKNOWN
+                            ),
+                        )
+                        for w in seg.words
+                    ]
 
-            return EngineOutput(data=result)
+                segments.append(
+                    self.build_segment(
+                        start=seg.start,
+                        end=seg.end,
+                        text=seg.text,
+                        words=seg_words,
+                        language=seg.language,
+                        confidence=seg.confidence,
+                    )
+                )
+
+            # Merge warnings from adapter with engine warnings
+            adapter_warnings = adapter_result.warnings or []
+            all_warnings = warnings + adapter_warnings
+
+            return self.build_transcript(
+                text=adapter_result.text,
+                segments=segments,
+                language=adapter_result.language,
+                runtime=self._runtime,
+                language_confidence=adapter_result.language_confidence,
+                duration=adapter_result.duration,
+                alignment_method=(
+                    adapter_result.alignment_method
+                    if adapter_result.alignment_method is not None
+                    else AlignmentMethod.UNKNOWN
+                ),
+                channel=channel,
+                warnings=all_warnings,
+            )
 
         finally:
             self._set_runtime_state(loaded_model=runtime_model_id, status="idle")

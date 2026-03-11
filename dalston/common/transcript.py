@@ -14,6 +14,7 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignOutput,
+    DalstonTranscriptV1,
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
@@ -23,6 +24,7 @@ from dalston.common.pipeline_types import (
     SpeakerTurn,
     TranscribeOutput,
     TranscriptMetadata,
+    TranscriptSegment,
     Word,
 )
 
@@ -70,8 +72,9 @@ def assemble_transcript(
         transcribe_data,
     )
 
-    # Parse typed outputs if possible
-    transcribe_output = _try_parse_transcribe(transcribe_data)
+    # Parse typed outputs if possible — try DalstonTranscriptV1 first
+    transcript_v1 = _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
+    transcribe_output = _try_parse_transcribe(transcribe_data) if transcript_v1 is None else None
     align_output = _try_parse_align(align_data) if align_data else None
     diarize_output = _try_parse_diarize(diarize_data) if diarize_data else None
 
@@ -80,6 +83,7 @@ def assemble_transcript(
         transcribe_output=transcribe_output,
         align_output=align_output,
         raw_segments=raw_segments,
+        transcript_v1=transcript_v1,
     )
 
     # Build speaker assignments from diarization
@@ -212,9 +216,12 @@ def assemble_per_channel_transcript(
             lc_raw = transcribe_data.get("language_confidence")
             language_confidence = lc_raw if lc_raw is not None else 1.0
 
-        # Select best segment source for this channel
+        # Select best segment source for this channel — try V1 first
+        transcript_v1 = (
+            _try_parse_transcript_v1(transcribe_data) if transcribe_data else None
+        )
         transcribe_output = (
-            _try_parse_transcribe(transcribe_data) if transcribe_data else None
+            _try_parse_transcribe(transcribe_data) if transcribe_data and transcript_v1 is None else None
         )
         align_output = _try_parse_align(align_data) if align_data else None
         raw_segments = transcribe_data.get("segments", []) if transcribe_data else []
@@ -223,6 +230,7 @@ def assemble_per_channel_transcript(
             transcribe_output=transcribe_output,
             align_output=align_output,
             raw_segments=raw_segments,
+            transcript_v1=transcript_v1,
         )
         if ch_word_ts:
             word_timestamps_available = True
@@ -326,7 +334,20 @@ def assemble_per_channel_transcript(
 
 def _extract_segment_fields(seg: Any) -> dict[str, Any]:
     """Extract segment fields into a plain dict from any segment type."""
-    if isinstance(seg, Segment):
+    if isinstance(seg, TranscriptSegment):
+        # DalstonTranscriptV1 segment — model-specific fields are in metadata
+        return {
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+            "words": seg.words,
+            "tokens": seg.metadata.get("tokens"),
+            "temperature": seg.metadata.get("temperature"),
+            "avg_logprob": seg.metadata.get("avg_logprob"),
+            "compression_ratio": seg.metadata.get("compression_ratio"),
+            "no_speech_prob": seg.metadata.get("no_speech_prob"),
+        }
+    elif isinstance(seg, Segment):
         return {
             "start": seg.start,
             "end": seg.end,
@@ -438,6 +459,14 @@ def _extract_transcribe_data(
     return text, language, language_confidence, raw_segments
 
 
+def _try_parse_transcript_v1(data: dict[str, Any]) -> DalstonTranscriptV1 | None:
+    """Try to parse transcribe data into a DalstonTranscriptV1."""
+    try:
+        return DalstonTranscriptV1.model_validate(data)
+    except Exception:
+        return None
+
+
 def _try_parse_transcribe(data: dict[str, Any]) -> TranscribeOutput | None:
     """Try to parse transcribe data into a typed TranscribeOutput."""
     try:
@@ -467,7 +496,8 @@ def _select_segments(
     transcribe_output: TranscribeOutput | None,
     align_output: AlignOutput | None,
     raw_segments: list,
-) -> tuple[list[Segment] | list[dict], bool, list]:
+    transcript_v1: DalstonTranscriptV1 | None = None,
+) -> tuple[list[Segment] | list[TranscriptSegment] | list[dict], bool, list]:
     """Select the best available segments and determine word timestamp availability.
 
     Returns:
@@ -479,16 +509,22 @@ def _select_segments(
         if align_output.skipped:
             logger.warning("alignment_skipped", reason=align_output.skip_reason)
             pipeline_warnings.extend(align_output.warnings)
-            segments_source = (
-                transcribe_output.segments if transcribe_output else raw_segments
-            )
+            if transcript_v1 is not None:
+                segments_source: list = list(transcript_v1.segments)
+            elif transcribe_output is not None:
+                segments_source = list(transcribe_output.segments)
+            else:
+                segments_source = raw_segments
             word_timestamps_available = False
         else:
-            segments_source = align_output.segments
+            segments_source = list(align_output.segments)
             word_timestamps_available = align_output.word_timestamps
+    elif transcript_v1 is not None:
+        segments_source = list(transcript_v1.segments)
+        word_timestamps_available = any(s.words for s in transcript_v1.segments)
     elif transcribe_output is not None:
-        segments_source = transcribe_output.segments
-        word_timestamps_available = any(s.words for s in segments_source)
+        segments_source = list(transcribe_output.segments)
+        word_timestamps_available = any(s.words for s in transcribe_output.segments)
     else:
         segments_source = raw_segments
         word_timestamps_available = False
@@ -575,9 +611,35 @@ def _normalize_words(words: list) -> list[Word]:
     return result or []
 
 
+def _normalize_transcript_words(words: list) -> list[Word]:
+    """Normalize TranscriptWord or Word objects into pipeline Word objects."""
+    from dalston.common.pipeline_types import TranscriptWord as TW
+
+    result = []
+    for w in words:
+        if isinstance(w, Word):
+            result.append(w)
+        elif isinstance(w, TW):
+            result.append(
+                Word(
+                    text=w.text,
+                    start=w.start,
+                    end=w.end,
+                    confidence=w.confidence,
+                    alignment_method=w.alignment_method,
+                )
+            )
+        elif isinstance(w, dict):
+            try:
+                result.append(Word.model_validate(w))
+            except Exception:
+                pass
+    return result or []
+
+
 def _build_merged_segments(
     *,
-    segments_source: list[Segment] | list[dict],
+    segments_source: list[Segment] | list[TranscriptSegment] | list[dict],
     diarization_turns: list[SpeakerTurn],
     word_timestamps_available: bool,
 ) -> list[MergedSegment]:
@@ -585,7 +647,18 @@ def _build_merged_segments(
     segments: list[MergedSegment] = []
 
     for idx, seg in enumerate(segments_source):
-        if isinstance(seg, Segment):
+        if isinstance(seg, TranscriptSegment):
+            # DalstonTranscriptV1 segment
+            seg_start = seg.start
+            seg_end = seg.end
+            seg_text = seg.text
+            seg_words = seg.words
+            seg_tokens = seg.metadata.get("tokens")
+            seg_temperature = seg.metadata.get("temperature")
+            seg_avg_logprob = seg.metadata.get("avg_logprob")
+            seg_compression_ratio = seg.metadata.get("compression_ratio")
+            seg_no_speech_prob = seg.metadata.get("no_speech_prob")
+        elif isinstance(seg, Segment):
             seg_start = seg.start
             seg_end = seg.end
             seg_text = seg.text
@@ -622,10 +695,13 @@ def _build_merged_segments(
         if diarization_turns:
             speaker = _find_speaker_by_overlap(seg_start, seg_end, diarization_turns)
 
-        # Normalize words
+        # Normalize words — use appropriate normalizer for the segment type
         words: list[Word] | None = None
         if word_timestamps_available and seg_words:
-            words = _normalize_words(seg_words)
+            if isinstance(seg, TranscriptSegment):
+                words = _normalize_transcript_words(seg_words)
+            else:
+                words = _normalize_words(seg_words)
 
         segment = MergedSegment(
             id=f"seg_{idx:03d}",

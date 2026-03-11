@@ -29,18 +29,18 @@ Environment variables:
 import os
 from typing import Any
 
-from dalston.engine_sdk import (
+from dalston.common.pipeline_types import (
     AlignmentMethod,
+    DalstonTranscriptV1,
+    TranscriptSegment,
+    TranscriptWord,
+)
+from dalston.engine_sdk import (
     BatchTaskContext,
-    Engine,
     EngineCapabilities,
     EngineInput,
-    EngineOutput,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
 )
+from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
 
 # Decoder type extracted from model ID for alignment method reporting
@@ -56,12 +56,12 @@ _NGC_TO_MANAGER_ID = {
 }
 
 
-class ParakeetOnnxEngine(Engine):
+class ParakeetOnnxEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine using ONNX Runtime.
 
     Delegates inference to ParakeetOnnxCore, which is shared with the RT
     ONNX engine. The batch adapter handles file path input and output
-    formatting to TranscribeOutput.
+    formatting to DalstonTranscriptV1.
 
     Supports both GPU (CUDA/TensorRT) and CPU inference. CPU inference with
     INT8 quantization achieves competitive performance for batch processing.
@@ -102,26 +102,22 @@ class ParakeetOnnxEngine(Engine):
         )
 
     def _normalize_model_id(self, runtime_model_id: str) -> str:
-        """Normalize NGC model IDs to NeMoOnnxModelManager format.
-
-        Args:
-            runtime_model_id: Model identifier, possibly in NGC format
-
-        Returns:
-            Normalized model ID for NeMoOnnxModelManager
-        """
+        """Normalize NGC model IDs to NeMoOnnxModelManager format."""
         if runtime_model_id in _NGC_TO_MANAGER_ID:
             return _NGC_TO_MANAGER_ID[runtime_model_id]
         return runtime_model_id
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def transcribe_audio(
+        self, engine_input: EngineInput, ctx: BatchTaskContext
+    ) -> DalstonTranscriptV1:
         """Transcribe audio using Parakeet via ONNX Runtime and shared core.
 
         Args:
             engine_input: Task input with audio file path and config
+            ctx: Batch task context
 
         Returns:
-            EngineOutput with TranscribeOutput containing text, segments, and words
+            DalstonTranscriptV1 with text, segments, and words
         """
         audio_path = engine_input.audio_path
         config = engine_input.config
@@ -137,62 +133,50 @@ class ParakeetOnnxEngine(Engine):
         # Delegate to shared core
         core_result = self._core.transcribe(str(audio_path), model_id)
 
-        # Convert core result to batch output format
-        segments: list[Segment] = []
-        all_words: list[Word] = []
+        # Convert core result to DalstonTranscriptV1
+        segments: list[TranscriptSegment] = []
+        word_count = 0
 
         for core_seg in core_result.segments:
-            seg_words: list[Word] = []
+            seg_words: list[TranscriptWord] = []
             for w in core_seg.words:
-                word = Word(
-                    text=w.word,
-                    start=w.start,
-                    end=w.end,
-                    confidence=w.confidence,
-                    alignment_method=alignment_method,
+                seg_words.append(
+                    self.build_word(
+                        text=w.word,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence,
+                        alignment_method=alignment_method,
+                    )
                 )
-                seg_words.append(word)
-                all_words.append(word)
+                word_count += 1
 
             segments.append(
-                Segment(
+                self.build_segment(
                     start=core_seg.start,
                     end=core_seg.end,
                     text=core_seg.text,
                     words=seg_words if seg_words else None,
+                    decoder_type=decoder_type,
                 )
             )
 
         self.logger.info(
             "transcription_complete",
             segment_count=len(segments),
-            word_count=len(all_words),
+            word_count=word_count,
             char_count=len(core_result.text),
         )
 
-        has_word_timestamps = any(seg.words for seg in segments)
-        timestamp_granularity_actual = (
-            TimestampGranularity.WORD
-            if has_word_timestamps
-            else TimestampGranularity.SEGMENT
-        )
-
-        output = TranscribeOutput(
+        return self.build_transcript(
             text=core_result.text,
             segments=segments,
             language="en",
+            runtime=self._runtime,
             language_confidence=1.0,
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=timestamp_granularity_actual,
             alignment_method=alignment_method,
             channel=channel,
-            runtime=self._runtime,
-            skipped=False,
-            skip_reason=None,
-            warnings=[],
         )
-
-        return EngineOutput(data=output)
 
     @staticmethod
     def _get_decoder_type(runtime_model_id: str) -> str:

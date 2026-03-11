@@ -641,6 +641,11 @@ class EngineRunner:
                     output = self.engine.process(task_input, task_ctx)
                 process_time = time.time() - process_start
 
+                # Boundary validation: validate transcribe outputs against
+                # DalstonTranscriptV1 (warn-only during migration).
+                if task_input.stage == "transcribe":
+                    self._validate_transcript_output(output, task_id)
+
                 # Calculate total task time (for metrics)
                 total_task_time = time.time() - start_time
 
@@ -776,6 +781,39 @@ class EngineRunner:
             raise ValueError(f"Task metadata not found in Redis: {task_id}")
 
         return data
+
+    def _validate_transcript_output(
+        self,
+        output: EngineOutput,
+        task_id: str,
+    ) -> None:
+        """Validate transcribe-stage output against DalstonTranscriptV1.
+
+        During the migration period this logs a warning on failure rather
+        than rejecting the output. Set DALSTON_STRICT_TRANSCRIPT_VALIDATION=true
+        to promote warnings to errors.
+        """
+        from dalston.common.pipeline_types import DalstonTranscriptV1
+
+        strict = os.environ.get(
+            "DALSTON_STRICT_TRANSCRIPT_VALIDATION", ""
+        ).lower() in ("true", "1", "yes")
+
+        output_dict = output.to_dict()
+        try:
+            DalstonTranscriptV1.model_validate(output_dict)
+        except Exception as e:
+            if strict:
+                raise ValueError(
+                    f"Transcribe output failed DalstonTranscriptV1 validation: {e}"
+                ) from e
+            logger.warning(
+                "transcript_v1_validation_failed",
+                task_id=task_id,
+                error=str(e),
+                hint="Engine output does not conform to DalstonTranscriptV1. "
+                "Migrate engine to return DalstonTranscriptV1 for strict mode.",
+            )
 
     def _save_task_output(
         self,

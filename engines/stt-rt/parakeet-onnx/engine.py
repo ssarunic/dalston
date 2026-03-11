@@ -27,25 +27,26 @@ from typing import Any
 import numpy as np
 import structlog
 
-from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
-from dalston.realtime_sdk import (
-    AsyncModelManager,
-    RealtimeEngine,
-    TranscribeResult,
-    Word,
+from dalston.common.pipeline_types import (
+    AlignmentMethod,
+    DalstonTranscriptV1,
+    TranscriptWord,
 )
+from dalston.engine_sdk.cores.parakeet_onnx_core import ParakeetOnnxCore
+from dalston.realtime_sdk import AsyncModelManager
+from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
 
-class ParakeetOnnxStreamingEngine(RealtimeEngine):
+class ParakeetOnnxStreamingEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription using Parakeet via ONNX Runtime.
 
     Delegates inference to ParakeetOnnxCore, which is shared with the batch
     ONNX engine. The RT adapter handles:
     - Model ID normalization
     - VAD-chunked audio input (numpy arrays)
-    - Output formatting to TranscribeResult
+    - Output formatting to DalstonTranscriptV1
 
     When run standalone, creates its own ParakeetOnnxCore in load_models().
     When used within a unified runner, accepts an injected core to share a
@@ -91,13 +92,13 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
             shared_core=self._core is not None,
         )
 
-    def transcribe(
+    def transcribe_v1(
         self,
         audio: np.ndarray,
         language: str,
         model_variant: str,
         vocabulary: list[str] | None = None,
-    ) -> TranscribeResult:
+    ) -> DalstonTranscriptV1:
         """Transcribe an audio segment via shared ParakeetOnnxCore.
 
         Args:
@@ -107,7 +108,7 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
             vocabulary: List of terms to boost recognition (not supported for ONNX)
 
         Returns:
-            TranscribeResult with text, words, language, confidence
+            DalstonTranscriptV1 with text, words, language, confidence
         """
         if self._core is None:
             raise RuntimeError(
@@ -137,24 +138,39 @@ class ParakeetOnnxStreamingEngine(RealtimeEngine):
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
-        # Format core result into RT output contract
-        words: list[Word] = []
+        # Format core result into DalstonTranscriptV1
+        segments = []
+        text_parts: list[str] = []
+
         for seg in result.segments:
+            words: list[TranscriptWord] = []
+            seg_text = seg.text if hasattr(seg, "text") else ""
+            text_parts.append(seg_text)
             for w in seg.words:
                 words.append(
-                    Word(
-                        word=w.word,
+                    self.build_word(
+                        text=w.word,
                         start=w.start,
                         end=w.end,
                         confidence=w.confidence or 0.95,
+                        alignment_method=AlignmentMethod.CTC,
                     )
                 )
+            segments.append(
+                self.build_segment(
+                    start=seg.start if hasattr(seg, "start") else (words[0].start if words else 0.0),
+                    end=seg.end if hasattr(seg, "end") else (words[-1].end if words else 0.0),
+                    text=seg_text,
+                    words=words if words else None,
+                )
+            )
 
-        return TranscribeResult(
+        return self.build_transcript(
             text=result.text,
-            words=words,
+            segments=segments,
             language="en",
-            confidence=1.0,
+            runtime="nemo-onnx",
+            language_confidence=1.0,
         )
 
     def _normalize_model_id(self, model_id: str) -> str:
