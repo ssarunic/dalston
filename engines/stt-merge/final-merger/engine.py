@@ -29,6 +29,7 @@ from dalston.engine_sdk import (
     SpeakerTurn,
     TranscriptMetadata,
     TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 
@@ -171,7 +172,7 @@ class FinalMergerEngine(Engine):
         # Build segments with IDs and speaker assignments
         segments: list[MergedSegment] = []
         for idx, seg in enumerate(segments_source):
-            # Handle TranscriptSegment, Segment, and raw dict
+            # Handle TranscriptSegment and raw dict
             if isinstance(seg, TranscriptSegment):
                 seg_start = seg.start
                 seg_end = seg.end
@@ -182,16 +183,6 @@ class FinalMergerEngine(Engine):
                 seg_avg_logprob = seg.metadata.get("avg_logprob")
                 seg_compression_ratio = seg.metadata.get("compression_ratio")
                 seg_no_speech_prob = seg.metadata.get("no_speech_prob")
-            elif hasattr(seg, "start"):
-                seg_start = seg.start
-                seg_end = seg.end
-                seg_text = seg.text
-                seg_words = seg.words
-                seg_tokens = getattr(seg, "tokens", None)
-                seg_temperature = getattr(seg, "temperature", None)
-                seg_avg_logprob = getattr(seg, "avg_logprob", None)
-                seg_compression_ratio = getattr(seg, "compression_ratio", None)
-                seg_no_speech_prob = getattr(seg, "no_speech_prob", None)
             else:
                 seg_start = seg.get("start", 0.0)
                 seg_end = seg.get("end", 0.0)
@@ -497,24 +488,6 @@ class FinalMergerEngine(Engine):
                             "avg_logprob": seg.metadata.get("avg_logprob"),
                             "compression_ratio": seg.metadata.get("compression_ratio"),
                             "no_speech_prob": seg.metadata.get("no_speech_prob"),
-                            "channel": source_channel,
-                        }
-                    )
-                elif hasattr(seg, "start"):
-                    all_segments.append(
-                        {
-                            "start": seg.start,
-                            "end": seg.end,
-                            "text": seg.text,
-                            "speaker": speaker_id,
-                            "words": seg.words if has_words else None,
-                            "tokens": getattr(seg, "tokens", None),
-                            "temperature": getattr(seg, "temperature", None),
-                            "avg_logprob": getattr(seg, "avg_logprob", None),
-                            "compression_ratio": getattr(
-                                seg, "compression_ratio", None
-                            ),
-                            "no_speech_prob": getattr(seg, "no_speech_prob", None),
                             "channel": source_channel,
                         }
                     )
@@ -1098,18 +1071,26 @@ class FinalMergerEngine(Engine):
         """Normalize word structures per pipeline interface spec.
 
         Args:
-            words: List of Word objects or word dicts from transcription/alignment
+            words: List of Word, TranscriptWord objects, or word dicts
 
         Returns:
             List of normalized Word objects
         """
         normalized: list[Word] = []
         for w in words:
-            if hasattr(w, "text"):
-                # Already a Word object
+            if isinstance(w, Word):
                 normalized.append(w)
-            else:
-                # Raw dict
+            elif isinstance(w, TranscriptWord):
+                normalized.append(
+                    Word(
+                        text=w.text,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence,
+                        alignment_method=w.alignment_method,
+                    )
+                )
+            elif isinstance(w, dict):
                 normalized.append(
                     Word(
                         text=w.get("text", ""),

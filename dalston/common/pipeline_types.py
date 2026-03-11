@@ -616,7 +616,9 @@ class AlignOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    segments: list[Segment] = Field(..., description="Segments with refined timestamps")
+    segments: list[TranscriptSegment] = Field(
+        ..., description="Segments with refined timestamps"
+    )
     text: str = Field(..., description="Full transcript text")
     language: str = Field(..., description="Language code")
 

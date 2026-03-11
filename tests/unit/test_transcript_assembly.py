@@ -6,11 +6,10 @@ for linear pipelines.
 
 from dalston.common.pipeline_types import (
     AlignOutput,
-    Segment,
     SpeakerTurn,
     Transcript,
     TranscriptSegment,
-    Word,
+    TranscriptWord,
 )
 from dalston.common.transcript import (
     _build_merged_segments,
@@ -401,7 +400,7 @@ class TestSelectSegments:
             runtime="faster-whisper",
         )
         align = AlignOutput(
-            segments=[Segment(start=0.1, end=0.9, text="aligned")],
+            segments=[TranscriptSegment(start=0.1, end=0.9, text="aligned")],
             text="aligned",
             language="en",
             word_timestamps=True,
@@ -475,9 +474,9 @@ class TestBuildMergedSegments:
 
     def test_assigns_sequential_ids(self):
         source = [
-            Segment(start=0.0, end=1.0, text="First"),
-            Segment(start=1.0, end=2.0, text="Second"),
-            Segment(start=2.0, end=3.0, text="Third"),
+            TranscriptSegment(start=0.0, end=1.0, text="First"),
+            TranscriptSegment(start=1.0, end=2.0, text="Second"),
+            TranscriptSegment(start=2.0, end=3.0, text="Third"),
         ]
 
         result = _build_merged_segments(
@@ -490,8 +489,8 @@ class TestBuildMergedSegments:
 
     def test_assigns_speakers_from_turns(self):
         source = [
-            Segment(start=0.0, end=2.0, text="Hello"),
-            Segment(start=3.0, end=5.0, text="Hi there"),
+            TranscriptSegment(start=0.0, end=2.0, text="Hello"),
+            TranscriptSegment(start=3.0, end=5.0, text="Hi there"),
         ]
         turns = [
             SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=2.5),
@@ -529,13 +528,13 @@ class TestBuildMergedSegments:
 
     def test_normalizes_words(self):
         source = [
-            Segment(
+            TranscriptSegment(
                 start=0.0,
                 end=2.0,
                 text="Hello world",
                 words=[
-                    Word(text="Hello", start=0.0, end=0.5),
-                    Word(text="world", start=0.6, end=2.0),
+                    TranscriptWord(text="Hello", start=0.0, end=0.5),
+                    TranscriptWord(text="world", start=0.6, end=2.0),
                 ],
             ),
         ]

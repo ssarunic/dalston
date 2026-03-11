@@ -12,14 +12,12 @@ from dalston.common.pipeline_types import (
     DiarizeOutput,
     MergeOutput,
     PrepareOutput,
-    Segment,
     SpeakerDetectionMode,
     SpeakerTurn,
     TimestampGranularity,
     Transcript,
     TranscriptSegment,
     TranscriptWord,
-    Word,
 )
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineInput, EngineOutput
@@ -404,12 +402,12 @@ class TestOutputValidation:
         """Test AlignOutput validates against the spec."""
         output = AlignOutput(
             segments=[
-                Segment(
+                TranscriptSegment(
                     start=0.0,
                     end=5.0,
                     text="Aligned text",
                     words=[
-                        Word(
+                        TranscriptWord(
                             text="Aligned",
                             start=0.0,
                             end=2.5,

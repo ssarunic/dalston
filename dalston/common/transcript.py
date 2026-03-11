@@ -17,13 +17,13 @@ from dalston.common.pipeline_types import (
     DiarizeOutput,
     MergedSegment,
     MergeOutput,
-    Segment,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
     Transcript,
     TranscriptMetadata,
     TranscriptSegment,
+    TranscriptWord,
     Word,
 )
 
@@ -242,7 +242,7 @@ def assemble_per_channel_transcript(
     for idx, seg_dict in enumerate(all_channel_segments):
         words: list[Word] | None = None
         if seg_dict["_word_ts"] and seg_dict.get("words"):
-            words = _normalize_words(seg_dict["words"])
+            words = _normalize_transcript_words(seg_dict["words"])
 
         segment = MergedSegment(
             id=f"seg_{idx:03d}",
@@ -322,34 +322,19 @@ def assemble_per_channel_transcript(
     return transcript
 
 
-def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
+def _extract_segment_fields(seg: TranscriptSegment) -> dict[str, Any]:
     """Extract segment fields into a plain dict from a typed segment."""
-    if isinstance(seg, TranscriptSegment):
-        return {
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text,
-            "words": seg.words,
-            "tokens": seg.metadata.get("tokens"),
-            "temperature": seg.metadata.get("temperature"),
-            "avg_logprob": seg.metadata.get("avg_logprob"),
-            "compression_ratio": seg.metadata.get("compression_ratio"),
-            "no_speech_prob": seg.metadata.get("no_speech_prob"),
-        }
-    elif isinstance(seg, Segment):
-        return {
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text,
-            "words": seg.words,
-            "tokens": seg.tokens,
-            "temperature": seg.temperature,
-            "avg_logprob": seg.avg_logprob,
-            "compression_ratio": seg.compression_ratio,
-            "no_speech_prob": seg.no_speech_prob,
-        }
-    else:
-        raise TypeError(f"Unexpected segment type: {type(seg)}")
+    return {
+        "start": seg.start,
+        "end": seg.end,
+        "text": seg.text,
+        "words": seg.words,
+        "tokens": seg.metadata.get("tokens"),
+        "temperature": seg.metadata.get("temperature"),
+        "avg_logprob": seg.metadata.get("avg_logprob"),
+        "compression_ratio": seg.metadata.get("compression_ratio"),
+        "no_speech_prob": seg.metadata.get("no_speech_prob"),
+    }
 
 
 def determine_terminal_stage(
@@ -450,7 +435,7 @@ def _select_segments(
     *,
     align_output: AlignOutput | None,
     transcript: Transcript,
-) -> tuple[list[Segment] | list[TranscriptSegment], bool, list]:
+) -> tuple[list[TranscriptSegment], bool, list]:
     """Select the best available segments and determine word timestamp availability.
 
     Returns:
@@ -462,9 +447,7 @@ def _select_segments(
         if align_output.skipped:
             logger.warning("alignment_skipped", reason=align_output.skip_reason)
             pipeline_warnings.extend(align_output.warnings)
-            segments_source: list[Segment] | list[TranscriptSegment] = list(
-                transcript.segments
-            )
+            segments_source = list(transcript.segments)
             word_timestamps_available = False
         else:
             segments_source = list(align_output.segments)
@@ -541,29 +524,13 @@ def _find_speaker_by_overlap(
     return best_speaker
 
 
-def _normalize_words(words: list) -> list[Word]:
-    """Normalize word data into typed Word objects."""
-    result = []
-    for w in words:
-        if isinstance(w, Word):
-            result.append(w)
-        elif isinstance(w, dict):
-            try:
-                result.append(Word.model_validate(w))
-            except Exception:
-                pass
-    return result or []
-
-
 def _normalize_transcript_words(words: list) -> list[Word]:
     """Normalize TranscriptWord or Word objects into pipeline Word objects."""
-    from dalston.common.pipeline_types import TranscriptWord as TW
-
     result = []
     for w in words:
         if isinstance(w, Word):
             result.append(w)
-        elif isinstance(w, TW):
+        elif isinstance(w, TranscriptWord):
             result.append(
                 Word(
                     text=w.text,
@@ -583,7 +550,7 @@ def _normalize_transcript_words(words: list) -> list[Word]:
 
 def _build_merged_segments(
     *,
-    segments_source: list[Segment] | list[TranscriptSegment],
+    segments_source: list[TranscriptSegment],
     diarization_turns: list[SpeakerTurn],
     word_timestamps_available: bool,
 ) -> list[MergedSegment]:
@@ -591,55 +558,30 @@ def _build_merged_segments(
     segments: list[MergedSegment] = []
 
     for idx, seg in enumerate(segments_source):
-        seg_words: Any = None
-        if isinstance(seg, TranscriptSegment):
-            seg_start = seg.start
-            seg_end = seg.end
-            seg_text = seg.text
-            seg_words = seg.words
-            seg_tokens = seg.metadata.get("tokens")
-            seg_temperature = seg.metadata.get("temperature")
-            seg_avg_logprob = seg.metadata.get("avg_logprob")
-            seg_compression_ratio = seg.metadata.get("compression_ratio")
-            seg_no_speech_prob = seg.metadata.get("no_speech_prob")
-        elif isinstance(seg, Segment):
-            seg_start = seg.start
-            seg_end = seg.end
-            seg_text = seg.text
-            seg_words = seg.words
-            seg_tokens = seg.tokens
-            seg_temperature = seg.temperature
-            seg_avg_logprob = seg.avg_logprob
-            seg_compression_ratio = seg.compression_ratio
-            seg_no_speech_prob = seg.no_speech_prob
-        else:
-            raise TypeError(f"Unexpected segment type: {type(seg)}")
-
         # Assign speaker based on diarization overlap
         speaker = None
         if diarization_turns:
-            speaker = _find_speaker_by_overlap(seg_start, seg_end, diarization_turns)
+            speaker = _find_speaker_by_overlap(seg.start, seg.end, diarization_turns)
 
-        # Normalize words — use appropriate normalizer for the segment type
+        # Normalize words from TranscriptWord to pipeline Word
         words: list[Word] | None = None
-        if word_timestamps_available and seg_words:
-            if isinstance(seg, TranscriptSegment):
-                words = _normalize_transcript_words(seg_words)
-            else:
-                words = _normalize_words(seg_words)
+        if word_timestamps_available and seg.words:
+            words = _normalize_transcript_words(seg.words)
 
         segment = MergedSegment(
             id=f"seg_{idx:03d}",
-            start=seg_start,
-            end=seg_end,
-            text=seg_text,
+            start=seg.start,
+            end=seg.end,
+            text=seg.text,
             speaker=speaker,
             words=words,
-            tokens=seg_tokens if isinstance(seg_tokens, list) else None,
-            temperature=seg_temperature,
-            avg_logprob=seg_avg_logprob,
-            compression_ratio=seg_compression_ratio,
-            no_speech_prob=seg_no_speech_prob,
+            tokens=seg.metadata.get("tokens")
+            if isinstance(seg.metadata.get("tokens"), list)
+            else None,
+            temperature=seg.metadata.get("temperature"),
+            avg_logprob=seg.metadata.get("avg_logprob"),
+            compression_ratio=seg.metadata.get("compression_ratio"),
+            no_speech_prob=seg.metadata.get("no_speech_prob"),
             emotion=None,
             emotion_confidence=None,
             events=[],

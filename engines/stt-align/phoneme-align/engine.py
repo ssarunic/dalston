@@ -24,9 +24,9 @@ from dalston.engine_sdk import (
     Engine,
     EngineInput,
     EngineOutput,
-    Segment,
     TimestampGranularity,
-    Word,
+    TranscriptSegment,
+    TranscriptWord,
 )
 
 
@@ -171,7 +171,7 @@ class PhonemeAlignEngine(Engine):
             output_segments, stats = self._to_sdk_segments(result.segments)
 
             # Compute alignment confidence
-            all_words: list[Word] = []
+            all_words: list[TranscriptWord] = []
             for seg in output_segments:
                 if seg.words:
                     all_words.extend(seg.words)
@@ -243,15 +243,15 @@ class PhonemeAlignEngine(Engine):
 
     def _to_sdk_segments(
         self, aligned_segments: list[AlignedSegment]
-    ) -> tuple[list[Segment], dict[str, int]]:
-        """Convert aligned segments to SDK types."""
-        segments: list[Segment] = []
+    ) -> tuple[list[TranscriptSegment], dict[str, int]]:
+        """Convert aligned segments to TranscriptSegment/TranscriptWord types."""
+        segments: list[TranscriptSegment] = []
         unaligned_words = 0
 
         for aseg in aligned_segments:
-            words: list[Word] | None = None
+            words: list[TranscriptWord] | None = None
             if aseg.words:
-                valid_words: list[Word] = []
+                valid_words: list[TranscriptWord] = []
                 for aw in aseg.words:
                     if not aw.word.strip():
                         continue
@@ -259,7 +259,7 @@ class PhonemeAlignEngine(Engine):
                         unaligned_words += 1
                         continue
                     valid_words.append(
-                        Word(
+                        TranscriptWord(
                             text=aw.word,
                             start=aw.start,
                             end=aw.end,
@@ -270,7 +270,7 @@ class PhonemeAlignEngine(Engine):
                 words = valid_words if valid_words else None
 
             segments.append(
-                Segment(
+                TranscriptSegment(
                     start=aseg.start,
                     end=aseg.end,
                     text=aseg.text,
@@ -292,7 +292,7 @@ class PhonemeAlignEngine(Engine):
             "alignment_fallback", reason=reason, segment_count=len(segments)
         )
         typed_segments = [
-            Segment(
+            TranscriptSegment(
                 start=s.start if hasattr(s, "start") else s["start"],
                 end=s.end if hasattr(s, "end") else s["end"],
                 text=s.text if hasattr(s, "text") else s["text"],

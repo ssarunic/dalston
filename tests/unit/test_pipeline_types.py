@@ -467,7 +467,7 @@ class TestAlignOutput:
     def test_create_basic_align_output(self):
         """Test creating basic align output."""
         out = AlignOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello")],
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
             word_timestamps=True,
@@ -479,7 +479,7 @@ class TestAlignOutput:
     def test_align_output_with_statistics(self):
         """Test align output with alignment statistics."""
         out = AlignOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello world")],
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello world")],
             text="Hello world",
             language="en",
             word_timestamps=True,
@@ -496,7 +496,7 @@ class TestAlignOutput:
     def test_align_output_skipped(self):
         """Test align output when skipped."""
         out = AlignOutput(
-            segments=[Segment(start=0.0, end=1.0, text="Hello")],
+            segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="xx",
             word_timestamps=False,
