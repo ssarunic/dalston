@@ -73,3 +73,25 @@ async def test_lite_db_bootstrap_creates_all_tables(monkeypatch, tmp_path) -> No
     assert expected_tables.issubset(actual_tables), (
         f"Missing tables: {expected_tables - actual_tables}"
     )
+
+
+@pytest.mark.asyncio
+async def test_lite_db_bootstrap_drops_hybrid_enhance_column(
+    monkeypatch, tmp_path
+) -> None:
+    """Latest schema should not include hybrid-mode enhance_on_end column."""
+    from sqlalchemy import text
+
+    monkeypatch.setenv("DALSTON_MODE", "lite")
+    monkeypatch.setenv(
+        "DALSTON_LITE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/lite.db"
+    )
+    get_settings.cache_clear()
+    reset_session_state()
+    await init_db()
+
+    async with async_session() as session:
+        result = await session.execute(text("PRAGMA table_info('realtime_sessions')"))
+        columns = {row[1] for row in result.fetchall()}
+
+    assert "enhance_on_end" not in columns
