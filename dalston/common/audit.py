@@ -408,9 +408,12 @@ class AuditService:
         self,
         model_id: str,
         *,
+        tenant_id: UUID | None = None,
         source: str | None = None,
         size_bytes: int | None = None,
         download_path: str | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
         correlation_id: str | None = None,
     ) -> None:
         """Log model download event."""
@@ -426,8 +429,9 @@ class AuditService:
             action="model.downloaded",
             resource_type="model",
             resource_id=model_id,
-            actor_type="system",
-            actor_id="model_registry",
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
             detail=detail if detail else None,
             correlation_id=correlation_id,
         )
@@ -436,7 +440,10 @@ class AuditService:
         self,
         model_id: str,
         *,
+        tenant_id: UUID | None = None,
         download_path: str | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
         correlation_id: str | None = None,
     ) -> None:
         """Log model removal event."""
@@ -448,8 +455,9 @@ class AuditService:
             action="model.removed",
             resource_type="model",
             resource_id=model_id,
-            actor_type="system",
-            actor_id="model_registry",
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
             detail=detail if detail else None,
             correlation_id=correlation_id,
         )
@@ -458,7 +466,10 @@ class AuditService:
         self,
         model_id: str,
         *,
+        tenant_id: UUID | None = None,
         error: str | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
         correlation_id: str | None = None,
     ) -> None:
         """Log model download failure event."""
@@ -470,8 +481,9 @@ class AuditService:
             action="model.download_failed",
             resource_type="model",
             resource_id=model_id,
-            actor_type="system",
-            actor_id="model_registry",
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
             detail=detail if detail else None,
             correlation_id=correlation_id,
         )
@@ -480,7 +492,10 @@ class AuditService:
         self,
         model_id: str,
         *,
+        tenant_id: UUID | None = None,
         download_path: str | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
         correlation_id: str | None = None,
     ) -> None:
         """Log model deletion from registry event."""
@@ -492,10 +507,33 @@ class AuditService:
             action="model.deleted_from_registry",
             resource_type="model",
             resource_id=model_id,
-            actor_type="system",
-            actor_id="model_registry",
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
             detail=detail if detail else None,
             correlation_id=correlation_id,
+        )
+
+    async def log_job_cancel_requested(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        *,
+        actor_type: str = "api_key",
+        actor_id: str = "unknown",
+        correlation_id: str | None = None,
+        ip_address: str | None = None,
+    ) -> None:
+        """Log job cancellation request event."""
+        await self.log(
+            action="job.cancel_requested",
+            resource_type="job",
+            resource_id=str(job_id),
+            tenant_id=tenant_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+            ip_address=ip_address,
         )
 
     async def log_permission_denied(
@@ -509,20 +547,7 @@ class AuditService:
         correlation_id: str | None = None,
         ip_address: str | None = None,
     ) -> None:
-        """Log permission denied event for security monitoring.
-
-        This method records failed authorization attempts for security auditing
-        and anomaly detection.
-
-        Args:
-            principal_id: ID of the principal (API key or session) that was denied
-            permission: The permission that was required but missing
-            resource_type: Type of resource being accessed
-            resource_id: ID of the resource being accessed
-            tenant_id: Optional tenant UUID
-            correlation_id: Optional request correlation ID
-            ip_address: Optional client IP address
-        """
+        """Log permission denied event for security monitoring."""
         await self.log(
             action="permission.denied",
             resource_type=resource_type,
@@ -543,18 +568,7 @@ class AuditService:
         correlation_id: str | None = None,
         ip_address: str | None = None,
     ) -> None:
-        """Log authentication failure for security monitoring.
-
-        This method records failed authentication attempts for security auditing,
-        brute-force detection, and anomaly monitoring.
-
-        Args:
-            reason: The reason for authentication failure (e.g., "invalid_key",
-                   "expired_key", "revoked_key", "missing_header")
-            key_prefix: Optional key prefix for partial identification
-            correlation_id: Optional request correlation ID
-            ip_address: Optional client IP address
-        """
+        """Log authentication failure for security monitoring."""
         await self.log(
             action="auth.failed",
             resource_type="api_key",

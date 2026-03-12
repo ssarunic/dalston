@@ -742,11 +742,13 @@ async def delete_console_job(
     },
 )
 async def cancel_console_job(
+    request: Request,
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> JobCancelledResponse:
     """Cancel a job (admin endpoint).
 
@@ -764,6 +766,16 @@ async def cancel_console_job(
 
     # Publish event for orchestrator
     await publish_job_cancel_requested(redis, job_id)
+
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_cancel_requested(
+        job_id=job_id,
+        tenant_id=result.job.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
     return JobCancelledResponse(
         id=result.job.id,

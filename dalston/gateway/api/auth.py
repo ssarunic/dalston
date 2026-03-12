@@ -12,10 +12,12 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from dalston.common.audit import AuditService
 from dalston.gateway.dependencies import (
+    get_audit_service,
     get_auth_service,
     get_principal,
     get_security_manager,
@@ -171,9 +173,11 @@ class SessionTokenResponse(BaseModel):
     description="Create a new API key. Requires admin scope.",
 )
 async def create_api_key(
-    request: CreateAPIKeyRequest,
+    request: Request,
+    create_request: CreateAPIKeyRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     auth_service: AuthService = Depends(get_auth_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> APIKeyCreatedResponse:
     """Create a new API key for the current tenant.
 
@@ -184,9 +188,9 @@ async def create_api_key(
 
     # Parse scopes
     scopes: list[Scope] | None = None
-    if request.scopes:
+    if create_request.scopes:
         try:
-            scopes = [Scope(s) for s in request.scopes]
+            scopes = [Scope(s) for s in create_request.scopes]
         except ValueError as e:
             valid_scopes = [s.value for s in Scope]
             raise HTTPException(
@@ -196,10 +200,21 @@ async def create_api_key(
 
     # Create key
     raw_key, new_key = await auth_service.create_api_key(
-        name=request.name,
+        name=create_request.name,
         tenant_id=principal.tenant_id,
         scopes=scopes,
-        rate_limit=request.rate_limit,
+        rate_limit=create_request.rate_limit,
+    )
+
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_api_key_created(
+        key_id=new_key.id,
+        tenant_id=principal.tenant_id,
+        key_name=new_key.name,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
     )
 
     return APIKeyCreatedResponse(
@@ -282,9 +297,11 @@ async def get_api_key(
     responses={404: {"description": "API key not found"}},
 )
 async def revoke_api_key(
+    request: Request,
     key_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     auth_service: AuthService = Depends(get_auth_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> None:
     """Revoke an API key."""
     security_manager = get_security_manager()
@@ -307,6 +324,16 @@ async def revoke_api_key(
         )
 
     await auth_service.revoke_api_key(key_id)
+
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_api_key_revoked(
+        key_id=key_id,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
 
 @router.get(

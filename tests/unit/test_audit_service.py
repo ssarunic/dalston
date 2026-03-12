@@ -303,6 +303,81 @@ class TestAuditServiceJobMethods:
         assert entry.actor_id == "cleanup_worker"
         assert entry.detail == {"artifacts_deleted": ["audio", "tasks"]}
 
+    @pytest.mark.asyncio
+    async def test_log_job_cancel_requested(
+        self, audit_service: AuditService, mock_db_session, job_id, tenant_id
+    ):
+        """Test log_job_cancel_requested method."""
+        await audit_service.log_job_cancel_requested(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            actor_type="api_key",
+            actor_id="dk_abcd",
+            correlation_id="req-789",
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "job.cancel_requested"
+        assert entry.actor_id == "dk_abcd"
+        assert entry.correlation_id == "req-789"
+
+
+class TestAuditServiceApiKeyMethods:
+    """Tests for API key audit methods."""
+
+    @pytest.fixture
+    def mock_db_session(self):
+        session = AsyncMock()
+        return session
+
+    @pytest.fixture
+    def audit_service(self, mock_db_session):
+        @asynccontextmanager
+        async def session_factory():
+            yield mock_db_session
+
+        return AuditService(db_session_factory=session_factory)
+
+    @pytest.fixture
+    def key_id(self) -> UUID:
+        return UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+
+    @pytest.fixture
+    def tenant_id(self) -> UUID:
+        return UUID("12345678-1234-1234-1234-123456789abc")
+
+    @pytest.mark.asyncio
+    async def test_log_api_key_created(
+        self, audit_service: AuditService, mock_db_session, key_id, tenant_id
+    ):
+        """Test log_api_key_created method."""
+        await audit_service.log_api_key_created(
+            key_id=key_id,
+            tenant_id=tenant_id,
+            key_name="production-key",
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "api_key.created"
+        assert entry.resource_type == "api_key"
+        assert entry.detail == {"key_name": "production-key"}
+
+    @pytest.mark.asyncio
+    async def test_log_api_key_revoked(
+        self, audit_service: AuditService, mock_db_session, key_id, tenant_id
+    ):
+        """Test log_api_key_revoked method."""
+        await audit_service.log_api_key_revoked(
+            key_id=key_id,
+            tenant_id=tenant_id,
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "api_key.revoked"
+
 
 class TestAuditServiceSessionMethods:
     """Tests for session-related audit convenience methods."""
@@ -366,13 +441,56 @@ class TestAuditServiceSessionMethods:
         assert entry.detail == {"duration_seconds": 300.5, "word_count": 1500}
 
 
-class TestAuditServiceApiKeyMethods:
-    """Tests for API key audit methods."""
+class TestAuditServiceSecurityMethods:
+    """Tests for security-related audit convenience methods."""
 
     @pytest.fixture
     def mock_db_session(self):
-        session = AsyncMock()
-        return session
+        return AsyncMock()
+
+    @pytest.fixture
+    def audit_service(self, mock_db_session):
+        @asynccontextmanager
+        async def session_factory():
+            yield mock_db_session
+
+        return AuditService(db_session_factory=session_factory)
+
+    @pytest.mark.asyncio
+    async def test_log_permission_denied(
+        self, audit_service: AuditService, mock_db_session
+    ):
+        principal_id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+        await audit_service.log_permission_denied(
+            principal_id=principal_id,
+            permission="jobs:delete",
+            resource_type="job",
+            resource_id="job-1",
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "permission.denied"
+        assert entry.actor_id == str(principal_id)
+        assert entry.detail == {"required_permission": "jobs:delete"}
+
+    @pytest.mark.asyncio
+    async def test_log_auth_failure(self, audit_service: AuditService, mock_db_session):
+        await audit_service.log_auth_failure(reason="invalid_key", key_prefix="dk_abc")
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "auth.failed"
+        assert entry.resource_id == "dk_abc"
+        assert entry.detail == {"reason": "invalid_key"}
+
+
+class TestAuditServiceModelMethods:
+    """Tests for model registry audit methods."""
+
+    @pytest.fixture
+    def mock_db_session(self):
+        return AsyncMock()
 
     @pytest.fixture
     def audit_service(self, mock_db_session):
@@ -383,40 +501,77 @@ class TestAuditServiceApiKeyMethods:
         return AuditService(db_session_factory=session_factory)
 
     @pytest.fixture
-    def key_id(self) -> UUID:
-        return UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
-
-    @pytest.fixture
     def tenant_id(self) -> UUID:
         return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
-    async def test_log_api_key_created(
-        self, audit_service: AuditService, mock_db_session, key_id, tenant_id
+    async def test_log_model_downloaded_with_tenant(
+        self, audit_service: AuditService, mock_db_session, tenant_id
     ):
-        """Test log_api_key_created method."""
-        await audit_service.log_api_key_created(
-            key_id=key_id,
+        await audit_service.log_model_downloaded(
+            model_id="faster-whisper/base",
             tenant_id=tenant_id,
-            key_name="production-key",
+            actor_type="api_key",
+            actor_id="dk_test",
         )
 
         call_args = mock_db_session.add.call_args
         entry = call_args[0][0]
-        assert entry.action == "api_key.created"
-        assert entry.resource_type == "api_key"
-        assert entry.detail == {"key_name": "production-key"}
+        assert entry.action == "model.downloaded"
+        assert entry.tenant_id == tenant_id
+        assert entry.actor_id == "dk_test"
 
     @pytest.mark.asyncio
-    async def test_log_api_key_revoked(
-        self, audit_service: AuditService, mock_db_session, key_id, tenant_id
+    async def test_log_model_download_failed_with_tenant(
+        self, audit_service: AuditService, mock_db_session, tenant_id
     ):
-        """Test log_api_key_revoked method."""
-        await audit_service.log_api_key_revoked(
-            key_id=key_id,
+        await audit_service.log_model_download_failed(
+            model_id="faster-whisper/base",
             tenant_id=tenant_id,
+            error="network timeout",
         )
 
         call_args = mock_db_session.add.call_args
         entry = call_args[0][0]
-        assert entry.action == "api_key.revoked"
+        assert entry.action == "model.download_failed"
+        assert entry.tenant_id == tenant_id
+        assert entry.detail == {"error": "network timeout"}
+
+    @pytest.mark.asyncio
+    async def test_log_model_removed_with_tenant(
+        self, audit_service: AuditService, mock_db_session, tenant_id
+    ):
+        await audit_service.log_model_removed(
+            model_id="faster-whisper/base",
+            tenant_id=tenant_id,
+            download_path="s3://bucket/models/faster-whisper/base/",
+            actor_type="api_key",
+            actor_id="dk_test",
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "model.removed"
+        assert entry.tenant_id == tenant_id
+        assert entry.actor_id == "dk_test"
+        assert entry.detail == {
+            "download_path": "s3://bucket/models/faster-whisper/base/"
+        }
+
+    @pytest.mark.asyncio
+    async def test_log_model_deleted_from_registry_with_tenant(
+        self, audit_service: AuditService, mock_db_session, tenant_id
+    ):
+        await audit_service.log_model_deleted_from_registry(
+            model_id="faster-whisper/base",
+            tenant_id=tenant_id,
+            download_path="s3://bucket/models/faster-whisper/base/",
+        )
+
+        call_args = mock_db_session.add.call_args
+        entry = call_args[0][0]
+        assert entry.action == "model.deleted_from_registry"
+        assert entry.tenant_id == tenant_id
+        assert entry.detail == {
+            "download_path": "s3://bucket/models/faster-whisper/base/"
+        }
