@@ -23,6 +23,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import structlog
 from sqlalchemy import delete, select, update
@@ -208,6 +209,10 @@ class ModelRegistryService:
         model_id: str,
         *,
         force: bool = False,
+        tenant_id: UUID | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
+        correlation_id: str | None = None,
     ) -> ModelRegistryModel:
         """Download a model from HuggingFace Hub and upload to S3.
 
@@ -223,6 +228,10 @@ class ModelRegistryService:
             db: Database session
             model_id: Dalston model ID
             force: Re-download even if already present
+            tenant_id: Optional tenant context for audit visibility
+            actor_type: Audit actor type for model events
+            actor_id: Audit actor id for model events
+            correlation_id: Optional request correlation id for audit linking
 
         Returns:
             Updated model entry
@@ -321,9 +330,13 @@ class ModelRegistryService:
             audit = get_audit_service()
             await audit.log_model_downloaded(
                 model_id=model_id,
+                tenant_id=tenant_id,
                 source=hf_repo_id,
                 size_bytes=size_bytes,
                 download_path=s3_uri,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
             )
 
         except Exception as e:
@@ -343,7 +356,11 @@ class ModelRegistryService:
             audit = get_audit_service()
             await audit.log_model_download_failed(
                 model_id=model_id,
+                tenant_id=tenant_id,
                 error=str(e),
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
             )
 
             raise
@@ -499,6 +516,10 @@ class ModelRegistryService:
         model_id: str,
         *,
         purge: bool = False,
+        tenant_id: UUID | None = None,
+        actor_type: str = "system",
+        actor_id: str = "model_registry",
+        correlation_id: str | None = None,
     ) -> None:
         """Remove a downloaded model from disk and optionally from registry.
 
@@ -507,6 +528,10 @@ class ModelRegistryService:
             model_id: Dalston model ID
             purge: If True, delete the model from registry entirely.
                    If False (default), only remove files and reset status.
+            tenant_id: Optional tenant context for audit visibility
+            actor_type: Audit actor type for model events
+            actor_id: Audit actor id for model events
+            correlation_id: Optional request correlation id for audit linking
 
         Raises:
             ModelNotFoundError: If model doesn't exist in registry
@@ -541,7 +566,11 @@ class ModelRegistryService:
             logger.info("model_deleted_from_registry", model_id=model_id)
             await audit.log_model_deleted_from_registry(
                 model_id=model_id,
+                tenant_id=tenant_id,
                 download_path=str(download_path) if download_path else None,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
             )
         else:
             # Update registry status (keep entry)
@@ -559,7 +588,11 @@ class ModelRegistryService:
             logger.info("model_removed", model_id=model_id)
             await audit.log_model_removed(
                 model_id=model_id,
+                tenant_id=tenant_id,
                 download_path=str(download_path) if download_path else None,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
             )
 
     async def sync_from_s3(

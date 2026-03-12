@@ -1134,6 +1134,7 @@ async def update_transcription(
     },
 )
 async def export_transcription(
+    request: Request,
     job_id: UUID,
     format: str,
     principal: Annotated[Principal, Depends(get_principal)],
@@ -1150,6 +1151,7 @@ async def export_transcription(
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
     export_service: ExportService = Depends(get_export_service),
+    audit_service: AuditService = Depends(get_audit_service),
     storage: StorageService = Depends(get_storage_service),
 ) -> Response:
     """Export transcript in specified format.
@@ -1177,6 +1179,17 @@ async def export_transcription(
 
     # Fetch transcript from S3
     transcript = await storage.get_transcript(job.id)
+
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_transcript_exported(
+        job_id=job.id,
+        tenant_id=principal.tenant_id,
+        export_format=export_format,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
     # Generate and return export response
     return export_service.create_export_response(
@@ -1470,12 +1483,14 @@ async def get_job_audio_redacted(
     },
 )
 async def cancel_transcription(
+    request: Request,
     job_id: UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     jobs_service: JobsService = Depends(get_jobs_service),
+    audit_service: AuditService = Depends(get_audit_service),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> JobCancelledResponse:
     """Cancel a transcription job.
@@ -1505,6 +1520,16 @@ async def cancel_transcription(
 
     # Publish event for orchestrator to remove tasks from Redis queues
     await publish_job_cancel_requested(redis, job_id)
+
+    request_id = getattr(request.state, "request_id", None)
+    await audit_service.log_job_cancel_requested(
+        job_id=job_id,
+        tenant_id=principal.tenant_id,
+        actor_type=principal.actor_type,
+        actor_id=principal.actor_id,
+        correlation_id=request_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
     # If job was immediately cancelled (no running tasks), decrement counter now.
     # Uses idempotent helper to prevent double-decrement if orchestrator also tries.

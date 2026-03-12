@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -361,7 +362,8 @@ async def update_model(
 async def pull_model(
     model_id: str,
     principal: Annotated[Principal, Depends(get_principal)],
-    request: PullModelRequest | None = None,
+    request: Request,
+    pull_request: PullModelRequest | None = None,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
     service: ModelRegistryService = Depends(get_model_registry_service),
@@ -373,7 +375,7 @@ async def pull_model(
     """
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.MODEL_PULL)
-    force = request.force if request else False
+    force = pull_request.force if pull_request else False
 
     try:
         model = await service.get_model_or_raise(db, model_id)
@@ -407,7 +409,16 @@ async def pull_model(
 
     # Start download in background
     # Note: We need a new session for the background task
-    background_tasks.add_task(_pull_model_background, model_id, force)
+    request_id = getattr(request.state, "request_id", None)
+    background_tasks.add_task(
+        _pull_model_background,
+        model_id,
+        force,
+        principal.tenant_id,
+        principal.actor_type,
+        principal.actor_id,
+        request_id,
+    )
 
     return PullModelResponse(
         message="Download started",
@@ -416,7 +427,14 @@ async def pull_model(
     )
 
 
-async def _pull_model_background(model_id: str, force: bool) -> None:
+async def _pull_model_background(
+    model_id: str,
+    force: bool,
+    tenant_id: UUID | None,
+    actor_type: str,
+    actor_id: str,
+    correlation_id: str | None,
+) -> None:
     """Background task to download a model."""
     from dalston.db.session import async_session
 
@@ -424,7 +442,15 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 
     async with async_session() as db:
         try:
-            await service.pull_model(db, model_id, force=force)
+            await service.pull_model(
+                db,
+                model_id,
+                force=force,
+                tenant_id=tenant_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+            )
         except Exception:
             # Error is already logged and status updated in the service
             pass
@@ -446,6 +472,7 @@ async def _pull_model_background(model_id: str, force: bool) -> None:
 async def remove_model(
     model_id: str,
     principal: Annotated[Principal, Depends(get_principal)],
+    request: Request,
     purge: bool = Query(
         default=False,
         description="If true, delete model from registry entirely. If false, only remove files.",
@@ -457,7 +484,16 @@ async def remove_model(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.MODEL_DELETE)
     try:
-        await service.remove_model(db, model_id, purge=purge)
+        request_id = getattr(request.state, "request_id", None)
+        await service.remove_model(
+            db,
+            model_id,
+            purge=purge,
+            tenant_id=principal.tenant_id,
+            actor_type=principal.actor_type,
+            actor_id=principal.actor_id,
+            correlation_id=request_id,
+        )
     except ModelNotFoundError:
         raise HTTPException(
             status_code=404,
