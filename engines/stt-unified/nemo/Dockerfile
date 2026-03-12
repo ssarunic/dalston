@@ -8,8 +8,8 @@
 #   CPU: docker compose build stt-unified-nemo-cpu
 #
 # Or directly:
-#   GPU: docker build -t dalston/stt-unified-nemo:1.0.0 -f engines/stt-unified/parakeet/Dockerfile .
-#   CPU: docker build --build-arg DEVICE=cpu -t dalston/stt-unified-nemo-cpu:1.0.0 -f engines/stt-unified/parakeet/Dockerfile .
+#   GPU: docker build -t dalston/stt-unified-nemo:1.0.0 -f engines/stt-unified/nemo/Dockerfile .
+#   CPU: docker build --build-arg DEVICE=cpu -t dalston/stt-unified-nemo-cpu:1.0.0 -f engines/stt-unified/nemo/Dockerfile .
 
 ARG DEVICE=cuda
 
@@ -36,7 +36,7 @@ RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
 
 # Install PyTorch for CPU builds only (GPU base already provides torch)
 WORKDIR /engine
-COPY engines/stt-unified/parakeet/requirements.txt .
+COPY engines/stt-unified/nemo/requirements.txt .
 RUN if [ "$DEVICE" = "cpu" ]; then \
         pip install --no-cache-dir \
             torch --index-url https://download.pytorch.org/whl/cpu && \
@@ -53,16 +53,16 @@ RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Copy engine files preserving the directory structure the runner expects
 WORKDIR /app
-COPY engines/stt-unified/parakeet/ engines/stt-unified/parakeet/
-COPY engines/stt-transcribe/parakeet/engine.py engines/stt-transcribe/parakeet/engine.py
-COPY engines/stt-rt/parakeet/engine.py engines/stt-rt/parakeet/engine.py
+COPY engines/stt-unified/nemo/ engines/stt-unified/nemo/
+COPY engines/stt-transcribe/nemo/engine.py engines/stt-transcribe/nemo/engine.py
+COPY engines/stt-rt/nemo/engine.py engines/stt-rt/nemo/engine.py
 
 # RT capabilities (read by realtime SDK at registration time)
-COPY engines/stt-rt/parakeet/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/nemo/engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/parakeet/runner.py"]
+CMD ["python", "engines/stt-unified/nemo/runner.py"]

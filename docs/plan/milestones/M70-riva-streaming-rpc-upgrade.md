@@ -591,7 +591,7 @@ M70 and M71 are independent and can be worked in parallel.
 
 - `engines/stt-transcribe/faster-whisper/` — batch engine reference implementation
 - `engines/stt-rt/faster-whisper/` — RT engine reference implementation
-- `engines/stt-rt/parakeet/engine.py` — streaming partial results reference (`supports_streaming = True`)
+- `engines/stt-rt/nemo/engine.py` — streaming partial results reference (`supports_streaming = True`)
 - `dalston/realtime_sdk/session.py` — `SessionHandler` partial result logic (`PARTIAL_RESULT_INTERVAL_CHUNKS`)
 - `dalston/engine_sdk/base.py` — `Engine` base class
 - `dalston/realtime_sdk/base.py` — `RealtimeEngine` base class

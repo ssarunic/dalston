@@ -8,8 +8,8 @@
 #   docker compose build stt-rt-transcribe-parakeet-onnx-ctc-0.6b
 #
 # Or directly:
-#   CPU: docker build -t dalston/stt-rt-transcribe-parakeet-onnx:cpu -f engines/stt-rt/parakeet-onnx/Dockerfile .
-#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-rt-transcribe-parakeet-onnx:gpu -f engines/stt-rt/parakeet-onnx/Dockerfile .
+#   CPU: docker build -t dalston/stt-rt-transcribe-parakeet-onnx:cpu -f engines/stt-rt/onnx/Dockerfile .
+#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-rt-transcribe-parakeet-onnx:gpu -f engines/stt-rt/onnx/Dockerfile .
 
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cpu
@@ -50,7 +50,7 @@ RUN pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/stt-rt/parakeet-onnx/requirements.txt .
+COPY engines/stt-rt/onnx/requirements.txt .
 
 # Install PyTorch for CPU builds (needed for Silero VAD)
 RUN if [ "$DEVICE" = "cpu" ]; then \
@@ -69,8 +69,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine files
 # M50: Use main engine.yaml for structured capabilities
-COPY engines/stt-rt/parakeet-onnx/engine.yaml /etc/dalston/engine.yaml
-COPY engines/stt-rt/parakeet-onnx/engine.py .
+COPY engines/stt-rt/onnx/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/onnx/engine.py .
 
 # M39: Standardized model cache directories
 ENV HF_HUB_CACHE=/models/huggingface

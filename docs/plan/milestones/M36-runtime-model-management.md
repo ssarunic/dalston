@@ -219,7 +219,7 @@ API request (model="nvidia/parakeet-tdt-1.1b")
 | File | Change |
 |------|--------|
 | `engines/stt-transcribe/faster-whisper/engine.py` | Model swapping, SUPPORTED_MODELS |
-| `engines/stt-transcribe/parakeet/engine.py` | Model swapping for NeMo |
+| `engines/stt-transcribe/nemo/engine.py` | Model swapping for NeMo |
 | `engines/stt-transcribe/*/engine.yaml` | Runtime field added |
 
 ---

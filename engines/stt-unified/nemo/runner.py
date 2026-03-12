@@ -9,7 +9,7 @@ This is the M63 "unified engine instance" — batch and RT share the same
 GPU-resident model instead of loading independent copies.
 
 Usage:
-    python -m engines.stt-unified.parakeet.runner
+    python -m engines.stt-unified.nemo.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
@@ -85,8 +85,8 @@ class UnifiedParakeetRunner:
         self._running = True
 
         # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_parakeet import NemoRealtimeEngine
-        from engines.stt_transcribe_parakeet import NemoBatchEngine
+        from engines.stt_rt_nemo import NemoRealtimeEngine
+        from engines.stt_transcribe_nemo import NemoBatchEngine
 
         # Create adapters sharing the same NemoInference
         self._batch_engine = NemoBatchEngine(core=self._core)
@@ -216,25 +216,23 @@ def _register_engine_modules() -> None:
     engines_root = Path(__file__).resolve().parents[2]
 
     # Register batch engine
-    batch_path = engines_root / "stt-transcribe" / "parakeet" / "engine.py"
+    batch_path = engines_root / "stt-transcribe" / "nemo" / "engine.py"
     if batch_path.exists():
         spec = importlib.util.spec_from_file_location(
-            "engines.stt_transcribe_parakeet", batch_path
+            "engines.stt_transcribe_nemo", batch_path
         )
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_transcribe_parakeet"] = module
+            sys.modules["engines.stt_transcribe_nemo"] = module
             spec.loader.exec_module(module)
 
     # Register RT engine
-    rt_path = engines_root / "stt-rt" / "parakeet" / "engine.py"
+    rt_path = engines_root / "stt-rt" / "nemo" / "engine.py"
     if rt_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "engines.stt_rt_parakeet", rt_path
-        )
+        spec = importlib.util.spec_from_file_location("engines.stt_rt_nemo", rt_path)
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_rt_parakeet"] = module
+            sys.modules["engines.stt_rt_nemo"] = module
             spec.loader.exec_module(module)
 
 

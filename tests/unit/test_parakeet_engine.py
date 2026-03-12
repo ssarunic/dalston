@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")
 
 def load_parakeet_engine():
     """Load NemoBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-transcribe/parakeet/engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet engine not found")
 

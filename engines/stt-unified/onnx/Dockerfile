@@ -8,8 +8,8 @@
 #   GPU: docker compose build stt-unified-onnx
 #
 # Or directly:
-#   CPU: docker build -t dalston/stt-unified-onnx-cpu:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
-#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-unified-onnx:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
+#   CPU: docker build -t dalston/stt-unified-onnx-cpu:1.0.0 -f engines/stt-unified/onnx/Dockerfile .
+#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-unified-onnx:1.0.0 -f engines/stt-unified/onnx/Dockerfile .
 
 ARG DEVICE=cpu
 
@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
 
 # Install ONNX ASR and audio dependencies
 WORKDIR /engine
-COPY engines/stt-unified/parakeet-onnx/requirements.txt .
+COPY engines/stt-unified/onnx/requirements.txt .
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir "onnx-asr[cuda,hub]>=0.5.0"; \
     else \
@@ -48,16 +48,16 @@ RUN mkdir -p /models/huggingface /models/onnx
 
 # Copy engine files preserving the directory structure the runner expects
 WORKDIR /app
-COPY engines/stt-unified/parakeet-onnx/ engines/stt-unified/parakeet-onnx/
-COPY engines/stt-transcribe/parakeet-onnx/engine.py engines/stt-transcribe/parakeet-onnx/engine.py
-COPY engines/stt-rt/parakeet-onnx/engine.py engines/stt-rt/parakeet-onnx/engine.py
+COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/
+COPY engines/stt-transcribe/onnx/engine.py engines/stt-transcribe/onnx/engine.py
+COPY engines/stt-rt/onnx/engine.py engines/stt-rt/onnx/engine.py
 
 # RT capabilities (read by realtime SDK at registration time)
-COPY engines/stt-rt/parakeet-onnx/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/onnx/engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/parakeet-onnx/runner.py"]
+CMD ["python", "engines/stt-unified/onnx/runner.py"]

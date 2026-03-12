@@ -7,8 +7,8 @@
 #   docker compose build stt-batch-transcribe-onnx
 #
 # Or directly:
-#   CPU:  docker build -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
-#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
+#   CPU:  docker build -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/onnx/Dockerfile .
+#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/onnx/Dockerfile .
 #
 # Models are downloaded at runtime to /models/onnx volume by onnx-asr (via HuggingFace Hub).
 # Supported models: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b
@@ -58,7 +58,7 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/stt-transcribe/parakeet-onnx/requirements.txt .
+COPY engines/stt-transcribe/onnx/requirements.txt .
 
 # Install ONNX Runtime (GPU variant for CUDA builds)
 RUN if [ "$DEVICE" = "cuda" ]; then \
@@ -74,8 +74,8 @@ ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface /models/onnx
 
 # Copy engine files
-COPY engines/stt-transcribe/parakeet-onnx/engine.yaml /etc/dalston/engine.yaml
-COPY engines/stt-transcribe/parakeet-onnx/engine.py .
+COPY engines/stt-transcribe/onnx/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/onnx/engine.py .
 
 # Set CUDA visible devices (only relevant for GPU builds)
 ENV NVIDIA_VISIBLE_DEVICES=all

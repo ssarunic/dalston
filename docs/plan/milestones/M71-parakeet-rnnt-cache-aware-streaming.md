@@ -45,7 +45,7 @@ In scope:
 
 - Extend `ParakeetCore` with a `transcribe_streaming()` method using
   `CacheAwareStreamingConfig` that yields `NeMoWordResult` events incrementally.
-- Update the RT parakeet engine (`engines/stt-rt/parakeet/engine.py`) to call
+- Update the RT parakeet engine (`engines/stt-rt/nemo/engine.py`) to call
   `transcribe_streaming()` for RNNT/TDT variants, bypassing VAD accumulation.
 - Retain the VAD-accumulate path as the code path for CTC variants.
 - Update `ParakeetOnnxCore` only if the ONNX engine_id exposes an equivalent API
@@ -108,7 +108,7 @@ Gate: unit tests pass; existing `transcribe()` path unchanged.
 
 ### T2. RT engine — decoder-aware dispatch
 
-Update `engines/stt-rt/parakeet/engine.py` to select the inference path based on
+Update `engines/stt-rt/nemo/engine.py` to select the inference path based on
 decoder architecture:
 
 ```python
@@ -179,9 +179,9 @@ remains unchanged and is architecturally correct for that model family.
 ## References
 
 - `dalston/engine_sdk/cores/parakeet_core.py` — `ParakeetCore` (extend here)
-- `engines/stt-rt/parakeet/engine.py` — RT adapter (update dispatch)
-- `engines/stt-rt/parakeet/engine.yaml` — already declares cache-aware streaming intent
-- `engines/stt-rt/parakeet/variants/rnnt-0.6b.yaml` — "RNNT is the only decoder architecture that supports streaming inference"
+- `engines/stt-rt/nemo/engine.py` — RT adapter (update dispatch)
+- `engines/stt-rt/nemo/engine.yaml` — already declares cache-aware streaming intent
+- `engines/stt-rt/nemo/variants/rnnt-0.6b.yaml` — "RNNT is the only decoder architecture that supports streaming inference"
 - NeMo docs: `CacheAwareStreamingConfig`, `EncDecRNNTBPEModel.transcribe_streaming()`
 - `docs/plan/milestones/M70-riva-streaming-rpc-upgrade.md`
 - `docs/plan/milestones/M63-engine-unification-incremental.md`

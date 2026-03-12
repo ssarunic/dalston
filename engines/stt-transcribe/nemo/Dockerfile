@@ -7,7 +7,7 @@
 #   docker compose build stt-batch-transcribe-nemo
 #
 # Or directly:
-#   docker build -t dalston/stt-batch-transcribe-nemo:1.0.0 -f engines/stt-transcribe/parakeet/Dockerfile .
+#   docker build -t dalston/stt-batch-transcribe-nemo:1.0.0 -f engines/stt-transcribe/nemo/Dockerfile .
 #
 # Models are downloaded at runtime to /models/nemo volume.
 # Supported models: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/stt-transcribe/parakeet/requirements.txt .
+COPY engines/stt-transcribe/nemo/requirements.txt .
 
 # Install PyTorch for CPU builds only (GPU base already provides torch)
 RUN if [ "$DEVICE" = "cpu" ]; then \
@@ -71,8 +71,8 @@ ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Copy engine-level engine.yaml (not variant-specific)
-COPY engines/stt-transcribe/parakeet/engine.yaml /etc/dalston/engine.yaml
-COPY engines/stt-transcribe/parakeet/engine.py .
+COPY engines/stt-transcribe/nemo/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/nemo/engine.py .
 
 # Set CUDA visible devices
 ENV NVIDIA_VISIBLE_DEVICES=all

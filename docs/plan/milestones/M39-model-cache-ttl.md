@@ -132,7 +132,7 @@ ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
 | `docker-compose.yml` | Remove 6 volumes, unify to `model-cache` |
 | `dalston/engine_sdk/model_paths.py` | Create - centralized path utilities |
 | `engines/stt-transcribe/faster-whisper/Dockerfile` | Update env vars |
-| `engines/stt-transcribe/parakeet/Dockerfile` | Update env vars |
+| `engines/stt-transcribe/nemo/Dockerfile` | Update env vars |
 | `engines/stt-diarize/pyannote-4.0/Dockerfile` | Update env vars |
 | `engines/stt-align/phoneme-align/Dockerfile` | Update env vars |
 | `engines/stt-detect/pii-presidio/Dockerfile` | Update env vars |
@@ -510,8 +510,8 @@ class WhisperEngine(Engine):
 | `docker-compose.yml` | Consolidate volumes |
 | `engines/stt-transcribe/faster-whisper/Dockerfile` | Update env vars |
 | `engines/stt-transcribe/faster-whisper/engine.py` | Use ModelManager |
-| `engines/stt-transcribe/parakeet/Dockerfile` | Update env vars |
-| `engines/stt-transcribe/parakeet/engine.py` | Use ModelManager |
+| `engines/stt-transcribe/nemo/Dockerfile` | Update env vars |
+| `engines/stt-transcribe/nemo/engine.py` | Use ModelManager |
 | `engines/stt-diarize/pyannote-4.0/Dockerfile` | Update env vars |
 | `engines/stt-align/phoneme-align/Dockerfile` | Update env vars |
 | `engines/stt-detect/pii-presidio/Dockerfile` | Update env vars |

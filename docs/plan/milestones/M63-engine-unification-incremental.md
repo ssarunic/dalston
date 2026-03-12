@@ -222,12 +222,12 @@ pytest -m e2e
   shared core with `OnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
   (`ParakeetOnnxStreamingEngine`) both delegate via `core=` injection.
 - **Unified runners implemented**: `UnifiedParakeetRunner`
-  (`engines/stt-unified/parakeet/runner.py`) and `UnifiedParakeetOnnxRunner`
-  (`engines/stt-unified/parakeet-onnx/runner.py`) — same structure as the
+  (`engines/stt-unified/nemo/runner.py`) and `UnifiedParakeetOnnxRunner`
+  (`engines/stt-unified/onnx/runner.py`) — same structure as the
   faster-whisper runner (one core, batch thread + RT async loop, shared
   admission controller).
-- **Dockerfiles created**: `engines/stt-unified/parakeet/Dockerfile` and
-  `engines/stt-unified/parakeet-onnx/Dockerfile` with GPU/CPU build-arg variants.
+- **Dockerfiles created**: `engines/stt-unified/nemo/Dockerfile` and
+  `engines/stt-unified/onnx/Dockerfile` with GPU/CPU build-arg variants.
 - **Promoted to docker-compose**: 8 legacy split services (`stt-batch-transcribe-nemo*`,
   `stt-rt-nemo*`) replaced by 4 unified services (`stt-unified-nemo`,
   `stt-unified-nemo-cpu`, `stt-unified-onnx-cpu`, `stt-unified-onnx`).

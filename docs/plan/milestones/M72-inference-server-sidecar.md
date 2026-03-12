@@ -409,7 +409,7 @@ RUN pip install grpcio dalston[engine-sdk]
 
 Image size drops from ~4GB to ~200MB.
 
-Apply the same change to `engines/stt-transcribe/parakeet/engine.py`.
+Apply the same change to `engines/stt-transcribe/nemo/engine.py`.
 
 Gate: batch engine processes a job via gRPC to the inference server.
 
@@ -536,7 +536,7 @@ Once sidecar mode is validated:
 2. Remove unified runner compose services (`stt-unified-faster-whisper`,
    `stt-unified-nemo`).
 3. Delete `engines/stt-unified/faster-whisper/runner.py` and
-   `engines/stt-unified/parakeet/runner.py`.
+   `engines/stt-unified/nemo/runner.py`.
 4. Remove `AdmissionController` and `AdmissionConfig` from engine SDK
    (admission is now a semaphore in the inference server).
 5. Remove `_register_engine_modules()` import hacks.
@@ -648,7 +648,7 @@ match the GPU's ability to batch requests. For a single consumer GPU:
 ## References
 
 - `engines/stt-unified/faster-whisper/runner.py` — current unified runner (to be replaced)
-- `engines/stt-unified/parakeet/runner.py` — current unified runner (to be replaced)
+- `engines/stt-unified/nemo/runner.py` — current unified runner (to be replaced)
 - `dalston/engine_sdk/cores/faster_whisper_inference.py` — `TranscribeCore` (wrapped by server)
 - `dalston/engine_sdk/cores/parakeet_core.py` — `ParakeetCore` (wrapped by server)
 - `dalston/engine_sdk/admission.py` — `AdmissionController` (replaced by server semaphore)

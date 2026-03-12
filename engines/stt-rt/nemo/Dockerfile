@@ -50,7 +50,7 @@ RUN pip install --no-cache-dir -e ".[realtime-sdk]"
 WORKDIR /engine
 
 # Copy engine requirements first for better caching
-COPY engines/stt-rt/parakeet/requirements.txt .
+COPY engines/stt-rt/nemo/requirements.txt .
 
 # Install PyTorch for CPU builds only (GPU base already has PyTorch)
 ARG DEVICE=cuda
@@ -79,8 +79,8 @@ print('Model nvidia/parakeet-rnnt-${MODEL_VARIANT} downloaded successfully')" &&
 
 # Copy engine files
 # M50: Use main engine.yaml for structured capabilities
-COPY engines/stt-rt/parakeet/engine.yaml /etc/dalston/engine.yaml
-COPY engines/stt-rt/parakeet/engine.py .
+COPY engines/stt-rt/nemo/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-rt/nemo/engine.py .
 
 # M39: Standardized model cache directories
 ENV HF_HUB_CACHE=/models/huggingface

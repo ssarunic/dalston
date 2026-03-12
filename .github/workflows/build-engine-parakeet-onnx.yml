@@ -1,6 +1,6 @@
-# .github/workflows/build-engine-parakeet-onnx.yml
+# .github/workflows/build-engine-onnx.yml
 #
-# Builds the Parakeet ONNX engine image and pushes to ECR.
+# Builds the ONNX engine image and pushes to ECR.
 # Runs natively on x86 — no QEMU, no 40-minute builds.
 #
 # Triggers:
@@ -13,20 +13,20 @@
 #   3. Create ECR repository: dalston/parakeet-onnx
 #   4. Set repository variable: AWS_ACCOUNT_ID
 
-name: Build Parakeet ONNX Engine
+name: Build ONNX Engine
 
 on:
   push:
     branches: [main]
     paths:
-      - 'engines/stt-transcribe/parakeet-onnx/**'
+      - 'engines/stt-transcribe/onnx/**'
       - 'dalston/**'
       - 'pyproject.toml'
   workflow_dispatch:  # manual trigger
 
 env:
   AWS_REGION: eu-west-2
-  ECR_REPO: dalston/parakeet-onnx
+  ECR_REPO: dalston/onnx
 
 permissions:
   id-token: write   # needed for OIDC auth with AWS
@@ -60,7 +60,7 @@ jobs:
             --build-arg DEVICE=cuda \
             -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPO:latest \
-            -f engines/stt-transcribe/parakeet-onnx/Dockerfile \
+            -f engines/stt-transcribe/onnx/Dockerfile \
             .
 
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG

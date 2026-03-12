@@ -13,7 +13,7 @@ import pytest
 
 def load_parakeet_onnx_streaming_engine():
     """Load OnnxRealtimeEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-rt/parakeet-onnx/engine.py")
+    engine_path = Path("engines/stt-rt/onnx/engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet ONNX streaming engine not found")
 

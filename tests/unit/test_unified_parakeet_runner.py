@@ -30,10 +30,8 @@ from dalston.engine_sdk.admission import (
 # ---------------------------------------------------------------------------
 
 _ENGINES_ROOT = Path("engines")
-_PARAKEET_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "parakeet" / "runner.py"
-_PARAKEET_ONNX_RUNNER_PATH = (
-    _ENGINES_ROOT / "stt-unified" / "parakeet-onnx" / "runner.py"
-)
+_PARAKEET_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "nemo" / "runner.py"
+_PARAKEET_ONNX_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "onnx" / "runner.py"
 
 # Prefixes of module names we inject — only these are cleaned up between tests.
 # Third-party packages (numpy, torch, etc.) are intentionally left in sys.modules
@@ -288,8 +286,8 @@ class TestRegisterEngineModules:
 
             registered_names = [c[0][0] for c in mock_spec.call_args_list]
 
-        assert "engines.stt_transcribe_parakeet" in registered_names
-        assert "engines.stt_rt_parakeet" in registered_names
+        assert "engines.stt_transcribe_nemo" in registered_names
+        assert "engines.stt_rt_nemo" in registered_names
 
     def test_parakeet_onnx_registers_correct_names(self) -> None:
         module = _load_runner_module(
@@ -305,29 +303,29 @@ class TestRegisterEngineModules:
 
             registered_names = [c[0][0] for c in mock_spec.call_args_list]
 
-        assert "engines.stt_transcribe_parakeet_onnx" in registered_names
-        assert "engines.stt_rt_parakeet_onnx" in registered_names
+        assert "engines.stt_transcribe_onnx" in registered_names
+        assert "engines.stt_rt_onnx" in registered_names
 
     def test_parakeet_batch_engine_path_exists(self) -> None:
         """The batch engine file referenced by _register_engine_modules exists."""
         engines_root = _PARAKEET_RUNNER_PATH.resolve().parents[2]
-        batch_path = engines_root / "stt-transcribe" / "parakeet" / "engine.py"
+        batch_path = engines_root / "stt-transcribe" / "nemo" / "engine.py"
         assert batch_path.exists(), f"Batch engine not found: {batch_path}"
 
     def test_parakeet_rt_engine_path_exists(self) -> None:
         """The RT engine file referenced by _register_engine_modules exists."""
         engines_root = _PARAKEET_RUNNER_PATH.resolve().parents[2]
-        rt_path = engines_root / "stt-rt" / "parakeet" / "engine.py"
+        rt_path = engines_root / "stt-rt" / "nemo" / "engine.py"
         assert rt_path.exists(), f"RT engine not found: {rt_path}"
 
     def test_parakeet_onnx_batch_engine_path_exists(self) -> None:
         """The batch ONNX engine file referenced by _register_engine_modules exists."""
         engines_root = _PARAKEET_ONNX_RUNNER_PATH.resolve().parents[2]
-        batch_path = engines_root / "stt-transcribe" / "parakeet-onnx" / "engine.py"
+        batch_path = engines_root / "stt-transcribe" / "onnx" / "engine.py"
         assert batch_path.exists(), f"Batch ONNX engine not found: {batch_path}"
 
     def test_parakeet_onnx_rt_engine_path_exists(self) -> None:
         """The RT ONNX engine file referenced by _register_engine_modules exists."""
         engines_root = _PARAKEET_ONNX_RUNNER_PATH.resolve().parents[2]
-        rt_path = engines_root / "stt-rt" / "parakeet-onnx" / "engine.py"
+        rt_path = engines_root / "stt-rt" / "onnx" / "engine.py"
         assert rt_path.exists(), f"RT ONNX engine not found: {rt_path}"

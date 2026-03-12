@@ -32,13 +32,13 @@ Replace the heavy NeMo toolkit (~5GB container) with lightweight ONNX Runtime (~
 
 ### Current State
 
-- `engines/stt-transcribe/parakeet/` uses NeMo toolkit
+- `engines/stt-transcribe/nemo/` uses NeMo toolkit
 - NeMo pulls PyTorch, Megatron, CUDA engine_id
 - Container is ~5GB, slow cold start
 
 ### Target State
 
-- New `engines/stt-transcribe/parakeet-onnx/`
+- New `engines/stt-transcribe/onnx/`
 - Uses ONNX Runtime with TensorRT provider
 - Container ~1GB, fast cold start
 - Same accuracy, ~2x faster inference
@@ -46,7 +46,7 @@ Replace the heavy NeMo toolkit (~5GB container) with lightweight ONNX Runtime (~
 ### Directory Structure
 
 ```
-engines/stt-transcribe/parakeet-onnx/
+engines/stt-transcribe/onnx/
 ├── Dockerfile
 ├── engine.py
 ├── engine.yaml
@@ -73,12 +73,12 @@ RUN pip install --no-cache-dir -e ".[engine-sdk]"
 
 # Install engine dependencies
 WORKDIR /engine
-COPY engines/stt-transcribe/parakeet-onnx/requirements.txt .
+COPY engines/stt-transcribe/onnx/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine code
-COPY engines/stt-transcribe/parakeet-onnx/engine.py .
-COPY engines/stt-transcribe/parakeet-onnx/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/onnx/engine.py .
+COPY engines/stt-transcribe/onnx/engine.yaml /etc/dalston/engine.yaml
 
 # Environment
 ENV DALSTON_MODEL_DIR=/models
@@ -361,7 +361,7 @@ stt-batch-transcribe-parakeet-onnx:
   image: dalston/engine-parakeet-onnx:latest
   build:
     context: .
-    dockerfile: engines/stt-transcribe/parakeet-onnx/Dockerfile
+    dockerfile: engines/stt-transcribe/onnx/Dockerfile
   volumes:
     - model-cache:/models
   environment:
@@ -1109,7 +1109,7 @@ Add new engines to `generated_catalog.json` or database seeding:
 
 | File | Description |
 |------|-------------|
-| `engines/stt-transcribe/parakeet-onnx/*` | ONNX Parakeet engine |
+| `engines/stt-transcribe/onnx/*` | ONNX Parakeet engine |
 | `engines/stt-transcribe/hf-asr/*` | HuggingFace Transformers engine |
 | `engines/stt-transcribe/vllm-asr/*` | vLLM audio engine |
 | `dalston/engine_sdk/managers/hf_transformers.py` | HF model manager |
@@ -1132,7 +1132,7 @@ Add new engines to `generated_catalog.json` or database seeding:
 ```bash
 # Build container
 docker build -t dalston/engine-parakeet-onnx:latest \
-  -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
+  -f engines/stt-transcribe/onnx/Dockerfile .
 
 # Test locally
 docker run --rm -it -v model-cache:/models \

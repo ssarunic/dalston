@@ -352,8 +352,8 @@ For reference, here are the current engine_ids and their batch/RT coverage:
 | Runtime | Batch engine | RT engine | Key trait |
 |---------|-------------|-----------|-----------|
 | `faster-whisper` | `engines/stt-transcribe/faster-whisper/` | `engines/stt-rt/faster-whisper/` | 99 languages, CTranslate2, RTF 0.03 GPU |
-| `nemo` | `engines/stt-transcribe/parakeet/` | `engines/stt-rt/parakeet/` | English, native word timestamps, RTF 0.0006 GPU |
-| `onnx` | `engines/stt-transcribe/parakeet-onnx/` | `engines/stt-rt/parakeet-onnx/` | 12x smaller image, ONNX Runtime, RTF 0.0003 GPU |
+| `nemo` | `engines/stt-transcribe/nemo/` | `engines/stt-rt/nemo/` | English, native word timestamps, RTF 0.0006 GPU |
+| `onnx` | `engines/stt-transcribe/onnx/` | `engines/stt-rt/onnx/` | 12x smaller image, ONNX Runtime, RTF 0.0003 GPU |
 | `hf-asr` | `engines/stt-transcribe/hf-asr/` | None | 10k+ HF models, generic Transformers pipeline |
 | `vllm-asr` | `engines/stt-transcribe/vllm-asr/` | `engines/stt-rt/voxtral/` | Audio LLMs (Voxtral, Qwen2-Audio), GPU required |
 

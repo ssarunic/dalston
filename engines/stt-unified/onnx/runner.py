@@ -9,7 +9,7 @@ This is the M63 "unified engine instance" — batch and RT share the same
 ONNX Runtime session instead of loading independent copies.
 
 Usage:
-    python -m engines.stt-unified.parakeet-onnx.runner
+    python -m engines.stt-unified.onnx.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
@@ -86,8 +86,8 @@ class UnifiedParakeetOnnxRunner:
         self._running = True
 
         # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_parakeet_onnx import OnnxRealtimeEngine
-        from engines.stt_transcribe_parakeet_onnx import OnnxBatchEngine
+        from engines.stt_rt_onnx import OnnxRealtimeEngine
+        from engines.stt_transcribe_onnx import OnnxBatchEngine
 
         # Create adapters sharing the same OnnxInference
         self._batch_engine = OnnxBatchEngine(core=self._core)
@@ -217,25 +217,23 @@ def _register_engine_modules() -> None:
     engines_root = Path(__file__).resolve().parents[2]
 
     # Register batch engine
-    batch_path = engines_root / "stt-transcribe" / "parakeet-onnx" / "engine.py"
+    batch_path = engines_root / "stt-transcribe" / "onnx" / "engine.py"
     if batch_path.exists():
         spec = importlib.util.spec_from_file_location(
-            "engines.stt_transcribe_parakeet_onnx", batch_path
+            "engines.stt_transcribe_onnx", batch_path
         )
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_transcribe_parakeet_onnx"] = module
+            sys.modules["engines.stt_transcribe_onnx"] = module
             spec.loader.exec_module(module)
 
     # Register RT engine
-    rt_path = engines_root / "stt-rt" / "parakeet-onnx" / "engine.py"
+    rt_path = engines_root / "stt-rt" / "onnx" / "engine.py"
     if rt_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "engines.stt_rt_parakeet_onnx", rt_path
-        )
+        spec = importlib.util.spec_from_file_location("engines.stt_rt_onnx", rt_path)
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_rt_parakeet_onnx"] = module
+            sys.modules["engines.stt_rt_onnx"] = module
             spec.loader.exec_module(module)
 
 

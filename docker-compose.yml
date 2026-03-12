@@ -299,7 +299,7 @@ services:
     image: dalston/stt-unified-nemo:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/parakeet/Dockerfile
+      dockerfile: engines/stt-unified/nemo/Dockerfile
       args:
         DEVICE: cuda
     environment:
@@ -327,7 +327,7 @@ services:
     image: dalston/stt-unified-nemo-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/parakeet/Dockerfile
+      dockerfile: engines/stt-unified/nemo/Dockerfile
       args:
         DEVICE: cpu
     environment:
@@ -413,7 +413,7 @@ services:
     image: dalston/stt-unified-onnx-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/parakeet-onnx/Dockerfile
+      dockerfile: engines/stt-unified/onnx/Dockerfile
       args:
         DEVICE: cpu
     environment:
@@ -440,7 +440,7 @@ services:
     image: dalston/stt-unified-onnx:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/parakeet-onnx/Dockerfile
+      dockerfile: engines/stt-unified/onnx/Dockerfile
       args:
         DEVICE: cuda
     environment:

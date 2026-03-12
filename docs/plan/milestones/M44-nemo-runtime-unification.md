@@ -119,8 +119,8 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
 
 **Deliverables:**
 
-- [x] `engines/stt-rt/parakeet/engine.py` - Consolidated NeMo RT engine (updated to use NeMoModelManager)
-- [x] `engines/stt-rt/parakeet-onnx/engine.py` - Consolidated ONNX RT engine (updated to use OnnxModelManager)
+- [x] `engines/stt-rt/nemo/engine.py` - Consolidated NeMo RT engine (updated to use NeMoModelManager)
+- [x] `engines/stt-rt/onnx/engine.py` - Consolidated ONNX RT engine (updated to use OnnxModelManager)
 - [x] Updated `docker-compose.yml` with new consolidated service definitions (`stt-rt-nemo`, `stt-rt-onnx`)
 - [ ] Remove obsolete per-model RT engine directories (optional - kept for backward compatibility)
 
