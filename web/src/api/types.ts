@@ -674,7 +674,10 @@ export interface ModelRegistryEntry {
   status: ModelStatus
   download_path: string | null
   size_bytes: number | null
+  expected_total_bytes: number | null
+  downloaded_bytes: number | null
   download_progress?: number
+  progress_updated_at: string | null
   downloaded_at: string | null
 
   // Capabilities

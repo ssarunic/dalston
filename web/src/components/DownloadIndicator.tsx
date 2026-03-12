@@ -1,9 +1,10 @@
 import { useState, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Download, Loader2, CheckCircle, XCircle, X } from 'lucide-react'
+import { Loader2, CheckCircle, XCircle, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { formatDownloadProgress } from '@/lib/format'
 import type { ModelRegistryEntry } from '@/api/types'
 
 interface Notification {
@@ -117,17 +118,41 @@ export function DownloadIndicator() {
           onClick={handleClick}
           className={cn(
             'fixed bottom-20 right-6 z-50',
-            'flex items-center gap-3 px-5 py-3 rounded-full',
+            'flex flex-col gap-2 px-5 py-3 rounded-2xl',
             'bg-card border-2 border-blue-500/50 shadow-xl shadow-blue-500/20',
-            'hover:scale-105 transition-all cursor-pointer',
-            'text-base font-medium'
+            'hover:scale-[1.02] transition-all cursor-pointer',
+            'text-left min-w-[280px]'
           )}
         >
-          <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-          <Download className="h-5 w-5 text-blue-500" />
-          <span className="text-foreground font-semibold">
-            Downloading {activeCount} model{activeCount > 1 ? 's' : ''}...
-          </span>
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-500 flex-shrink-0" />
+            <span className="text-sm font-semibold text-foreground">
+              Downloading {activeCount} model{activeCount > 1 ? 's' : ''}
+            </span>
+          </div>
+          {downloads.map((model) => (
+            <div key={model.id} className="w-full space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="font-mono truncate mr-2">{model.id}</span>
+                <span className="flex-shrink-0">
+                  {typeof model.download_progress === 'number'
+                    ? `${model.download_progress}%`
+                    : ''}
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                  style={{ width: `${model.download_progress ?? 0}%` }}
+                />
+              </div>
+              {formatDownloadProgress(model) && (
+                <p className="text-[11px] text-muted-foreground text-right">
+                  {formatDownloadProgress(model)}
+                </p>
+              )}
+            </div>
+          ))}
         </button>
       )}
 

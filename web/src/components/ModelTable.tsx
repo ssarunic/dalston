@@ -26,24 +26,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { formatBytes, formatDownloadProgress, formatNumber } from '@/lib/format'
 import { S } from '@/lib/strings'
 import type { ModelRegistryEntry } from '@/api/types'
-
-// Format bytes to human-readable string
-function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
-// Format large numbers with K/M suffix
-function formatNumber(num: number | undefined): string {
-  if (num === undefined) return '-'
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-  return num.toString()
-}
 
 const statusColors: Record<string, string> = {
   ready: 'bg-green-500',
@@ -241,13 +226,30 @@ function ModelTableRow({
           <Badge variant="secondary">{model.engine_id}</Badge>
         </TableCell>
         <TableCell>
-          <div className="flex items-center gap-2">
-            <div
-              className={cn('w-2 h-2 rounded-full flex-shrink-0', statusColors[model.status])}
-            />
-            <span className="text-sm">{statusLabels[model.status]}</span>
-            {model.status === 'downloading' && typeof model.download_progress === 'number' && (
-              <span className="text-xs text-muted-foreground">({model.download_progress}%)</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <div
+                className={cn('w-2 h-2 rounded-full flex-shrink-0', statusColors[model.status])}
+              />
+              <span className="text-sm">{statusLabels[model.status]}</span>
+              {model.status === 'downloading' && typeof model.download_progress === 'number' && (
+                <span className="text-xs text-muted-foreground">{model.download_progress}%</span>
+              )}
+            </div>
+            {model.status === 'downloading' && (
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 w-24 bg-secondary rounded-full overflow-hidden flex-shrink-0">
+                  <div
+                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    style={{ width: `${model.download_progress ?? 0}%` }}
+                  />
+                </div>
+                {formatDownloadProgress(model) && (
+                  <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                    {formatDownloadProgress(model)}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </TableCell>

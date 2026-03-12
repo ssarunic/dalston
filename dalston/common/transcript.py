@@ -30,6 +30,16 @@ from dalston.common.pipeline_types import (
 
 logger = structlog.get_logger()
 
+# Diarization turns shorter than this are merged into neighbours.
+# Eliminates micro-turn chatter that pyannote produces during speaker overlap,
+# which otherwise creates single-word segments at speaker boundaries.
+MIN_TURN_DURATION_S = 0.25
+
+# After word-level speaker splitting, segments with fewer words than this
+# are merged into the nearest neighbour.  Prevents orphan single-word segments
+# that arise from genuine but very brief overlapping speech.
+MIN_SEGMENT_WORDS = 2
+
 
 def assemble_transcript(
     *,
@@ -92,6 +102,18 @@ def assemble_transcript(
         speaker_detection=speaker_detection,
         pipeline_warnings=pipeline_warnings,
     )
+
+    # Smooth out micro-turns from overlap chatter before word assignment.
+    if diarization_turns:
+        raw_count = len(diarization_turns)
+        diarization_turns = _smooth_diarization_turns(diarization_turns)
+        if len(diarization_turns) != raw_count:
+            logger.info(
+                "diarization_turns_smoothed",
+                raw_turns=raw_count,
+                smoothed_turns=len(diarization_turns),
+                min_duration_s=MIN_TURN_DURATION_S,
+            )
 
     # Build merged segments with IDs and speaker assignments
     segments = _build_merged_segments(
@@ -553,6 +575,138 @@ def _extract_diarization(
     return diarization_turns, diarization_speakers
 
 
+def _smooth_diarization_turns(
+    turns: list[SpeakerTurn],
+    min_duration: float = MIN_TURN_DURATION_S,
+) -> list[SpeakerTurn]:
+    """Merge micro-turns into neighbours to eliminate overlap chatter.
+
+    Pyannote's frame-level classifier can oscillate rapidly between speakers
+    during crosstalk, producing turns of 20-70 ms that create single-word
+    segments after word assignment.  This function:
+
+    1. Absorbs any turn shorter than *min_duration* into the longer adjacent
+       turn (preferring the neighbour with more temporal overlap, falling back
+       to the longer neighbour).
+    2. Merges consecutive same-speaker turns that are now adjacent or
+       overlapping.
+
+    The result is a cleaner turn list that still preserves genuine short
+    utterances (back-channels, interjections) as long as they exceed the
+    threshold.
+    """
+    if not turns or min_duration <= 0:
+        return turns
+
+    sorted_turns = sorted(turns, key=lambda t: (t.start, t.end))
+
+    # --- Step 1: absorb micro-turns -------------------------------------------
+    kept: list[SpeakerTurn] = []
+    absorbed_indices: set[int] = set()
+
+    for idx, turn in enumerate(sorted_turns):
+        if (turn.end - turn.start) >= min_duration:
+            kept.append(turn)
+        else:
+            absorbed_indices.add(idx)
+
+    if not absorbed_indices:
+        # Nothing to smooth — skip to merge step.
+        return _merge_adjacent_turns(sorted_turns)
+
+    # If every turn is micro, keep the longest one so we don't lose all
+    # diarization information.
+    if not kept:
+        longest = max(sorted_turns, key=lambda t: t.end - t.start)
+        kept.append(longest)
+        absorbed_indices.discard(sorted_turns.index(longest))
+
+    # Map each kept turn to its original index so we can look it up after
+    # in-place rebuilds (Pydantic models are immutable, so we create new
+    # objects when extending).
+    kept_by_orig_idx: dict[int, int] = {}
+    for orig_idx, _turn in enumerate(sorted_turns):
+        if orig_idx not in absorbed_indices:
+            kept_by_orig_idx[orig_idx] = len(kept_by_orig_idx)
+
+    def _turn_overlap(a: SpeakerTurn, b: SpeakerTurn) -> float:
+        return max(0.0, min(a.end, b.end) - max(a.start, b.start))
+
+    # For each absorbed micro-turn, extend the best neighbour to cover it.
+    for idx in sorted(absorbed_indices):
+        micro = sorted_turns[idx]
+
+        # Find immediate non-absorbed neighbours by original index.
+        prev_orig: int | None = None
+        nxt_orig: int | None = None
+        for p in range(idx - 1, -1, -1):
+            if p not in absorbed_indices:
+                prev_orig = p
+                break
+        for n in range(idx + 1, len(sorted_turns)):
+            if n not in absorbed_indices:
+                nxt_orig = n
+                break
+
+        prev = kept[kept_by_orig_idx[prev_orig]] if prev_orig is not None else None
+        nxt = kept[kept_by_orig_idx[nxt_orig]] if nxt_orig is not None else None
+
+        # Pick the neighbour with more temporal overlap with the micro-turn;
+        # tie-break by longer duration; last resort: whichever exists.
+        target: SpeakerTurn | None = None
+        target_k_idx: int | None = None
+        if prev and nxt:
+            ov_prev = _turn_overlap(prev, micro)
+            ov_nxt = _turn_overlap(nxt, micro)
+            if ov_prev > ov_nxt:
+                target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+            elif ov_nxt > ov_prev:
+                target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+            else:
+                if (prev.end - prev.start) >= (nxt.end - nxt.start):
+                    target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+                else:
+                    target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+        elif prev:
+            target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+        elif nxt:
+            target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+
+        if target is not None and target_k_idx is not None:
+            kept[target_k_idx] = SpeakerTurn(
+                start=min(target.start, micro.start),
+                end=max(target.end, micro.end),
+                speaker=target.speaker,
+                confidence=target.confidence,
+                overlapping_speakers=target.overlapping_speakers,
+            )
+
+    # --- Step 2: merge consecutive same-speaker turns -------------------------
+    return _merge_adjacent_turns(sorted(kept, key=lambda t: (t.start, t.end)))
+
+
+def _merge_adjacent_turns(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Merge consecutive turns with the same speaker that overlap or are adjacent."""
+    if not turns:
+        return []
+
+    merged: list[SpeakerTurn] = [turns[0]]
+    for turn in turns[1:]:
+        prev = merged[-1]
+        if turn.speaker == prev.speaker and turn.start <= prev.end:
+            merged[-1] = SpeakerTurn(
+                start=prev.start,
+                end=max(prev.end, turn.end),
+                speaker=prev.speaker,
+                confidence=prev.confidence,
+                overlapping_speakers=prev.overlapping_speakers,
+            )
+        else:
+            merged.append(turn)
+
+    return merged
+
+
 def _find_speaker_by_overlap(
     seg_start: float,
     seg_end: float,
@@ -745,6 +899,76 @@ def _split_words_by_speaker(
     return split_parts
 
 
+def _merge_short_splits(
+    parts: list[dict[str, Any]],
+    min_words: int = MIN_SEGMENT_WORDS,
+) -> list[dict[str, Any]]:
+    """Merge splits with fewer than *min_words* into the closest neighbour.
+
+    After word-level speaker splitting, genuine but very brief overlapping
+    speech can produce orphan 1-2 word segments (e.g. a single "i" from a
+    cross-talk moment).  This pass absorbs them into the temporally closest
+    adjacent part, preferring the neighbour that already has more words.
+    """
+    if len(parts) <= 1 or min_words <= 1:
+        return parts
+
+    merged: list[dict[str, Any]] = list(parts)
+
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(merged)):
+            word_count = len(merged[i].get("words") or merged[i]["text"].split())
+            if word_count >= min_words:
+                continue
+
+            # Find best neighbour to absorb into.
+            prev = merged[i - 1] if i > 0 else None
+            nxt = merged[i + 1] if i < len(merged) - 1 else None
+            target_idx: int | None = None
+
+            if prev and nxt:
+                prev_words = len(prev.get("words") or prev["text"].split())
+                nxt_words = len(nxt.get("words") or nxt["text"].split())
+                target_idx = (i - 1) if prev_words >= nxt_words else (i + 1)
+            elif prev:
+                target_idx = i - 1
+            elif nxt:
+                target_idx = i + 1
+
+            if target_idx is None:
+                continue
+
+            t = merged[target_idx]
+            s = merged[i]
+
+            # Combine words and text.
+            if target_idx < i:
+                combined_words = (t.get("words") or []) + (s.get("words") or [])
+                combined_text = (t["text"] + " " + s["text"]).strip()
+                new_start = t["start"]
+                new_end = max(s["end"], t["end"])
+            else:
+                combined_words = (s.get("words") or []) + (t.get("words") or [])
+                combined_text = (s["text"] + " " + t["text"]).strip()
+                new_start = min(s["start"], t["start"])
+                new_end = t["end"]
+
+            merged[target_idx] = {
+                "start": new_start,
+                "end": new_end,
+                "text": combined_text,
+                "speaker": t["speaker"],
+                "words": combined_words if combined_words else None,
+            }
+            merged.pop(i)
+            changed = True
+            break
+
+    return merged
+
+
 def _split_text_across_windows(
     seg_text: str,
     seg_start: float,
@@ -827,7 +1051,7 @@ def _split_segment_by_diarization(
     if words:
         split_with_words = _split_words_by_speaker(words, diarization_turns)
         if split_with_words:
-            return split_with_words
+            return _merge_short_splits(split_with_words)
 
     # Fallback without words: split text across diarization windows.
     resolved_windows: list[tuple[float, float, str | None]] = []

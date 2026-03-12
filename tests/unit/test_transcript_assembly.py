@@ -16,7 +16,10 @@ from dalston.common.transcript import (
     _build_merged_segments,
     _extract_audio_metadata,
     _find_speaker_by_overlap,
+    _merge_adjacent_turns,
+    _merge_short_splits,
     _select_segments,
+    _smooth_diarization_turns,
     assemble_per_channel_transcript,
     assemble_transcript,
     determine_terminal_stage,
@@ -1238,3 +1241,454 @@ class TestAssemblePerChannelTranscript:
             "transcribe_ch0",
             "transcribe_ch1",
         ]
+
+
+# ---------------------------------------------------------------------------
+# _merge_adjacent_turns
+# ---------------------------------------------------------------------------
+
+
+class TestMergeAdjacentTurns:
+    """Tests for merging consecutive same-speaker turns."""
+
+    def test_merges_same_speaker_overlapping(self):
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=2.0),
+            SpeakerTurn(speaker="A", start=1.5, end=4.0),
+        ]
+
+        result = _merge_adjacent_turns(turns)
+
+        assert len(result) == 1
+        assert result[0].speaker == "A"
+        assert result[0].start == 0.0
+        assert result[0].end == 4.0
+
+    def test_merges_same_speaker_adjacent(self):
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=2.0),
+            SpeakerTurn(speaker="A", start=2.0, end=3.0),
+        ]
+
+        result = _merge_adjacent_turns(turns)
+
+        assert len(result) == 1
+        assert result[0].end == 3.0
+
+    def test_keeps_different_speakers(self):
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=2.0),
+            SpeakerTurn(speaker="B", start=2.0, end=4.0),
+        ]
+
+        result = _merge_adjacent_turns(turns)
+
+        assert len(result) == 2
+
+    def test_empty_input(self):
+        assert _merge_adjacent_turns([]) == []
+
+    def test_single_turn(self):
+        turns = [SpeakerTurn(speaker="A", start=0.0, end=1.0)]
+
+        result = _merge_adjacent_turns(turns)
+
+        assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# _smooth_diarization_turns
+# ---------------------------------------------------------------------------
+
+
+class TestSmoothDiarizationTurns:
+    """Tests for micro-turn smoothing."""
+
+    def test_removes_micro_turns_at_overlap_boundary(self):
+        """Rapid alternation at speaker boundary is smoothed out."""
+        turns = [
+            SpeakerTurn(speaker="SPEAKER_00", start=39.0, end=40.0),
+            SpeakerTurn(speaker="SPEAKER_01", start=40.0, end=40.03),  # 30ms micro
+            SpeakerTurn(speaker="SPEAKER_00", start=40.03, end=40.05),  # 20ms micro
+            SpeakerTurn(speaker="SPEAKER_01", start=40.05, end=40.07),  # 20ms micro
+            SpeakerTurn(speaker="SPEAKER_01", start=40.07, end=41.0),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.25)
+
+        # Micro-turns should be absorbed; expect 2 clean turns.
+        assert len(result) == 2
+        speakers = [t.speaker for t in result]
+        assert "SPEAKER_00" in speakers
+        assert "SPEAKER_01" in speakers
+
+    def test_preserves_long_turns(self):
+        """Turns above the threshold are never dropped."""
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=5.0),
+            SpeakerTurn(speaker="B", start=5.0, end=10.0),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.25)
+
+        assert len(result) == 2
+        assert result[0].speaker == "A"
+        assert result[1].speaker == "B"
+
+    def test_all_micro_turns_absorbed(self):
+        """When all turns are micro, they still produce output."""
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=0.05),
+            SpeakerTurn(speaker="B", start=0.05, end=0.1),
+            SpeakerTurn(speaker="A", start=0.1, end=0.15),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.25)
+
+        # All micro-turns — one long turn kept, others absorbed into it.
+        assert len(result) >= 1
+        # No turn should be lost entirely; total span is covered.
+        assert result[0].start <= 0.0
+        assert result[-1].end >= 0.15
+
+    def test_no_smoothing_when_threshold_zero(self):
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=0.02),
+            SpeakerTurn(speaker="B", start=0.02, end=0.04),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.0)
+
+        assert len(result) == 2
+
+    def test_empty_turns(self):
+        assert _smooth_diarization_turns([], min_duration=0.25) == []
+
+    def test_adjacent_same_speaker_merged_after_absorption(self):
+        """After absorbing micro-turns, consecutive same-speaker turns merge."""
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=2.0),
+            SpeakerTurn(speaker="B", start=2.0, end=2.05),  # micro
+            SpeakerTurn(speaker="A", start=2.05, end=4.0),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.25)
+
+        # The micro B turn gets absorbed into one of the A neighbours,
+        # then the two A turns merge into one.
+        assert len(result) == 1
+        assert result[0].speaker == "A"
+        assert result[0].start == 0.0
+        assert result[0].end == 4.0
+
+    def test_real_world_overlap_chatter(self):
+        """Reproduces the actual pyannote output pattern from the bug report."""
+        turns = [
+            SpeakerTurn(speaker="SPEAKER_00", start=39.248, end=39.974),
+            SpeakerTurn(speaker="SPEAKER_01", start=39.974, end=40.008),  # 34ms
+            SpeakerTurn(speaker="SPEAKER_00", start=40.008, end=40.025),  # 17ms
+            SpeakerTurn(speaker="SPEAKER_01", start=40.025, end=40.042),  # 17ms
+            SpeakerTurn(speaker="SPEAKER_00", start=40.042, end=40.058),  # 16ms
+            SpeakerTurn(speaker="SPEAKER_01", start=40.058, end=40.733),
+            SpeakerTurn(speaker="SPEAKER_00", start=40.092, end=41.375),
+            SpeakerTurn(speaker="SPEAKER_01", start=41.375, end=43.957),
+        ]
+
+        result = _smooth_diarization_turns(turns, min_duration=0.25)
+
+        # No micro-turns should survive.
+        for turn in result:
+            assert (turn.end - turn.start) >= 0.25, (
+                f"Micro-turn survived: {turn.speaker} "
+                f"{turn.start:.3f}-{turn.end:.3f} ({turn.end - turn.start:.3f}s)"
+            )
+
+        # All speakers should still be represented.
+        speakers = {t.speaker for t in result}
+        assert "SPEAKER_00" in speakers
+        assert "SPEAKER_01" in speakers
+
+    def test_integration_no_single_word_segments(self):
+        """Smoothed turns should not produce single-word segments during merge."""
+        source = [
+            Segment(
+                start=38.0,
+                end=42.0,
+                text="just but i think youtube",
+                words=[
+                    Word(text="just", start=38.0, end=38.5),
+                    Word(text="but", start=39.0, end=39.5),
+                    Word(text="i", start=40.0, end=40.2),
+                    Word(text="think", start=40.2, end=40.8),
+                    Word(text="youtube", start=41.0, end=42.0),
+                ],
+            ),
+        ]
+
+        # Raw micro-turns that would create single-word "i" and "think" segments.
+        raw_turns = [
+            SpeakerTurn(speaker="SPEAKER_00", start=37.0, end=40.0),
+            SpeakerTurn(speaker="SPEAKER_01", start=40.0, end=40.03),
+            SpeakerTurn(speaker="SPEAKER_00", start=40.03, end=40.05),
+            SpeakerTurn(speaker="SPEAKER_01", start=40.05, end=42.5),
+        ]
+        smoothed = _smooth_diarization_turns(raw_turns, min_duration=0.25)
+
+        result = _build_merged_segments(
+            segments_source=source,
+            diarization_turns=smoothed,
+            word_timestamps_available=True,
+        )
+
+        # No segment should contain only a single word.
+        for seg in result:
+            word_count = len(seg.text.strip().split())
+            assert word_count >= 2, (
+                f"Single-word segment: '{seg.text}' speaker={seg.speaker}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# _merge_short_splits
+# ---------------------------------------------------------------------------
+
+
+class TestMergeShortSplits:
+    """Tests for merging short split parts into neighbours."""
+
+    def test_single_word_merged_into_larger_neighbour(self):
+        parts = [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "hello world foo",
+                "speaker": "A",
+                "words": [
+                    Word(text="hello", start=0.0, end=0.5),
+                    Word(text="world", start=0.6, end=1.0),
+                    Word(text="foo", start=1.0, end=2.0),
+                ],
+            },
+            {
+                "start": 2.0,
+                "end": 2.2,
+                "text": "i",
+                "speaker": "B",
+                "words": [Word(text="i", start=2.0, end=2.2)],
+            },
+            {
+                "start": 2.2,
+                "end": 5.0,
+                "text": "think yes sure",
+                "speaker": "A",
+                "words": [
+                    Word(text="think", start=2.2, end=2.8),
+                    Word(text="yes", start=3.0, end=3.5),
+                    Word(text="sure", start=4.0, end=5.0),
+                ],
+            },
+        ]
+
+        result = _merge_short_splits(parts, min_words=3)
+
+        # "i" should be merged into one of the neighbours.
+        assert len(result) == 2
+        texts = [p["text"] for p in result]
+        assert all("i" in t for t in texts if len(t.split()) > 3) or len(result) == 2
+
+    def test_preserves_parts_above_threshold(self):
+        parts = [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "one two three",
+                "speaker": "A",
+                "words": None,
+            },
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "four five six",
+                "speaker": "B",
+                "words": None,
+            },
+        ]
+
+        result = _merge_short_splits(parts, min_words=3)
+
+        assert len(result) == 2
+
+    def test_single_part_unchanged(self):
+        parts = [
+            {"start": 0.0, "end": 1.0, "text": "hi", "speaker": "A", "words": None},
+        ]
+
+        result = _merge_short_splits(parts, min_words=3)
+
+        assert len(result) == 1
+
+    def test_two_short_parts_merge(self):
+        parts = [
+            {"start": 0.0, "end": 0.5, "text": "hi", "speaker": "A", "words": None},
+            {"start": 0.5, "end": 1.0, "text": "there", "speaker": "B", "words": None},
+        ]
+
+        result = _merge_short_splits(parts, min_words=3)
+
+        # Both are short but only one can absorb the other.
+        assert len(result) == 1
+        assert "hi" in result[0]["text"] and "there" in result[0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Real-world fixture: audio-2.wav transcript + diarization merge
+# ---------------------------------------------------------------------------
+
+
+class TestAudio2FixtureMerge:
+    """Integration test using real pyannote + transcription output from audio-2.wav.
+
+    Verifies that the full smoothing + merge pipeline produces clean segments
+    with no single-word orphans.
+    """
+
+    @staticmethod
+    def _load_fixture(name: str) -> dict:
+        import json
+        from pathlib import Path
+
+        path = Path(__file__).parent / "fixtures" / name
+        return json.loads(path.read_text())
+
+    def test_no_single_word_segments(self):
+        """Full pipeline: smooth turns then merge — no 1-word segments."""
+        transcribe = self._load_fixture("audio2_transcribe.json")
+        diarize = self._load_fixture("audio2_diarize.json")
+
+        # Build typed inputs
+        segments_source = []
+        for seg in transcribe["segments"]:
+            words = None
+            if seg.get("words"):
+                words = [
+                    Word(text=w["text"], start=w["start"], end=w["end"])
+                    for w in seg["words"]
+                ]
+            segments_source.append(
+                Segment(
+                    start=seg["start"],
+                    end=seg["end"],
+                    text=seg["text"],
+                    words=words,
+                )
+            )
+
+        raw_turns = [
+            SpeakerTurn(speaker=t["speaker"], start=t["start"], end=t["end"])
+            for t in diarize["turns"]
+        ]
+
+        # Apply smoothing (same as production path)
+        smoothed_turns = _smooth_diarization_turns(raw_turns)
+
+        result = _build_merged_segments(
+            segments_source=segments_source,
+            diarization_turns=smoothed_turns,
+            word_timestamps_available=True,
+        )
+
+        # No segment should have fewer than MIN_SEGMENT_WORDS words.
+        from dalston.common.transcript import MIN_SEGMENT_WORDS
+
+        for seg in result:
+            word_count = len(seg.text.strip().split())
+            assert word_count >= MIN_SEGMENT_WORDS, (
+                f"Short segment {seg.id}: '{seg.text}' "
+                f"({word_count} words, speaker={seg.speaker}, "
+                f"{seg.start:.2f}-{seg.end:.2f})"
+            )
+
+    def test_all_speakers_preserved(self):
+        """Smoothing + merge should not eliminate any speaker entirely."""
+        transcribe = self._load_fixture("audio2_transcribe.json")
+        diarize = self._load_fixture("audio2_diarize.json")
+
+        segments_source = []
+        for seg in transcribe["segments"]:
+            words = None
+            if seg.get("words"):
+                words = [
+                    Word(text=w["text"], start=w["start"], end=w["end"])
+                    for w in seg["words"]
+                ]
+            segments_source.append(
+                Segment(
+                    start=seg["start"],
+                    end=seg["end"],
+                    text=seg["text"],
+                    words=words,
+                )
+            )
+
+        raw_turns = [
+            SpeakerTurn(speaker=t["speaker"], start=t["start"], end=t["end"])
+            for t in diarize["turns"]
+        ]
+
+        smoothed_turns = _smooth_diarization_turns(raw_turns)
+
+        result = _build_merged_segments(
+            segments_source=segments_source,
+            diarization_turns=smoothed_turns,
+            word_timestamps_available=True,
+        )
+
+        result_speakers = {seg.speaker for seg in result}
+        expected_speakers = set(diarize["speakers"])
+        assert expected_speakers == result_speakers, (
+            f"Missing speakers: {expected_speakers - result_speakers}"
+        )
+
+    def test_no_text_lost(self):
+        """All words from the original transcript survive the merge."""
+        transcribe = self._load_fixture("audio2_transcribe.json")
+        diarize = self._load_fixture("audio2_diarize.json")
+
+        segments_source = []
+        for seg in transcribe["segments"]:
+            words = None
+            if seg.get("words"):
+                words = [
+                    Word(text=w["text"], start=w["start"], end=w["end"])
+                    for w in seg["words"]
+                ]
+            segments_source.append(
+                Segment(
+                    start=seg["start"],
+                    end=seg["end"],
+                    text=seg["text"],
+                    words=words,
+                )
+            )
+
+        raw_turns = [
+            SpeakerTurn(speaker=t["speaker"], start=t["start"], end=t["end"])
+            for t in diarize["turns"]
+        ]
+
+        smoothed_turns = _smooth_diarization_turns(raw_turns)
+
+        result = _build_merged_segments(
+            segments_source=segments_source,
+            diarization_turns=smoothed_turns,
+            word_timestamps_available=True,
+        )
+
+        original_text = " ".join(seg["text"] for seg in transcribe["segments"])
+        merged_text = " ".join(seg.text for seg in result)
+
+        original_words = set(original_text.lower().split())
+        merged_words = set(merged_text.lower().split())
+
+        missing = original_words - merged_words
+        assert not missing, f"Words lost during merge: {missing}"

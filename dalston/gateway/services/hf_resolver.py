@@ -126,6 +126,39 @@ class HFResolver:
             )
             return None
 
+    async def get_model_total_size_bytes(self, model_id: str) -> int | None:
+        """Estimate total repository size for a HuggingFace model.
+
+        Args:
+            model_id: HuggingFace model ID
+
+        Returns:
+            Sum of sibling file sizes in bytes when available, otherwise None.
+        """
+        try:
+            info = await asyncio.to_thread(
+                self.api.model_info,
+                model_id,
+                files_metadata=True,
+            )
+        except Exception as e:
+            logger.warning(
+                "hf_model_size_lookup_failed",
+                model_id=model_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return None
+
+        siblings = getattr(info, "siblings", None) or []
+        sizes = [getattr(sibling, "size", None) for sibling in siblings]
+        known_sizes = [size for size in sizes if isinstance(size, int) and size >= 0]
+
+        if not known_sizes:
+            return None
+
+        return sum(known_sizes)
+
     async def resolve_engine_id(self, model_id: str) -> str | None:
         """Determine which engine_id can load a HuggingFace model.
 

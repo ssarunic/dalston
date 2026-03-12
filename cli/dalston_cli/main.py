@@ -25,6 +25,8 @@ class State:
 
     client: Dalston
     config: dict
+    server: str
+    api_key: str | None
     verbose: bool = False
     quiet: bool = False
 
@@ -120,6 +122,8 @@ def main(
     # Store in global state for subcommands
     state.client = client
     state.config = config
+    state.server = final_server
+    state.api_key = final_api_key
     state.verbose = verbose
     state.quiet = quiet
 

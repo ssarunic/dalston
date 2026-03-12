@@ -386,26 +386,40 @@ class TestPullModel:
         mock_result.scalar_one_or_none.return_value = sample_model
         mock_db.execute.return_value = mock_result
 
-        # Patch snapshot_download and S3 upload
-        with patch("huggingface_hub.snapshot_download") as mock_download:
+        # Mock async_session used by _progress_poller (creates its own DB session)
+        mock_poller_session = AsyncMock()
+        mock_poller_ctx = AsyncMock()
+        mock_poller_ctx.__aenter__.return_value = mock_poller_session
+        mock_poller_ctx.__aexit__.return_value = None
+
+        # Patch snapshot_download, S3 upload, HF resolver, and async_session
+        with (
+            patch("huggingface_hub.snapshot_download") as mock_download,
+            patch.object(service, "_upload_model_to_s3") as mock_s3_upload,
+            patch("pathlib.Path.rglob") as mock_rglob,
+            patch("shutil.rmtree"),
+            patch(
+                "dalston.gateway.services.model_registry.HFResolver"
+            ) as mock_resolver_cls,
+            patch(
+                "dalston.db.session.async_session",
+                return_value=mock_poller_ctx,
+            ),
+        ):
+            mock_resolver_cls.return_value.get_model_total_size_bytes = AsyncMock(
+                return_value=5000
+            )
             mock_download.return_value = "/models/test"
+            mock_s3_upload.return_value = "s3://bucket/models/test"
+            mock_file = MagicMock()
+            mock_file.is_file.return_value = True
+            mock_file.stat.return_value.st_size = 1000
+            mock_rglob.return_value = [mock_file]
 
-            with patch.object(service, "_upload_model_to_s3") as mock_s3_upload:
-                mock_s3_upload.return_value = "s3://bucket/models/test"
+            await service.pull_model(mock_db, "faster-whisper-large-v3", force=True)
 
-                with patch("pathlib.Path.rglob") as mock_rglob:
-                    mock_file = MagicMock()
-                    mock_file.is_file.return_value = True
-                    mock_file.stat.return_value.st_size = 1000
-                    mock_rglob.return_value = [mock_file]
-
-                    with patch("shutil.rmtree"):  # Mock temp dir cleanup
-                        await service.pull_model(
-                            mock_db, "faster-whisper-large-v3", force=True
-                        )
-
-                    mock_download.assert_called_once()
-                    mock_s3_upload.assert_called_once()
+            mock_download.assert_called_once()
+            mock_s3_upload.assert_called_once()
 
 
 class TestRemoveModel:
@@ -514,3 +528,29 @@ class TestModelNotDownloadedError:
         assert error.model_id == "test-model"
         assert "test-model" in str(error)
         assert "dalston model pull" in str(error)
+
+
+class TestDownloadProgressTracker:
+    """Tests for throttled progress tracker behavior."""
+
+    def test_tracker_emits_first_and_throttles_until_threshold(self):
+        from dalston.gateway.services.model_registry import DownloadProgressTracker
+
+        tracker = DownloadProgressTracker()
+
+        assert tracker.should_emit() is True
+        tracker.mark_emitted()
+        tracker.add(1024)
+        assert tracker.should_emit() is False
+
+    def test_tracker_emits_after_large_byte_delta(self):
+        from dalston.gateway.services.model_registry import (
+            DOWNLOAD_PROGRESS_MIN_BYTES,
+            DownloadProgressTracker,
+        )
+
+        tracker = DownloadProgressTracker()
+        tracker.mark_emitted()
+        tracker.add(DOWNLOAD_PROGRESS_MIN_BYTES)
+
+        assert tracker.should_emit() is True

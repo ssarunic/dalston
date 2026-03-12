@@ -9,7 +9,7 @@ description: |
   Uses the onnx-asr library for fast inference without the full NeMo toolkit.
   Supports CTC, TDT, and RNNT decoders.
 
-  M41: This engine_id provides the same Parakeet model accuracy with significantly
+  M41: This engine provides the same Parakeet model accuracy with significantly
   smaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime
   for inference and supports both CPU and GPU execution.
 
@@ -30,7 +30,31 @@ container:
 
 capabilities:
   languages:
-    - en  # English-only models
+    - en
+    - bg
+    - hr
+    - cs
+    - da
+    - nl
+    - et
+    - fi
+    - fr
+    - de
+    - el
+    - hu
+    - it
+    - lv
+    - lt
+    - mt
+    - pl
+    - pt
+    - ro
+    - ru
+    - sk
+    - sl
+    - es
+    - sv
+    - uk
   max_audio_duration: 7200
   streaming: false
   word_timestamps: true  # Native word timestamps via CTC alignment

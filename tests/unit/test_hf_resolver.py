@@ -497,3 +497,36 @@ class TestHFResolverLazyLoading:
             # Should only create once
             mock_hf_api.assert_called_once()
             assert api1 is api2
+
+
+class TestHFResolverModelSize:
+    """Tests for HFResolver.get_model_total_size_bytes."""
+
+    @pytest.mark.asyncio
+    async def test_model_size_sums_known_siblings(self, resolver: HFResolver):
+        info = MagicMock()
+        sibling_a = MagicMock(size=1024)
+        sibling_b = MagicMock(size=2048)
+        info.siblings = [sibling_a, sibling_b]
+
+        mock_api = MagicMock()
+        mock_api.model_info.return_value = info
+        resolver._api = mock_api
+
+        result = await resolver.get_model_total_size_bytes("nvidia/parakeet-ctc-0.6b")
+
+        assert result == 3072
+
+    @pytest.mark.asyncio
+    async def test_model_size_returns_none_when_missing(self, resolver: HFResolver):
+        info = MagicMock()
+        sibling = MagicMock(size=None)
+        info.siblings = [sibling]
+
+        mock_api = MagicMock()
+        mock_api.model_info.return_value = info
+        resolver._api = mock_api
+
+        result = await resolver.get_model_total_size_bytes("nvidia/parakeet-ctc-0.6b")
+
+        assert result is None

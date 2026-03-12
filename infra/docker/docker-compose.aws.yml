@@ -72,6 +72,77 @@ services:
     volumes:
       - /data/models:/data/models
 
+  # ONNX Parakeet unified (CPU)
+  stt-unified-onnx-cpu:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # ONNX Parakeet unified (GPU)
+  stt-unified-onnx:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # NeMo Parakeet unified (CPU)
+  stt-unified-nemo-cpu:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # Pyannote 4.0 diarization (CPU)
+  stt-batch-diarize-pyannote-4.0-cpu:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # Pyannote 4.0 diarization (GPU)
+  stt-batch-diarize-pyannote-4.0:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      HF_HOME: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # NeMo MSDD diarization (GPU)
+  stt-batch-diarize-nemo-msdd:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
+
+  # NeMo MSDD diarization (CPU)
+  stt-batch-diarize-nemo-msdd-cpu:
+    environment:
+      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+      AWS_REGION: ${AWS_REGION}
+      NEMO_CACHE: /data/models
+    volumes:
+      - /data/models:/data/models
+
 # Exclude MinIO services - using S3 instead
 # The base docker-compose.yml may define minio and minio-init
 # but they won't be started unless explicitly included

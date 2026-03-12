@@ -10,14 +10,14 @@
 #   CPU:  docker build -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
 #   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
 #
-# Models are downloaded at engine_id to /models/onnx volume by onnx-asr (via HuggingFace Hub).
+# Models are downloaded at runtime to /models/onnx volume by onnx-asr (via HuggingFace Hub).
 # Supported models: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b
 
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cpu
 
-# GPU: CUDA engine_id image (no PyTorch needed - just ONNX Runtime GPU)
-FROM nvidia/cuda:12.6.0-engine_id-ubuntu22.04 AS base-cuda
+# GPU: CUDA runtime image (no PyTorch needed - just ONNX Runtime GPU)
+FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04 AS base-cuda
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \

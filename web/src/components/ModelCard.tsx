@@ -3,23 +3,8 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { formatBytes, formatDownloadProgress, formatNumber } from '@/lib/format'
 import type { ModelRegistryEntry } from '@/api/types'
-
-// Format bytes to human-readable string
-function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
-// Format large numbers with K/M suffix
-function formatNumber(num: number | undefined): string {
-  if (num === undefined) return '-'
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-  return num.toString()
-}
 
 interface ModelCardProps {
   model: ModelRegistryEntry
@@ -142,15 +127,20 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
         )}
 
         {/* Download Progress */}
-        {model.status === 'downloading' && model.download_progress !== undefined && (
+        {model.status === 'downloading' && (
           <div className="space-y-1">
             <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
               <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${model.download_progress}%` }}
+                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                style={{ width: `${model.download_progress ?? 0}%` }}
               />
             </div>
-            <p className="text-xs text-muted-foreground text-right">{model.download_progress}%</p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{formatDownloadProgress(model) ?? ''}</span>
+              <span>
+                {typeof model.download_progress === 'number' ? `${model.download_progress}%` : ''}
+              </span>
+            </div>
           </div>
         )}
 
