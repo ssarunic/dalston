@@ -1,10 +1,10 @@
-# Model catalog entry for parakeet-onnx-tdt-0.6b-v3
+# Model catalog entry for istupakov/parakeet-tdt-0.6b-v3-onnx
 # M41: ONNX Runtime variant of Parakeet TDT 0.6B v3
 
 schema_version: "1.1"
-id: parakeet-onnx-tdt-0.6b-v3
+id: istupakov/parakeet-tdt-0.6b-v3-onnx
 engine_id: nemo-onnx
-loaded_model_id: "parakeet-onnx-tdt-0.6b-v3"  # ONNX runtime model ID used by nemo-onnx
+loaded_model_id: "istupakov/parakeet-tdt-0.6b-v3-onnx"  # HuggingFace model ID
 
 name: NVIDIA Parakeet ONNX TDT 0.6B v3
 source: istupakov/parakeet-tdt-0.6b-v3-onnx

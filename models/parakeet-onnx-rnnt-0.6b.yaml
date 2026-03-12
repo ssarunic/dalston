@@ -1,10 +1,10 @@
-# Model catalog entry for parakeet-onnx-rnnt-0.6b
+# Model catalog entry for istupakov/parakeet-rnnt-0.6b-onnx
 # M41: ONNX Runtime variant of Parakeet RNNT 0.6B
 
 schema_version: "1.1"
-id: parakeet-onnx-rnnt-0.6b
+id: istupakov/parakeet-rnnt-0.6b-onnx
 engine_id: nemo-onnx
-loaded_model_id: "parakeet-onnx-rnnt-0.6b"  # ONNX runtime model ID used by nemo-onnx
+loaded_model_id: "istupakov/parakeet-rnnt-0.6b-onnx"  # HuggingFace model ID
 
 name: NVIDIA Parakeet ONNX RNNT 0.6B
 source: istupakov/parakeet-rnnt-0.6b-onnx
