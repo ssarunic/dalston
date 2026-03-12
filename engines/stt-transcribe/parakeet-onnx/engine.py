@@ -81,7 +81,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
 
     # Curated model set advertised at registration time.
     # The underlying OnnxModelManager accepts any onnx-asr compatible ID.
-    SUPPORTED_MODELS = {
+    CURATED_MODELS = {
         "parakeet-onnx-ctc-0.6b",
         "parakeet-onnx-ctc-1.1b",
         "parakeet-onnx-tdt-0.6b-v2",
@@ -230,7 +230,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             languages=["en"],
             supports_word_timestamps=True,
             supports_streaming=False,
-            model_variants=sorted(self.SUPPORTED_MODELS),
+            model_variants=sorted(self.CURATED_MODELS),
             gpu_required=False,
             gpu_vram_mb=2000,
             supports_cpu=True,

@@ -70,7 +70,9 @@ class OnnxInference:
     while keeping their own I/O contracts and output formatting.
     """
 
-    SUPPORTED_MODELS = list(OnnxModelManager.MODEL_ALIASES.keys())
+    # Curated model aliases advertised at registration time.
+    # The underlying manager accepts any onnx-asr compatible model ID.
+    CURATED_MODELS = list(OnnxModelManager.MODEL_ALIASES.keys())
 
     def __init__(
         self,

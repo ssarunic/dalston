@@ -137,7 +137,15 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
             Exception: If model loading fails
         """
         # Resolve alias if known, otherwise pass through as-is
+        is_alias = model_id in self.MODEL_ALIASES
         onnx_asr_name = self.MODEL_ALIASES.get(model_id, model_id)
+
+        if not is_alias:
+            logger.warning(
+                "onnx_model_passthrough",
+                model_id=model_id,
+                hint="Model ID not in MODEL_ALIASES; passing through to onnx_asr.load_model() as-is.",
+            )
 
         # Import onnx-asr (deferred to avoid import errors if not installed)
         try:
@@ -160,11 +168,18 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         if self._providers:
             kwargs["providers"] = self._providers
 
-        model = onnx_asr.load_model(
-            onnx_asr_name,
-            quantization=self.quantization,
-            **kwargs,
-        )
+        try:
+            model = onnx_asr.load_model(
+                onnx_asr_name,
+                quantization=self.quantization,
+                **kwargs,
+            )
+        except Exception as e:
+            raise type(e)(
+                f"Failed to load ONNX model '{model_id}' "
+                f"(resolved to '{onnx_asr_name}'). "
+                f"Curated aliases: {sorted(self.MODEL_ALIASES.keys())}"
+            ) from e
 
         logger.info(
             "onnx_model_loaded",

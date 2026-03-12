@@ -195,8 +195,8 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         return False
 
     def get_models(self) -> list[str]:
-        """Return list of supported model identifiers."""
-        return OnnxInference.SUPPORTED_MODELS
+        """Return list of curated model aliases."""
+        return OnnxInference.CURATED_MODELS
 
     def get_languages(self) -> list[str]:
         """Return list of supported languages."""

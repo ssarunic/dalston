@@ -38,30 +38,30 @@ class TestParakeetOnnxEngineModelVariants:
     def test_supported_models_include_ctc_variants(self):
         """Test that CTC model variants are supported."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "parakeet-onnx-ctc-0.6b" in OnnxBatchEngine.SUPPORTED_MODELS
-        assert "parakeet-onnx-ctc-1.1b" in OnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-ctc-0.6b" in OnnxBatchEngine.CURATED_MODELS
+        assert "parakeet-onnx-ctc-1.1b" in OnnxBatchEngine.CURATED_MODELS
 
     def test_supported_models_include_tdt_variants(self):
         """Test that TDT model variants are supported."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "parakeet-onnx-tdt-0.6b-v2" in OnnxBatchEngine.SUPPORTED_MODELS
-        assert "parakeet-onnx-tdt-0.6b-v3" in OnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-tdt-0.6b-v2" in OnnxBatchEngine.CURATED_MODELS
+        assert "parakeet-onnx-tdt-0.6b-v3" in OnnxBatchEngine.CURATED_MODELS
 
     def test_supported_models_include_rnnt_variant(self):
         """Test that RNNT model variant is supported."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "parakeet-onnx-rnnt-0.6b" in OnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-rnnt-0.6b" in OnnxBatchEngine.CURATED_MODELS
 
     def test_supported_models_excludes_unavailable(self):
         """Test that models without ONNX conversions are not supported."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
         # TDT 1.1b has no ONNX conversion available
-        assert "nvidia/parakeet-tdt-1.1b" not in OnnxBatchEngine.SUPPORTED_MODELS
+        assert "nvidia/parakeet-tdt-1.1b" not in OnnxBatchEngine.CURATED_MODELS
 
     def test_supported_models_count(self):
         """Test that all 5 ONNX models are supported."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert len(OnnxBatchEngine.SUPPORTED_MODELS) == 5
+        assert len(OnnxBatchEngine.CURATED_MODELS) == 5
 
 
 class TestParakeetOnnxEngineHealthCheck:
@@ -184,13 +184,17 @@ class TestParakeetOnnxEngineModelLoading:
         with patch.dict("sys.modules", {"onnx_asr": mock_onnx_asr}):
             result = manager.acquire("nvidia/parakeet-tdt-1.1b")
 
-        # Passed through as-is (not in MODEL_ALIASES)
-        mock_onnx_asr.load_model.assert_called_once_with(
-            "nvidia/parakeet-tdt-1.1b",
-            quantization=None,
-            providers=["CPUExecutionProvider"],
-        )
-        assert result is mock_model
+        try:
+            # Passed through as-is (not in MODEL_ALIASES)
+            mock_onnx_asr.load_model.assert_called_once_with(
+                "nvidia/parakeet-tdt-1.1b",
+                quantization=None,
+                providers=["CPUExecutionProvider"],
+            )
+            assert result is mock_model
+        finally:
+            manager.release("nvidia/parakeet-tdt-1.1b")
+            manager.shutdown()
 
 
 class TestParakeetOnnxDecoderTypeDetection:
@@ -255,17 +259,17 @@ class TestParakeetOnnxCatalogIntegration:
     """
 
     def test_onnx_engine_id_exists_in_catalog(self):
-        """Test that nemo-onnx engine_id exists in the engine catalog."""
+        """Test that onnx engine_id exists in the engine catalog."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
         engine = catalog.get_engine("onnx")
 
-        assert engine is not None, "nemo-onnx engine_id not found in catalog"
+        assert engine is not None, "onnx engine_id not found in catalog"
         assert "transcribe" in engine.capabilities.stages
 
     def test_onnx_engine_id_supports_english(self):
-        """Test that nemo-onnx engine_id reports English support."""
+        """Test that onnx engine_id reports English support."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
