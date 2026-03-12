@@ -2,12 +2,13 @@
 
 ## Overview
 
-Dalston provides real-time streaming transcription via WebSocket with two endpoint variants:
+Dalston provides real-time streaming transcription via WebSocket with three endpoint variants:
 
 - **ElevenLabs Compatible** (`/v1/speech-to-text/realtime`) — Drop-in replacement for ElevenLabs WebSocket API
+- **OpenAI Compatible** (`/v1/realtime?intent=transcription`) — Drop-in replacement for OpenAI Realtime Transcription API
 - **Dalston Native** (`/v1/audio/transcriptions/stream`) — Dalston's own conventions with binary audio
 
-Both provide sub-500ms latency for real-time transcription.
+All three provide sub-500ms latency for real-time transcription.
 
 Lag budget behavior (explicit lag warning + lag-exceeded close semantics) is specified in [Latency Budget & Backpressure](./LATENCY_BUDGET_BACKPRESSURE.md).
 
@@ -245,6 +246,346 @@ When `include_language_detection=true`, language info is included:
 ## Client Examples
 
 For complete client implementations in JavaScript and Python, see [WebSocket Client Examples](../examples/websocket-clients.md).
+
+---
+
+# OpenAI Compatible WebSocket
+
+## Endpoint
+
+```
+WS /v1/realtime?intent=transcription
+```
+
+This endpoint implements the OpenAI Realtime Transcription API protocol, allowing existing OpenAI SDK users to connect by changing only the base URL.
+
+---
+
+## Authentication
+
+OpenAI uses header-based authentication during the WebSocket handshake:
+
+```
+Authorization: Bearer dk_your_api_key_here
+OpenAI-Beta: realtime=v1
+```
+
+Dalston accepts both `dk_` (Dalston native) and `sk-` (OpenAI-style) key prefixes, both treated as Dalston API keys.
+
+If authentication fails, the connection is closed immediately with an `error` event containing `type: "authentication_error"`.
+
+---
+
+## Connection
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `intent` | string | **required** | Must be `"transcription"` |
+| `model` | string | `"gpt-4o-transcribe"` | Transcription model (see table below) |
+
+### Example Connection
+
+```javascript
+const ws = new WebSocket(
+  'wss://api.dalston.example.com/v1/realtime?intent=transcription',
+  {
+    headers: {
+      'Authorization': 'Bearer dk_your_key_here',
+      'OpenAI-Beta': 'realtime=v1'
+    }
+  }
+);
+```
+
+---
+
+## Session Configuration
+
+After connecting, configure the transcription session. Dalston accepts both OpenAI request variants and normalizes them internally.
+
+### Variant A: Wrapped (`transcription_session.update`)
+
+```json
+{
+  "type": "transcription_session.update",
+  "session": {
+    "input_audio_format": "pcm16",
+    "input_audio_transcription": {
+      "model": "gpt-4o-transcribe",
+      "language": "en",
+      "prompt": "Technical terms: Kubernetes, FastAPI"
+    },
+    "turn_detection": {
+      "type": "server_vad",
+      "threshold": 0.5,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 500
+    },
+    "input_audio_noise_reduction": {
+      "type": "near_field"
+    }
+  }
+}
+```
+
+### Variant B: Flat (`session.update`)
+
+```json
+{
+  "type": "session.update",
+  "input_audio_format": "pcm16",
+  "input_audio_transcription": {
+    "model": "gpt-4o-transcribe",
+    "language": "en"
+  },
+  "turn_detection": {
+    "type": "server_vad",
+    "threshold": 0.5,
+    "prefix_padding_ms": 300,
+    "silence_duration_ms": 500
+  }
+}
+```
+
+Invalid nested payloads such as `{"session": {"session": {...}}}` are rejected with `invalid_request_error` (`code: "invalid_request"`).
+
+### Audio Format Values
+
+| Format | Description |
+|--------|-------------|
+| `pcm16` | 16-bit PCM, 24kHz, mono |
+| `g711_ulaw` | G.711 μ-law |
+| `g711_alaw` | G.711 A-law |
+
+### Turn Detection Options
+
+| Type | Description |
+|------|-------------|
+| `server_vad` | Server-side voice activity detection (default) |
+| `semantic_vad` | Semantic-aware turn detection |
+| `null` | Manual commit only (client controls when to commit) |
+
+### Model ID Mapping
+
+| OpenAI Model | Dalston Backend | Description |
+|--------------|-----------------|-------------|
+| `gpt-4o-transcribe` | Parakeet 1.1B | Best quality streaming |
+| `gpt-4o-mini-transcribe` | Parakeet 0.6B | Fast streaming |
+| `whisper-1` | Whisper streaming | VAD-chunked Whisper |
+
+---
+
+## Protocol Messages
+
+### Client → Server
+
+#### Append Audio
+
+Send audio as base64-encoded data within a JSON event:
+
+```json
+{
+  "type": "input_audio_buffer.append",
+  "audio": "UklGRiQAAABXQVZFZm10IBA..."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | Yes | Must be `"input_audio_buffer.append"` |
+| `audio` | string | Yes | Base64-encoded audio data |
+
+**Chunk size limit**: Each chunk cannot exceed 15 MB.
+
+#### Commit Buffer
+
+Force processing of buffered audio (used with manual turn detection):
+
+```json
+{
+  "type": "input_audio_buffer.commit"
+}
+```
+
+#### Clear Buffer
+
+Discard buffered audio:
+
+```json
+{
+  "type": "input_audio_buffer.clear"
+}
+```
+
+---
+
+### Server → Client
+
+All server events include an `event_id` field for correlation.
+
+#### Session Created
+
+Sent immediately on connection:
+
+```json
+{
+  "type": "transcription_session.created",
+  "event_id": "evt_abc123",
+  "session": {
+    "id": "sess_xyz789",
+    "input_audio_format": "pcm16",
+    "input_audio_transcription": {
+      "model": "gpt-4o-transcribe",
+      "language": "en"
+    }
+  }
+}
+```
+
+#### Session Updated
+
+Confirmation of session configuration change:
+
+```json
+{
+  "type": "transcription_session.updated",
+  "event_id": "evt_abc124",
+  "session": {
+    "id": "sess_xyz789",
+    "input_audio_format": "pcm16",
+    "input_audio_transcription": {
+      "model": "gpt-4o-transcribe",
+      "language": "en"
+    },
+    "turn_detection": {
+      "type": "server_vad",
+      "threshold": 0.5,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 500
+    }
+  }
+}
+```
+
+#### Speech Started
+
+VAD detected speech in the audio buffer:
+
+```json
+{
+  "type": "input_audio_buffer.speech_started",
+  "event_id": "evt_abc125",
+  "audio_start_ms": 1500
+}
+```
+
+#### Speech Stopped
+
+VAD detected end of speech:
+
+```json
+{
+  "type": "input_audio_buffer.speech_stopped",
+  "event_id": "evt_abc126",
+  "audio_end_ms": 3200
+}
+```
+
+#### Buffer Committed
+
+Acknowledgment that the audio buffer was committed for processing:
+
+```json
+{
+  "type": "input_audio_buffer.committed",
+  "event_id": "evt_abc127",
+  "item_id": "item_xyz"
+}
+```
+
+#### Transcription Delta
+
+Incremental transcript as the model streams results:
+
+```json
+{
+  "type": "conversation.item.input_audio_transcription.delta",
+  "event_id": "evt_abc128",
+  "item_id": "item_xyz",
+  "content_index": 0,
+  "delta": "Hello, how"
+}
+```
+
+#### Transcription Completed
+
+Final transcript for an utterance:
+
+```json
+{
+  "type": "conversation.item.input_audio_transcription.completed",
+  "event_id": "evt_abc129",
+  "item_id": "item_xyz",
+  "content_index": 0,
+  "transcript": "Hello, how are you today?"
+}
+```
+
+With logprobs (if requested via `include` in session config):
+
+```json
+{
+  "type": "conversation.item.input_audio_transcription.completed",
+  "event_id": "evt_abc129",
+  "item_id": "item_xyz",
+  "content_index": 0,
+  "transcript": "Hello, how are you today?",
+  "logprobs": [
+    { "token": "Hello", "logprob": -0.12 },
+    { "token": ",", "logprob": -0.05 },
+    { "token": "how", "logprob": -0.08 }
+  ]
+}
+```
+
+#### Error
+
+```json
+{
+  "type": "error",
+  "event_id": "evt_abc130",
+  "error": {
+    "type": "invalid_request_error",
+    "code": "invalid_audio_format",
+    "message": "Audio format does not match session configuration"
+  }
+}
+```
+
+| Error Type | Description |
+|------------|-------------|
+| `invalid_request_error` | Malformed request, bad parameters, or unsupported format |
+| `authentication_error` | Invalid or missing API key |
+| `rate_limit_error` | Rate limit exceeded |
+| `server_error` | Internal processing error |
+
+---
+
+## REST Session Creation
+
+Dalston also supports creating transcription sessions via REST before connecting:
+
+`POST /v1/realtime/transcription_sessions`
+
+The endpoint accepts either flat session fields at the top level, or a wrapped payload under `session`. See [OpenAI API Reference](../openai/API.md#rest-session-creation) for details.
+
+---
+
+## Client Examples
+
+For complete OpenAI-compatible client implementations, see [WebSocket Client Examples](../examples/websocket-clients.md#openai-compatible-client-javascript).
 
 ---
 
@@ -535,21 +876,24 @@ If preferred model unavailable:
 
 # Protocol Comparison
 
-| Aspect | ElevenLabs (`/v1/speech-to-text/realtime`) | Dalston (`/v1/audio/transcriptions/stream`) |
-|--------|-------------------------------------------|---------------------------------------------|
-| Audio input | JSON with `audio_base_64` | Binary frames (raw bytes) |
-| Message type field | `message_type` | `type` |
-| Partial message | `partial_transcript` | `transcript.partial` |
-| Final message | `committed_transcript_with_timestamps` | `transcript.final` |
-| Commit control | `commit: true` in audio message | `{ "type": "flush" }` |
-| Session begin | *(not sent)* | `session.begin` |
-| VAD events | *(not sent)* | `vad.speech_start`, `vad.speech_end` |
-| Session end | *(connection closes)* | `session.end` with summary |
-| Model param | `model_id` = `scribe_v1`/`scribe_v2` | `model` = `fast`/`accurate` |
-| Language param | `language_code` | `language` |
-| VAD param | `commit_strategy` = `vad`/`manual` | `enable_vad` = `true`/`false` |
-| Timestamps param | `include_timestamps` | `word_timestamps` |
-| Speaker ID format | `speaker_1`, `speaker_2` | `SPEAKER_00`, `SPEAKER_01` |
+| Aspect | ElevenLabs (`/v1/speech-to-text/realtime`) | OpenAI (`/v1/realtime?intent=transcription`) | Dalston (`/v1/audio/transcriptions/stream`) |
+|--------|-------------------------------------------|----------------------------------------------|---------------------------------------------|
+| Auth | `api_key` query param | `Authorization` header + `OpenAI-Beta` header | `api_key` query param |
+| Audio input | JSON with `audio_base_64` | JSON with `audio` (base64) | Binary frames (raw bytes) |
+| Message type field | `message_type` | `type` | `type` |
+| Partial message | `partial_transcript` | `conversation.item.input_audio_transcription.delta` | `transcript.partial` |
+| Final message | `committed_transcript_with_timestamps` | `conversation.item.input_audio_transcription.completed` | `transcript.final` |
+| Commit control | `commit: true` in audio message | `input_audio_buffer.commit` | `{ "type": "flush" }` |
+| Session begin | *(not sent)* | `transcription_session.created` | `session.begin` |
+| Session config | *(query params only)* | `transcription_session.update` / `session.update` | `{ "type": "config" }` |
+| VAD events | *(not sent)* | `input_audio_buffer.speech_started/stopped` | `vad.speech_start`, `vad.speech_end` |
+| Session end | *(connection closes)* | *(connection closes)* | `session.end` with summary |
+| Model param | `model_id` = `scribe_v1`/`scribe_v2` | `model` = `gpt-4o-transcribe`/`gpt-4o-mini-transcribe`/`whisper-1` | `model` = `fast`/`accurate` |
+| Language param | `language_code` | `input_audio_transcription.language` | `language` |
+| VAD param | `commit_strategy` = `vad`/`manual` | `turn_detection.type` = `server_vad`/`null` | `enable_vad` = `true`/`false` |
+| Timestamps param | `include_timestamps` | *(always included via delta events)* | `word_timestamps` |
+| Error format | `{ "message_type": "error", "code": ... }` | `{ "type": "error", "error": { "type": ..., "code": ... } }` | `{ "type": "error", "code": ... }` |
+| Event correlation | *(none)* | `event_id` on all server events | *(none)* |
 
 ---
 
@@ -576,6 +920,44 @@ If migrating to Dalston native for efficiency:
 - Session metadata (`session.begin`, `session.end`)
 - VAD events for UI feedback
 - Enhanced transcript option on session end
+
+## From OpenAI to Dalston
+
+If using the OpenAI-compatible endpoint (`/v1/realtime?intent=transcription`), no changes needed — point the OpenAI SDK at Dalston's base URL:
+
+```python
+import asyncio
+import websockets
+import json
+
+# Before (OpenAI)
+uri = "wss://api.openai.com/v1/realtime?intent=transcription"
+headers = {"Authorization": "Bearer sk-xxx", "OpenAI-Beta": "realtime=v1"}
+
+# After (Dalston) — only change the host and key
+uri = "wss://api.dalston.example.com/v1/realtime?intent=transcription"
+headers = {"Authorization": "Bearer dk_your_key", "OpenAI-Beta": "realtime=v1"}
+```
+
+If migrating to Dalston native for efficiency:
+
+| Change | Before (OpenAI) | After (Dalston) |
+|--------|-----------------|-----------------|
+| Endpoint | `/v1/realtime?intent=transcription` | `/v1/audio/transcriptions/stream` |
+| Auth | `Authorization` header | `api_key` query param |
+| Audio | Base64 JSON (`input_audio_buffer.append`) | Raw binary frames |
+| Session config | `transcription_session.update` event | Query params at connection |
+| Partials | `conversation.item.input_audio_transcription.delta` | `transcript.partial` |
+| Finals | `conversation.item.input_audio_transcription.completed` | `transcript.final` |
+| VAD events | `input_audio_buffer.speech_started/stopped` | `vad.speech_start/end` |
+| Model | `gpt-4o-transcribe` | `accurate` |
+
+**Benefits of Dalston native:**
+
+- ~33% bandwidth reduction (no base64 overhead)
+- Session summary on end (`session.end`)
+- Enhanced transcript option on session end
+- Simpler message format (shorter event type names)
 
 ---
 
