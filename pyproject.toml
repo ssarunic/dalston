@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.13.0",
+    "pydantic==2.12.5",
+    "pydantic-settings==2.13.1",
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
@@ -14,7 +14,7 @@ dependencies = [
     "opentelemetry-sdk==1.39.0",
     "opentelemetry-exporter-otlp-proto-grpc==1.39.0",
     # Prometheus metrics (M20)
-    "prometheus-client>=0.19.0",
+    "prometheus-client==0.24.1",
 ]
 
 [project.optional-dependencies]
