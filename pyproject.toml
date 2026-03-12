@@ -8,9 +8,11 @@ dependencies = [
     "pydantic-settings>=2.13.0",
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
-    "opentelemetry-api>=1.39.0,<2.0.0",
-    "opentelemetry-sdk>=1.39.0,<2.0.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.39.0,<2.0.0",
+    # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
+    # Loose ranges cause pip resolver backtracking (20+ min in CI).
+    "opentelemetry-api==1.39.0",
+    "opentelemetry-sdk==1.39.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.39.0",
     # Prometheus metrics (M20)
     "prometheus-client>=0.19.0",
 ]
@@ -33,10 +35,10 @@ gateway = [
     "tinytag>=2.0.0",  # Audio metadata extraction
     "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
-    "opentelemetry-instrumentation-fastapi>=0.60b0,<1.0.0",
-    "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
-    "opentelemetry-instrumentation-httpx>=0.60b0,<1.0.0",
-    "opentelemetry-instrumentation-sqlalchemy>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-fastapi==0.60b0",
+    "opentelemetry-instrumentation-redis==0.60b0",
+    "opentelemetry-instrumentation-httpx==0.60b0",
+    "opentelemetry-instrumentation-sqlalchemy==0.60b0",
     "alembic>=1.13.0",
 ]
 orchestrator = [
@@ -59,8 +61,8 @@ engine-sdk = [
     "boto3>=1.34.0",
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
-    "opentelemetry-instrumentation-redis>=0.60b0,<1.0.0",
-    "opentelemetry-instrumentation-boto3sqs>=0.60b0,<1.0.0",
+    "opentelemetry-instrumentation-redis==0.60b0",
+    "opentelemetry-instrumentation-boto3sqs==0.60b0",
 ]
 realtime-sdk = [
     "websockets>=12.0",
@@ -88,7 +90,7 @@ dev = [
     "soxr>=0.3.0",  # For resampling tests
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
-    "opentelemetry-test-utils>=0.60b0,<1.0.0",
+    "opentelemetry-test-utils==0.60b0",
     # Pinned OpenAI SDK for M61 contract suite
     "openai==1.93.2",
     # Pinned ElevenLabs SDK for M62 contract suite
