@@ -1,4 +1,4 @@
-# Model catalog entry for parakeet-onnx-ctc-0.6b
+# Model catalog entry for istupakov/parakeet-ctc-0.6b-onnx
 # M41: ONNX Runtime variant of Parakeet CTC 0.6B
 
 schema_version: "1.1"
