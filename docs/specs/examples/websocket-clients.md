@@ -203,6 +203,232 @@ asyncio.run(transcribe_realtime(
 
 ---
 
+## OpenAI Compatible Client (JavaScript)
+
+Full-featured client for the OpenAI-compatible endpoint.
+
+```javascript
+class OpenAICompatibleTranscriber {
+  constructor(options = {}) {
+    this.options = {
+      url: 'wss://api.dalston.example.com/v1/realtime?intent=transcription',
+      apiKey: null,  // Required
+      model: 'gpt-4o-transcribe',
+      language: 'en',
+      turnDetection: 'server_vad',
+      audioFormat: 'pcm16',
+      ...options
+    };
+    this.ws = null;
+  }
+
+  connect() {
+    return new Promise((resolve, reject) => {
+      this.ws = new WebSocket(this.options.url, {
+        headers: {
+          'Authorization': `Bearer ${this.options.apiKey}`,
+          'OpenAI-Beta': 'realtime=v1'
+        }
+      });
+
+      this.ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        this.handleMessage(message);
+
+        if (message.type === 'transcription_session.created') {
+          resolve(message);
+        }
+      };
+
+      this.ws.onerror = (error) => reject(error);
+
+      this.ws.onclose = (event) => {
+        this.onClose?.(event);
+      };
+    });
+  }
+
+  configure() {
+    this.ws?.send(JSON.stringify({
+      type: 'transcription_session.update',
+      session: {
+        input_audio_format: this.options.audioFormat,
+        input_audio_transcription: {
+          model: this.options.model,
+          language: this.options.language
+        },
+        turn_detection: this.options.turnDetection
+          ? { type: this.options.turnDetection }
+          : null
+      }
+    }));
+  }
+
+  handleMessage(message) {
+    switch (message.type) {
+      case 'transcription_session.created':
+        this.onSessionCreated?.(message);
+        break;
+      case 'transcription_session.updated':
+        this.onSessionUpdated?.(message);
+        break;
+      case 'input_audio_buffer.speech_started':
+        this.onSpeechStarted?.(message);
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        this.onSpeechStopped?.(message);
+        break;
+      case 'input_audio_buffer.committed':
+        this.onBufferCommitted?.(message);
+        break;
+      case 'conversation.item.input_audio_transcription.delta':
+        this.onTranscriptionDelta?.(message.delta);
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        this.onTranscriptionCompleted?.(message);
+        break;
+      case 'error':
+        this.onError?.(message.error);
+        break;
+    }
+  }
+
+  sendAudio(audioData) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(audioData)));
+      this.ws.send(JSON.stringify({
+        type: 'input_audio_buffer.append',
+        audio: base64
+      }));
+    }
+  }
+
+  commit() {
+    this.ws?.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+  }
+
+  clear() {
+    this.ws?.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+  }
+
+  close() {
+    this.ws?.close();
+  }
+}
+
+// Usage
+const transcriber = new OpenAICompatibleTranscriber({
+  apiKey: 'dk_your_key_here',
+  model: 'gpt-4o-transcribe',
+  language: 'en'
+});
+
+transcriber.onTranscriptionDelta = (delta) => {
+  process.stdout.write(delta);
+};
+
+transcriber.onTranscriptionCompleted = (result) => {
+  console.log('\nFinal:', result.transcript);
+};
+
+transcriber.onSpeechStarted = (msg) => {
+  console.log(`[Speech started at ${msg.audio_start_ms}ms]`);
+};
+
+await transcriber.connect();
+transcriber.configure();
+
+// Send audio from microphone or file
+transcriber.sendAudio(pcmBuffer);
+```
+
+---
+
+## OpenAI Compatible Client (Python)
+
+```python
+import asyncio
+import websockets
+import json
+import base64
+
+async def transcribe_openai_realtime(audio_source, api_key: str):
+    uri = "wss://api.dalston.example.com/v1/realtime?intent=transcription"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "OpenAI-Beta": "realtime=v1",
+    }
+
+    async with websockets.connect(uri, additional_headers=headers) as ws:
+        # Wait for session.created
+        created = json.loads(await ws.recv())
+        print(f"Session started: {created['session']['id']}")
+
+        # Configure session
+        await ws.send(json.dumps({
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "pcm16",
+                "input_audio_transcription": {
+                    "model": "gpt-4o-transcribe",
+                    "language": "en"
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "silence_duration_ms": 500
+                }
+            }
+        }))
+
+        async def receive():
+            async for msg in ws:
+                event = json.loads(msg)
+                event_type = event.get("type")
+
+                if event_type == "conversation.item.input_audio_transcription.delta":
+                    print(event["delta"], end="", flush=True)
+                elif event_type == "conversation.item.input_audio_transcription.completed":
+                    print(f"\nFinal: {event['transcript']}")
+                elif event_type == "input_audio_buffer.speech_started":
+                    print(f"\n[Speech detected at {event['audio_start_ms']}ms]")
+                elif event_type == "error":
+                    print(f"Error: {event['error']['message']}")
+                    break
+
+        async def send():
+            async for chunk in audio_source:
+                audio_b64 = base64.b64encode(chunk).decode("utf-8")
+                await ws.send(json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": audio_b64
+                }))
+
+            # Commit final buffer
+            await ws.send(json.dumps({
+                "type": "input_audio_buffer.commit"
+            }))
+
+        await asyncio.gather(receive(), send())
+
+
+# Audio source from file (24kHz PCM16 for OpenAI compat)
+async def audio_file_source(path):
+    with open(path, "rb") as f:
+        while chunk := f.read(4800):  # 100ms at 24kHz, 16-bit
+            yield chunk
+            await asyncio.sleep(0.1)
+
+
+# Run
+asyncio.run(transcribe_openai_realtime(
+    audio_file_source("audio.raw"),
+    api_key="dk_your_key_here"
+))
+```
+
+---
+
 ## Dalston Native Client (JavaScript)
 
 Binary mode client for maximum efficiency (no base64 overhead).
