@@ -277,6 +277,177 @@ class TestAssembleTranscriptBasic:
         assert result.speakers[1].id == "SPEAKER_01"
         assert result.metadata.speaker_count == 2
 
+    def test_with_diarization_splits_single_segment_when_words_exist(self):
+        """Diarization turns split a long transcript segment into speaker segments."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 10.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                    }
+                ],
+                "engine_id": "audio-prepare",
+            },
+            "transcribe": {
+                "text": "Hello there how are you",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 5.0,
+                        "text": "Hello there how are you",
+                        "words": [
+                            {"text": "Hello", "start": 0.0, "end": 0.6},
+                            {"text": "there", "start": 0.7, "end": 1.2},
+                            {"text": "how", "start": 2.6, "end": 3.0},
+                            {"text": "are", "start": 3.1, "end": 3.5},
+                            {"text": "you", "start": 3.6, "end": 4.0},
+                        ],
+                    },
+                ],
+                "engine_id": "faster-whisper",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 2.5},
+                    {"speaker": "SPEAKER_01", "start": 2.5, "end": 5.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="job-3b",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        assert len(result.segments) == 2
+        assert result.segments[0].speaker == "SPEAKER_00"
+        assert result.segments[1].speaker == "SPEAKER_01"
+        assert result.segments[0].text == "Hello there"
+        assert result.segments[1].text == "how are you"
+        assert result.segments[0].words is not None
+        assert result.segments[1].words is not None
+
+    def test_with_diarization_preserves_zero_duration_trailing_word(self):
+        """Split logic should keep words where end == start (common at segment tail)."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 6.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                    }
+                ],
+                "engine_id": "audio-prepare",
+            },
+            "transcribe": {
+                "text": "alpha beta gamma",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 3.0,
+                        "text": "alpha beta gamma",
+                        "words": [
+                            {"text": "alpha", "start": 0.0, "end": 1.0},
+                            {"text": "beta", "start": 1.2, "end": 2.2},
+                            {"text": "gamma", "start": 3.0, "end": 3.0},
+                        ],
+                    }
+                ],
+                "engine_id": "faster-whisper",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 1.5},
+                    {"speaker": "SPEAKER_01", "start": 1.5, "end": 3.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="job-3c",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        words = [
+            word.text for segment in result.segments for word in (segment.words or [])
+        ]
+        assert words == ["alpha", "beta", "gamma"]
+
+    def test_with_diarization_gap_does_not_create_null_speaker_word_segment(self):
+        """Words crossing diarization gaps should attach to nearest/overlap speaker."""
+        stage_outputs = {
+            "prepare": {
+                "channel_files": [
+                    {
+                        "artifact_id": "a1",
+                        "format": "wav",
+                        "duration": 10.0,
+                        "sample_rate": 16000,
+                        "channels": 1,
+                    }
+                ],
+                "engine_id": "audio-prepare",
+            },
+            "transcribe": {
+                "text": "one two three four five",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 5.0,
+                        "text": "one two three four five",
+                        "words": [
+                            {"text": "one", "start": 0.0, "end": 1.0},
+                            {"text": "two", "start": 1.0, "end": 2.0},
+                            {"text": "three", "start": 2.0, "end": 3.3},
+                            {"text": "four", "start": 3.3, "end": 4.0},
+                            {"text": "five", "start": 4.0, "end": 5.0},
+                        ],
+                    }
+                ],
+                "engine_id": "faster-whisper",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_01", "start": 0.0, "end": 2.5},
+                    {"speaker": "SPEAKER_00", "start": 3.5, "end": 5.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="job-3d",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        assert len(result.segments) == 2
+        assert result.segments[0].speaker == "SPEAKER_01"
+        assert result.segments[1].speaker == "SPEAKER_00"
+        assert all(seg.speaker is not None for seg in result.segments)
+        assert result.segments[0].text == "one two three"
+        assert result.segments[1].text == "four five"
+
     def test_known_speaker_names(self):
         """Assemble transcript applying known speaker names."""
         stage_outputs = {
@@ -652,6 +823,31 @@ class TestBuildMergedSegments:
         assert result[0].words is not None
         assert len(result[0].words) == 2
         assert result[0].words[0].text == "Hello"
+
+    def test_splits_single_segment_by_diarization_turns_without_words(self):
+        source = [
+            Segment(start=0.0, end=6.0, text="one two three four five six"),
+        ]
+        turns = [
+            SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=3.0),
+            SpeakerTurn(speaker="SPEAKER_01", start=3.0, end=6.0),
+        ]
+
+        result = _build_merged_segments(
+            segments_source=source,
+            diarization_turns=turns,
+            word_timestamps_available=False,
+        )
+
+        assert len(result) == 2
+        assert result[0].speaker == "SPEAKER_00"
+        assert result[1].speaker == "SPEAKER_01"
+        reconstructed = " ".join(
+            token
+            for token in f"{result[0].text} {result[1].text}".split()
+            if token.strip()
+        )
+        assert reconstructed == "one two three four five six"
 
 
 # ---------------------------------------------------------------------------

@@ -623,6 +623,257 @@ def _normalize_transcript_words(words: list) -> list[Word]:
     return result or []
 
 
+def _build_speaker_windows(
+    seg_start: float,
+    seg_end: float,
+    turns: list[SpeakerTurn],
+) -> list[tuple[float, float, str | None]]:
+    """Build non-overlapping windows across a segment using diarization boundaries."""
+    if seg_end <= seg_start:
+        return []
+
+    boundaries = {seg_start, seg_end}
+    for turn in turns:
+        if turn.end <= seg_start or turn.start >= seg_end:
+            continue
+        boundaries.add(max(seg_start, turn.start))
+        boundaries.add(min(seg_end, turn.end))
+
+    ordered = sorted(boundaries)
+    windows: list[tuple[float, float, str | None]] = []
+    for idx in range(len(ordered) - 1):
+        win_start = ordered[idx]
+        win_end = ordered[idx + 1]
+        if win_end <= win_start:
+            continue
+        speaker = _find_speaker_by_overlap(win_start, win_end, turns)
+        if windows and windows[-1][2] == speaker:
+            prev_start, _, prev_speaker = windows[-1]
+            windows[-1] = (prev_start, win_end, prev_speaker)
+        else:
+            windows.append((win_start, win_end, speaker))
+
+    return windows
+
+
+def _find_nearest_turn_speaker(at_time: float, turns: list[SpeakerTurn]) -> str | None:
+    """Find nearest speaker turn to a timestamp."""
+    nearest_speaker: str | None = None
+    nearest_distance: float | None = None
+
+    for turn in turns:
+        if turn.start <= at_time <= turn.end:
+            return turn.speaker
+        if at_time < turn.start:
+            distance = turn.start - at_time
+        else:
+            distance = at_time - turn.end
+        if nearest_distance is None or distance < nearest_distance:
+            nearest_distance = distance
+            nearest_speaker = turn.speaker
+
+    return nearest_speaker
+
+
+def _assign_speaker_to_word(word: Word, turns: list[SpeakerTurn]) -> str | None:
+    """Assign speaker to a word using overlap, then nearest-turn fallback."""
+    if not turns:
+        return None
+
+    if word.end < word.start:
+        return None
+
+    # Zero-duration words are common at segment tails; treat as point assignments.
+    if word.end == word.start:
+        return _find_nearest_turn_speaker(word.start, turns)
+
+    speaker = _find_speaker_by_overlap(word.start, word.end, turns)
+    if speaker is not None:
+        return speaker
+
+    midpoint = (word.start + word.end) / 2.0
+    return _find_nearest_turn_speaker(midpoint, turns)
+
+
+def _split_words_by_speaker(
+    words: list[Word],
+    turns: list[SpeakerTurn],
+) -> list[dict[str, Any]]:
+    """Split words into contiguous runs by assigned speaker."""
+    if not words:
+        return []
+
+    sorted_words = sorted(words, key=lambda w: (w.start, w.end))
+    split_parts: list[dict[str, Any]] = []
+
+    current_speaker: str | None = None
+    current_words: list[Word] = []
+
+    for word in sorted_words:
+        if word.end < word.start:
+            continue
+        speaker = _assign_speaker_to_word(word, turns)
+        if current_words and speaker != current_speaker:
+            text = " ".join(w.text.strip() for w in current_words if w.text.strip())
+            if text:
+                split_parts.append(
+                    {
+                        "start": current_words[0].start,
+                        "end": max(current_words[-1].end, current_words[-1].start),
+                        "text": text,
+                        "speaker": current_speaker,
+                        "words": list(current_words),
+                    }
+                )
+            current_words = []
+        current_words.append(word)
+        current_speaker = speaker
+
+    if current_words:
+        text = " ".join(w.text.strip() for w in current_words if w.text.strip())
+        if text:
+            split_parts.append(
+                {
+                    "start": current_words[0].start,
+                    "end": max(current_words[-1].end, current_words[-1].start),
+                    "text": text,
+                    "speaker": current_speaker,
+                    "words": list(current_words),
+                }
+            )
+
+    return split_parts
+
+
+def _split_text_across_windows(
+    seg_text: str,
+    seg_start: float,
+    seg_end: float,
+    windows: list[tuple[float, float, str | None]],
+) -> list[str]:
+    """Split segment text across windows proportionally by token index."""
+    if not windows:
+        return []
+
+    tokens = [token for token in seg_text.split() if token]
+    if not tokens:
+        return ["" for _ in windows]
+
+    if len(windows) == 1:
+        return [" ".join(tokens)]
+
+    duration = seg_end - seg_start
+    if duration <= 0:
+        return [" ".join(tokens)] + ["" for _ in range(len(windows) - 1)]
+
+    buckets: list[list[str]] = [[] for _ in windows]
+    window_idx = 0
+    token_count = len(tokens)
+    for idx, token in enumerate(tokens):
+        midpoint = seg_start + duration * ((idx + 0.5) / token_count)
+        while window_idx < len(windows) - 1 and midpoint >= windows[window_idx][1]:
+            window_idx += 1
+        buckets[window_idx].append(token)
+
+    return [" ".join(bucket) for bucket in buckets]
+
+
+def _split_segment_by_diarization(
+    *,
+    seg_start: float,
+    seg_end: float,
+    seg_text: str,
+    words: list[Word] | None,
+    diarization_turns: list[SpeakerTurn],
+) -> list[dict[str, Any]]:
+    """Split one transcript segment by diarization speaker windows."""
+    if not diarization_turns:
+        return [
+            {
+                "start": seg_start,
+                "end": seg_end,
+                "text": seg_text,
+                "speaker": None,
+                "words": words,
+            }
+        ]
+
+    windows = _build_speaker_windows(seg_start, seg_end, diarization_turns)
+    if not windows:
+        return [
+            {
+                "start": seg_start,
+                "end": seg_end,
+                "text": seg_text,
+                "speaker": _find_speaker_by_overlap(
+                    seg_start, seg_end, diarization_turns
+                ),
+                "words": words,
+            }
+        ]
+
+    if len(windows) == 1:
+        return [
+            {
+                "start": seg_start,
+                "end": seg_end,
+                "text": seg_text,
+                "speaker": windows[0][2],
+                "words": words,
+            }
+        ]
+
+    # Best path: word-aware splitting aligned to diarization windows.
+    if words:
+        split_with_words = _split_words_by_speaker(words, diarization_turns)
+        if split_with_words:
+            return split_with_words
+
+    # Fallback without words: split text across diarization windows.
+    resolved_windows: list[tuple[float, float, str | None]] = []
+    for win_start, win_end, speaker in windows:
+        resolved_speaker = speaker
+        if resolved_speaker is None:
+            resolved_speaker = _find_nearest_turn_speaker(
+                (win_start + win_end) / 2.0, diarization_turns
+            )
+        if resolved_windows and resolved_windows[-1][2] == resolved_speaker:
+            prev_start, _, prev_speaker = resolved_windows[-1]
+            resolved_windows[-1] = (prev_start, win_end, prev_speaker)
+        else:
+            resolved_windows.append((win_start, win_end, resolved_speaker))
+
+    split_text = _split_text_across_windows(
+        seg_text,
+        seg_start,
+        seg_end,
+        resolved_windows,
+    )
+    split_without_words: list[dict[str, Any]] = []
+    for (win_start, win_end, speaker), text in zip(
+        resolved_windows, split_text, strict=True
+    ):
+        split_without_words.append(
+            {
+                "start": win_start,
+                "end": win_end,
+                "text": text,
+                "speaker": speaker,
+                "words": None,
+            }
+        )
+
+    return split_without_words or [
+        {
+            "start": seg_start,
+            "end": seg_end,
+            "text": seg_text,
+            "speaker": _find_speaker_by_overlap(seg_start, seg_end, diarization_turns),
+            "words": words,
+        }
+    ]
+
+
 def _build_merged_segments(
     *,
     segments_source: list[Segment] | list[TranscriptSegment],
@@ -632,7 +883,7 @@ def _build_merged_segments(
     """Build MergedSegment list with IDs and speaker assignments."""
     segments: list[MergedSegment] = []
 
-    for idx, seg in enumerate(segments_source):
+    for seg in segments_source:
         seg_words: Any = None
         if isinstance(seg, TranscriptSegment):
             seg_start = seg.start
@@ -657,18 +908,13 @@ def _build_merged_segments(
         else:
             raise TypeError(f"Unexpected segment type: {type(seg)}")
 
-        # Assign speaker based on diarization overlap
-        speaker = None
-        if diarization_turns:
-            speaker = _find_speaker_by_overlap(seg_start, seg_end, diarization_turns)
-
-        # Normalize words — use appropriate normalizer for the segment type
-        words: list[Word] | None = None
-        if word_timestamps_available and seg_words:
+        # Normalize words once. They are used for splitting when available.
+        normalized_words: list[Word] | None = None
+        if seg_words:
             if isinstance(seg, TranscriptSegment):
-                words = _normalize_transcript_words(seg_words)
+                normalized_words = _normalize_transcript_words(seg_words)
             else:
-                words = _normalize_words(seg_words)
+                normalized_words = _normalize_words(seg_words)
 
         # Extract per-segment language (code-switching)
         seg_language: str | None = None
@@ -677,24 +923,42 @@ def _build_merged_segments(
         elif isinstance(seg, Segment):
             seg_language = seg.language
 
-        segment = MergedSegment(
-            id=f"seg_{idx:03d}",
-            start=seg_start,
-            end=seg_end,
-            text=seg_text,
-            speaker=speaker,
-            language=seg_language,
-            words=words,
-            tokens=seg_tokens if isinstance(seg_tokens, list) else None,
-            temperature=seg_temperature,
-            avg_logprob=seg_avg_logprob,
-            compression_ratio=seg_compression_ratio,
-            no_speech_prob=seg_no_speech_prob,
-            emotion=None,
-            emotion_confidence=None,
-            events=[],
+        split_parts = _split_segment_by_diarization(
+            seg_start=seg_start,
+            seg_end=seg_end,
+            seg_text=seg_text,
+            words=normalized_words,
+            diarization_turns=diarization_turns,
         )
-        segments.append(segment)
+
+        for part in split_parts:
+            output_words: list[Word] | None = None
+            part_words = part.get("words")
+            if (
+                word_timestamps_available
+                and isinstance(part_words, list)
+                and part_words
+            ):
+                output_words = part_words
+
+            segment = MergedSegment(
+                id=f"seg_{len(segments):03d}",
+                start=float(part["start"]),
+                end=float(part["end"]),
+                text=str(part["text"]),
+                speaker=part["speaker"],
+                language=seg_language,
+                words=output_words,
+                tokens=seg_tokens if isinstance(seg_tokens, list) else None,
+                temperature=seg_temperature,
+                avg_logprob=seg_avg_logprob,
+                compression_ratio=seg_compression_ratio,
+                no_speech_prob=seg_no_speech_prob,
+                emotion=None,
+                emotion_confidence=None,
+                events=[],
+            )
+            segments.append(segment)
 
     return segments
 
