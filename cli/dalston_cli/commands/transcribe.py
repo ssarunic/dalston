@@ -399,6 +399,16 @@ def transcribe(
                         json_output=json_output,
                         message=CLIMsg.BOOTSTRAP_SERVER_SIDE_AUTO,
                     )
+                elif runtime_mode != "lite":
+                    # Distributed mode requires explicit model lifecycle control.
+                    # Do not auto-trigger pulls from the CLI bootstrap path.
+                    _emit_bootstrap_step(
+                        quiet=quiet,
+                        json_output=json_output,
+                        message=CLIMsg.BOOTSTRAP_SKIPPING_MODEL_ENSURE_DISTRIBUTED.format(
+                            model=effective_model
+                        ),
+                    )
                 else:
                     _emit_bootstrap_step(
                         quiet=quiet,

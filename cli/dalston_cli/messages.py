@@ -37,6 +37,9 @@ class CLIMsg:
     BOOTSTRAP_HOW_TO_FIX = "[yellow]How to fix:[/yellow] {remediation}"
     BOOTSTRAP_PREFLIGHT = "Bootstrap: preflight checks"
     BOOTSTRAP_SERVER_SIDE_AUTO = "Bootstrap: using server-side model auto-selection"
+    BOOTSTRAP_SKIPPING_MODEL_ENSURE_DISTRIBUTED = (
+        "Bootstrap: distributed mode, skipping model auto-ensure for '{model}'"
+    )
 
     # -------------------------------------------------------------------------
     # Bootstrap error messages

@@ -116,8 +116,7 @@ def test_local_zero_config_bootstrap_uses_default_model(
     assert _FakeDalston.instances[0].transcribe_models == ["distil-small"]
     mock_preflight.assert_called_once()
     assert mock_preflight.call_args.kwargs["files"] == [audio_file]
-    mock_model_ready.assert_called_once()
-    assert mock_model_ready.call_args.kwargs["model_id"] == "distil-small"
+    mock_model_ready.assert_not_called()
 
 
 def test_local_existing_server_keeps_auto_model(
