@@ -14,11 +14,11 @@ description: |
   for inference and supports both CPU and GPU execution.
 
   Supported models:
-    - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)
-    - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)
-    - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)
-    - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)
-    - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)
+    - parakeet-onnx-ctc-0.6b (CTC, fast, 600M params)
+    - parakeet-onnx-ctc-1.1b (CTC, accurate, 1.1B params)
+    - parakeet-onnx-tdt-0.6b-v2 (TDT, English-only, 600M params)
+    - parakeet-onnx-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)
+    - parakeet-onnx-rnnt-0.6b (RNNT, English-only, 600M params)
 
   All models produce native word-level timestamps without needing a separate
   alignment stage.

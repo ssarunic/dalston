@@ -83,7 +83,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
     with patch.object(_ParakeetOnnxEngine, "__init__", lambda self, core=None: None):
         engine = _ParakeetOnnxEngine.__new__(_ParakeetOnnxEngine)
         engine._core = mock_core
-        engine._default_model_id = "nvidia/parakeet-ctc-0.6b"
+        engine._default_model_id = "parakeet-onnx-ctc-0.6b"
         engine._engine_id = "nemo-onnx"
         engine.logger = MagicMock()
     return engine
@@ -177,7 +177,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"loaded_model_id": "nvidia/parakeet-ctc-0.6b"},
+                config={"loaded_model_id": "parakeet-onnx-ctc-0.6b"},
             ),
             _ctx(task_id, job_id),
         )
@@ -195,7 +195,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"loaded_model_id": "nvidia/parakeet-tdt-0.6b-v3"},
+                config={"loaded_model_id": "parakeet-onnx-tdt-0.6b-v3"},
             ),
             _ctx(task_id, job_id),
         )
@@ -213,7 +213,7 @@ class TestOnnxBatchAlignmentMethod:
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
-                config={"loaded_model_id": "nvidia/parakeet-rnnt-0.6b"},
+                config={"loaded_model_id": "parakeet-onnx-rnnt-0.6b"},
             ),
             _ctx(task_id, job_id),
         )

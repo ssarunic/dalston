@@ -420,7 +420,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
       DALSTON_ENGINE_ID: nemo-onnx
-      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+      DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-onnx-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
@@ -447,7 +447,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
       DALSTON_ENGINE_ID: nemo-onnx
-      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+      DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-onnx
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4

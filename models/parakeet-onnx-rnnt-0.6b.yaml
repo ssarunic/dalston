@@ -4,10 +4,10 @@
 schema_version: "1.1"
 id: parakeet-onnx-rnnt-0.6b
 engine_id: nemo-onnx
-loaded_model_id: "nvidia/parakeet-rnnt-0.6b"  # HuggingFace model, ONNX engine_id
+loaded_model_id: "parakeet-onnx-rnnt-0.6b"  # ONNX runtime model ID used by nemo-onnx
 
 name: NVIDIA Parakeet ONNX RNNT 0.6B
-source: nvidia/parakeet-rnnt-0.6b
+source: istupakov/parakeet-rnnt-0.6b-onnx
 size_gb: 0.6
 stage: transcribe
 

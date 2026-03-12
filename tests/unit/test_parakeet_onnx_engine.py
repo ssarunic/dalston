@@ -31,26 +31,26 @@ class TestParakeetOnnxEngineModelVariants:
     """Tests for Parakeet ONNX model variants (M41)."""
 
     def test_default_model_id_is_ctc_0_6b(self):
-        """Test that default model is nvidia/parakeet-ctc-0.6b."""
+        """Test that default model is parakeet-onnx-ctc-0.6b."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
-        assert NemoOnnxBatchEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-ctc-0.6b"
+        assert NemoOnnxBatchEngine.DEFAULT_MODEL_ID == "parakeet-onnx-ctc-0.6b"
 
     def test_supported_models_include_ctc_variants(self):
         """Test that CTC model variants are supported."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-ctc-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-ctc-1.1b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-ctc-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-ctc-1.1b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_include_tdt_variants(self):
         """Test that TDT model variants are supported."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-tdt-0.6b-v2" in NemoOnnxBatchEngine.SUPPORTED_MODELS
-        assert "nvidia/parakeet-tdt-0.6b-v3" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-tdt-0.6b-v2" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-tdt-0.6b-v3" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_include_rnnt_variant(self):
         """Test that RNNT model variant is supported."""
         NemoOnnxBatchEngine = load_parakeet_onnx_engine()
-        assert "nvidia/parakeet-rnnt-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
+        assert "parakeet-onnx-rnnt-0.6b" in NemoOnnxBatchEngine.SUPPORTED_MODELS
 
     def test_supported_models_excludes_unavailable(self):
         """Test that models without ONNX conversions are not supported."""
@@ -151,6 +151,24 @@ class TestParakeetOnnxEngineCapabilities:
 
 class TestParakeetOnnxEngineModelLoading:
     """Tests for model loading and validation."""
+
+    def test_normalize_legacy_nvidia_model_id(self):
+        """Test that legacy NVIDIA IDs normalize to ONNX runtime IDs."""
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
+        assert (
+            engine._normalize_model_id("nvidia/parakeet-ctc-0.6b")
+            == "parakeet-onnx-ctc-0.6b"
+        )
+
+    def test_normalize_onnx_hf_repo_id(self):
+        """Test that ONNX HF repo IDs normalize to ONNX runtime IDs."""
+        NemoOnnxBatchEngine = load_parakeet_onnx_engine()
+        engine = NemoOnnxBatchEngine()
+        assert (
+            engine._normalize_model_id("istupakov/parakeet-tdt-0.6b-v3-onnx")
+            == "parakeet-onnx-tdt-0.6b-v3"
+        )
 
     def test_core_manager_rejects_unsupported(self):
         """Test that loading a model without ONNX conversion raises ValueError."""

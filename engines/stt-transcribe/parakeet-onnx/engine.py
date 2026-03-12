@@ -13,15 +13,15 @@ Advantages over the NeMo engine_id:
   - No PyTorch dependency for CPU inference
 
 Supported models:
-  - nvidia/parakeet-ctc-0.6b: Fastest inference, 600M params
-  - nvidia/parakeet-ctc-1.1b: Higher accuracy, 1.1B params
-  - nvidia/parakeet-tdt-0.6b-v2: TDT decoder, 600M params, English-only
-  - nvidia/parakeet-tdt-0.6b-v3: TDT decoder, 600M params, punctuation + capitalization
-  - nvidia/parakeet-rnnt-0.6b: RNNT decoder, 600M params, English-only
+  - parakeet-onnx-ctc-0.6b: Fastest inference, 600M params
+  - parakeet-onnx-ctc-1.1b: Higher accuracy, 1.1B params
+  - parakeet-onnx-tdt-0.6b-v2: TDT decoder, 600M params, English-only
+  - parakeet-onnx-tdt-0.6b-v3: TDT decoder, 600M params, punctuation + capitalization
+  - parakeet-onnx-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo-onnx")
-    DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "nvidia/parakeet-ctc-0.6b")
+    DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "parakeet-onnx-ctc-0.6b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
 """
@@ -46,13 +46,25 @@ from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}
 
-# NGC model ID to NeMoOnnxModelManager ID mapping
-_NGC_TO_MANAGER_ID = {
+# Accepted aliases to NeMoOnnxModelManager IDs.
+_MODEL_ID_ALIASES = {
+    # Canonical ONNX runtime IDs
+    "parakeet-onnx-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
+    "parakeet-onnx-ctc-1.1b": "parakeet-onnx-ctc-1.1b",
+    "parakeet-onnx-tdt-0.6b-v2": "parakeet-onnx-tdt-0.6b-v2",
+    "parakeet-onnx-tdt-0.6b-v3": "parakeet-onnx-tdt-0.6b-v3",
+    "parakeet-onnx-rnnt-0.6b": "parakeet-onnx-rnnt-0.6b",
+    # Legacy NVIDIA NeMo repo IDs
     "nvidia/parakeet-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
     "nvidia/parakeet-ctc-1.1b": "parakeet-onnx-ctc-1.1b",
     "nvidia/parakeet-tdt-0.6b-v2": "parakeet-onnx-tdt-0.6b-v2",
     "nvidia/parakeet-tdt-0.6b-v3": "parakeet-onnx-tdt-0.6b-v3",
     "nvidia/parakeet-rnnt-0.6b": "parakeet-onnx-rnnt-0.6b",
+    # ONNX model repositories published for onnx-asr
+    "istupakov/parakeet-ctc-0.6b-onnx": "parakeet-onnx-ctc-0.6b",
+    "istupakov/parakeet-tdt-0.6b-v2-onnx": "parakeet-onnx-tdt-0.6b-v2",
+    "istupakov/parakeet-tdt-0.6b-v3-onnx": "parakeet-onnx-tdt-0.6b-v3",
+    "istupakov/parakeet-rnnt-0.6b-onnx": "parakeet-onnx-rnnt-0.6b",
 }
 
 
@@ -68,14 +80,14 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
     """
 
     SUPPORTED_MODELS = {
-        "nvidia/parakeet-ctc-0.6b",
-        "nvidia/parakeet-ctc-1.1b",
-        "nvidia/parakeet-tdt-0.6b-v2",
-        "nvidia/parakeet-tdt-0.6b-v3",
-        "nvidia/parakeet-rnnt-0.6b",
+        "parakeet-onnx-ctc-0.6b",
+        "parakeet-onnx-ctc-1.1b",
+        "parakeet-onnx-tdt-0.6b-v2",
+        "parakeet-onnx-tdt-0.6b-v3",
+        "parakeet-onnx-rnnt-0.6b",
     }
 
-    DEFAULT_MODEL_ID = "nvidia/parakeet-ctc-0.6b"
+    DEFAULT_MODEL_ID = "parakeet-onnx-ctc-0.6b"
 
     def __init__(self, core: NemoOnnxInference | None = None) -> None:
         """Initialize the engine.
@@ -102,10 +114,8 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def _normalize_model_id(self, loaded_model_id: str) -> str:
-        """Normalize NGC model IDs to NeMoOnnxModelManager format."""
-        if loaded_model_id in _NGC_TO_MANAGER_ID:
-            return _NGC_TO_MANAGER_ID[loaded_model_id]
-        return loaded_model_id
+        """Normalize accepted aliases to NeMoOnnxModelManager IDs."""
+        return _MODEL_ID_ALIASES.get(loaded_model_id, loaded_model_id)
 
     def transcribe_audio(
         self, engine_input: EngineInput, ctx: BatchTaskContext

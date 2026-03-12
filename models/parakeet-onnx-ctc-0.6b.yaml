@@ -4,10 +4,10 @@
 schema_version: "1.1"
 id: parakeet-onnx-ctc-0.6b
 engine_id: nemo-onnx
-loaded_model_id: "nvidia/parakeet-ctc-0.6b"  # Same HuggingFace model, different engine_id
+loaded_model_id: "parakeet-onnx-ctc-0.6b"  # ONNX runtime model ID used by nemo-onnx
 
 name: NVIDIA Parakeet ONNX CTC 0.6B
-source: nvidia/parakeet-ctc-0.6b
+source: istupakov/parakeet-ctc-0.6b-onnx
 size_gb: 0.6  # ONNX model is smaller than NeMo checkpoint
 stage: transcribe
 

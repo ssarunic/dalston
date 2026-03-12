@@ -65,11 +65,11 @@ def build_task_dag_for_test(
         "nvidia/parakeet-tdt-0.6b-v3": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v3"),
         "nvidia/parakeet-rnnt-0.6b": ("nemo-onnx", "nvidia/parakeet-rnnt-0.6b"),
         # NeMo ONNX models (CPU/GPU) - catalog model IDs
-        "parakeet-onnx-ctc-0.6b": ("nemo-onnx", "nvidia/parakeet-ctc-0.6b"),
-        "parakeet-onnx-ctc-1.1b": ("nemo-onnx", "nvidia/parakeet-ctc-1.1b"),
-        "parakeet-onnx-tdt-0.6b-v2": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v2"),
-        "parakeet-onnx-tdt-0.6b-v3": ("nemo-onnx", "nvidia/parakeet-tdt-0.6b-v3"),
-        "parakeet-onnx-rnnt-0.6b": ("nemo-onnx", "nvidia/parakeet-rnnt-0.6b"),
+        "parakeet-onnx-ctc-0.6b": ("nemo-onnx", "parakeet-onnx-ctc-0.6b"),
+        "parakeet-onnx-ctc-1.1b": ("nemo-onnx", "parakeet-onnx-ctc-1.1b"),
+        "parakeet-onnx-tdt-0.6b-v2": ("nemo-onnx", "parakeet-onnx-tdt-0.6b-v2"),
+        "parakeet-onnx-tdt-0.6b-v3": ("nemo-onnx", "parakeet-onnx-tdt-0.6b-v3"),
+        "parakeet-onnx-rnnt-0.6b": ("nemo-onnx", "parakeet-onnx-rnnt-0.6b"),
         # Faster Whisper models
         "Systran/faster-whisper-large-v3-turbo": ("faster-whisper", "large-v3-turbo"),
         "Systran/faster-whisper-base": ("faster-whisper", "base"),

@@ -827,7 +827,6 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 |-------|------|-------|
 | parakeet-onnx-tdt-0.6b-v3 | 0.6 GB | Best for CPU, has punctuation |
 | parakeet-onnx-ctc-0.6b | 0.6 GB | Fastest CPU inference |
-| parakeet-onnx-ctc-1.1b | 1.2 GB | Better accuracy, still fast |
 | parakeet-onnx-rnnt-0.6b | 0.6 GB | RNNT decoder |
 
 **Transcription models (faster-whisper engine_id)**:
