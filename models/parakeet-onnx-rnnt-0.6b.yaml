@@ -3,8 +3,8 @@
 
 schema_version: "1.1"
 id: parakeet-onnx-rnnt-0.6b
-engine_id: nemo-onnx
-loaded_model_id: "parakeet-onnx-rnnt-0.6b"  # ONNX runtime model ID used by nemo-onnx
+engine_id: onnx
+loaded_model_id: "parakeet-onnx-rnnt-0.6b"  # ONNX runtime model ID used by onnx engine
 
 name: NVIDIA Parakeet ONNX RNNT 0.6B
 source: istupakov/parakeet-rnnt-0.6b-onnx

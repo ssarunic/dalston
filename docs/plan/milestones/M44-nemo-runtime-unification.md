@@ -5,7 +5,7 @@
 | **Goal** | NeMo RT engines use dynamic model loading, consolidating per-model containers into per-engine containers |
 | **Duration** | 3-4 days |
 | **Dependencies** | M43 (Real-Time Engine Unification) |
-| **Deliverable** | Two consolidated RT containers: `stt-rt-nemo` and `stt-rt-nemo-onnx` |
+| **Deliverable** | Two consolidated RT containers: `stt-rt-nemo` and `stt-rt-onnx` |
 | **Status** | Implemented |
 
 ## User Story
@@ -41,13 +41,13 @@ Consolidate into two engine-ID-based containers with dynamic model loading:
 
 ```text
 Before: 6+ NeMo RT images (per-model)
-After:  2 RT images (stt-rt-nemo, stt-rt-nemo-onnx)
+After:  2 RT images (stt-rt-nemo, stt-rt-onnx)
 ```
 
 | Container | Runtime | Models |
 |-----------|---------|--------|
 | `stt-rt-nemo` | nemo | parakeet-rnnt-0.6b, parakeet-rnnt-1.1b, parakeet-ctc-* |
-| `stt-rt-nemo-onnx` | nemo-onnx | parakeet-onnx-tdt-*, parakeet-onnx-ctc-* |
+| `stt-rt-onnx` | onnx | parakeet-onnx-tdt-*, parakeet-onnx-ctc-* |
 
 ---
 
@@ -95,14 +95,14 @@ class NeMoModelManager(ModelManager[ASRModel]):
 
 **Deliverables:**
 
-- [x] `NeMoOnnxModelManager` in `dalston/engine_sdk/managers/nemo_onnx.py`
+- [x] `OnnxModelManager` in `dalston/engine_sdk/managers/onnx.py`
 - [x] Support for ONNX Runtime inference via onnx-asr library
 - [x] Separate from PyTorch NeMo for lighter container
 
 **Key difference:** ONNX models use `onnxruntime` instead of full NeMo:
 
 ```python
-class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
+class OnnxModelManager(ModelManager[OnnxASRModel]):
     def _load_model(self, model_id: str) -> OnnxASRModel:
         # Download model files
         model_path = self._download_or_cache(model_id)
@@ -120,8 +120,8 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
 **Deliverables:**
 
 - [x] `engines/stt-rt/parakeet/engine.py` - Consolidated NeMo RT engine (updated to use NeMoModelManager)
-- [x] `engines/stt-rt/parakeet-onnx/engine.py` - Consolidated ONNX RT engine (updated to use NeMoOnnxModelManager)
-- [x] Updated `docker-compose.yml` with new consolidated service definitions (`stt-rt-nemo`, `stt-rt-nemo-onnx`)
+- [x] `engines/stt-rt/parakeet-onnx/engine.py` - Consolidated ONNX RT engine (updated to use OnnxModelManager)
+- [x] Updated `docker-compose.yml` with new consolidated service definitions (`stt-rt-nemo`, `stt-rt-onnx`)
 - [ ] Remove obsolete per-model RT engine directories (optional - kept for backward compatibility)
 
 **Files to delete:**
@@ -200,13 +200,13 @@ stt-rt-nemo:
             capabilities: [gpu]
 
 # Consolidated NeMo ONNX RT (CPU-friendly)
-stt-rt-nemo-onnx:
-  image: dalston/stt-rt-nemo-onnx:1.0.0
+stt-rt-onnx:
+  image: dalston/stt-rt-onnx:1.0.0
   build:
     context: .
-    dockerfile: engines/stt-rt/nemo-onnx/Dockerfile
+    dockerfile: engines/stt-rt/onnx/Dockerfile
   environment:
-    DALSTON_WORKER_ID: stt-rt-nemo-onnx
+    DALSTON_WORKER_ID: stt-rt-onnx
     DALSTON_MODEL_TTL_SECONDS: 3600
     DALSTON_MAX_LOADED_MODELS: 1
     DALSTON_MODEL_PRELOAD: parakeet-onnx-tdt-0.6b-v3
@@ -218,7 +218,7 @@ stt-rt-nemo-onnx:
 
 - [x] NeMo RT engines serve any model variant without image rebuild
 - [x] Models downloaded on-demand from HuggingFace
-- [x] Number of NeMo RT images reduced from N to 2 (nemo, nemo-onnx)
+- [x] Number of NeMo RT images reduced from N to 2 (nemo, onnx)
 - [x] Session Router routes to warm workers when available (via `loaded_models` in heartbeat)
 - [ ] Cold-start latency < 90s for largest model (1.1B) (requires testing)
 
@@ -226,7 +226,7 @@ stt-rt-nemo-onnx:
 
 ## Migration Plan
 
-1. Deploy new `stt-rt-nemo` and `stt-rt-nemo-onnx` containers alongside existing
+1. Deploy new `stt-rt-nemo` and `stt-rt-onnx` containers alongside existing
 2. Verify both can serve all model variants
 3. Update Session Router to prefer new consolidated workers
 4. Deprecate old per-model containers

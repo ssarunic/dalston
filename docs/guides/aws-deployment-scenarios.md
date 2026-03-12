@@ -10,7 +10,7 @@ The engine_id-based engine architecture loads models dynamically from HuggingFac
 
 | Scenario | Instance | GPU | Monthly (8h/day) | w/ Spot | Runtimes |
 |----------|----------|-----|-------------------|---------|----------|
-| 1. CPU-only | t3.xlarge | None | ~$35 | N/A | nemo-onnx (EN), faster-whisper (multi) |
+| 1. CPU-only | t3.xlarge | None | ~$35 | N/A | onnx (EN), faster-whisper (multi) |
 | 2. Single GPU | g5.xlarge | 1x A10G 24GB | ~$100 | ~$35 | All batch + realtime + diarization |
 | 3. Dual-purpose GPU | g5.2xlarge | 1x A10G 24GB | ~$150 | ~$50 | Higher throughput, concurrent batch+RT |
 | 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline + vllm-asr |
@@ -28,7 +28,7 @@ Runtimes are inference engines that load models dynamically. Each engine_id is a
 | Runtime | Stage | Languages | GPU required | Key models |
 |---------|-------|-----------|-------------|------------|
 | **nemo** | transcribe | EN | No (slow on CPU) | parakeet-tdt-1.1b, parakeet-ctc-0.6b |
-| **nemo-onnx** | transcribe | EN | No | Same models, 12x smaller image, better CPU perf |
+| **onnx** | transcribe | EN | No | Same models, 12x smaller image, better CPU perf |
 | **faster-whisper** | transcribe | 99 langs | No | large-v3-turbo, large-v3, medium, small, base, tiny |
 | **hf-asr** | transcribe | Varies | No | Any HuggingFace ASR model (10,000+) |
 | **vllm-asr** | transcribe | 8-12 langs | **Yes** | Voxtral Mini 3B, Qwen2-Audio 7B, Voxtral Small 24B |
@@ -71,7 +71,7 @@ The engine selector automatically picks the best engine_id for each pipeline sta
 │                                              │
 │  Runtimes (CPU):                             │
 │  ┌──────────────────────────────────┐        │
-│  │ nemo-onnx (parakeet-tdt-0.6b-v3)│ 4 GB   │
+│  │ onnx (parakeet-tdt-0.6b-v3)│ 4 GB   │
 │  └──────────────────────────────────┘        │
 │  ┌──────────────────────────────────┐        │
 │  │ faster-whisper (large-v3-turbo)  │ 8 GB   │
@@ -86,13 +86,13 @@ The engine selector automatically picks the best engine_id for each pipeline sta
 
 ### What you get
 
-- **English**: nemo-onnx with parakeet-tdt-0.6b-v3 — native word timestamps, punctuation + capitalization, ~8x realtime on CPU (RTF 0.12). The ~1 GB container image starts in seconds vs ~12 GB for full NeMo.
+- **English**: onnx with parakeet-tdt-0.6b-v3 — native word timestamps, punctuation + capitalization, ~8x realtime on CPU (RTF 0.12). The ~1 GB container image starts in seconds vs ~12 GB for full NeMo.
 - **Multilingual**: faster-whisper with large-v3-turbo — 99 languages, ~3.3x realtime on CPU (RTF 0.3)
 - **Realtime (limited)**: parakeet-onnx realtime works on CPU (VAD-chunked, not true streaming) — usable for single-session English. faster-whisper realtime works on CPU for multilingual but is slow (RTF 0.5).
 - Batch-only for throughput; realtime is single-session and latency-sensitive on CPU
-- The engine selector auto-routes: English jobs → nemo-onnx, non-English → faster-whisper
+- The engine selector auto-routes: English jobs → onnx, non-English → faster-whisper
 
-**nemo-onnx model choices** (all English, all have native word timestamps):
+**onnx model choices** (all English, all have native word timestamps):
 
 | Model | RTF (CPU) | Punctuation | Size |
 |-------|-----------|-------------|------|
@@ -114,7 +114,7 @@ dalston-aws setup --instance-type t3.xlarge
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-nemo-onnx \
+  stt-batch-prepare stt-batch-transcribe-onnx \
   stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
 ```
 
@@ -127,12 +127,12 @@ Only one transcription engine_id loads at a time — the orchestrator routes tas
 | OS + Docker | ~1.5 GB |
 | Redis + Postgres | ~1 GB |
 | Gateway + Orchestrator | ~0.5 GB |
-| nemo-onnx (parakeet-tdt-0.6b-v3) | ~4 GB |
+| onnx (parakeet-tdt-0.6b-v3) | ~4 GB |
 | faster-whisper (large-v3-turbo, idle) | ~1 GB |
 | prepare + align + merge | ~1 GB |
 | **Headroom** | **~7 GB** |
 
-When faster-whisper actively processes a task, it loads the model (~8 GB peak). The nemo-onnx engine_id is lightweight enough that both can coexist, but for sustained mixed workloads consider running only one transcription engine_id and relying on model swapping.
+When faster-whisper actively processes a task, it loads the model (~8 GB peak). The onnx engine_id is lightweight enough that both can coexist, but for sustained mixed workloads consider running only one transcription engine_id and relying on model swapping.
 
 ### Cost
 
@@ -228,7 +228,7 @@ All four fit simultaneously on 24 GB — comfortable. Adding phoneme-align GPU (
 
 **Realtime VRAM trade-offs**: If you add faster-whisper RT for multilingual streaming (+6 GB) or voxtral Mini 4B for LLM streaming (+16 GB), the budget gets tighter. voxtral RT alone would consume ~16 GB, leaving only ~6 GB for batch — enough for one transcription engine_id but not both nemo and faster-whisper simultaneously. For voxtral RT + full batch, Scenario 3 (g5.2xlarge) gives more CPU/RAM headroom, or Scenario 4 with dedicated GPUs.
 
-**Lighter alternative**: Use nemo-onnx instead of full NeMo — same Parakeet models, ~2 GB VRAM, ~12x smaller container image. Slightly slower on GPU but negligible for single-file workloads. Frees VRAM for other engine_ids.
+**Lighter alternative**: Use onnx instead of full NeMo — same Parakeet models, ~2 GB VRAM, ~12x smaller container image. Slightly slower on GPU but negligible for single-file workloads. Frees VRAM for other engine_ids.
 
 ### How to deploy
 
@@ -299,7 +299,7 @@ The GPU is identical — the extra spend buys more CPU and RAM for:
 - Running more utility engines concurrently (prepare, align, merge, PII detection run CPU-side)
 - Higher batch throughput (CPU-bound stages don't bottleneck)
 - Comfortable headroom for web console, monitoring stack (Prometheus/Grafana)
-- Could add nemo-onnx as a secondary CPU transcription engine_id alongside GPU nemo
+- Could add onnx as a secondary CPU transcription engine_id alongside GPU nemo
 - PII detection (pii-presidio) + audio redaction without RAM pressure
 
 ```bash
@@ -433,7 +433,7 @@ This is serious money. Only justified for production workloads with throughput r
 │  │ prepare  │  │  merge  │              │     │  └─────────────────────────────────┘  │
 │  └──────────┘  └─────────┘              │     │  ┌─────────────────────────────────┐  │
 │  ┌─────────────┐  ┌───────────────────┐ │     │  │ pyannote-4.0 / nemo-msdd       │  │
-│  │ nemo-onnx   │  │ pii-presidio      │ │     │  └─────────────────────────────────┘  │
+│  │ onnx   │  │ pii-presidio      │ │     │  └─────────────────────────────────┘  │
 │  │ (CPU batch) │  │ (CPU detection)   │ │     │  ┌─────────────────────────────────┐  │
 │  └─────────────┘  └───────────────────┘ │     │  │ RT parakeet-rnnt (streaming)    │  │
 │  ┌───────────────────┐                  │     │  └─────────────────────────────────┘  │
@@ -465,7 +465,7 @@ Splitting lets you:
 - **Run the control plane 24/7 on a ~$30/month t3.medium** — Gateway accepts uploads, Orchestrator queues tasks
 - **Start/stop the GPU instance on demand** — or use spot ($0.35/hr vs $1.01/hr)
 - **All model-heavy stages on GPU** — transcribe, align, diarize run where they're 15-40x faster
-- **CPU-side processing continues while GPU is off** — prepare, PII detection, audio-redact, merge, and nemo-onnx transcription (English, ~8x realtime) all run on the control plane
+- **CPU-side processing continues while GPU is off** — prepare, PII detection, audio-redact, merge, and onnx transcription (English, ~8x realtime) all run on the control plane
 - **Queue buffering** — if the GPU is off, tasks sit in Redis queues. Start the GPU instance, engines drain the backlog automatically
 
 ### How it works
@@ -480,7 +480,7 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   stt-batch-prepare stt-batch-merge \
   stt-batch-pii-detect-presidio \
   stt-batch-audio-redact-audio \
-  stt-batch-transcribe-nemo-onnx
+  stt-batch-transcribe-onnx
 
 # On the GPU instance (g5.xlarge)
 # .env.gpu points REDIS_URL and DATABASE_URL to the control plane
@@ -533,7 +533,7 @@ The split pattern extends naturally:
 
 - **Multiple GPU workers**: Launch 2-3 spot g5.xlarge instances, all pointing at the same Redis. Tasks distribute automatically via consumer groups. Drain the queue faster.
 - **Heterogeneous workers**: One g5.xlarge for transcription, one focused on align+diarize. Each engine type on the right hardware.
-- **Smaller GPU for align+diarize only**: If nemo-onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
+- **Smaller GPU for align+diarize only**: If onnx handles transcription on CPU fast enough, the GPU worker only runs align + diarize engines. A smaller g4dn.xlarge (~$0.53/hr) is sufficient — align needs ~2 GB VRAM and diarize needs 2-4 GB.
 
 ---
 
@@ -640,13 +640,13 @@ If your workload is sporadic — uploads come in throughout the day but processi
 - GPU worker (g5.xlarge spot) starts when you have a queue to drain
 - All model-heavy stages (transcribe, align, diarize) run on GPU where they're 15-40x faster
 - Align and diarize tasks queue until the GPU starts — don't bother running them on CPU (too slow)
-- For light English-only work, nemo-onnx on the control plane handles transcription without GPU
+- For light English-only work, onnx on the control plane handles transcription without GPU
 
 ### English-only on a budget: Scenario 1 (`t3.xlarge`)
 
 If it's only English and batch latency is acceptable:
 
-- nemo-onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
+- onnx with parakeet-tdt-0.6b-v3 transcribes at ~8x realtime on CPU with punctuation — a 10-minute file takes ~75 seconds
 - parakeet-onnx RT handles single-session English realtime on CPU (VAD-chunked)
 - ~$35/month. No GPU needed.
 
@@ -698,7 +698,7 @@ Adding speaker diarization (`speaker_detection: "diarize"`) changes the pipeline
 The orchestrator's DAG builder (`dag.py`) automatically determines whether the alignment stage is needed:
 
 ```
-Parakeet (nemo/nemo-onnx):  prepare → transcribe → diarize → merge
+Parakeet (nemo/onnx):  prepare → transcribe → diarize → merge
                             (native word timestamps — alignment skipped)
 
 faster-whisper:             prepare → transcribe → align → diarize → merge
@@ -821,7 +821,7 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 | nvidia/parakeet-tdt-0.6b-v3 | 1.8 GB | Punctuation + capitalization |
 | nvidia/parakeet-ctc-0.6b | 1.8 GB | Lightest NeMo model |
 
-**Transcription models (nemo-onnx engine_id — lightweight ONNX)**:
+**Transcription models (onnx engine_id — lightweight ONNX)**:
 
 | Model | Size | Notes |
 |-------|------|-------|
@@ -860,7 +860,7 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 
 | Setup | Models | Total |
 |-------|--------|-------|
-| CPU-only (EN) | nemo-onnx tdt-0.6b-v3 + faster-whisper lg-v3-turbo | ~2.2 GB |
+| CPU-only (EN) | onnx tdt-0.6b-v3 + faster-whisper lg-v3-turbo | ~2.2 GB |
 | Scenario 2 (EN + multi) | parakeet-tdt-1.1b + fw lg-v3-turbo + pyannote + align | ~9.3 GB |
 | Scenario 4 (everything) | All above + Voxtral Mini 3B | ~15 GB |
 

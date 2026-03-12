@@ -5,7 +5,7 @@ This package provides ModelManager implementations for different ML frameworks:
 - FasterWhisperModelManager: CTranslate2/faster-whisper models
 - HFTransformersModelManager: HuggingFace Transformers ASR pipelines
 - NeMoModelManager: NVIDIA NeMo Parakeet ASR models (M44)
-- NeMoOnnxModelManager: ONNX-optimized Parakeet models (M44)
+- OnnxModelManager: ONNX Runtime ASR models (M44)
 
 Example usage:
     from dalston.engine_sdk.managers import FasterWhisperModelManager
@@ -37,11 +37,11 @@ Example usage:
 from dalston.engine_sdk.managers.faster_whisper import FasterWhisperModelManager
 from dalston.engine_sdk.managers.hf_transformers import HFTransformersModelManager
 from dalston.engine_sdk.managers.nemo import NeMoModelManager
-from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
 __all__ = [
     "FasterWhisperModelManager",
     "HFTransformersModelManager",
     "NeMoModelManager",
-    "NeMoOnnxModelManager",
+    "OnnxModelManager",
 ]

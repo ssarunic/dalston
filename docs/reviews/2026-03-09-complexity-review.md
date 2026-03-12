@@ -275,8 +275,8 @@ messages to/from the core format.
 
 The docker-compose currently defines **~20 batch engine services** plus RT
 services. Each engine variant (e.g., `stt-batch-transcribe-nemo`,
-`stt-batch-transcribe-nemo-cpu`, `stt-batch-transcribe-nemo-onnx`,
-`stt-batch-transcribe-nemo-onnx-gpu`) is a separate service with its own
+`stt-batch-transcribe-nemo-cpu`, `stt-batch-transcribe-onnx`,
+`stt-batch-transcribe-onnx-gpu`) is a separate service with its own
 container image.
 
 With unified engines + engine_id model loading, you need **one container per

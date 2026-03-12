@@ -4,7 +4,7 @@ Uses ONNX Runtime via the onnx-asr library for fast, lightweight inference
 of Parakeet CTC, TDT, and RNNT models without the full NeMo toolkit. Produces
 native word-level timestamps without requiring a separate alignment stage.
 
-Delegates inference to NemoOnnxInference (shared with the RT engine).
+Delegates inference to OnnxInference (shared with the RT engine).
 
 Advantages over the NeMo engine_id:
   - ~12x smaller container image (~1GB vs ~12GB)
@@ -20,7 +20,7 @@ Supported models:
   - parakeet-onnx-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
-    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo-onnx")
+    DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "onnx")
     DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "parakeet-onnx-ctc-0.6b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
@@ -41,12 +41,12 @@ from dalston.engine_sdk import (
     EngineInput,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
+from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}
 
-# Accepted aliases to NeMoOnnxModelManager IDs.
+# Accepted aliases to OnnxModelManager IDs.
 _MODEL_ID_ALIASES = {
     # Canonical ONNX runtime IDs
     "parakeet-onnx-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
@@ -68,10 +68,10 @@ _MODEL_ID_ALIASES = {
 }
 
 
-class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
-    """NVIDIA Parakeet transcription engine using ONNX Runtime.
+class OnnxBatchEngine(BaseBatchTranscribeEngine):
+    """ONNX Runtime transcription engine for batch processing.
 
-    Delegates inference to NemoOnnxInference, which is shared with the RT
+    Delegates inference to OnnxInference, which is shared with the RT
     ONNX engine. The batch adapter handles file path input and output
     formatting to Transcript.
 
@@ -79,6 +79,8 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
     INT8 quantization achieves competitive performance for batch processing.
     """
 
+    # Curated model set advertised at registration time.
+    # The underlying OnnxModelManager accepts any onnx-asr compatible ID.
     SUPPORTED_MODELS = {
         "parakeet-onnx-ctc-0.6b",
         "parakeet-onnx-ctc-1.1b",
@@ -89,20 +91,20 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "parakeet-onnx-ctc-0.6b"
 
-    def __init__(self, core: NemoOnnxInference | None = None) -> None:
+    def __init__(self, core: OnnxInference | None = None) -> None:
         """Initialize the engine.
 
         Args:
-            core: Optional shared NemoOnnxInference. If provided, the engine
+            core: Optional shared OnnxInference. If provided, the engine
                   uses it instead of creating its own.
         """
         super().__init__()
-        self._core = core if core is not None else NemoOnnxInference.from_env()
+        self._core = core if core is not None else OnnxInference.from_env()
 
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo-onnx")
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
 
         self.logger.info(
             "engine_init",
@@ -114,7 +116,7 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def _normalize_model_id(self, loaded_model_id: str) -> str:
-        """Normalize accepted aliases to NeMoOnnxModelManager IDs."""
+        """Normalize accepted aliases to OnnxModelManager IDs."""
         return _MODEL_ID_ALIASES.get(loaded_model_id, loaded_model_id)
 
     def transcribe_audio(
@@ -239,5 +241,5 @@ class NemoOnnxBatchEngine(BaseBatchTranscribeEngine):
 
 
 if __name__ == "__main__":
-    engine = NemoOnnxBatchEngine()
+    engine = OnnxBatchEngine()
     engine.run()

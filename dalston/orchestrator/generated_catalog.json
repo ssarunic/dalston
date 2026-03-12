@@ -327,14 +327,14 @@
         "warm_start_latency_ms": 150
       }
     },
-    "nemo-onnx": {
-      "id": "nemo-onnx",
-      "name": "NVIDIA Parakeet ONNX Runtime",
+    "onnx": {
+      "id": "onnx",
+      "name": "ONNX Runtime ASR",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
       "description": "Lightweight ONNX Runtime engine for NVIDIA Parakeet transcription models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders.\n\nM41: This engine_id provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nSupported models:\n  - nvidia/parakeet-ctc-0.6b (CTC, fast, 600M params)\n  - nvidia/parakeet-ctc-1.1b (CTC, accurate, 1.1B params)\n  - nvidia/parakeet-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - nvidia/parakeet-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - nvidia/parakeet-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll models produce native word-level timestamps without needing a separate\nalignment stage.",
-      "image": "dalston/stt-batch-transcribe-nemo-onnx:1.0.0",
+      "image": "dalston/stt-batch-transcribe-onnx:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [

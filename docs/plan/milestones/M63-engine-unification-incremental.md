@@ -136,7 +136,7 @@ Gate:
 
 ## Phase 2: Remaining Runtimes (repeatable template)
 
-For each engine_id (`nemo`, `nemo-onnx`, `hf-asr`, `vllm-asr`):
+For each engine_id (`nemo`, `onnx`, `hf-asr`, `vllm-asr`):
 
 1. Add engine_id core module (unused first).
 2. Migrate batch adapter.
@@ -219,7 +219,7 @@ pytest -m e2e
   with `NeMoModelManager`. Batch (`ParakeetEngine`) and RT
   (`ParakeetStreamingEngine`) both delegate via `core=` injection.
 - **ParakeetOnnxCore** (`dalston/engine_sdk/cores/parakeet_onnx_core.py`):
-  shared core with `NeMoOnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
+  shared core with `OnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
   (`ParakeetOnnxStreamingEngine`) both delegate via `core=` injection.
 - **Unified runners implemented**: `UnifiedParakeetRunner`
   (`engines/stt-unified/parakeet/runner.py`) and `UnifiedParakeetOnnxRunner`
@@ -230,7 +230,7 @@ pytest -m e2e
   `engines/stt-unified/parakeet-onnx/Dockerfile` with GPU/CPU build-arg variants.
 - **Promoted to docker-compose**: 8 legacy split services (`stt-batch-transcribe-nemo*`,
   `stt-rt-nemo*`) replaced by 4 unified services (`stt-unified-nemo`,
-  `stt-unified-nemo-cpu`, `stt-unified-nemo-onnx-cpu`, `stt-unified-nemo-onnx`).
+  `stt-unified-nemo-cpu`, `stt-unified-onnx-cpu`, `stt-unified-onnx`).
 - **hf-asr, vllm-asr, voxtral**: batch-only engine_ids with no RT counterpart to
   unify — no core extraction needed.
 

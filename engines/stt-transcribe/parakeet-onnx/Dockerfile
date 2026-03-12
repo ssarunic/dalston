@@ -4,11 +4,11 @@
 # M41: ~1GB image vs ~12GB for the NeMo-based engine.
 #
 # Build from repo root:
-#   docker compose build stt-batch-transcribe-nemo-onnx
+#   docker compose build stt-batch-transcribe-onnx
 #
 # Or directly:
-#   CPU:  docker build -t dalston/stt-batch-transcribe-nemo-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
-#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-nemo-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
+#   CPU:  docker build -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
+#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-batch-transcribe-onnx:1.0.0 -f engines/stt-transcribe/parakeet-onnx/Dockerfile .
 #
 # Models are downloaded at engine_id to /models/onnx volume by onnx-asr (via HuggingFace Hub).
 # Supported models: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b

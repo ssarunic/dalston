@@ -1,31 +1,34 @@
-"""NeMo ONNX model manager for ONNX-optimized Parakeet ASR models.
+"""ONNX Runtime model manager for ONNX-exported ASR models.
 
-This manager handles loading and lifecycle management for ONNX-exported NeMo ASR
+This manager handles loading and lifecycle management for ONNX-exported ASR
 models using the onnx-asr library. Much lighter than full NeMo (no PyTorch needed
 for inference).
 
-Supported models:
-    CTC:
-    - parakeet-onnx-ctc-0.6b: nemo-parakeet-ctc-0.6b
-    - parakeet-onnx-ctc-1.1b: nemo-parakeet-ctc-1.1b
+The manager supports any model that onnx_asr.load_model() accepts. A curated
+set of short aliases (MODEL_ALIASES) is provided for convenience, but unknown
+model IDs are passed through to onnx-asr as-is — enabling Whisper, GigaAM,
+Vosk, NeMo Conformer/Canary, Kaldi, and arbitrary HuggingFace model paths.
 
-    TDT:
-    - parakeet-onnx-tdt-0.6b-v2: nemo-parakeet-tdt-0.6b-v2
-    - parakeet-onnx-tdt-0.6b-v3: nemo-parakeet-tdt-0.6b-v3
-
-    RNNT:
-    - parakeet-onnx-rnnt-0.6b: nemo-parakeet-rnnt-0.6b
+Curated aliases:
+    CTC:  parakeet-onnx-ctc-0.6b, parakeet-onnx-ctc-1.1b
+    TDT:  parakeet-onnx-tdt-0.6b-v2, parakeet-onnx-tdt-0.6b-v3
+    RNNT: parakeet-onnx-rnnt-0.6b
 
 Example usage:
-    from dalston.engine_sdk.managers import NeMoOnnxModelManager
+    from dalston.engine_sdk.managers import OnnxModelManager
 
-    manager = NeMoOnnxModelManager(
+    manager = OnnxModelManager(
         device="cpu",
         ttl_seconds=3600,
         max_loaded=2,
     )
 
+    # Using a curated alias
     model = manager.acquire("parakeet-onnx-ctc-0.6b")
+
+    # Or pass any onnx-asr compatible model ID directly
+    model = manager.acquire("openai/whisper-large-v3")
+
     try:
         result = model.recognize(audio_array, sample_rate=16000)
     finally:
@@ -56,8 +59,8 @@ logger = structlog.get_logger()
 OnnxASRModel = Any
 
 
-class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
-    """Model manager for ONNX-optimized NeMo Parakeet ASR models.
+class OnnxModelManager(ModelManager[OnnxASRModel]):
+    """Model manager for ONNX Runtime ASR models.
 
     This manager handles the lifecycle of ONNX ASR models using onnx-asr:
     - Automatic model downloading from HuggingFace Hub
@@ -73,8 +76,10 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
         **kwargs: Passed to ModelManager (ttl_seconds, max_loaded, preload)
     """
 
-    # Model ID to onnx-asr model name mapping
-    SUPPORTED_MODELS = {
+    # Curated aliases: friendly model ID → onnx-asr model name.
+    # Unknown IDs are passed through to onnx_asr.load_model() as-is,
+    # so this is a convenience mapping, not a gatekeeper.
+    MODEL_ALIASES: dict[str, str] = {
         # CTC models
         "parakeet-onnx-ctc-0.6b": "nemo-parakeet-ctc-0.6b",
         "parakeet-onnx-ctc-1.1b": "nemo-parakeet-ctc-1.1b",
@@ -108,7 +113,7 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
             self._providers = ["CPUExecutionProvider"]
 
         logger.info(
-            "nemo_onnx_model_manager_init",
+            "onnx_model_manager_init",
             device=self.device,
             quantization=self.quantization,
             providers=self._providers,
@@ -120,24 +125,19 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
         """Load an ONNX ASR model.
 
         Args:
-            model_id: Model identifier (e.g., "parakeet-onnx-ctc-0.6b" or "ctc-0.6b")
+            model_id: Model identifier. Can be a curated alias
+                (e.g., "parakeet-onnx-ctc-0.6b", "ctc-0.6b") or any model ID
+                accepted by onnx_asr.load_model() (e.g., "openai/whisper-large-v3").
 
         Returns:
             Loaded onnx-asr model instance
 
         Raises:
-            ValueError: If model_id is not supported
             ImportError: If onnx-asr is not installed
             Exception: If model loading fails
         """
-        # Resolve onnx-asr model name
-        if model_id in self.SUPPORTED_MODELS:
-            onnx_asr_name = self.SUPPORTED_MODELS[model_id]
-        else:
-            raise ValueError(
-                f"Unknown model: {model_id}. "
-                f"Supported: {sorted(set(self.SUPPORTED_MODELS.keys()))}"
-            )
+        # Resolve alias if known, otherwise pass through as-is
+        onnx_asr_name = self.MODEL_ALIASES.get(model_id, model_id)
 
         # Import onnx-asr (deferred to avoid import errors if not installed)
         try:
@@ -199,7 +199,7 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
                 pass
 
     @classmethod
-    def from_env(cls) -> NeMoOnnxModelManager:
+    def from_env(cls) -> OnnxModelManager:
         """Create a manager configured from environment variables.
 
         Environment variables:
@@ -210,7 +210,7 @@ class NeMoOnnxModelManager(ModelManager[OnnxASRModel]):
             DALSTON_MODEL_PRELOAD: Model to preload (optional)
 
         Returns:
-            Configured NeMoOnnxModelManager instance
+            Configured OnnxModelManager instance
         """
         # Auto-detect device
         device = os.environ.get("DALSTON_DEVICE", "").lower()

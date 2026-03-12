@@ -409,8 +409,8 @@ services:
   # M63: Unified Parakeet ONNX (CPU) — lightweight English, batch + realtime.
   # Uses ONNX Runtime instead of NeMo for ~12x smaller container image.
   # Supports: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b
-  stt-unified-nemo-onnx-cpu:
-    image: dalston/stt-unified-nemo-onnx-cpu:1.0.0
+  stt-unified-onnx-cpu:
+    image: dalston/stt-unified-onnx-cpu:1.0.0
     build:
       context: .
       dockerfile: engines/stt-unified/parakeet-onnx/Dockerfile
@@ -419,9 +419,9 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
-      DALSTON_INSTANCE: stt-unified-nemo-onnx-cpu
+      DALSTON_INSTANCE: stt-unified-onnx-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cpu
@@ -436,8 +436,8 @@ services:
     restart: unless-stopped
 
   # M63: Unified Parakeet ONNX (GPU) — faster English, batch + realtime.
-  stt-unified-nemo-onnx:
-    image: dalston/stt-unified-nemo-onnx:1.0.0
+  stt-unified-onnx:
+    image: dalston/stt-unified-onnx:1.0.0
     build:
       context: .
       dockerfile: engines/stt-unified/parakeet-onnx/Dockerfile
@@ -446,9 +446,9 @@ services:
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_UNIFIED_ENGINE_ENABLED: "true"
-      DALSTON_ENGINE_ID: nemo-onnx
+      DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
-      DALSTON_INSTANCE: stt-unified-nemo-onnx
+      DALSTON_INSTANCE: stt-unified-onnx
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cuda

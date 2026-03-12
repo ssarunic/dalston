@@ -3,8 +3,8 @@
 
 schema_version: "1.1"
 id: parakeet-onnx-tdt-0.6b-v2
-engine_id: nemo-onnx
-loaded_model_id: "parakeet-onnx-tdt-0.6b-v2"  # ONNX runtime model ID used by nemo-onnx
+engine_id: onnx
+loaded_model_id: "parakeet-onnx-tdt-0.6b-v2"  # ONNX runtime model ID used by onnx engine
 
 name: NVIDIA Parakeet ONNX TDT 0.6B v2
 source: istupakov/parakeet-tdt-0.6b-v2-onnx

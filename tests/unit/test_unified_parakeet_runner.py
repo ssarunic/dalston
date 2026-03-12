@@ -123,13 +123,13 @@ class TestUnifiedRunnerClassStructure:
         assert module.NemoInference is NemoInference
 
     def test_parakeet_onnx_runner_uses_parakeet_onnx_core(self) -> None:
-        """Runner module must import and reference NemoOnnxInference."""
+        """Runner module must import and reference OnnxInference."""
         module = _load_runner_module(
             _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_core_ref"
         )
-        from dalston.engine_sdk.inference.nemo_onnx_inference import NemoOnnxInference
+        from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 
-        assert module.NemoOnnxInference is NemoOnnxInference
+        assert module.OnnxInference is OnnxInference
 
 
 # ---------------------------------------------------------------------------

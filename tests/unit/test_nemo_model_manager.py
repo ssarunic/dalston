@@ -1,6 +1,6 @@
 """Unit tests for NeMo model managers (M44).
 
-Tests the NeMoModelManager and NeMoOnnxModelManager classes
+Tests the NeMoModelManager and OnnxModelManager classes
 for dynamic model loading.
 """
 
@@ -130,17 +130,17 @@ class TestNeMoModelManagerInit:
             manager.shutdown()
 
 
-class TestNeMoOnnxModelManagerInit:
-    """Tests for NeMoOnnxModelManager initialization."""
+class TestOnnxModelManagerInit:
+    """Tests for OnnxModelManager initialization."""
 
     def test_init_with_defaults(self):
         """Test manager creation with default settings."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(
+            manager = OnnxModelManager(
                 device="cpu",
                 quantization="none",
                 ttl_seconds=3600,
@@ -158,11 +158,11 @@ class TestNeMoOnnxModelManagerInit:
     def test_init_with_cuda(self):
         """Test manager creation with CUDA device."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(
+            manager = OnnxModelManager(
                 device="cuda",
                 ttl_seconds=3600,
                 max_loaded=2,
@@ -177,11 +177,11 @@ class TestNeMoOnnxModelManagerInit:
     def test_init_with_quantization(self):
         """Test manager creation with quantization enabled."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(
+            manager = OnnxModelManager(
                 device="cpu",
                 quantization="int8",
                 ttl_seconds=3600,
@@ -192,25 +192,25 @@ class TestNeMoOnnxModelManagerInit:
 
             manager.shutdown()
 
-    def test_supported_models(self):
-        """Test that supported models are properly defined."""
-        from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+    def test_model_aliases(self):
+        """Test that model aliases are properly defined."""
+        from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
         # Full names
-        assert "parakeet-onnx-ctc-0.6b" in NeMoOnnxModelManager.SUPPORTED_MODELS
-        assert "parakeet-onnx-ctc-1.1b" in NeMoOnnxModelManager.SUPPORTED_MODELS
-        assert "parakeet-onnx-tdt-0.6b-v2" in NeMoOnnxModelManager.SUPPORTED_MODELS
-        assert "parakeet-onnx-tdt-0.6b-v3" in NeMoOnnxModelManager.SUPPORTED_MODELS
-        assert "parakeet-onnx-rnnt-0.6b" in NeMoOnnxModelManager.SUPPORTED_MODELS
+        assert "parakeet-onnx-ctc-0.6b" in OnnxModelManager.MODEL_ALIASES
+        assert "parakeet-onnx-ctc-1.1b" in OnnxModelManager.MODEL_ALIASES
+        assert "parakeet-onnx-tdt-0.6b-v2" in OnnxModelManager.MODEL_ALIASES
+        assert "parakeet-onnx-tdt-0.6b-v3" in OnnxModelManager.MODEL_ALIASES
+        assert "parakeet-onnx-rnnt-0.6b" in OnnxModelManager.MODEL_ALIASES
 
         # Short aliases
-        assert "ctc-0.6b" in NeMoOnnxModelManager.SUPPORTED_MODELS
-        assert "tdt-0.6b-v3" in NeMoOnnxModelManager.SUPPORTED_MODELS
+        assert "ctc-0.6b" in OnnxModelManager.MODEL_ALIASES
+        assert "tdt-0.6b-v3" in OnnxModelManager.MODEL_ALIASES
 
     def test_from_env_defaults(self):
         """Test from_env with no environment variables set."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
             with patch.dict("os.environ", {}, clear=True):
                 # Mock onnxruntime to control device detection
@@ -218,11 +218,11 @@ class TestNeMoOnnxModelManagerInit:
                 mock_ort.get_available_providers.return_value = ["CPUExecutionProvider"]
 
                 with patch.dict("sys.modules", {"onnxruntime": mock_ort}):
-                    from dalston.engine_sdk.managers.nemo_onnx import (
-                        NeMoOnnxModelManager,
+                    from dalston.engine_sdk.managers.onnx import (
+                        OnnxModelManager,
                     )
 
-                    manager = NeMoOnnxModelManager.from_env()
+                    manager = OnnxModelManager.from_env()
 
                     assert manager.device == "cpu"
                     assert manager.ttl_seconds == 3600
@@ -233,7 +233,7 @@ class TestNeMoOnnxModelManagerInit:
     def test_from_env_with_custom_settings(self):
         """Test from_env with custom environment variables."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
             env_vars = {
                 "DALSTON_DEVICE": "cpu",
@@ -242,9 +242,9 @@ class TestNeMoOnnxModelManagerInit:
                 "DALSTON_MAX_LOADED_MODELS": "4",
             }
             with patch.dict("os.environ", env_vars, clear=True):
-                from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+                from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-                manager = NeMoOnnxModelManager.from_env()
+                manager = OnnxModelManager.from_env()
 
                 assert manager.device == "cpu"
                 assert manager.quantization == "int8"
@@ -253,17 +253,29 @@ class TestNeMoOnnxModelManagerInit:
 
                 manager.shutdown()
 
-    def test_load_model_invalid_id(self):
-        """Test loading invalid model ID raises ValueError."""
+    def test_load_model_passthrough_unknown_id(self):
+        """Test that unknown model IDs are passed through to onnx_asr."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(device="cpu")
+            manager = OnnxModelManager(device="cpu")
 
-            with pytest.raises(ValueError, match="Unknown model"):
-                manager._load_model("invalid-model")
+            mock_model = MagicMock()
+            mock_onnx_asr = MagicMock()
+            mock_onnx_asr.load_model.return_value = mock_model
+
+            with patch.dict("sys.modules", {"onnx_asr": mock_onnx_asr}):
+                result = manager._load_model("openai/whisper-large-v3")
+
+            # Unknown ID passed through as-is to onnx_asr.load_model()
+            mock_onnx_asr.load_model.assert_called_once_with(
+                "openai/whisper-large-v3",
+                quantization=None,
+                providers=["CPUExecutionProvider"],
+            )
+            assert result is mock_model
 
             manager.shutdown()
 
@@ -328,17 +340,17 @@ class TestNeMoModelManagerModelLoading:
             manager.shutdown()
 
 
-class TestNeMoOnnxModelManagerModelLoading:
-    """Tests for NeMoOnnxModelManager model loading mechanics."""
+class TestOnnxModelManagerModelLoading:
+    """Tests for OnnxModelManager model loading mechanics."""
 
     def test_model_acquire_release_flow(self):
         """Test the acquire/release flow without actual model loading."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(device="cpu")
+            manager = OnnxModelManager(device="cpu")
 
             # Mock the _load_model method
             mock_model = MagicMock()
@@ -365,11 +377,11 @@ class TestNeMoOnnxModelManagerModelLoading:
     def test_short_alias_model_loading(self):
         """Test loading model using short alias."""
         with patch(
-            "dalston.engine_sdk.managers.nemo_onnx.NeMoOnnxModelManager._start_eviction_thread"
+            "dalston.engine_sdk.managers.onnx.OnnxModelManager._start_eviction_thread"
         ):
-            from dalston.engine_sdk.managers.nemo_onnx import NeMoOnnxModelManager
+            from dalston.engine_sdk.managers.onnx import OnnxModelManager
 
-            manager = NeMoOnnxModelManager(device="cpu")
+            manager = OnnxModelManager(device="cpu")
 
             # Mock the _load_model method but capture what's called
             mock_model = MagicMock()
@@ -377,7 +389,7 @@ class TestNeMoOnnxModelManagerModelLoading:
 
             def mock_load(model_id):
                 # Verify the model ID is resolved correctly
-                if model_id in NeMoOnnxModelManager.SUPPORTED_MODELS:
+                if model_id in OnnxModelManager.MODEL_ALIASES:
                     return mock_model
                 return original_load(model_id)
 
@@ -400,11 +412,11 @@ class TestModuleExports:
             FasterWhisperModelManager,
             HFTransformersModelManager,
             NeMoModelManager,
-            NeMoOnnxModelManager,
+            OnnxModelManager,
         )
 
         # Just verify they're importable
         assert FasterWhisperModelManager is not None
         assert HFTransformersModelManager is not None
         assert NeMoModelManager is not None
-        assert NeMoOnnxModelManager is not None
+        assert OnnxModelManager is not None
