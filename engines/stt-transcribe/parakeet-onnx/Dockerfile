@@ -16,9 +16,9 @@
 # Build argument to select device (cuda or cpu)
 ARG DEVICE=cpu
 
-# GPU: CUDA runtime image (no PyTorch needed - just ONNX Runtime GPU)
 # GPU: CUDA runtime image
 FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04 AS base-cuda
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa \
