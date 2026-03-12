@@ -236,8 +236,8 @@ class NoCapableEngineError(Exception):
 
 def _resolve_loaded_model_id(model: ModelRegistryModel, stage: str) -> str:
     """Resolve the task-level loaded_model_id from a registry model."""
-    # NeMo ONNX accepts aliases but should use the YAML configured loaded_model_id.
-    if stage == "transcribe" and model.engine_id == "nemo-onnx":
+    # ONNX engine accepts aliases but should use the YAML configured loaded_model_id.
+    if stage == "transcribe" and model.engine_id == "onnx":
         return model.loaded_model_id
 
     # Transcribe uses source IDs for S3-backed artifact lookup compatibility.

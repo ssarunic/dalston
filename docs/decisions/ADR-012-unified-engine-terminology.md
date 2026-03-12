@@ -32,7 +32,7 @@ Standardize on three canonical terms:
 
 ### 1. `engine_id` — The inference framework
 
-**Definition:** The software that loads model weights and runs inference. Examples: `faster-whisper`, `nemo-onnx`, `whisperx`.
+**Definition:** The software that loads model weights and runs inference. Examples: `faster-whisper`, `onnx`, `whisperx`.
 
 **Why `engine_id` over `engine`:**
 

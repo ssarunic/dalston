@@ -2,7 +2,7 @@
 
 Verifies that the batch engine produces the correct output shape
 (Transcript with segments, text, language) and that word
-timestamp behavior is preserved after delegation to NemoOnnxInference.
+timestamp behavior is preserved after delegation to OnnxInference.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from uuid import uuid4
 
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.inference.nemo_onnx_inference import (
-    NemoOnnxInference,
+from dalston.engine_sdk.inference.onnx_inference import (
+    OnnxInference,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
@@ -42,7 +42,7 @@ def _load_onnx_engine_class():
     module = importlib.util.module_from_spec(spec)
     sys.modules["m63_parakeet_onnx_engine"] = module
     spec.loader.exec_module(module)
-    return module.NemoOnnxBatchEngine
+    return module.OnnxBatchEngine
 
 
 _ParakeetOnnxEngine = _load_onnx_engine_class()
@@ -74,7 +74,7 @@ def _make_core_result(
 
 
 def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
-    mock_core = MagicMock(spec=NemoOnnxInference)
+    mock_core = MagicMock(spec=OnnxInference)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result
@@ -84,7 +84,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
         engine = _ParakeetOnnxEngine.__new__(_ParakeetOnnxEngine)
         engine._core = mock_core
         engine._default_model_id = "parakeet-onnx-ctc-0.6b"
-        engine._engine_id = "nemo-onnx"
+        engine._engine_id = "onnx"
         engine.logger = MagicMock()
     return engine
 
@@ -113,7 +113,7 @@ class TestOnnxBatchOutputShape:
         assert data.language == "en"
         assert data.language_confidence == 1.0
         assert len(data.segments) >= 1
-        assert data.engine_id == "nemo-onnx"
+        assert data.engine_id == "onnx"
 
     def test_output_has_word_timestamps(self) -> None:
         result = _make_core_result(

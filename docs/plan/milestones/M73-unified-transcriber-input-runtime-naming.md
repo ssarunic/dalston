@@ -79,18 +79,18 @@ Apply engine_id-based names:
   - `TranscribeCore` -> `FasterWhisperInference`
   - `TranscribeConfig` -> `FasterWhisperConfig`
   - `ParakeetCore` -> `NemoInference`
-  - `ParakeetOnnxCore` -> `NemoOnnxInference`
+  - `ParakeetOnnxCore` -> `OnnxInference`
 - Batch:
   - `WhisperEngine` -> `FasterWhisperBatchEngine`
   - `ParakeetEngine` -> `NemoBatchEngine`
-  - `ParakeetOnnxEngine` -> `NemoOnnxBatchEngine`
+  - `ParakeetOnnxEngine` -> `OnnxBatchEngine`
   - `HFASREngine` -> `HfAsrBatchEngine`
   - `VLLMASREngine` -> `VllmAsrBatchEngine`
   - `VoxtralEngine` -> `VoxtralBatchEngine`
 - Realtime:
   - `WhisperStreamingEngine` -> `FasterWhisperRealtimeEngine`
   - `ParakeetStreamingEngine` -> `NemoRealtimeEngine`
-  - `ParakeetOnnxStreamingEngine` -> `NemoOnnxRealtimeEngine`
+  - `ParakeetOnnxStreamingEngine` -> `OnnxRealtimeEngine`
   - `VoxtralStreamingEngine` -> `VoxtralRealtimeEngine`
 
 Gate:
@@ -120,7 +120,7 @@ Gate:
 - Migrate transcribe batch engines to typed params:
   - faster-whisper
   - nemo
-  - nemo-onnx
+  - onnx
   - hf-asr
   - vllm-asr
   - riva
@@ -138,7 +138,7 @@ Gate:
 - Migrate realtime transcribe engines:
   - faster-whisper
   - nemo
-  - nemo-onnx
+  - onnx
   - riva
   - voxtral
 

@@ -1,10 +1,10 @@
-"""Shared inference core for ONNX Parakeet batch and realtime engines.
+"""Shared inference core for ONNX batch and realtime engines.
 
 Extracts common model loading and transcription logic so that both the
 batch engine (queue-based) and the realtime engine (WebSocket-based) can
 share a single loaded model and inference path via ONNX Runtime.
 
-This module owns the NeMoOnnxModelManager and provides a engine_id-neutral
+This module owns the OnnxModelManager and provides an engine_id-neutral
 interface for transcription using the onnx-asr library.
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import structlog
 
-from dalston.engine_sdk.managers import NeMoOnnxModelManager
+from dalston.engine_sdk.managers import OnnxModelManager
 
 logger = structlog.get_logger()
 
@@ -58,19 +58,21 @@ class OnnxTranscriptionResult:
 
 
 # ---------------------------------------------------------------------------
-# NemoOnnxInference — shared inference logic
+# OnnxInference — shared inference logic
 # ---------------------------------------------------------------------------
 
 
-class NemoOnnxInference:
-    """Shared inference logic for ONNX Parakeet batch and realtime.
+class OnnxInference:
+    """Shared inference logic for ONNX batch and realtime engines.
 
-    Owns the NeMoOnnxModelManager and provides a unified transcription
+    Owns the OnnxModelManager and provides a unified transcription
     interface. Both batch and realtime adapters delegate inference here
     while keeping their own I/O contracts and output formatting.
     """
 
-    SUPPORTED_MODELS = list(NeMoOnnxModelManager.SUPPORTED_MODELS.keys())
+    # Curated model aliases advertised at registration time.
+    # The underlying manager accepts any onnx-asr compatible model ID.
+    CURATED_MODELS = list(OnnxModelManager.MODEL_ALIASES.keys())
 
     def __init__(
         self,
@@ -80,7 +82,7 @@ class NemoOnnxInference:
         max_loaded: int = 2,
         preload: str | None = None,
     ) -> None:
-        self._manager = NeMoOnnxModelManager(
+        self._manager = OnnxModelManager(
             device=device,
             quantization=quantization,
             ttl_seconds=ttl_seconds,
@@ -91,7 +93,7 @@ class NemoOnnxInference:
         self._quantization = quantization
 
         logger.info(
-            "nemo_onnx_inference_init",
+            "onnx_inference_init",
             device=device,
             quantization=quantization,
             ttl_seconds=ttl_seconds,
@@ -109,7 +111,7 @@ class NemoOnnxInference:
         return self._quantization
 
     @property
-    def manager(self) -> NeMoOnnxModelManager:
+    def manager(self) -> OnnxModelManager:
         """Expose manager for stats, shutdown, and direct model access."""
         return self._manager
 
@@ -327,14 +329,14 @@ class NemoOnnxInference:
 
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
-        logger.info("nemo_onnx_inference_shutdown")
+        logger.info("onnx_inference_shutdown")
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> NemoOnnxInference:
-        """Create a NemoOnnxInference configured from environment variables.
+    def from_env(cls) -> OnnxInference:
+        """Create an OnnxInference configured from environment variables.
 
         Environment variables:
             DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)

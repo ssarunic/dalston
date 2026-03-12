@@ -1,15 +1,15 @@
 # Unified Parakeet ONNX Engine (M63)
 #
 # One process, one ONNX model, both batch and realtime interfaces.
-# Replaces the separate stt-batch-transcribe-nemo-onnx + stt-rt-nemo-onnx services.
+# Replaces the separate stt-batch-transcribe-onnx + stt-rt-onnx services.
 #
 # Build from repo root:
-#   CPU: docker compose build stt-unified-nemo-onnx-cpu
-#   GPU: docker compose build stt-unified-nemo-onnx
+#   CPU: docker compose build stt-unified-onnx-cpu
+#   GPU: docker compose build stt-unified-onnx
 #
 # Or directly:
-#   CPU: docker build -t dalston/stt-unified-nemo-onnx-cpu:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
-#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-unified-nemo-onnx:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
+#   CPU: docker build -t dalston/stt-unified-onnx-cpu:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
+#   GPU: docker build --build-arg DEVICE=cuda -t dalston/stt-unified-onnx:1.0.0 -f engines/stt-unified/parakeet-onnx/Dockerfile .
 
 ARG DEVICE=cpu
 

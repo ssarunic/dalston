@@ -478,7 +478,7 @@ _RUNTIME_FIXTURES = {
         "language_confidence": 1.0,
         "timestamp_granularity": "word",
         "alignment_method": "ctc",
-        "engine_id": "nemo-onnx",
+        "engine_id": "onnx",
     },
     "voxtral": {
         "text": "hello world",

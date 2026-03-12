@@ -123,7 +123,7 @@ build-cpu:
 		stt-batch-prepare \
 		stt-batch-transcribe-faster-whisper \
 		stt-unified-nemo-cpu \
-		stt-unified-nemo-onnx-cpu \
+		stt-unified-onnx-cpu \
 		stt-unified-faster-whisper-cpu \
 		stt-batch-align-phoneme-cpu \
 		stt-batch-diarize-pyannote-4.0-cpu \

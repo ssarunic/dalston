@@ -2,7 +2,7 @@
 
 Verifies that the RT engine produces the correct Transcript
 shape and that word timestamp behavior is preserved after delegation
-to NemoOnnxInference.
+to OnnxInference.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from dalston.common.pipeline_types import TranscribeInput
-from dalston.engine_sdk.inference.nemo_onnx_inference import (
-    NemoOnnxInference,
+from dalston.engine_sdk.inference.onnx_inference import (
+    OnnxInference,
     OnnxSegmentResult,
     OnnxTranscriptionResult,
     OnnxWordResult,
@@ -56,13 +56,13 @@ def _build_rt_engine(core_result: OnnxTranscriptionResult):
     sys.modules["m63_parakeet_onnx_rt"] = module
     spec.loader.exec_module(module)
 
-    mock_core = MagicMock(spec=NemoOnnxInference)
+    mock_core = MagicMock(spec=OnnxInference)
     mock_core.device = "cpu"
     mock_core.quantization = "none"
     mock_core.transcribe.return_value = core_result
     mock_core.manager = MagicMock()
 
-    engine = module.NemoOnnxRealtimeEngine(core=mock_core)
+    engine = module.OnnxRealtimeEngine(core=mock_core)
     return engine
 
 
@@ -138,7 +138,7 @@ class TestOnnxRTEngineMetadata:
     def test_get_engine_id(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.get_engine_id() == "nemo-onnx"
+        assert engine.get_engine_id() == "onnx"
 
     def test_get_languages(self) -> None:
         result = _make_core_result()

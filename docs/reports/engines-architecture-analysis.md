@@ -353,13 +353,13 @@ For reference, here are the current engine_ids and their batch/RT coverage:
 |---------|-------------|-----------|-----------|
 | `faster-whisper` | `engines/stt-transcribe/faster-whisper/` | `engines/stt-rt/faster-whisper/` | 99 languages, CTranslate2, RTF 0.03 GPU |
 | `nemo` | `engines/stt-transcribe/parakeet/` | `engines/stt-rt/parakeet/` | English, native word timestamps, RTF 0.0006 GPU |
-| `nemo-onnx` | `engines/stt-transcribe/parakeet-onnx/` | `engines/stt-rt/parakeet-onnx/` | 12x smaller image, ONNX Runtime, RTF 0.0003 GPU |
+| `onnx` | `engines/stt-transcribe/parakeet-onnx/` | `engines/stt-rt/parakeet-onnx/` | 12x smaller image, ONNX Runtime, RTF 0.0003 GPU |
 | `hf-asr` | `engines/stt-transcribe/hf-asr/` | None | 10k+ HF models, generic Transformers pipeline |
 | `vllm-asr` | `engines/stt-transcribe/vllm-asr/` | `engines/stt-rt/voxtral/` | Audio LLMs (Voxtral, Qwen2-Audio), GPU required |
 
 **Observations:**
 
-- `faster-whisper`, `nemo`, and `nemo-onnx` have both batch and RT implementations — these are the prime candidates for unification
+- `faster-whisper`, `nemo`, and `onnx` have both batch and RT implementations — these are the prime candidates for unification
 - `hf-asr` is batch-only — adding RT support would be straightforward with the unified model manager
 - `vllm-asr` has limited RT applicability due to high latency (5s warm start) and no streaming support
 

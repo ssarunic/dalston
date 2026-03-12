@@ -13,7 +13,7 @@
 When no specific model is requested (via "Any available" in console OR ElevenLabs/OpenAI compatible endpoints):
 
 - The session router prefers workers with `models_loaded`, regardless of whether those models are in the registry
-- This routes sessions to workers like `nemo-onnx-cpu` (with preloaded models) even when no nemo-onnx models are downloaded
+- This routes sessions to workers like `onnx-cpu` (with preloaded models) even when no onnx models are downloaded
 
 **This affects API compatibility**: ElevenLabs/OpenAI endpoints use generic model names (e.g., `scribe_v1`) that map to `routing_model = None`. Clients have no control over which worker handles their request, and may get routed to workers with models that aren't properly registered.
 
@@ -22,9 +22,9 @@ When no specific model is requested (via "Any available" in console OR ElevenLab
 **Example scenario:**
 
 1. User has downloaded `Systran/faster-whisper-base` (engine_id: `faster-whisper`)
-2. Worker `nemo-onnx-cpu` has `parakeet-onnx-ctc-0.6b` preloaded
+2. Worker `onnx-cpu` has `parakeet-onnx-ctc-0.6b` preloaded
 3. User selects "Any available" or calls ElevenLabs endpoint
-4. Session routes to `nemo-onnx-cpu` because it has models loaded
+4. Session routes to `onnx-cpu` because it has models loaded
 5. User has no visibility into why this worker was selected
 
 ## Solution
@@ -178,9 +178,9 @@ Apply same change to ElevenLabs endpoint handler.
 ## Verification
 
 1. **Setup test state:**
-   - Have `nemo-onnx-cpu` worker with preloaded model
+   - Have `onnx-cpu` worker with preloaded model
    - Have `faster-whisper-cpu` worker without preloaded model
-   - Ensure only `faster-whisper` models are downloaded in registry (not `nemo-onnx`)
+   - Ensure only `faster-whisper` models are downloaded in registry (not `onnx`)
 
 2. **Test "Any available" routing:**
 
@@ -191,7 +191,7 @@ Apply same change to ElevenLabs endpoint handler.
    ```
 
    - Session should route to `faster-whisper-cpu` (engine_id has downloaded models)
-   - NOT to `nemo-onnx-cpu` (engine_id has no downloaded models in registry)
+   - NOT to `onnx-cpu` (engine_id has no downloaded models in registry)
 
 3. **Test ElevenLabs endpoint:**
 
