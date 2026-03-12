@@ -10,7 +10,7 @@
 # Prerequisites (one-time setup):
 #   1. Create OIDC identity provider in AWS IAM (see below)
 #   2. Create IAM role with ECR push permissions
-#   3. Create ECR repository: dalston/parakeet-onnx
+#   3. Create ECR repository: dalston/onnx
 #   4. Set repository variable: AWS_ACCOUNT_ID
 
 name: Build ONNX Engine
@@ -19,7 +19,9 @@ on:
   push:
     branches: [main]
     paths:
+      - 'engines/stt-unified/onnx/**'
       - 'engines/stt-transcribe/onnx/**'
+      - 'engines/stt-rt/onnx/**'
       - 'dalston/**'
       - 'pyproject.toml'
   workflow_dispatch:  # manual trigger
@@ -60,7 +62,7 @@ jobs:
             --build-arg DEVICE=cuda \
             -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPO:latest \
-            -f engines/stt-transcribe/onnx/Dockerfile \
+            -f engines/stt-unified/onnx/Dockerfile \
             .
 
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
