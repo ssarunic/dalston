@@ -203,31 +203,19 @@ class TestParakeetOnnxDecoderTypeDetection:
     def test_ctc_decoder_type(self):
         """Test that CTC model IDs produce ctc decoder type."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert (
-            OnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-0.6b") == "ctc"
-        )
-        assert (
-            OnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-1.1b") == "ctc"
-        )
+        assert OnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-0.6b") == "ctc"
+        assert OnnxBatchEngine._get_decoder_type("nvidia/parakeet-ctc-1.1b") == "ctc"
 
     def test_tdt_decoder_type(self):
         """Test that TDT model IDs produce tdt decoder type."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert (
-            OnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2")
-            == "tdt"
-        )
-        assert (
-            OnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3")
-            == "tdt"
-        )
+        assert OnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v2") == "tdt"
+        assert OnnxBatchEngine._get_decoder_type("nvidia/parakeet-tdt-0.6b-v3") == "tdt"
 
     def test_rnnt_decoder_type(self):
         """Test that RNNT model IDs produce rnnt decoder type."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert (
-            OnnxBatchEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
-        )
+        assert OnnxBatchEngine._get_decoder_type("nvidia/parakeet-rnnt-0.6b") == "rnnt"
 
     def test_alignment_method_ctc(self):
         """Test that CTC maps to AlignmentMethod.CTC."""
