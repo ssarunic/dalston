@@ -18,8 +18,11 @@ S3 structure:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,12 +37,15 @@ from dalston.common.s3 import get_s3_client
 from dalston.config import get_settings
 from dalston.db.models import JobModel, ModelLanguage, ModelRegistryModel
 from dalston.gateway.dependencies import get_audit_service
+from dalston.gateway.services.hf_resolver import HFResolver
 
 # Marker file indicating a complete model upload
 COMPLETE_MARKER = ".complete"
 
 # S3 prefix for models
 MODELS_PREFIX = "models"
+DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 2.0
+DOWNLOAD_PROGRESS_MIN_BYTES = 8 * 1024 * 1024
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -74,6 +80,66 @@ class ModelInUseError(Exception):
         super().__init__(
             f"Cannot delete model {model_id}: {job_count} pending/processing job(s) using it"
         )
+
+
+class DownloadProgressTracker:
+    """Track bytes and emission cadence for model download progress."""
+
+    def __init__(self) -> None:
+        self.downloaded_bytes = 0
+        self._last_emit_at = 0.0
+        self._last_emit_bytes = 0
+
+    def add(self, increment: int) -> None:
+        """Accumulate additional downloaded bytes."""
+        self.downloaded_bytes += max(0, increment)
+
+    def should_emit(self) -> bool:
+        """Return True when progress should be persisted."""
+        now = time.monotonic()
+        bytes_delta = self.downloaded_bytes - self._last_emit_bytes
+        time_delta = now - self._last_emit_at
+        return (
+            self._last_emit_at == 0.0
+            or time_delta >= DOWNLOAD_PROGRESS_INTERVAL_SECONDS
+            or bytes_delta >= DOWNLOAD_PROGRESS_MIN_BYTES
+        )
+
+    def mark_emitted(self) -> None:
+        """Record the current counters as emitted."""
+        self._last_emit_at = time.monotonic()
+        self._last_emit_bytes = self.downloaded_bytes
+
+
+class SnapshotDownloadProgress:
+    """Thread-safe progress bridge for huggingface_hub snapshot_download.
+
+    huggingface_hub creates a single aggregate tqdm bar and mutates its
+    ``total`` attribute (``bar.total += file_size``) as each file download
+    starts.  We sync that attribute via ``set_total()`` and accumulate
+    downloaded bytes via ``add()``.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._downloaded_bytes = 0
+        self._expected_total_bytes = 0
+
+    def set_total(self, total: int) -> None:
+        """Set the expected total from the aggregate tqdm bar's total attribute."""
+        with self._lock:
+            self._expected_total_bytes = max(self._expected_total_bytes, total)
+
+    def add(self, increment: int) -> None:
+        """Record newly downloaded bytes from snapshot progress callbacks."""
+        delta = max(0, increment)
+        with self._lock:
+            self._downloaded_bytes += delta
+
+    def read(self) -> tuple[int, int]:
+        """Return (downloaded_bytes, expected_total_bytes)."""
+        with self._lock:
+            return self._downloaded_bytes, self._expected_total_bytes
 
 
 class ModelRegistryService:
@@ -196,10 +262,52 @@ class ModelRegistryService:
             model_id: Model ID
             status: New status (not_downloaded, downloading, ready, failed)
         """
+        values: dict[str, object | None] = {
+            "status": status,
+            "progress_updated_at": datetime.now(UTC),
+        }
+        if status == "not_downloaded":
+            values.update(
+                {
+                    "downloaded_bytes": None,
+                    "expected_total_bytes": None,
+                    "download_path": None,
+                    "size_bytes": None,
+                    "downloaded_at": None,
+                }
+            )
+        elif status == "downloading":
+            values.update(
+                {
+                    "downloaded_bytes": 0,
+                    "expected_total_bytes": None,
+                }
+            )
         await db.execute(
             update(ModelRegistryModel)
             .where(ModelRegistryModel.id == model_id)
-            .values(status=status)
+            .values(**values)
+        )
+        await db.commit()
+
+    async def _update_download_progress(
+        self,
+        db: AsyncSession,
+        model_id: str,
+        *,
+        downloaded_bytes: int,
+        expected_total_bytes: int | None,
+    ) -> None:
+        """Persist download progress fields for model registry entries."""
+        now = datetime.now(UTC)
+        await db.execute(
+            update(ModelRegistryModel)
+            .where(ModelRegistryModel.id == model_id)
+            .values(
+                downloaded_bytes=downloaded_bytes,
+                expected_total_bytes=expected_total_bytes,
+                progress_updated_at=now,
+            )
         )
         await db.commit()
 
@@ -252,7 +360,11 @@ class ModelRegistryService:
             await db.execute(
                 update(ModelRegistryModel)
                 .where(ModelRegistryModel.id == model_id)
-                .values(status="downloading")
+                .values(
+                    status="downloading",
+                    downloaded_bytes=0,
+                    expected_total_bytes=None,
+                )
             )
             await db.commit()
             # Refresh model to get updated status
@@ -272,6 +384,72 @@ class ModelRegistryService:
             # Import here to avoid dependency on huggingface_hub at import time
             from huggingface_hub import snapshot_download
 
+            resolver = HFResolver()
+            expected_total_bytes = await resolver.get_model_total_size_bytes(hf_repo_id)
+            await self._update_download_progress(
+                db,
+                model_id,
+                downloaded_bytes=0,
+                expected_total_bytes=expected_total_bytes,
+            )
+
+            bridge = SnapshotDownloadProgress()
+            tracker = DownloadProgressTracker()
+            stop_progress_poll = asyncio.Event()
+
+            async def _progress_poller() -> None:
+                from dalston.db.session import async_session
+
+                async with async_session() as poller_db:
+                    while not stop_progress_poll.is_set():
+                        downloaded, tqdm_total = bridge.read()
+                        tracker.downloaded_bytes = downloaded
+                        effective_total = tqdm_total or expected_total_bytes
+                        if tracker.should_emit():
+                            await self._update_download_progress(
+                                poller_db,
+                                model_id,
+                                downloaded_bytes=tracker.downloaded_bytes,
+                                expected_total_bytes=effective_total,
+                            )
+                            tracker.mark_emitted()
+                        await asyncio.sleep(0.25)
+
+                    downloaded, tqdm_total = bridge.read()
+                    tracker.downloaded_bytes = downloaded
+                    effective_total = tqdm_total or expected_total_bytes
+                    await self._update_download_progress(
+                        poller_db,
+                        model_id,
+                        downloaded_bytes=tracker.downloaded_bytes,
+                        expected_total_bytes=effective_total,
+                    )
+
+            progress_task = asyncio.create_task(_progress_poller())
+
+            from tqdm import tqdm as _tqdm_base
+
+            class _SnapshotProgressBar(_tqdm_base):
+                def __init__(self, *args, **kwargs) -> None:
+                    kwargs["disable"] = True
+                    super().__init__(*args, **kwargs)
+
+                def _sync_total(self) -> None:
+                    # HF mutates bar.total directly; sync it to bridge
+                    if self.total and self.total > 0:
+                        bridge.set_total(int(self.total))
+
+                def update(self, n: int = 1) -> None:
+                    bridge.add(n)
+                    self._sync_total()
+
+                def refresh(self, *args, **kwargs) -> None:
+                    # Called by HF after bar.total += file_size
+                    self._sync_total()
+
+                def close(self) -> None:
+                    self._sync_total()
+
             # Download from HuggingFace to temp directory
             temp_dir = Path(tempfile.mkdtemp(prefix="dalston-model-"))
             try:
@@ -280,6 +458,7 @@ class ModelRegistryService:
                     hf_repo_id,
                     local_dir=str(temp_dir),
                     force_download=force,
+                    tqdm_class=_SnapshotProgressBar,
                 )
                 downloaded_path = Path(downloaded_path_str)
 
@@ -302,6 +481,22 @@ class ModelRegistryService:
                 )
 
             finally:
+                stop_progress_poll.set()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(progress_task, timeout=5)
+                if not progress_task.done():
+                    progress_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await progress_task
+                if progress_task.done() and not progress_task.cancelled():
+                    poller_error = progress_task.exception()
+                    if poller_error is not None:
+                        logger.warning(
+                            "model_download_progress_poller_failed",
+                            model_id=model_id,
+                            error=str(poller_error),
+                            error_type=type(poller_error).__name__,
+                        )
                 # Clean up temp directory
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -314,6 +509,9 @@ class ModelRegistryService:
                     status="ready",
                     download_path=s3_uri,
                     size_bytes=size_bytes,
+                    expected_total_bytes=size_bytes,
+                    downloaded_bytes=size_bytes,
+                    progress_updated_at=now,
                     downloaded_at=now,
                 )
             )
@@ -347,6 +545,7 @@ class ModelRegistryService:
                 .where(ModelRegistryModel.id == model_id)
                 .values(
                     status="failed",
+                    progress_updated_at=datetime.now(UTC),
                     model_metadata={"error": str(e)},
                 )
             )

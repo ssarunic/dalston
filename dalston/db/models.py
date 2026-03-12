@@ -792,6 +792,11 @@ class ModelRegistryModel(Base):
     )
     download_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expected_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    downloaded_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    progress_updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
     downloaded_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )

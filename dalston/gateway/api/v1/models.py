@@ -120,7 +120,10 @@ class ModelRegistryResponse(BaseModel):
     status: str  # not_downloaded, downloading, ready, failed
     download_path: str | None = None
     size_bytes: int | None = None
+    expected_total_bytes: int | None = None
+    downloaded_bytes: int | None = None
     download_progress: int | None = None  # Percentage (0-100) when downloading
+    progress_updated_at: datetime | None = None
     downloaded_at: datetime | None = None
     source: str | None = None
     library_name: str | None = None
@@ -198,7 +201,12 @@ async def list_models(
             status=m.status,
             download_path=m.download_path,
             size_bytes=m.size_bytes,
-            download_progress=None,
+            expected_total_bytes=m.expected_total_bytes,
+            downloaded_bytes=m.downloaded_bytes,
+            download_progress=_calculate_download_progress(
+                m.downloaded_bytes, m.expected_total_bytes
+            ),
+            progress_updated_at=m.progress_updated_at,
             downloaded_at=m.downloaded_at,
             source=m.source,
             library_name=m.library_name,
@@ -269,6 +277,21 @@ class UpdateModelRequest(BaseModel):
     supports_cpu: bool | None = None
 
 
+def _calculate_download_progress(
+    downloaded_bytes: int | None,
+    expected_total_bytes: int | None,
+) -> int | None:
+    """Calculate integer model download progress percentage."""
+    if (
+        downloaded_bytes is None
+        or expected_total_bytes is None
+        or expected_total_bytes <= 0
+    ):
+        return None
+    progress = int((downloaded_bytes / expected_total_bytes) * 100)
+    return max(0, min(100, progress))
+
+
 def _build_metadata_response(model_metadata: dict | None) -> ModelMetadataResponse:
     """Convert DB model_metadata dict to API response model."""
     if not model_metadata:
@@ -328,7 +351,12 @@ async def update_model(
         status=model.status,
         download_path=model.download_path,
         size_bytes=model.size_bytes,
-        download_progress=None,
+        expected_total_bytes=model.expected_total_bytes,
+        downloaded_bytes=model.downloaded_bytes,
+        download_progress=_calculate_download_progress(
+            model.downloaded_bytes, model.expected_total_bytes
+        ),
+        progress_updated_at=model.progress_updated_at,
         downloaded_at=model.downloaded_at,
         source=model.source,
         library_name=model.library_name,
@@ -727,7 +755,12 @@ async def get_model(
         status=model.status,
         download_path=model.download_path,
         size_bytes=model.size_bytes,
-        download_progress=None,
+        expected_total_bytes=model.expected_total_bytes,
+        downloaded_bytes=model.downloaded_bytes,
+        download_progress=_calculate_download_progress(
+            model.downloaded_bytes, model.expected_total_bytes
+        ),
+        progress_updated_at=model.progress_updated_at,
         downloaded_at=model.downloaded_at,
         source=model.source,
         library_name=model.library_name,

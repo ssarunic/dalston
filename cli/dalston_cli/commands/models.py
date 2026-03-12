@@ -8,14 +8,69 @@ Subcommands:
 from __future__ import annotations
 
 import json
-from typing import Annotated
+import time
+from typing import Annotated, Any
 
+import httpx
 import typer
+from rich.progress import BarColumn, Progress, TextColumn
 
 from dalston_cli.main import state
 from dalston_cli.output import console
 
 app = typer.Typer(help="Manage transcription models.")
+
+
+def _headers(api_key: str | None) -> dict[str, str]:
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _format_bytes(bytes_value: Any) -> str:
+    if not isinstance(bytes_value, int | float) or bytes_value < 0:
+        return "-"
+    if bytes_value == 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(bytes_value)
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024
+        idx += 1
+    precision = 0 if idx == 0 else 1
+    return f"{value:.{precision}f} {units[idx]}"
+
+
+def _fetch_registry_entry(
+    base_url: str, api_key: str | None, model_id: str
+) -> dict[str, Any]:
+    response = httpx.get(
+        f"{base_url.rstrip('/')}/v1/models/{model_id}",
+        headers=_headers(api_key),
+        timeout=30.0,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Failed to read model '{model_id}' status (HTTP {response.status_code}): {response.text}"
+        )
+    return response.json()
+
+
+def _trigger_pull(
+    base_url: str, api_key: str | None, model_id: str, force: bool
+) -> dict[str, Any]:
+    response = httpx.post(
+        f"{base_url.rstrip('/')}/v1/models/{model_id}/pull",
+        headers=_headers(api_key),
+        json={"force": force},
+        timeout=30.0,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Failed to start model pull for '{model_id}' (HTTP {response.status_code}): {response.text}"
+        )
+    return response.json()
 
 
 @app.command("list")
@@ -228,76 +283,105 @@ def pull_model(
             help="Re-download even if model already exists.",
         ),
     ] = False,
+    watch: Annotated[
+        bool,
+        typer.Option(
+            "--watch/--no-watch",
+            help="Watch download progress until the model reaches a terminal state.",
+        ),
+    ] = True,
+    poll_interval: Annotated[
+        float,
+        typer.Option(
+            "--poll-interval",
+            min=0.2,
+            help="Polling interval in seconds while watching progress.",
+        ),
+    ] = 1.0,
 ) -> None:
-    """Pre-download a model for faster cold start.
+    """Request model pull from the gateway and optionally watch progress."""
+    base_url = state.server
+    api_key = state.api_key
 
-    Downloads the model weights to the local cache so the engine
-    doesn't need to download them on first use.
-
-    Examples:
-
-        dalston models pull parakeet-tdt-1.1b
-
-        dalston models pull faster-whisper-large-v3-turbo --force
-    """
-    client = state.client
-
-    # Get model details first
     try:
-        model = client.get_model(model_id)
+        model = _fetch_registry_entry(base_url, api_key, model_id)
     except Exception as e:
-        console.print(f"[red]Error:[/red] Model '{model_id}' not found: {e}")
+        console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
-    console.print(f"[bold]Model: {model.id}[/bold]")
-    console.print(f"  Runtime: {model.engine_id}")
-    console.print(f"  Source: {model.source or 'N/A'}")
-    if model.size_gb:
-        console.print(f"  Size: ~{model.size_gb} GB")
-    console.print()
-
-    # Check if model has a HuggingFace source
-    if model.source and ("huggingface.co" in model.source or "/" in model.source):
-        hf_model_id = model.loaded_model_id or model.source
-
-        console.print("[yellow]Note:[/yellow] Model download requires huggingface_hub.")
-        console.print()
-        console.print("To download manually, run:")
-        console.print()
-        console.print("  [cyan]pip install huggingface_hub[/cyan]")
-        console.print(f"  [cyan]hf download {hf_model_id}[/cyan]")
-        console.print()
-
-        # Try to use huggingface_hub if available
-        try:
-            from huggingface_hub import snapshot_download
-
-            console.print(f"Downloading [bold]{hf_model_id}[/bold]...")
-            console.print("[dim]This may take a while for large models.[/dim]")
-            console.print()
-
-            cache_dir = snapshot_download(
-                hf_model_id,
-                force_download=force,
-            )
-
-            console.print(f"[green]✓[/green] Model downloaded to: {cache_dir}")
-
-        except ImportError:
-            console.print(
-                "[dim]huggingface_hub not installed. "
-                "Use the commands above to download manually.[/dim]"
-            )
-            raise typer.Exit(code=0) from None
-        except Exception as e:
-            console.print(f"[red]Download failed:[/red] {e}")
-            raise typer.Exit(code=1) from None
-    else:
+    console.print(f"[bold]Model:[/bold] {model.get('id', model_id)}")
+    console.print(f"  Runtime: {model.get('engine_id', 'unknown')}")
+    console.print(f"  Source: {model.get('source') or 'N/A'}")
+    if isinstance(model.get("expected_total_bytes"), int):
         console.print(
-            f"[yellow]Warning:[/yellow] No downloadable source found for '{model_id}'."
+            f"  Estimated size: {_format_bytes(model['expected_total_bytes'])}"
         )
-        console.print("This model may be bundled with the engine container.")
-        raise typer.Exit(code=0) from None
+    elif isinstance(model.get("size_bytes"), int):
+        console.print(f"  Size: {_format_bytes(model['size_bytes'])}")
+
+    try:
+        pull_response = _trigger_pull(base_url, api_key, model_id, force)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+    status = pull_response.get("status", "unknown")
+    message = pull_response.get("message", "Request accepted")
+    console.print(f"[cyan]{message}[/cyan] (status: {status})")
+
+    if not watch:
+        return
+
+    with Progress(
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.percentage:>3.0f}%"),
+        TextColumn("• {task.fields[detail]}"),
+        transient=True,
+    ) as progress:
+        task_id = progress.add_task(
+            "Downloading", total=100.0, detail="Waiting for updates"
+        )
+        consecutive_failures = 0
+        max_poll_failures = 5
+        while True:
+            try:
+                model = _fetch_registry_entry(base_url, api_key, model_id)
+                consecutive_failures = 0
+            except Exception as e:
+                consecutive_failures += 1
+                if consecutive_failures >= max_poll_failures:
+                    console.print(
+                        f"[red]Error:[/red] {consecutive_failures} consecutive poll failures: {e}"
+                    )
+                    raise typer.Exit(code=1) from None
+                console.print(
+                    f"[yellow]Warning:[/yellow] Poll failed ({consecutive_failures}/{max_poll_failures}): {e}"
+                )
+                time.sleep(poll_interval)
+                continue
+
+            model_status = model.get("status", "unknown")
+            pct = model.get("download_progress")
+            downloaded = _format_bytes(model.get("downloaded_bytes"))
+            expected = _format_bytes(model.get("expected_total_bytes"))
+            detail = f"{downloaded} / {expected}"
+
+            progress_value = float(pct) if isinstance(pct, int | float) else 0.0
+            progress.update(
+                task_id, completed=max(0.0, min(100.0, progress_value)), detail=detail
+            )
+
+            if model_status == "ready":
+                final_size = _format_bytes(model.get("size_bytes"))
+                console.print(f"[green]✓[/green] Model ready ({final_size}).")
+                return
+            if model_status == "failed":
+                error_msg = (model.get("metadata") or {}).get("error", "unknown error")
+                console.print(f"[red]Download failed:[/red] {error_msg}")
+                raise typer.Exit(code=1)
+
+            time.sleep(poll_interval)
 
 
 # Keep backward compatibility - allow `dalston models` without subcommand

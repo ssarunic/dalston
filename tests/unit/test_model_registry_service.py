@@ -514,3 +514,29 @@ class TestModelNotDownloadedError:
         assert error.model_id == "test-model"
         assert "test-model" in str(error)
         assert "dalston model pull" in str(error)
+
+
+class TestDownloadProgressTracker:
+    """Tests for throttled progress tracker behavior."""
+
+    def test_tracker_emits_first_and_throttles_until_threshold(self):
+        from dalston.gateway.services.model_registry import DownloadProgressTracker
+
+        tracker = DownloadProgressTracker()
+
+        assert tracker.should_emit() is True
+        tracker.mark_emitted()
+        tracker.add(1024)
+        assert tracker.should_emit() is False
+
+    def test_tracker_emits_after_large_byte_delta(self):
+        from dalston.gateway.services.model_registry import (
+            DOWNLOAD_PROGRESS_MIN_BYTES,
+            DownloadProgressTracker,
+        )
+
+        tracker = DownloadProgressTracker()
+        tracker.mark_emitted()
+        tracker.add(DOWNLOAD_PROGRESS_MIN_BYTES)
+
+        assert tracker.should_emit() is True
