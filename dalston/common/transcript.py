@@ -659,18 +659,18 @@ def _smooth_diarization_turns(
             ov_prev = _turn_overlap(prev, micro)
             ov_nxt = _turn_overlap(nxt, micro)
             if ov_prev > ov_nxt:
-                target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+                target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[arg-type]
             elif ov_nxt > ov_prev:
-                target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+                target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[arg-type]
             else:
                 if (prev.end - prev.start) >= (nxt.end - nxt.start):
-                    target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+                    target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[arg-type]
                 else:
-                    target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+                    target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[arg-type]
         elif prev:
-            target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[index]
+            target, target_k_idx = prev, kept_by_orig_idx[prev_orig]  # type: ignore[arg-type]
         elif nxt:
-            target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[index]
+            target, target_k_idx = nxt, kept_by_orig_idx[nxt_orig]  # type: ignore[arg-type]
 
         if target is not None and target_k_idx is not None:
             kept[target_k_idx] = SpeakerTurn(
