@@ -391,11 +391,16 @@ async def pull_model(
         )
 
     if model.status == "downloading":
-        return PullModelResponse(
-            message="Model download already in progress",
-            model_id=model_id,
-            status="downloading",
-        )
+        if not force:
+            return PullModelResponse(
+                message="Model download already in progress",
+                model_id=model_id,
+                status="downloading",
+            )
+
+        # Recovery path for stale download state after worker/process crashes.
+        # Force resets state and re-enqueues a fresh background pull task.
+        await service.set_model_status(db, model_id, "not_downloaded")
 
     # Update status to downloading immediately so UI sees the change
     await service.set_model_status(db, model_id, "downloading")

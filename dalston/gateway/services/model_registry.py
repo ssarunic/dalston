@@ -468,8 +468,12 @@ class ModelRegistryService:
         dialect_name = db.get_bind().dialect.name
 
         if dialect_name == "postgresql":
+            from sqlalchemy import cast
+            from sqlalchemy.dialects.postgresql import JSONB
+
             model_filters = [
-                JobModel.parameters[key].astext == model_id
+                func.jsonb_extract_path_text(cast(JobModel.parameters, JSONB), key)
+                == model_id
                 for key in ACTIVE_MODEL_SELECTOR_KEYS
             ]
         else:
