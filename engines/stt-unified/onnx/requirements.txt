@@ -1,4 +1,4 @@
-# Unified Parakeet ONNX Engine Dependencies (batch + realtime)
+# Unified ONNX Engine Dependencies (batch + realtime)
 # Union of engines/stt-transcribe/onnx/requirements.txt
 # and  engines/stt-rt/onnx/requirements.txt
 

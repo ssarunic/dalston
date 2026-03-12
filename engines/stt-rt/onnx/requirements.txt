@@ -1,6 +1,6 @@
-# Parakeet ONNX Streaming Real-time Engine Dependencies
+# ONNX Streaming Real-time Engine Dependencies
 
-# ONNX ASR library for Parakeet CTC/TDT/RNNT inference
+# ONNX ASR library for CTC/TDT/RNNT inference
 onnx-asr[cpu,hub]>=0.5.0
 
 # Audio processing

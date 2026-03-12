@@ -1,4 +1,4 @@
-"""Real-time Parakeet ONNX streaming transcription engine.
+"""Real-time ONNX streaming transcription engine.
 
 Uses ONNX Runtime via the onnx-asr library for low-latency transcription
 of VAD-segmented utterances. Delegates inference to OnnxInference

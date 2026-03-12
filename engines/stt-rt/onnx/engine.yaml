@@ -1,12 +1,12 @@
 schema_version: "1.1"
-id: stt-rt-parakeet-onnx
+id: stt-rt-onnx
 engine_id: onnx
 stage: transcribe
 mode: realtime
-name: Parakeet ONNX Realtime
+name: ONNX Realtime
 version: 1.0.0
 description: |
-  Real-time VAD-chunked transcription using Parakeet via ONNX Runtime.
+  Real-time VAD-chunked transcription via ONNX Runtime.
   Simpler deployment than NeMo (no PyTorch) with slightly higher per-utterance latency.
 
 container:

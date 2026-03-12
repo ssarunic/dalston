@@ -28,7 +28,7 @@ on:
 
 env:
   AWS_REGION: eu-west-2
-  ECR_REPO: dalston/onnx
+  ECR_REPO: dalston/stt-onnx
 
 permissions:
   id-token: write   # needed for OIDC auth with AWS

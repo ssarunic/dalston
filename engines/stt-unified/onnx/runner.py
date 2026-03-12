@@ -1,4 +1,4 @@
-"""Unified Parakeet-ONNX runner: one process, one model, both interfaces.
+"""Unified ONNX runner: one process, one model, both interfaces.
 
 This runner creates a single OnnxInference (one loaded ONNX model) and
 passes it to both the batch engine adapter (queue polling) and the realtime
@@ -64,7 +64,7 @@ class UnifiedParakeetOnnxRunner:
         self._running = False
 
         logger.info(
-            "unified_parakeet_onnx_runner_init",
+            "unified_onnx_runner_init",
             device=self._core.device,
             quantization=self._core.quantization,
             admission=self._admission.get_status(),
@@ -168,7 +168,7 @@ class UnifiedParakeetOnnxRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_parakeet_onnx_runner_shutting_down")
+        logger.info("unified_onnx_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -188,7 +188,7 @@ class UnifiedParakeetOnnxRunner:
         self._core.shutdown()
 
         logger.info(
-            "unified_parakeet_onnx_runner_stopped",
+            "unified_onnx_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
