@@ -236,8 +236,7 @@ class NoCapableEngineError(Exception):
 
 def _resolve_loaded_model_id(model: ModelRegistryModel, stage: str) -> str:
     """Resolve the task-level loaded_model_id from a registry model."""
-    # ONNX engine expects its runtime model IDs (parakeet-onnx-*) rather than
-    # source repository IDs.
+    # ONNX engine accepts aliases but should use the YAML configured loaded_model_id.
     if stage == "transcribe" and model.engine_id == "onnx":
         return model.loaded_model_id
 
