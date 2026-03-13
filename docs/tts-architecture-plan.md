@@ -6,11 +6,13 @@
 
 | Model | Params | Voice Cloning | Emotion/Style | Non-speech Sounds | Streaming | Languages | Architecture | GPU | License |
 |---|---|---|---|---|---|---|---|---|---|
+| **Fish Audio OpenAudio S1** | 4B | Yes (zero-shot) | Yes (natural language) | Yes | Yes | Multilingual | LLM + dual-codebook (SNAC) + RLHF | 16–24 GB VRAM | Apache 2.0 |
 | **Qwen3-TTS** | 0.6B–1.7B | Yes (3s sample) | Yes | Partial | Yes (97ms TTFA) | 10 (EN, ZH, JA, KO, DE, FR, RU, PT, ES, IT) | Transformer, dual-track streaming | 8–16 GB VRAM | Apache 2.0 |
+| **CosyVoice 3** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes (150ms TTFA) | EN, ZH, JA, KO | Flow matching + GRPO post-training | 8–12 GB VRAM | Apache 2.0 |
 | **F5-TTS** | ~300M | Yes (10s sample, zero-shot) | Partial | No | Yes | Multilingual | Non-autoregressive, flow-matching DiT | 6–8 GB VRAM | MIT |
 | **Kokoro** | 82M | No | Limited (voice presets) | No | Yes (96x RT) | Limited | StyleTTS2-based | 2–4 GB VRAM (runs on CPU) | Apache 2.0 |
 | **Dia** | 1.6B | Yes | Yes (tag-based) | Yes — `(laughs)`, `(coughs)`, `(gasps)` | No (batch) | English only | Autoregressive + DAC codec | 8–12 GB VRAM | Apache 2.0 |
-| **Chatterbox** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes | 23 languages | - | 6–8 GB VRAM | MIT |
+| **Chatterbox** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes | 23 languages | Built-in watermarking | 6–8 GB VRAM | MIT |
 
 ### Tier 2 — Promising but with caveats
 
@@ -37,11 +39,21 @@
 
 ### Key takeaways
 
-1. **Qwen3-TTS** is the current open-source leader — cloning, streaming, multilingual, Apache 2.0
-2. **F5-TTS** is the best pure cloning engine — fast, high quality, MIT license
-3. **Kokoro** is the speed king — tiny model, CPU-friendly, great for low-latency where cloning isn't needed
-4. **Dia** is unique for non-speech sounds and dialogue — `(laughs)`, `(coughs)` tags are exactly what you described wanting
-5. **Chatterbox** is the dark horse — beats ElevenLabs in blind tests, 23 langs, MIT
+1. **Fish Audio OpenAudio S1** is #1 on TTS-Arena-V2 (March 2026) — 4B params, LLM-based, RLHF-trained, best overall quality. Open-sourced after dominating benchmarks as the commercial S2-Pro model.
+2. **Qwen3-TTS** is the best balance of quality, speed, and features — cloning, streaming (97ms), multilingual, Apache 2.0
+3. **CosyVoice 3** (Alibaba, May 2025) — state-of-the-art content consistency, GRPO post-training, 150ms streaming
+4. **F5-TTS** is the best pure cloning engine — fast, high quality, MIT license
+5. **Kokoro** is the speed king — tiny model, CPU-friendly, great for low-latency where cloning isn't needed
+6. **Dia** is unique for non-speech sounds and dialogue — `(laughs)`, `(coughs)` tags are exactly what you described wanting
+7. **Chatterbox** is the dark horse — beats ElevenLabs in blind tests, 23 langs, MIT, built-in audio watermarking
+
+### Key trends (2025–2026)
+
+- **LLM backbones** dominate TTS now (Qwen2.5, Llama) — same architecture as chat models but outputting audio codec tokens
+- **Neural audio codecs** (DAC, SNAC, Mimi) have replaced mel-spectrograms as intermediate representation — no separate vocoder needed
+- **RLHF/GRPO post-training** is becoming standard for quality (Fish Audio, CosyVoice 3)
+- **Emotion control** is shifting from tag-based to natural language instruction-based ("speak warmly with a slight smile")
+- **The quality gap between open-source and commercial has nearly closed** — Chatterbox beats ElevenLabs in blind tests, Fish Audio S1 competes with best commercial offerings
 
 ---
 
