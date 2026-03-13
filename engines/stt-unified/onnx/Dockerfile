@@ -9,19 +9,13 @@
 ARG DEVICE=cpu
 
 # --- CPU base ---
-FROM python:3.11-slim AS base-cpu
+FROM python:3.12-slim AS base-cpu
 
 # --- GPU base ---
-FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04 AS base-cuda
+FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-    python3.11 python3.11-venv python3.11-dev python3-pip \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    python3 python3-venv python3-dev python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Common ---
