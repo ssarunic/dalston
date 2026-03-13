@@ -124,13 +124,16 @@ class TestParakeetOnnxEngineCapabilities:
 
         assert caps.supports_cpu is True
 
-    def test_get_capabilities_english_only(self):
-        """Test that capabilities report English-only support."""
+    def test_get_capabilities_multilingual(self):
+        """Test that capabilities report multilingual support (TDT v3)."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
         engine = OnnxBatchEngine()
         caps = engine.get_capabilities()
 
-        assert caps.languages == ["en"]
+        assert "en" in caps.languages
+        assert len(caps.languages) == 25
+        for lang in ("de", "fr", "es", "ru", "uk"):
+            assert lang in caps.languages
 
     def test_get_capabilities_transcribe_stage(self):
         """Test that capabilities report transcribe stage."""
@@ -256,15 +259,16 @@ class TestParakeetOnnxCatalogIntegration:
         assert engine is not None, "onnx engine_id not found in catalog"
         assert "transcribe" in engine.capabilities.stages
 
-    def test_onnx_engine_id_supports_english(self):
-        """Test that onnx engine_id reports English support."""
+    def test_onnx_engine_id_supports_multilingual(self):
+        """Test that onnx engine_id reports multilingual support."""
         from dalston.orchestrator.catalog import get_catalog
 
         catalog = get_catalog()
         engine = catalog.get_engine("onnx")
 
         assert engine is not None
-        assert engine.capabilities.languages == ["en"]
+        assert "en" in engine.capabilities.languages
+        assert len(engine.capabilities.languages) == 25
 
     def test_dag_skips_align_for_onnx_ctc(self):
         """Test that DAG builder skips align stage for ONNX CTC models."""

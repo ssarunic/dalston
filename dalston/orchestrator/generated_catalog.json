@@ -333,7 +333,7 @@
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Lightweight ONNX Runtime engine for ASR models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders, plus any model compatible with\nonnx_asr.load_model() (Whisper, GigaAM, Vosk, etc.).\n\nM41: This engine_id provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nCurated model aliases:\n  - parakeet-onnx-ctc-0.6b (CTC, fast, 600M params)\n  - parakeet-onnx-ctc-1.1b (CTC, accurate, 1.1B params)\n  - parakeet-onnx-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - parakeet-onnx-tdt-0.6b-v3 (TDT, punctuation + capitalization, 600M params)\n  - parakeet-onnx-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage. Unknown model IDs are passed through to\nonnx-asr as-is.",
+      "description": "Lightweight ONNX Runtime engine for ASR models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders, plus any model compatible with\nonnx_asr.load_model() (Whisper, GigaAM, Vosk, etc.).\n\nM41: This engine_id provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nCurated model aliases:\n  - parakeet-onnx-ctc-0.6b (CTC, fast, 600M params)\n  - parakeet-onnx-ctc-1.1b (CTC, accurate, 1.1B params)\n  - parakeet-onnx-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - parakeet-onnx-tdt-0.6b-v3 (TDT, 25 languages, punctuation + capitalization, 600M params)\n  - parakeet-onnx-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage. Unknown model IDs are passed through to\nonnx-asr as-is.",
       "image": "dalston/stt-batch-transcribe-onnx:1.0.0",
       "execution_profile": "container",
       "capabilities": {
@@ -341,7 +341,9 @@
           "transcribe"
         ],
         "languages": [
-          "en"
+          "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
+          "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro",
+          "ru", "sk", "sl", "sv", "uk"
         ],
         "supports_word_timestamps": true,
         "supports_streaming": false,

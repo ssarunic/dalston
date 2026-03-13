@@ -16,7 +16,7 @@ Supported models:
   - parakeet-onnx-ctc-0.6b: Fastest inference, 600M params
   - parakeet-onnx-ctc-1.1b: Higher accuracy, 1.1B params
   - parakeet-onnx-tdt-0.6b-v2: TDT decoder, 600M params, English-only
-  - parakeet-onnx-tdt-0.6b-v3: TDT decoder, 600M params, punctuation + capitalization
+  - parakeet-onnx-tdt-0.6b-v3: TDT decoder, 600M params, 25 languages, punctuation + capitalization
   - parakeet-onnx-rnnt-0.6b: RNNT decoder, 600M params, English-only
 
 Environment variables:
@@ -221,13 +221,44 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             "quantization": self._core.quantization,
         }
 
+    # Languages supported by TDT v3 (25 European languages).
+    # Other models (CTC, TDT v2, RNNT) are English-only but the engine
+    # advertises the union so the orchestrator can route multilingual jobs.
+    SUPPORTED_LANGUAGES = [
+        "bg",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "fi",
+        "fr",
+        "hr",
+        "hu",
+        "it",
+        "lt",
+        "lv",
+        "mt",
+        "nl",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sk",
+        "sl",
+        "sv",
+        "uk",
+    ]
+
     def get_capabilities(self) -> EngineCapabilities:
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
             engine_id=self._engine_id,
-            version="1.1.0",
+            version="1.2.0",
             stages=["transcribe"],
-            languages=["en"],
+            languages=self.SUPPORTED_LANGUAGES,
             supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=sorted(self.CURATED_MODELS),

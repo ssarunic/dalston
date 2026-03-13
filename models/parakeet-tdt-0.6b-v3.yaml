@@ -12,15 +12,40 @@ size_gb: 1.8
 stage: transcribe
 
 description: |
-  NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate English-only transcription.
+  NVIDIA Parakeet FastConformer TDT 0.6B v3 for accurate multilingual transcription.
   TDT (Token-and-Duration Transducer) provides best-in-class accuracy.
   64% faster than RNNT while achieving lower WER.
   Produces native word-level timestamps without separate alignment.
+  Supports 25 European languages with automatic language detection.
 
   NOTE: v3 includes automatic punctuation and capitalization.
 
 languages:
-  - en
+  - bg  # Bulgarian
+  - cs  # Czech
+  - da  # Danish
+  - de  # German
+  - el  # Greek
+  - en  # English
+  - es  # Spanish
+  - et  # Estonian
+  - fi  # Finnish
+  - fr  # French
+  - hr  # Croatian
+  - hu  # Hungarian
+  - it  # Italian
+  - lt  # Lithuanian
+  - lv  # Latvian
+  - mt  # Maltese
+  - nl  # Dutch
+  - pl  # Polish
+  - pt  # Portuguese
+  - ro  # Romanian
+  - ru  # Russian
+  - sk  # Slovak
+  - sl  # Slovenian
+  - sv  # Swedish
+  - uk  # Ukrainian
 
 capabilities:
   word_timestamps: true

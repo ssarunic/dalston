@@ -123,11 +123,41 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
                 terms_count=len(vocabulary),
             )
 
-        if language != "auto" and language != "en":
+        # TDT v3 supports 25 European languages; other models are English-only.
+        # Log a warning only for languages outside the supported set.
+        _supported = {
+            "auto",
+            "bg",
+            "cs",
+            "da",
+            "de",
+            "el",
+            "en",
+            "es",
+            "et",
+            "fi",
+            "fr",
+            "hr",
+            "hu",
+            "it",
+            "lt",
+            "lv",
+            "mt",
+            "nl",
+            "pl",
+            "pt",
+            "ro",
+            "ru",
+            "sk",
+            "sl",
+            "sv",
+            "uk",
+        }
+        if language not in _supported:
             logger.warning(
                 "language_not_supported",
                 requested=language,
-                using="en",
+                supported=sorted(_supported - {"auto"}),
             )
 
         # Delegate to shared core
