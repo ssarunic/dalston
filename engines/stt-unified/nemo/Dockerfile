@@ -1,26 +1,34 @@
-# Unified Parakeet Engine (M63)
+# Unified NeMo Engine
 #
 # One process, one NeMo model, both batch and realtime interfaces.
-# Replaces the separate stt-batch-transcribe-nemo + stt-rt-nemo services.
 #
 # Build from repo root:
-#   GPU: docker compose build stt-unified-nemo
-#   CPU: docker compose build stt-unified-nemo-cpu
-#
-# Or directly:
-#   GPU: docker build -t dalston/stt-unified-nemo:1.0.0 -f engines/stt-unified/nemo/Dockerfile .
-#   CPU: docker build --build-arg DEVICE=cpu -t dalston/stt-unified-nemo-cpu:1.0.0 -f engines/stt-unified/nemo/Dockerfile .
+#   CPU:  docker build --build-arg DEVICE=cpu -t dalston/stt-nemo:latest -f engines/stt-unified/nemo/Dockerfile .
+#   GPU:  docker build -t dalston/stt-nemo:latest -f engines/stt-unified/nemo/Dockerfile .
 
 ARG DEVICE=cuda
 
-FROM nvcr.io/nvidia/pytorch:24.12-py3 AS base-cuda
+# --- CPU base ---
 FROM python:3.11-slim AS base-cpu
 
+# --- GPU base ---
+FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04 AS base-cuda
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3.11-dev python3-pip \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Common ---
 FROM base-${DEVICE} AS base
-
 ARG DEVICE=cuda
+ENV DEBIAN_FRONTEND=noninteractive
 
-# System dependencies (superset of batch + RT)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
@@ -28,13 +36,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dalston package with both SDKs
+# Dalston SDK
 WORKDIR /opt/dalston
 COPY pyproject.toml .
 COPY dalston/ dalston/
 RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
 
-# Install PyTorch for CPU builds only (GPU base already provides torch)
+# NeMo engine dependencies
 WORKDIR /engine
 COPY engines/stt-unified/nemo/requirements.txt .
 RUN if [ "$DEVICE" = "cpu" ]; then \
@@ -44,20 +52,18 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
     fi
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Model cache directories
+# Model cache
 ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
-# Copy engine files preserving the directory structure the runner expects
+# Engine code (runner + adapters it imports via _register_engine_modules)
 WORKDIR /app
 COPY engines/stt-unified/nemo/ engines/stt-unified/nemo/
 COPY engines/stt-transcribe/nemo/engine.py engines/stt-transcribe/nemo/engine.py
 COPY engines/stt-rt/nemo/engine.py engines/stt-rt/nemo/engine.py
-
-# RT capabilities (read by realtime SDK at registration time)
 COPY engines/stt-rt/nemo/engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
