@@ -1,14 +1,15 @@
 """Resolve HuggingFace model metadata for engine routing.
 
 This service enables automatic engine selection based on a HuggingFace model's
-`library_name` field. When a user specifies a HuggingFace model ID (e.g.,
+metadata. When a user specifies a HuggingFace model ID (e.g.,
 "nvidia/parakeet-tdt-1.1b"), we can fetch its model card and determine which
 Dalston engine_id is appropriate.
 
 Routing priority:
-1. library_name (most reliable) - e.g., "ctranslate2" -> "faster-whisper"
-2. Model tags (fallback) - e.g., "nemo" tag -> "nemo" engine_id
-3. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
+1. Exact model ID match (for models needing a specific engine, e.g. audio LLMs)
+2. library_name - e.g., "ctranslate2" -> "faster-whisper"
+3. Model tags (fallback) - e.g., "nemo" tag -> "nemo" engine_id
+4. pipeline_tag (last resort) - "automatic-speech-recognition" -> "hf-asr"
 
 Usage:
     resolver = HFResolver()
@@ -42,6 +43,19 @@ LIBRARY_TO_RUNTIME: dict[str, str] = {
     "whisper.cpp": "whisper-cpp",
     # OpenAI Whisper (original implementation)
     "whisper": "whisper",
+}
+
+# Exact model ID overrides: highest priority routing.
+# Models whose library_name (e.g. "transformers") would route to the wrong
+# engine. These are typically multimodal LLMs served via vLLM that publish
+# library_name="transformers" on HuggingFace.
+MODEL_TO_RUNTIME: dict[str, str] = {
+    # Voxtral (Mistral audio LLMs) — served via vLLM, not transformers pipeline
+    "mistralai/Voxtral-Mini-3B-2507": "vllm-asr",
+    "mistralai/Voxtral-Small-24B-2507": "vllm-asr",
+    "mistralai/Voxtral-Mini-4B-Realtime-2602": "vllm-asr",
+    # Qwen2-Audio — served via vLLM, not transformers pipeline
+    "Qwen/Qwen2-Audio-7B-Instruct": "vllm-asr",
 }
 
 # Fallback mapping from model tags to engine_id
@@ -163,9 +177,10 @@ class HFResolver:
         """Determine which engine_id can load a HuggingFace model.
 
         Routing priority:
-        1. library_name (most reliable)
-        2. Model tags (fallback)
-        3. pipeline_tag (last resort for generic ASR)
+        1. Exact model ID match (for models needing a specific engine)
+        2. library_name (most reliable for ASR-specific libraries)
+        3. Model tags (fallback)
+        4. pipeline_tag (last resort for generic ASR)
 
         Args:
             model_id: HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
@@ -174,6 +189,16 @@ class HFResolver:
             Dalston engine_id name (e.g., "faster-whisper", "nemo") or None
             if the engine_id cannot be determined.
         """
+        # 1. Check exact model ID override (highest priority)
+        engine_id = MODEL_TO_RUNTIME.get(model_id)
+        if engine_id:
+            logger.info(
+                "runtime_resolved_by_model_id",
+                model_id=model_id,
+                engine_id=engine_id,
+            )
+            return engine_id
+
         info = await self.get_model_info(model_id)
         if info is None:
             return None
@@ -182,7 +207,7 @@ class HFResolver:
         pipeline_tag = getattr(info, "pipeline_tag", None)
         pipeline_tag_lower = pipeline_tag.lower() if pipeline_tag else None
 
-        # 1. Check library_name (most reliable for ASR-specific libraries)
+        # 2. Check library_name (most reliable for ASR-specific libraries)
         library_name = getattr(info, "library_name", None)
         if library_name:
             library_name_lower = library_name.lower()
@@ -216,7 +241,7 @@ class HFResolver:
                     )
                     return engine_id
 
-        # 2. Check tags as fallback
+        # 3. Check tags as fallback
         tags = set(info.tags) if info.tags else set()
         for tag in tags:
             tag_lower = tag.lower()
@@ -230,7 +255,7 @@ class HFResolver:
                 )
                 return engine_id
 
-        # 3. Check pipeline_tag for generic ASR
+        # 4. Check pipeline_tag for generic ASR
         pipeline_tag = getattr(info, "pipeline_tag", None)
         if pipeline_tag and pipeline_tag.lower() in ASR_PIPELINE_TAGS:
             # Default to HuggingFace transformers pipeline for generic ASR
@@ -304,7 +329,8 @@ class HFResolver:
 
     def get_supported_engine_ids(self) -> list[str]:
         """Return list of all engine_ids that can be resolved."""
-        engine_ids = set(LIBRARY_TO_RUNTIME.values())
+        engine_ids = set(MODEL_TO_RUNTIME.values())
+        engine_ids.update(LIBRARY_TO_RUNTIME.values())
         engine_ids.update(TAG_TO_RUNTIME.values())
         engine_ids.add("hf-asr")  # Fallback engine_id
         return sorted(engine_ids)

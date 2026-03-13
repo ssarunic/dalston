@@ -7,6 +7,7 @@ import pytest
 from dalston.gateway.services.hf_resolver import (
     ASR_PIPELINE_TAGS,
     LIBRARY_TO_RUNTIME,
+    MODEL_TO_RUNTIME,
     TAG_TO_RUNTIME,
     HFModelMetadata,
     HFResolver,
@@ -30,6 +31,26 @@ def mock_model_info() -> MagicMock:
     info.downloads = 50000
     info.likes = 100
     return info
+
+
+class TestModelToRuntimeMapping:
+    """Tests for the MODEL_TO_RUNTIME exact model ID override mapping."""
+
+    def test_voxtral_models_route_to_vllm_asr(self):
+        """Voxtral models should route to vllm-asr, not hf-asr."""
+        assert MODEL_TO_RUNTIME["mistralai/Voxtral-Mini-3B-2507"] == "vllm-asr"
+        assert MODEL_TO_RUNTIME["mistralai/Voxtral-Small-24B-2507"] == "vllm-asr"
+        assert MODEL_TO_RUNTIME["mistralai/Voxtral-Mini-4B-Realtime-2602"] == "vllm-asr"
+
+    def test_qwen2_audio_routes_to_vllm_asr(self):
+        """Qwen2-Audio should route to vllm-asr, not hf-asr."""
+        assert MODEL_TO_RUNTIME["Qwen/Qwen2-Audio-7B-Instruct"] == "vllm-asr"
+
+    def test_all_model_overrides_have_valid_engine_ids(self):
+        """All model ID overrides should have non-empty engine_ids."""
+        for model_id, engine_id in MODEL_TO_RUNTIME.items():
+            assert model_id, "Model ID cannot be empty"
+            assert engine_id, f"Runtime for {model_id} cannot be empty"
 
 
 class TestLibraryToRuntimeMapping:
@@ -295,6 +316,35 @@ class TestHFResolverResolveRuntime:
             result = await resolver.resolve_engine_id("openai/whisper-large-v3")
 
             assert result == "hf-asr"
+
+    @pytest.mark.asyncio
+    async def test_model_id_override_beats_library_name(
+        self,
+        resolver: HFResolver,
+    ):
+        """Test exact model ID override takes priority over library_name.
+
+        Voxtral publishes library_name="transformers" on HuggingFace but
+        must be served via vLLM, not the generic HF ASR pipeline.
+        """
+        # Should resolve without even calling get_model_info
+        result = await resolver.resolve_engine_id("mistralai/Voxtral-Mini-3B-2507")
+
+        assert result == "vllm-asr"
+
+    @pytest.mark.asyncio
+    async def test_model_id_override_skips_hf_api_call(
+        self,
+        resolver: HFResolver,
+    ):
+        """Test model ID override doesn't fetch from HuggingFace Hub."""
+        mock_api = MagicMock()
+        resolver._api = mock_api
+
+        await resolver.resolve_engine_id("Qwen/Qwen2-Audio-7B-Instruct")
+
+        # get_model_info should never be called for overridden models
+        mock_api.model_info.assert_not_called()
 
 
 class TestHFResolverGetModelMetadata:
