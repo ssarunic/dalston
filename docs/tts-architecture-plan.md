@@ -10,8 +10,8 @@
 | **Qwen3-TTS** | 0.6B–1.7B | Yes (3s sample) | Yes | Partial | Yes (97ms TTFA) | 10 (EN, ZH, JA, KO, DE, FR, RU, PT, ES, IT) | Transformer, dual-track streaming | 8–16 GB VRAM | Apache 2.0 |
 | **CosyVoice 3** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes (150ms TTFA) | EN, ZH, JA, KO | Flow matching + GRPO post-training | 8–12 GB VRAM | Apache 2.0 |
 | **F5-TTS** | ~300M | Yes (10s sample, zero-shot) | Partial | No | Yes | Multilingual | Non-autoregressive, flow-matching DiT | 6–8 GB VRAM | MIT |
-| **Kyutai Pocket TTS** | 100M | Yes (zero-shot, few seconds) | No | No | Yes (6x RT on CPU, ~200ms first chunk) | English (more planned) | CALM (Continuous Audio Language Model) + inner monologue | CPU only (2 cores, no GPU needed) | MIT |
-| **Kyutai TTS 1.6B** | 1.8B | Yes (pre-computed voice embeddings) | No | No | Yes (streaming, ~200ms latency) | EN, FR | Hierarchical Transformer + Mimi codec, delayed streams | 8–16 GB VRAM (64 sessions on L40S) | MIT |
+| **Kyutai Pocket TTS** | 100M (90M LM + 20M VAE) | Yes (zero-shot, ~5s sample) | No | No | Yes (6x RT on CPU, ~200ms first chunk) | English (more planned) | CALM + Mimi VAE, distilled from 300M teacher | CPU only (2 cores, no GPU needed) | MIT (code), gated weights for cloning |
+| **Kyutai TTS 1.6B** | 1.8B (1B backbone + 600M depth) | Pre-computed embeddings only (228 donated voices) | Yes (via style embeddings) | No | Yes (true text-streaming, 220ms latency, 75x throughput) | EN, FR | Delayed Streams Modeling + Mimi codec, CFG distillation | 16+ GB VRAM (64 sessions on L40S) | CC-BY-4.0 (weights), MIT (Python), Apache 2.0 (Rust) |
 | **Kokoro** | 82M | No | Limited (voice presets) | No | Yes (96x RT) | Limited | StyleTTS2-based | 2–4 GB VRAM (runs on CPU) | Apache 2.0 |
 | **Dia** | 1.6B | Yes | Yes (tag-based) | Yes — `(laughs)`, `(coughs)`, `(gasps)` | No (batch) | English only | Autoregressive + DAC codec | 8–12 GB VRAM | Apache 2.0 |
 | **Chatterbox** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes | 23 languages | Built-in watermarking | 6–8 GB VRAM | MIT |
@@ -45,8 +45,8 @@
 2. **Qwen3-TTS** is the best balance of quality, speed, and features — cloning, streaming (97ms), multilingual, Apache 2.0
 3. **CosyVoice 3** (Alibaba, May 2025) — state-of-the-art content consistency, GRPO post-training, 150ms streaming
 4. **F5-TTS** is the best pure cloning engine — fast, high quality, MIT license
-5. **Kyutai Pocket TTS** is the new CPU champion — 100M params, voice cloning, 6x real-time on M4 CPU, MIT license. Replaces Kokoro as the go-to lightweight option since it adds cloning
-6. **Kyutai TTS 1.6B** is the production streaming pick — 1.8B params, Mimi codec, Rust server serves 64 sessions on one L40S GPU, powers Unmute.sh
+5. **Kyutai Pocket TTS** is the CPU champion — 100M params, voice cloning, 6x real-time on M4 CPU, MIT license. Distilled from a 300M teacher. Replaces Kokoro as the go-to lightweight option since it adds cloning. Elo 2016 on TTS Arena (beats F5-TTS at 1949)
+6. **Kyutai TTS 1.6B** is the production streaming pick — 1.8B params, true text-streaming (starts generating before full text arrives), 75x throughput, Rust server serves 64 sessions on one L40S GPU. **No arbitrary voice cloning** — uses 228 pre-computed voice embeddings from their Voice Donation project. Style/emotion variants available for some voices
 7. **Kokoro** remains the smallest/fastest option when cloning isn't needed
 8. **Dia** is unique for non-speech sounds and dialogue — `(laughs)`, `(coughs)` tags are exactly what you described wanting
 9. **Chatterbox** is the dark horse — beats ElevenLabs in blind tests, 23 langs, MIT, built-in audio watermarking
@@ -321,8 +321,8 @@ MODEL_PARAM_SYNTHESIZE = "model"        # reuse "model" since it's a different e
 | F5-TTS | Zero-shot, 10s sample | 10s | Highest |
 | Dia | Reference audio | 5s | Good |
 | Chatterbox | Zero-shot | 5s | High |
-| Kyutai Pocket TTS | Zero-shot, few seconds | 3s | High (CPU!) |
-| Kyutai TTS 1.6B | Pre-computed embeddings | 5s | High |
+| Kyutai Pocket TTS | Zero-shot, ~5s sample | 5s | High (CPU!) |
+| Kyutai TTS 1.6B | Pre-computed embeddings only (228 voices) | N/A (no arbitrary cloning) | High (fixed voices) |
 | Kokoro | Not supported | N/A | N/A |
 
 ### Voice management API
@@ -388,7 +388,7 @@ If an engine doesn't support a tag, TEXT_PREPARE strips it and logs a warning. N
 |---|---|---|---|
 | Qwen3-TTS | Yes | Yes (97ms TTFA) | Best all-rounder |
 | Kyutai Pocket TTS | Yes | Yes (~200ms, CPU) | Voice cloning on CPU! |
-| Kyutai TTS 1.6B | Yes | Yes (~200ms, GPU) | Rust server, 64 sessions/GPU |
+| Kyutai TTS 1.6B | Yes | Yes (220ms, true text-streaming) | Rust server, 64 sessions/GPU, 75x throughput |
 | Kokoro | Yes | Yes (fastest) | No cloning, but lowest latency |
 | F5-TTS | Yes | Yes | Good balance |
 | Dia | Yes | No | Batch-only, but best for dialogue |
