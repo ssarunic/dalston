@@ -841,9 +841,6 @@ class Dalston:
                     available_models=e.get("available_models"),
                     capabilities=EngineCapabilities(
                         languages=e["capabilities"].get("languages"),
-                        supports_word_timestamps=e["capabilities"].get(
-                            "supports_word_timestamps", False
-                        ),
                         supports_streaming=e["capabilities"].get(
                             "supports_streaming", False
                         ),
@@ -1776,9 +1773,6 @@ class AsyncDalston:
                     available_models=e.get("available_models"),
                     capabilities=EngineCapabilities(
                         languages=e["capabilities"].get("languages"),
-                        supports_word_timestamps=e["capabilities"].get(
-                            "supports_word_timestamps", False
-                        ),
                         supports_streaming=e["capabilities"].get(
                             "supports_streaming", False
                         ),

@@ -368,7 +368,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
-            supports_word_timestamps=False,  # Audio LLMs don't produce timestamps
             supports_streaming=False,
             model_variants=sorted(ADAPTER_REGISTRY.keys()),
             gpu_required=True,

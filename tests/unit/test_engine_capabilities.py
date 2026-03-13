@@ -41,7 +41,6 @@ class TestEngineCapabilities:
         assert caps.engine_id == "test-engine"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
-        assert caps.supports_word_timestamps is False
         assert caps.supports_streaming is False
         assert caps.gpu_required is False
 
@@ -51,7 +50,6 @@ class TestEngineCapabilities:
             engine_id="parakeet",
             version="1.0.0",
             stages=["transcribe"],
-            supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=["tdt-110m", "rnnt-1.1b"],
             gpu_required=True,
@@ -59,7 +57,6 @@ class TestEngineCapabilities:
         )
 
         assert caps.engine_id == "parakeet"
-        assert caps.supports_word_timestamps is True
         assert caps.model_variants == ["tdt-110m", "rnnt-1.1b"]
         assert caps.gpu_required is True
         assert caps.gpu_vram_mb == 4000
@@ -119,7 +116,6 @@ class TestEngineGetCapabilities:
                     engine_id="custom",
                     version="2.0.0",
                     stages=["transcribe"],
-                    supports_word_timestamps=True,
                     gpu_required=True,
                     gpu_vram_mb=4000,
                 )
@@ -129,7 +125,6 @@ class TestEngineGetCapabilities:
 
         assert caps.engine_id == "custom"
         assert caps.version == "2.0.0"
-        assert caps.supports_word_timestamps is True
 
 
 class TestEngineCatalog:
@@ -150,7 +145,6 @@ class TestEngineCatalog:
                     "execution_profile": "inproc",
                     "capabilities": {
                         "stages": ["transcribe"],
-                        "supports_word_timestamps": True,
                         "supports_streaming": False,
                     },
                     "hardware": {
@@ -167,7 +161,6 @@ class TestEngineCatalog:
                     "image": "dalston/faster-whisper:latest",
                     "capabilities": {
                         "stages": ["transcribe"],
-                        "supports_word_timestamps": False,
                         "supports_streaming": False,
                     },
                     "hardware": {
@@ -184,7 +177,6 @@ class TestEngineCatalog:
                     "image": "dalston/audio-prepare:latest",
                     "capabilities": {
                         "stages": ["prepare"],
-                        "supports_word_timestamps": False,
                         "supports_streaming": False,
                     },
                     "hardware": {
@@ -218,7 +210,6 @@ class TestEngineCatalog:
         assert entry.engine_id == "parakeet"
         assert entry.image == "dalston/parakeet:latest"
         assert entry.execution_profile == "inproc"
-        assert entry.capabilities.supports_word_timestamps is True
 
     def test_execution_profile_defaults_to_container(self, catalog_json):
         """Missing execution_profile should default to container."""
@@ -309,7 +300,6 @@ class TestServerRegistryCapabilities:
                 "engine_id": "parakeet",
                 "version": "1.0.0",
                 "stages": ["transcribe"],
-                "supports_word_timestamps": True,
                 "supports_streaming": False,
                 "model_variants": None,
                 "gpu_required": True,
@@ -336,7 +326,6 @@ class TestServerRegistryCapabilities:
         assert engine is not None
         assert engine.capabilities is not None
         assert engine.capabilities.engine_id == "parakeet"
-        assert engine.capabilities.supports_word_timestamps is True
         assert engine.capabilities.gpu_vram_mb == 4000
 
     @pytest.mark.asyncio

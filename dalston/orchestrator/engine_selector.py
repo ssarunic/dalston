@@ -3,13 +3,14 @@
 This module replaces hardcoded engine defaults with dynamic selection based on:
 - Running engine capabilities from the registry
 - Job requirements (language, streaming, etc.)
-- Engine ranking by capabilities (word timestamps, diarization, speed)
+- Engine ranking by capabilities (diarization, speed)
+- Model capabilities (word timestamps, language)
 
 Example:
     requirements = extract_requirements(job_parameters)
     selection = await select_engine("transcribe", requirements, registry, catalog)
     # selection.engine_id = "parakeet"
-    # selection.capabilities.supports_word_timestamps = True
+    # selection.model_word_timestamps = True
 """
 
 from __future__ import annotations
@@ -114,12 +115,15 @@ class EngineSelectionResult:
         selection_reason: Human-readable explanation of why this engine was selected
         loaded_model_id: Model ID to pass to the engine (e.g., "nvidia/parakeet-tdt-1.1b")
                          Only set when user requested a specific model variant.
+        model_word_timestamps: Whether the selected model supports word timestamps.
+                               Determined from the model YAML, not the engine.
     """
 
     engine_id: str
     capabilities: EngineCapabilities
     selection_reason: str
     loaded_model_id: str | None = None
+    model_word_timestamps: bool | None = None
 
 
 @dataclass
@@ -387,9 +391,12 @@ def _rank_capable_engines(
     """Rank capable engines, best first.
 
     Ranking criteria (in order of priority):
-    1. Native word timestamps (skips alignment stage)
-    2. Native diarization (skips diarize stage)
-    3. Speed (lower RTF is better)
+    1. Native diarization (skips diarize stage)
+    2. Speed (lower RTF is better)
+
+    Note: Word timestamps are a model-level capability, not an engine-level one.
+    The alignment decision is made after model selection using the model's
+    word_timestamps field.
 
     Args:
         capable: List of engines that meet hard requirements
@@ -402,10 +409,7 @@ def _rank_capable_engines(
     def score(engine: EngineRecord) -> tuple:
         caps = engine.capabilities
         if caps is None:
-            return (0, 0, -999.0)
-
-        # Prefer native word timestamps (skips alignment stage)
-        native_ts = 1 if caps.supports_word_timestamps else 0
+            return (0, -999.0)
 
         # Prefer native diarization (skips diarize stage)
         native_diar = 1 if caps.includes_diarization else 0
@@ -414,7 +418,7 @@ def _rank_capable_engines(
         rtf = caps.rtf_gpu if caps.rtf_gpu else 999.0
         speed = -rtf
 
-        return (native_ts, native_diar, speed)
+        return (native_diar, speed)
 
     return sorted(capable, key=score, reverse=True)
 
@@ -429,8 +433,6 @@ def _rank_and_select(
 
     reasons = []
     if winner.capabilities:
-        if winner.capabilities.supports_word_timestamps:
-            reasons.append("native word timestamps")
         if winner.capabilities.includes_diarization:
             reasons.append("native diarization")
     if len(capable) > 1:
@@ -561,6 +563,7 @@ async def select_engine(
                 ),
                 selection_reason="database model lookup",
                 loaded_model_id=loaded_model_id,
+                model_word_timestamps=db_model.word_timestamps,
             )
 
         if user_preference_is_model:
@@ -642,6 +645,7 @@ async def select_engine(
         else _rank_and_select(capable, requirements).selection_reason
     )
     auto_model_id: str | None = None
+    model_word_timestamps: bool | None = None
     engine = ranked_capable[0]
     selection_reason = ranked_reason
 
@@ -677,6 +681,7 @@ async def select_engine(
             )
 
         auto_model_id = _resolve_loaded_model_id(selected_model, stage)
+        model_word_timestamps = selected_model.word_timestamps
 
     logger.info(
         "engine_selected",
@@ -697,6 +702,7 @@ async def select_engine(
         ),
         selection_reason=selection_reason,
         loaded_model_id=auto_model_id,
+        model_word_timestamps=model_word_timestamps,
     )
 
 
@@ -707,11 +713,15 @@ def _should_add_alignment(
 
     Alignment is needed when:
     - Job wants word timestamps (default: yes)
-    - Transcriber doesn't produce native accurate timestamps
+    - Selected model doesn't produce native accurate timestamps
+
+    The word_timestamps capability comes from the model YAML, not the engine.
+    Engines are language-agnostic runtimes; the model determines whether
+    word timestamps are usable.
 
     Args:
         parameters: Job parameters
-        transcribe_selection: Selected transcribe engine
+        transcribe_selection: Selected transcribe engine (with model info)
 
     Returns:
         True if alignment stage should be added
@@ -724,7 +734,10 @@ def _should_add_alignment(
     else:
         wants_word_timestamps = True  # Default: word timestamps on
 
-    has_native = transcribe_selection.capabilities.supports_word_timestamps
+    # Model's word_timestamps is the sole source of truth for this capability.
+    # If no model was resolved (e.g., non-model-backed stage), assume no native
+    # timestamps and let alignment handle it.
+    has_native = transcribe_selection.model_word_timestamps or False
 
     return wants_word_timestamps and not has_native
 

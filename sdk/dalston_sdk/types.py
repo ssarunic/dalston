@@ -493,7 +493,6 @@ class EngineCapabilities:
     """Engine capabilities in API response format."""
 
     languages: list[str] | None = None
-    supports_word_timestamps: bool = False
     supports_streaming: bool = False
     max_audio_duration_s: int | None = None
     max_concurrency: int | None = None

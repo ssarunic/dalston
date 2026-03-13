@@ -157,14 +157,12 @@ class TestErrorDetails:
 
         info = EngineInfo(
             id="faster-whisper",
-            supports_word_timestamps=True,
             status="running",
         )
 
         result = info.to_dict()
 
         assert result["id"] == "faster-whisper"
-        assert result["word_timestamps"] is True
         assert result["status"] == "running"
 
     def test_error_details_to_dict(self):

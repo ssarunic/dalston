@@ -27,7 +27,6 @@ from dalston.orchestrator.engine_selector import ModelSelectionError
 def make_capabilities(
     engine_id: str,
     stage: str = "transcribe",
-    supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
     supports_streaming: bool = False,
     rtf_gpu: float | None = None,
@@ -37,7 +36,6 @@ def make_capabilities(
         engine_id=engine_id,
         version="1.0.0",
         stages=[stage],
-        supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
         supports_streaming=supports_streaming,
         rtf_gpu=rtf_gpu,
@@ -144,6 +142,93 @@ class _ScalarOneResult:
         return self._value
 
 
+class _ScalarsAllResult:
+    """Minimal SQLAlchemy-like result wrapper for scalars().all()."""
+
+    def __init__(self, values: list):
+        self._values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return list(self._values)
+
+    def scalar_one_or_none(self):
+        return self._values[0] if self._values else None
+
+
+def _make_mock_db(engine_models: dict[str, dict]) -> AsyncMock:
+    """Create a mock DB session returning models for auto engine selection.
+
+    The engine selector queries the model registry via SQLAlchemy WHERE clauses
+    that filter by ``engine_id`` and ``stage``.  Since those clauses are inert
+    on a mock, this helper extracts bound parameter values from the compiled
+    statement and returns only matching models.
+
+    Two query patterns are handled:
+
+    1. ``_find_best_downloaded_model``: filters by engine_id + stage + status,
+       accessed via ``result.scalars().all()``.
+    2. User-preference lookup (``select(Model).where(Model.id == ...)``),
+       accessed via ``result.scalar_one_or_none()``.
+
+    Args:
+        engine_models: Mapping of engine_id to model attributes.
+            Each value is a dict with optional keys:
+            - word_timestamps: bool (default False)
+            - languages: list[str] | None (default None)
+            - stage: str (default "transcribe")
+            - size_bytes: int (default 1_000_000)
+
+    Returns:
+        AsyncMock acting as an AsyncSession.
+    """
+    all_models: dict[str, SimpleNamespace] = {}
+    for engine_id, model_attrs in engine_models.items():
+        model_stage = model_attrs.get("stage", "transcribe")
+        model = SimpleNamespace(
+            id=f"{engine_id}-model",
+            engine_id=engine_id,
+            stage=model_stage,
+            status="ready",
+            loaded_model_id=f"{engine_id}-model",
+            source=f"{engine_id}-model",
+            languages=model_attrs.get("languages"),
+            word_timestamps=model_attrs.get("word_timestamps", False),
+            size_bytes=model_attrs.get("size_bytes", 1_000_000),
+        )
+        all_models[engine_id] = model
+
+    async def execute_side_effect(stmt):
+        # Extract bound parameter values from the compiled statement to
+        # filter models by engine_id, mimicking the SQL WHERE clause.
+        try:
+            compiled = stmt.compile()
+            params = compiled.params
+        except Exception:
+            params = {}
+
+        param_values = set(params.values())
+
+        # Return models whose engine_id matches a bound parameter value.
+        matched = [
+            m for eid, m in all_models.items() if eid in param_values
+        ]
+        if not matched:
+            # Check if this is a lookup by model ID (scalar_one_or_none path)
+            matched = [
+                m for m in all_models.values() if m.id in param_values
+            ]
+        if not matched:
+            matched = []
+        return _ScalarsAllResult(matched)
+
+    mock_db = AsyncMock()
+    mock_db.execute.side_effect = execute_side_effect
+    return mock_db
+
+
 # =============================================================================
 # Test DAG Shape Adaptation
 # =============================================================================
@@ -156,17 +241,18 @@ class TestDagShapeWithNativeWordTimestamps:
     async def test_skips_alignment_with_native_timestamps(
         self, job_id, audio_uri, mock_catalog
     ):
-        """Transcriber with native word timestamps -> no align stage."""
+        """Transcriber whose model has word_timestamps=True -> no align stage."""
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "parakeet",
-                    "capabilities": {
-                        "supports_word_timestamps": True,
-                    },
+                    "capabilities": {},
                 },
             }
+        )
+        mock_db = _make_mock_db(
+            {"parakeet": {"word_timestamps": True, "stage": "transcribe"}}
         )
 
         tasks = await build_task_dag(
@@ -175,12 +261,13 @@ class TestDagShapeWithNativeWordTimestamps:
             parameters={"language": "en"},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         stages = [t.stage for t in tasks]
         assert "prepare" in stages
         assert "transcribe" in stages
-        assert "align" not in stages  # Skipped due to native support
+        assert "align" not in stages  # Skipped due to model word timestamps
         assert "merge" not in stages
         assert len(tasks) == 2  # prepare, transcribe
 
@@ -188,13 +275,13 @@ class TestDagShapeWithNativeWordTimestamps:
     async def test_includes_alignment_without_native_timestamps(
         self, job_id, audio_uri, mock_catalog
     ):
-        """Transcriber without native timestamps -> align stage included."""
+        """Transcriber whose model lacks word timestamps -> align stage included."""
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -209,7 +296,7 @@ class TestDagShapeWithNativeWordTimestamps:
         )
 
         stages = [t.stage for t in tasks]
-        assert "align" in stages  # Included because transcriber lacks native support
+        assert "align" in stages  # Included because no model word timestamps
         assert "merge" not in stages
         assert len(tasks) == 3  # prepare, transcribe, align
 
@@ -228,11 +315,13 @@ class TestDagShapeWithNativeDiarization:
                 "transcribe": {
                     "engine_id": "whisperx-full",
                     "capabilities": {
-                        "supports_word_timestamps": True,
                         "includes_diarization": True,
                     },
                 },
             }
+        )
+        mock_db = _make_mock_db(
+            {"whisperx-full": {"word_timestamps": True, "stage": "transcribe"}}
         )
 
         tasks = await build_task_dag(
@@ -241,11 +330,12 @@ class TestDagShapeWithNativeDiarization:
             parameters={"speaker_detection": "diarize"},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         stages = [t.stage for t in tasks]
         assert "diarize" not in stages  # Skipped - transcriber has native diarization
-        assert "align" not in stages  # Skipped - transcriber has native timestamps
+        assert "align" not in stages  # Skipped - model has word timestamps
         assert "merge" not in stages
         assert len(tasks) == 2  # prepare, transcribe
 
@@ -260,7 +350,6 @@ class TestDagShapeWithNativeDiarization:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
@@ -328,7 +417,7 @@ class TestDagWithTimestampGranularity:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
+                    "capabilities": {},
                 },
             }
         )
@@ -354,7 +443,7 @@ class TestDagWithTimestampGranularity:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -379,17 +468,18 @@ class TestDagPerChannelWithCapabilities:
     async def test_per_channel_with_native_timestamps_skips_alignment(
         self, job_id, audio_uri, mock_catalog
     ):
-        """per_channel mode with native timestamps skips alignment for all channels."""
+        """per_channel mode with model word timestamps skips alignment for all channels."""
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "parakeet",
-                    "capabilities": {
-                        "supports_word_timestamps": True,
-                    },
+                    "capabilities": {},
                 },
             }
+        )
+        mock_db = _make_mock_db(
+            {"parakeet": {"word_timestamps": True, "stage": "transcribe"}}
         )
 
         tasks = await build_task_dag(
@@ -398,12 +488,13 @@ class TestDagPerChannelWithCapabilities:
             parameters={"speaker_detection": "per_channel", "language": "en"},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         stages = [t.stage for t in tasks]
         assert "transcribe_ch0" in stages
         assert "transcribe_ch1" in stages
-        assert "align_ch0" not in stages  # Skipped - native timestamps
+        assert "align_ch0" not in stages  # Skipped - model word timestamps
         assert "align_ch1" not in stages
         assert "merge" not in stages
         assert len(tasks) == 3  # prepare, transcribe_ch0, transcribe_ch1
@@ -412,13 +503,13 @@ class TestDagPerChannelWithCapabilities:
     async def test_per_channel_without_native_timestamps_includes_alignment(
         self, job_id, audio_uri, mock_catalog
     ):
-        """per_channel mode without native timestamps includes alignment for all channels."""
+        """per_channel mode without model word timestamps includes alignment for all channels."""
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -445,10 +536,10 @@ class TestEngineRanking:
     """Tests that the selector correctly ranks multiple capable engines."""
 
     @pytest.mark.asyncio
-    async def test_prefers_native_timestamps_over_no_timestamps(
+    async def test_prefers_engine_with_model_word_timestamps(
         self, job_id, audio_uri, mock_catalog
     ):
-        """When multiple engines available, prefer one with native word timestamps."""
+        """When model has word_timestamps, alignment is skipped."""
         registry = AsyncMock()
 
         # Both engines support the language
@@ -458,7 +549,6 @@ class TestEngineRanking:
             make_capabilities(
                 "faster-whisper",
                 stage="transcribe",
-                supports_word_timestamps=False,
             ),
         )
         fast_engine = make_engine_state(
@@ -467,7 +557,6 @@ class TestEngineRanking:
             make_capabilities(
                 "parakeet",
                 stage="transcribe",
-                supports_word_timestamps=True,
             ),
         )
 
@@ -481,12 +570,18 @@ class TestEngineRanking:
 
         registry.get_by_stage.side_effect = get_by_stage
 
+        # Parakeet model has word timestamps; faster-whisper does not
+        mock_db = _make_mock_db(
+            {"parakeet": {"word_timestamps": True, "stage": "transcribe"}}
+        )
+
         tasks = await build_task_dag(
             job_id=job_id,
             audio_uri=audio_uri,
             parameters={},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         by_stage = {t.stage: t for t in tasks}
@@ -505,7 +600,7 @@ class TestDagDependencies:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"supports_word_timestamps": False},
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -618,7 +713,6 @@ class TestMergedWavScenarios:
             make_capabilities(
                 "parakeet",
                 "transcribe",
-                supports_word_timestamps=True,
             ),
         )
 
@@ -645,18 +739,24 @@ class TestMergedWavScenarios:
 
         registry.get_by_stage.side_effect = get_by_stage
 
+        # Parakeet model has word timestamps
+        mock_db = _make_mock_db(
+            {"parakeet": {"word_timestamps": True, "stage": "transcribe"}}
+        )
+
         tasks = await build_task_dag(
             job_id=job_id,
             audio_uri="s3://test-bucket/audio/test_merged.wav",
             parameters={"language": "en"},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         by_stage = {t.stage: t for t in tasks}
-        # Should prefer parakeet (language-specific + native timestamps)
+        # Should prefer parakeet (language-specific + model word timestamps)
         assert by_stage["transcribe"].engine_id == "parakeet"
-        # Parakeet has native timestamps, so no alignment needed
+        # Parakeet model has word timestamps, so no alignment needed
         assert "align" not in [t.stage for t in tasks]
 
     @pytest.mark.asyncio
@@ -669,7 +769,6 @@ class TestMergedWavScenarios:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
@@ -729,9 +828,7 @@ class TestMergedWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {
-                        "supports_word_timestamps": False,
-                    },
+                    "capabilities": {},
                 },
             }
         )
@@ -761,7 +858,6 @@ class TestStageModelSelection:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
@@ -778,7 +874,6 @@ class TestStageModelSelection:
                 make_capabilities(
                     engine_id="faster-whisper",
                     stage="transcribe",
-                    supports_word_timestamps=False,
                     includes_diarization=False,
                 ),
             ),
@@ -800,6 +895,7 @@ class TestStageModelSelection:
                     loaded_model_id="facebook/wav2vec2-base-960h",
                     source="facebook/wav2vec2-base-960h",
                     languages=["en"],
+                    word_timestamps=False,
                 )
             ),
             _ScalarOneResult(
@@ -811,6 +907,7 @@ class TestStageModelSelection:
                     loaded_model_id="pyannote/speaker-diarization-community-1",
                     source="pyannote/speaker-diarization-community-1",
                     languages=None,
+                    word_timestamps=False,
                 )
             ),
             _ScalarOneResult(
@@ -822,6 +919,7 @@ class TestStageModelSelection:
                     loaded_model_id="urchade/gliner_multi-v2.1",
                     source="urchade/gliner_multi-v2.1",
                     languages=None,
+                    word_timestamps=False,
                 )
             ),
         ]
@@ -862,7 +960,6 @@ class TestStageModelSelection:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
                 },
@@ -877,7 +974,6 @@ class TestStageModelSelection:
                 make_capabilities(
                     engine_id="faster-whisper",
                     stage="transcribe",
-                    supports_word_timestamps=False,
                     includes_diarization=False,
                 ),
             ),
@@ -897,6 +993,7 @@ class TestStageModelSelection:
                     loaded_model_id="urchade/gliner_multi-v2.1",
                     source="urchade/gliner_multi-v2.1",
                     languages=None,
+                    word_timestamps=False,
                 )
             ),
         ]
@@ -973,9 +1070,7 @@ class TestStereoSpeakersWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {
-                        "supports_word_timestamps": False,
-                    },
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -1001,18 +1096,19 @@ class TestStereoSpeakersWavScenarios:
 
     @pytest.mark.asyncio
     async def test_per_channel_with_native_timestamps(self, mock_catalog):
-        """Per-channel with native timestamps skips alignment for all channels."""
+        """Per-channel with model word timestamps skips alignment for all channels."""
         job_id = uuid4()
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "parakeet",
-                    "capabilities": {
-                        "supports_word_timestamps": True,
-                    },
+                    "capabilities": {},
                 },
             }
+        )
+        mock_db = _make_mock_db(
+            {"parakeet": {"word_timestamps": True, "stage": "transcribe"}}
         )
 
         tasks = await build_task_dag(
@@ -1021,6 +1117,7 @@ class TestStereoSpeakersWavScenarios:
             parameters={"speaker_detection": "per_channel", "language": "en"},
             registry=registry,
             catalog=mock_catalog,
+            db=mock_db,
         )
 
         stages = [t.stage for t in tasks]
@@ -1040,9 +1137,7 @@ class TestStereoSpeakersWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {
-                        "supports_word_timestamps": False,
-                    },
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }

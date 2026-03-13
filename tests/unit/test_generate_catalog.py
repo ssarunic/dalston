@@ -43,7 +43,6 @@ def valid_engine_id_yaml() -> dict:
         "capabilities": {
             "languages": ["en", "es"],
             "streaming": False,
-            "word_timestamps": True,
             "max_audio_duration": 7200,
         },
         "input": {
@@ -98,7 +97,6 @@ class TestTransformRuntimeToEntry:
         assert entry["stage"] == "transcribe"
         assert entry["execution_profile"] == "venv"
         assert entry["capabilities"]["stages"] == ["transcribe"]
-        assert entry["capabilities"]["supports_word_timestamps"] is True
         assert entry["hardware"]["gpu_required"] is False
         assert entry["hardware"]["gpu_optional"] is True
         assert entry["hardware"]["min_vram_gb"] == 4

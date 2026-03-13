@@ -45,7 +45,6 @@ lite_router = APIRouter(prefix="/lite", tags=["lite"])
 class EngineCapabilitiesResponse(BaseModel):
     """Engine capabilities in API response format."""
 
-    supports_word_timestamps: bool = False
     supports_streaming: bool = False
     max_audio_duration_s: int | None = None
     max_concurrency: int | None = None
@@ -94,7 +93,6 @@ class StageCapabilities(BaseModel):
     """Capabilities for a specific pipeline stage."""
 
     engines: list[str]
-    supports_word_timestamps: bool = False
     supports_streaming: bool = False
 
 
@@ -180,7 +178,6 @@ async def list_engines(
                 loaded_model=loaded_model,
                 available_models=available_models,
                 capabilities=EngineCapabilitiesResponse(
-                    supports_word_timestamps=caps.supports_word_timestamps,
                     supports_streaming=caps.supports_streaming,
                     max_audio_duration_s=None,  # Not in current schema
                     max_concurrency=caps.max_concurrency,
@@ -245,15 +242,12 @@ async def get_capabilities(
             if stage not in stages:
                 stages[stage] = StageCapabilities(
                     engines=[],
-                    supports_word_timestamps=False,
                     supports_streaming=False,
                 )
 
             stage_caps = stages[stage]
             stage_caps.engines.append(entry.engine_id)
 
-            if caps.supports_word_timestamps:
-                stage_caps.supports_word_timestamps = True
             if caps.supports_streaming:
                 stage_caps.supports_streaming = True
 

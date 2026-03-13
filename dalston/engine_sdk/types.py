@@ -31,7 +31,6 @@ class EngineCapabilities(BaseModel):
     engine_id: str
     version: str
     stages: list[str]
-    supports_word_timestamps: bool = False
     supports_streaming: bool = False
     model_variants: list[str] | None = None
     gpu_required: bool = False

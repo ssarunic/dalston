@@ -53,7 +53,6 @@ class ScaffoldConfig(NamedTuple):
     description: str
     gpu: str  # required, optional, none
     memory: str
-    word_timestamps: bool
     supports_cpu: bool
     min_vram_gb: int | None
     min_ram_gb: int
@@ -70,7 +69,6 @@ class VariantConfig(NamedTuple):
     description: str
     gpu: str
     memory: str
-    word_timestamps: bool
     supports_cpu: bool
     min_vram_gb: int | None
     min_ram_gb: int
@@ -217,7 +215,6 @@ container:
 capabilities:
   max_audio_duration: 7200
   streaming: false
-  word_timestamps: {str(config.word_timestamps).lower()}
 
 input:
   audio_formats:
@@ -344,7 +341,6 @@ class {class_name}(Engine):
             engine_id="{config.engine_id}",
             version="1.0.0",
             stages=["{config.stage}"],
-            supports_word_timestamps={config.word_timestamps},
             supports_streaming=False,
             gpu_required={config.gpu == "required"},
             gpu_vram_mb={config.min_vram_gb * 1024 if config.min_vram_gb else "None"},
@@ -517,8 +513,6 @@ container:
 capabilities:
   max_audio_duration: 7200
   streaming: false
-  word_timestamps: {str(config.word_timestamps).lower()}
-
 input:
   audio_formats:
     - wav
@@ -689,7 +683,6 @@ def scaffold_variant_engine(
     stage: str,
     variants: list[str],
     description: str,
-    word_timestamps: bool,
     engines_dir: Path,
     dry_run: bool,
 ) -> bool:
@@ -741,7 +734,6 @@ This engine supports multiple variants with different hardware requirements:
             description=f"{engine_family.title()} {variant} variant.",
             gpu=defaults.get("gpu", "optional"),
             memory=defaults.get("memory", "4G"),
-            word_timestamps=word_timestamps,
             supports_cpu=defaults.get("supports_cpu", True),
             min_vram_gb=defaults.get("min_vram_gb", 4),
             min_ram_gb=4,
@@ -891,11 +883,6 @@ Examples:
         help="Memory requirement (default: 4G)",
     )
     parser.add_argument(
-        "--word-timestamps",
-        action="store_true",
-        help="Engine produces word-level timestamps",
-    )
-    parser.add_argument(
         "--variants",
         type=str,
         help="Comma-separated list of variants (e.g., base,large-v3,large-v3-turbo). "
@@ -950,7 +937,6 @@ Examples:
             stage=args.stage,
             variants=variants,
             description=args.description,
-            word_timestamps=args.word_timestamps,
             engines_dir=args.engines_dir,
             dry_run=dry_run,
         )
@@ -975,7 +961,6 @@ Examples:
         description=args.description,
         gpu=args.gpu,
         memory=args.memory,
-        word_timestamps=args.word_timestamps,
         supports_cpu=supports_cpu,
         min_vram_gb=min_vram_gb,
         min_ram_gb=4,

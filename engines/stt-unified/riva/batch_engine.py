@@ -146,7 +146,6 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
             engine_id=self._engine_id,
             version="1.1.0",
             stages=["transcribe"],
-            supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=[],
             gpu_required=False,

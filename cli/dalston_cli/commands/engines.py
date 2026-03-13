@@ -99,7 +99,6 @@ def engines(
                     "available_models": e.available_models,
                     "capabilities": {
                         "languages": e.capabilities.languages,
-                        "word_timestamps": e.capabilities.word_timestamps,
                         "streaming": e.capabilities.streaming,
                     }
                     if e.capabilities
@@ -143,8 +142,6 @@ def engines(
 
             if engine.capabilities:
                 caps = []
-                if engine.capabilities.word_timestamps:
-                    caps.append("word-ts")
                 if engine.capabilities.streaming:
                     caps.append("streaming")
                 if engine.capabilities.languages:

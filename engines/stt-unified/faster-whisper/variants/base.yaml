@@ -16,7 +16,6 @@ container:
 capabilities:
   max_concurrency: 2
   streaming: true
-  word_timestamps: true
 
 server:
   port: 9000

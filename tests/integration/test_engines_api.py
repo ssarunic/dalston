@@ -34,7 +34,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
-                supports_word_timestamps=True,
                 supports_streaming=False,
                 gpu_required=False,
                 gpu_vram_mb=4096,
@@ -53,7 +52,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="parakeet",
                 version="1.0.0",
                 stages=["transcribe"],
-                supports_word_timestamps=True,
                 supports_streaming=True,
                 gpu_required=True,
                 gpu_vram_mb=6144,
@@ -70,7 +68,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="pyannote-4.0",
                 version="1.0.0",
                 stages=["diarize"],
-                supports_word_timestamps=False,
                 supports_streaming=False,
                 gpu_required=True,
                 gpu_vram_mb=2048,
@@ -101,7 +98,6 @@ def mock_running_engines() -> list[EngineRecord]:
                 engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
-                supports_word_timestamps=True,
             ),
         ),
     ]
@@ -238,7 +234,6 @@ class TestListEngines:
             engines_by_id = {e["id"]: e for e in data["engines"]}
 
             fw = engines_by_id["faster-whisper"]
-            assert fw["capabilities"]["supports_word_timestamps"] is True
             assert fw["hardware"]["supports_cpu"] is True
             assert fw["performance"]["rtf_gpu"] == 0.05
 
@@ -305,7 +300,6 @@ class TestGetCapabilities:
 
             # Only transcribe stage should be available
             assert "transcribe" in data["stages"]
-            assert data["stages"]["transcribe"]["supports_word_timestamps"] is True
 
     def test_capabilities_includes_stage_details(
         self, client, mock_catalog, mock_running_engines
@@ -330,7 +324,6 @@ class TestGetCapabilities:
             transcribe_caps = data["stages"]["transcribe"]
             assert "engines" in transcribe_caps
             assert "faster-whisper" in transcribe_caps["engines"]
-            assert transcribe_caps["supports_word_timestamps"] is True
 
     def test_empty_capabilities_when_no_engines_running(self, client, mock_catalog):
         """Should return empty stages when no engines are running."""

@@ -24,7 +24,6 @@ container:
 capabilities:
   max_audio_duration: 86400
   streaming: false
-  word_timestamps: false
 
 input:
   # This engine doesn't process audio directly

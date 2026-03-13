@@ -328,7 +328,6 @@ class RealtimeEngine(ABC):
             engine_id=card.get("engine_id") or card.get("id", self.get_engine_id()),
             version=card.get("version", "unknown"),
             stages=stages,
-            supports_word_timestamps=caps.get("word_timestamps", False),
             supports_streaming=caps.get("streaming", self.supports_streaming()),
             model_variants=None,
             gpu_required=gpu_required,
@@ -434,7 +433,6 @@ class RealtimeEngine(ABC):
                 endpoint=self._worker_endpoint,
                 models_loaded=self.get_models(),
                 capabilities=capabilities,
-                supports_word_timestamps=capabilities.supports_word_timestamps,
                 includes_diarization=capabilities.includes_diarization,
             )
         )

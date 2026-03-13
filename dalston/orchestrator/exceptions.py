@@ -11,14 +11,12 @@ class EngineInfo:
     """Summary of an engine for error context."""
 
     id: str
-    supports_word_timestamps: bool = False
     status: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "id": self.id,
-            "word_timestamps": self.supports_word_timestamps,
             "status": self.status,
         }
 

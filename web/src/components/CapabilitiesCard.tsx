@@ -13,7 +13,6 @@ import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
 
 const FEATURES = [
-  { key: 'word_timestamps', label: S.capabilities.wordTimestamps },
   { key: 'speaker_diarization', label: S.capabilities.speakerDiarization },
   { key: 'pii_detection', label: S.capabilities.piiDetection },
   { key: 'streaming', label: S.capabilities.streaming },

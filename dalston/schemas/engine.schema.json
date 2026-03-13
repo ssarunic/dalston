@@ -200,10 +200,6 @@
           "type": "boolean",
           "description": "Whether engine supports streaming mode"
         },
-        "word_timestamps": {
-          "type": "boolean",
-          "description": "Whether engine produces word-level timestamps"
-        },
         "max_concurrency": {
           "type": "integer",
           "minimum": 1,

@@ -16,7 +16,6 @@ container:
 
 capabilities:
   streaming: true
-  word_timestamps: false
   max_concurrency: 2
   supports_vocabulary: false
 

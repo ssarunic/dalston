@@ -121,7 +121,6 @@ class TestRecordSerialization:
             engine_id="faster-whisper",
             version="1.0",
             stages=["transcribe"],
-            supports_word_timestamps=True,
         )
         original = EngineRecord(
             instance="fw-abc123",
@@ -154,7 +153,7 @@ class TestRecordSerialization:
         assert restored.stream_name == original.stream_name
         assert restored.loaded_model == original.loaded_model
         assert restored.capabilities is not None
-        assert restored.capabilities.supports_word_timestamps is True
+        assert restored.capabilities.supports_streaming is False
 
     def test_round_trip_realtime(self):
         now = datetime.now(UTC)

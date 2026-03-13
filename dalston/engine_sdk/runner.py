@@ -212,9 +212,6 @@ class EngineRunner:
                 stream_name=self.stream_key,
                 capabilities=capabilities,
                 execution_profile=self._execution_profile,
-                supports_word_timestamps=(
-                    capabilities.supports_word_timestamps if capabilities else False
-                ),
                 includes_diarization=(
                     capabilities.includes_diarization if capabilities else False
                 ),

@@ -21,7 +21,6 @@ container:
 capabilities:
   max_audio_duration: 7200
   streaming: true
-  word_timestamps: true
   max_concurrency: 8
   supports_vocabulary: false
 

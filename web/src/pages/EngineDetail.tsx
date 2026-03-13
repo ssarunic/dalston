@@ -293,10 +293,6 @@ export function EngineDetail() {
           </CardHeader>
           <CardContent className="space-y-1">
             <CapabilityRow
-              label={S.engineDetail.wordTimestamps}
-              supported={engineInfo.capabilities.supports_word_timestamps}
-            />
-            <CapabilityRow
               label={S.engineDetail.streaming}
               supported={engineInfo.capabilities.supports_streaming}
             />

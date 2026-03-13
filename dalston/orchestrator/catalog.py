@@ -157,7 +157,6 @@ class EngineCatalog:
             engine_id=engine_id,
             version=engine_data.get("version", "unknown"),
             stages=stages,
-            supports_word_timestamps=caps_data.get("supports_word_timestamps", False),
             supports_streaming=caps_data.get("supports_streaming", False),
             model_variants=None,
             gpu_required=hw_data.get("gpu_required", False),

@@ -108,14 +108,6 @@ class TestParakeetOnnxEngineCapabilities:
 
         assert caps.engine_id == "onnx"
 
-    def test_get_capabilities_supports_word_timestamps(self):
-        """Test that capabilities report word timestamp support."""
-        OnnxBatchEngine = load_parakeet_onnx_engine()
-        engine = OnnxBatchEngine()
-        caps = engine.get_capabilities()
-
-        assert caps.supports_word_timestamps is True
-
     def test_get_capabilities_supports_cpu(self):
         """Test that capabilities report CPU support."""
         OnnxBatchEngine = load_parakeet_onnx_engine()

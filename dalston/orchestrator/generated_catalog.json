@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-13T15:15:00.199751+00:00",
+  "generated_at": "2026-03-13T16:28:58.666370+00:00",
   "schema_version": "3.0",
   "engine_count": 12,
   "engines": {
@@ -16,7 +16,6 @@
         "stages": [
           "align"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
@@ -51,7 +50,6 @@
         "stages": [
           "pii_detect"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
         "max_concurrency": null
@@ -84,7 +82,6 @@
         "stages": [
           "diarize"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
@@ -120,7 +117,6 @@
         "stages": [
           "diarize"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
@@ -155,7 +151,6 @@
         "stages": [
           "prepare"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 14400,
         "max_concurrency": null
@@ -188,7 +183,6 @@
         "stages": [
           "audio_redact"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
         "max_concurrency": null
@@ -221,7 +215,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
@@ -257,7 +250,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
@@ -293,7 +285,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
@@ -329,7 +320,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
@@ -365,7 +355,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": true,
         "supports_streaming": true,
         "max_audio_duration": 7200,
         "max_concurrency": 8
@@ -398,7 +387,6 @@
         "stages": [
           "transcribe"
         ],
-        "supports_word_timestamps": false,
         "supports_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 2

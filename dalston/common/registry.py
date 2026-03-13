@@ -62,7 +62,6 @@ class EngineRecord:
         active_batch: Number of active batch tasks
         active_realtime: Number of active realtime sessions
         models_loaded: List of currently loaded model IDs
-        supports_word_timestamps: Whether engine produces word-level timestamps
         includes_diarization: Whether engine includes speaker labels
         endpoint: WebSocket endpoint URL (RT engines only)
         stream_name: Redis stream key (batch engines only)
@@ -84,7 +83,6 @@ class EngineRecord:
     active_batch: int = 0
     active_realtime: int = 0
     models_loaded: list[str] | None = None
-    supports_word_timestamps: bool = False
     includes_diarization: bool = False
     endpoint: str | None = None
     stream_name: str | None = None
@@ -153,9 +151,6 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
         "registered_at": (
             record.registered_at.isoformat() if record.registered_at else now
         ),
-        "supports_word_timestamps": "true"
-        if record.supports_word_timestamps
-        else "false",
         "includes_diarization": "true" if record.includes_diarization else "false",
         "execution_profile": record.execution_profile,
     }
@@ -239,7 +234,6 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
         active_batch=active_batch,
         active_realtime=active_realtime,
         models_loaded=models_loaded,
-        supports_word_timestamps=data.get("supports_word_timestamps") == "true",
         includes_diarization=data.get("includes_diarization") == "true",
         endpoint=data.get("endpoint"),
         stream_name=data.get("stream_name"),

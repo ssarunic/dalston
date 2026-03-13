@@ -19,7 +19,6 @@ container:
 capabilities:
   max_concurrency: 2
   streaming: true
-  word_timestamps: true
   punctuation: false
   capitalization: false
 

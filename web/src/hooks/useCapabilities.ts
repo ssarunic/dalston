@@ -19,7 +19,6 @@ export function useEnginesList() {
 
 export interface SystemCapabilities {
   features: {
-    word_timestamps: boolean
     speaker_diarization: boolean
     pii_detection: boolean
     streaming: boolean
@@ -43,7 +42,6 @@ export function useSystemCapabilities() {
 
       // Derive features from capabilities
       const features = {
-        word_timestamps: stages.transcribe?.supports_word_timestamps ?? false,
         speaker_diarization: 'diarize' in stages,
         pii_detection: 'pii_detect' in stages,
         streaming: stages.transcribe?.supports_streaming ?? false,

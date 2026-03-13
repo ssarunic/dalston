@@ -32,7 +32,6 @@ from dalston.orchestrator.engine_selector import (
 
 def make_capabilities(
     engine_id: str = "test-engine",
-    supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
     supports_streaming: bool = False,
     rtf_gpu: float | None = None,
@@ -42,7 +41,6 @@ def make_capabilities(
         engine_id=engine_id,
         version="1.0.0",
         stages=["transcribe"],
-        supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
         supports_streaming=supports_streaming,
         rtf_gpu=rtf_gpu,
@@ -149,21 +147,6 @@ class TestMeetsRequirements:
 
 
 class TestRankAndSelect:
-    def test_prefers_native_word_timestamps(self):
-        engines = [
-            make_engine_state(
-                "slow",
-                capabilities=make_capabilities("slow", supports_word_timestamps=False),
-            ),
-            make_engine_state(
-                "fast",
-                capabilities=make_capabilities("fast", supports_word_timestamps=True),
-            ),
-        ]
-        result = _rank_and_select(engines, {})
-        assert result.engine_id == "fast"
-        assert "native word timestamps" in result.selection_reason
-
     def test_prefers_native_diarization(self):
         engines = [
             make_engine_state(
@@ -290,6 +273,7 @@ class TestSelectEngine:
             loaded_model_id="pyannote/speaker-diarization-community-1",
             source="pyannote/speaker-diarization-community-1",
             languages=None,
+            word_timestamps=False,
         )
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
@@ -422,32 +406,36 @@ class TestShouldAddAlignment:
     def test_needs_alignment_when_no_native_timestamps(self):
         selection = EngineSelectionResult(
             engine_id="faster-whisper",
-            capabilities=make_capabilities(supports_word_timestamps=False),
+            capabilities=make_capabilities(),
             selection_reason="test",
+            model_word_timestamps=False,
         )
         assert _should_add_alignment({}, selection) is True
 
     def test_skip_alignment_when_native_timestamps(self):
         selection = EngineSelectionResult(
             engine_id="parakeet",
-            capabilities=make_capabilities(supports_word_timestamps=True),
+            capabilities=make_capabilities(),
             selection_reason="test",
+            model_word_timestamps=True,
         )
         assert _should_add_alignment({}, selection) is False
 
     def test_skip_alignment_when_disabled_by_params(self):
         selection = EngineSelectionResult(
             engine_id="faster-whisper",
-            capabilities=make_capabilities(supports_word_timestamps=False),
+            capabilities=make_capabilities(),
             selection_reason="test",
+            model_word_timestamps=False,
         )
         assert _should_add_alignment({"word_timestamps": False}, selection) is False
 
     def test_skip_alignment_when_segment_granularity(self):
         selection = EngineSelectionResult(
             engine_id="faster-whisper",
-            capabilities=make_capabilities(supports_word_timestamps=False),
+            capabilities=make_capabilities(),
             selection_reason="test",
+            model_word_timestamps=False,
         )
         assert (
             _should_add_alignment({"timestamps_granularity": "segment"}, selection)
@@ -560,9 +548,7 @@ class TestSelectPipelineEngines:
         async def get_by_stage(stage: str):
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
-                "transcribe": make_capabilities(
-                    "faster-whisper", supports_word_timestamps=False
-                ),
+                "transcribe": make_capabilities("faster-whisper"),
                 "align": make_capabilities("phoneme-align"),
             }
             caps = stages_caps.get(stage)
@@ -584,7 +570,7 @@ class TestSelectPipelineEngines:
         assert "transcribe" in selections
         assert (
             "align" in selections
-        )  # Needed because faster-whisper lacks native timestamps
+        )  # Needed because model lacks native word timestamps
         # Mono pipelines no longer select merge (assembly is done in handlers)
         assert "merge" not in selections
 
@@ -603,11 +589,10 @@ class TestSelectPipelineEngines:
                 ),
                 EngineSelectionResult(
                     engine_id="faster-whisper",
-                    capabilities=make_capabilities(
-                        "faster-whisper", supports_word_timestamps=True
-                    ),
+                    capabilities=make_capabilities("faster-whisper"),
                     selection_reason="transcribe",
                     loaded_model_id="Systran/faster-whisper-base",
+                    model_word_timestamps=True,
                 ),
                 EngineSelectionResult(
                     engine_id="final-merger",
@@ -628,33 +613,31 @@ class TestSelectPipelineEngines:
     async def test_skips_alignment_with_native_timestamps(
         self, mock_registry, mock_catalog
     ):
-        async def get_by_stage(stage: str):
-            stages_caps = {
-                "prepare": make_capabilities("audio-prepare"),
-                "transcribe": make_capabilities(
-                    "parakeet", supports_word_timestamps=True
+        with patch(
+            "dalston.orchestrator.engine_selector.select_engine", new_callable=AsyncMock
+        ) as mock_select_engine:
+            mock_select_engine.side_effect = [
+                EngineSelectionResult(
+                    engine_id="audio-prepare",
+                    capabilities=make_capabilities("audio-prepare"),
+                    selection_reason="prepare",
                 ),
-            }
-            caps = stages_caps.get(stage)
-            if caps:
-                caps.stages = [stage]
-                return [
-                    make_engine_state(
-                        engine_id=caps.engine_id, stage=stage, capabilities=caps
-                    )
-                ]
-            return []
+                EngineSelectionResult(
+                    engine_id="parakeet",
+                    capabilities=make_capabilities("parakeet"),
+                    selection_reason="transcribe",
+                    model_word_timestamps=True,
+                ),
+            ]
 
-        mock_registry.get_by_stage.side_effect = get_by_stage
-
-        selection = await select_pipeline_engines(
-            {"language": "en"}, mock_registry, mock_catalog
-        )
-        selections = selection.stages
+            selection = await select_pipeline_engines(
+                {"language": "en"}, mock_registry, mock_catalog
+            )
+            selections = selection.stages
 
         assert "prepare" in selections
         assert "transcribe" in selections
-        assert "align" not in selections  # Parakeet has native timestamps
+        assert "align" not in selections  # Model has native word timestamps
         # Mono pipeline: no merge
         assert "merge" not in selections
 
@@ -705,10 +688,9 @@ class TestSelectPipelineEngines:
                 ),
                 EngineSelectionResult(
                     engine_id="faster-whisper",
-                    capabilities=make_capabilities(
-                        "faster-whisper", supports_word_timestamps=False
-                    ),
+                    capabilities=make_capabilities("faster-whisper"),
                     selection_reason="transcribe",
+                    model_word_timestamps=False,
                 ),
                 NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
             ]
@@ -743,10 +725,9 @@ class TestSelectPipelineEngines:
                 ),
                 EngineSelectionResult(
                     engine_id="faster-whisper",
-                    capabilities=make_capabilities(
-                        "faster-whisper", supports_word_timestamps=False
-                    ),
+                    capabilities=make_capabilities("faster-whisper"),
                     selection_reason="transcribe",
+                    model_word_timestamps=False,
                 ),
                 NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
                 EngineSelectionResult(
@@ -784,10 +765,9 @@ class TestSelectPipelineEngines:
                 ),
                 EngineSelectionResult(
                     engine_id="faster-whisper",
-                    capabilities=make_capabilities(
-                        "faster-whisper", supports_word_timestamps=False
-                    ),
+                    capabilities=make_capabilities("faster-whisper"),
                     selection_reason="transcribe",
+                    model_word_timestamps=False,
                 ),
                 NoCapableEngineError(
                     stage="align",
@@ -829,10 +809,9 @@ class TestSelectPipelineEngines:
                 ),
                 EngineSelectionResult(
                     engine_id="faster-whisper",
-                    capabilities=make_capabilities(
-                        "faster-whisper", supports_word_timestamps=False
-                    ),
+                    capabilities=make_capabilities("faster-whisper"),
                     selection_reason="transcribe",
+                    model_word_timestamps=False,
                 ),
                 NoDownloadedModelError(engine_id="phoneme-align", stage="align"),
             ]

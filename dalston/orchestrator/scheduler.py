@@ -62,7 +62,6 @@ def _build_engine_info(
 
     return EngineInfo(
         id=entry.engine_id,
-        supports_word_timestamps=entry.capabilities.supports_word_timestamps,
         status=status,
     )
 

@@ -409,7 +409,6 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
-            supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,

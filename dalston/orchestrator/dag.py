@@ -125,7 +125,7 @@ async def build_task_dag(
     post-processing after the core pipeline completes (see ``post_processor.py``).
 
     The DAG shape is determined by selected engine capabilities:
-    - If transcriber has supports_word_timestamps=True, skip align stage
+    - If resolved model has word_timestamps=True, skip align stage
     - If transcriber has includes_diarization=True, skip diarize stage
 
     Args:
