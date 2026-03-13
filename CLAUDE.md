@@ -138,21 +138,7 @@ make queues
 
 ### Data Preservation
 
-**NEVER** run commands that destroy Docker volumes. The `postgres-data` volume holds API keys, tenants, jobs, and audit logs. Destroying it invalidates all API keys (including the one in `.env`), forcing a re-bootstrap.
-
-Forbidden commands:
-
-- `docker compose down -v` or `docker compose down --volumes`
-- `docker volume prune` / `docker system prune --volumes`
-- `make clean-all` (runs both of the above)
-
-Safe alternatives:
-
-- `make stop` — stops containers without touching volumes
-- `make clean` — removes dangling images/containers but preserves volumes
-- `docker compose stop` — stops specific services
-
-If you need to reset the database intentionally, confirm with the user first.
+Never create new API keys via `POST /auth/keys` or `AuthService.create_api_key()` during testing or debugging. Use the existing key from `.env` (`DALSTON_API_KEY`). Do not modify `.env` unless the user asks.
 
 ### Environment Management (Docker vs Local)
 
