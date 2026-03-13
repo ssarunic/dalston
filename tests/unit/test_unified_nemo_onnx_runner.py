@@ -1,4 +1,4 @@
-"""Tests for the unified Parakeet and Parakeet-ONNX runners.
+"""Tests for the unified NeMo and ONNX runners.
 
 Covers:
 - BatchRejectedError inherits from TaskDeferredError (both runners)
@@ -30,13 +30,13 @@ from dalston.engine_sdk.admission import (
 # ---------------------------------------------------------------------------
 
 _ENGINES_ROOT = Path("engines")
-_PARAKEET_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "nemo" / "runner.py"
-_PARAKEET_ONNX_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "onnx" / "runner.py"
+_NEMO_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "nemo" / "runner.py"
+_ONNX_RUNNER_PATH = _ENGINES_ROOT / "stt-unified" / "onnx" / "runner.py"
 
 # Prefixes of module names we inject — only these are cleaned up between tests.
 # Third-party packages (numpy, torch, etc.) are intentionally left in sys.modules
 # because Python C extensions cannot be re-imported in the same process.
-_INJECTED_PREFIXES = ("parakeet_runner_", "parakeet_onnx_runner_")
+_INJECTED_PREFIXES = ("nemo_runner_", "onnx_runner_")
 
 
 # ---------------------------------------------------------------------------
@@ -76,14 +76,12 @@ def _cleanup_runner_modules():
 class TestBatchRejectedErrorInheritance:
     """BatchRejectedError must subclass TaskDeferredError in both runners."""
 
-    def test_parakeet_batch_rejected_error_is_task_deferred(self) -> None:
-        module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_mod")
+    def test_nemo_batch_rejected_error_is_task_deferred(self) -> None:
+        module = _load_runner_module(_NEMO_RUNNER_PATH, "nemo_runner_mod")
         assert issubclass(module.BatchRejectedError, TaskDeferredError)
 
-    def test_parakeet_onnx_batch_rejected_error_is_task_deferred(self) -> None:
-        module = _load_runner_module(
-            _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_mod"
-        )
+    def test_onnx_batch_rejected_error_is_task_deferred(self) -> None:
+        module = _load_runner_module(_ONNX_RUNNER_PATH, "onnx_runner_mod")
         assert issubclass(module.BatchRejectedError, TaskDeferredError)
 
 
@@ -95,36 +93,32 @@ class TestBatchRejectedErrorInheritance:
 class TestUnifiedRunnerClassStructure:
     """Both runner classes expose the expected interface without instantiation."""
 
-    def test_parakeet_runner_class_exists(self) -> None:
-        module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_cls")
-        cls = module.UnifiedParakeetRunner
+    def test_nemo_runner_class_exists(self) -> None:
+        module = _load_runner_module(_NEMO_RUNNER_PATH, "nemo_runner_cls")
+        cls = module.UnifiedNemoRunner
         assert callable(getattr(cls, "run", None))
         assert hasattr(cls, "_run_async")
         assert hasattr(cls, "_shutdown")
         assert hasattr(cls, "_run_batch")
 
-    def test_parakeet_onnx_runner_class_exists(self) -> None:
-        module = _load_runner_module(
-            _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_cls"
-        )
-        cls = module.UnifiedParakeetOnnxRunner
+    def test_onnx_runner_class_exists(self) -> None:
+        module = _load_runner_module(_ONNX_RUNNER_PATH, "onnx_runner_cls")
+        cls = module.UnifiedOnnxRunner
         assert callable(getattr(cls, "run", None))
         assert hasattr(cls, "_run_async")
         assert hasattr(cls, "_shutdown")
         assert hasattr(cls, "_run_batch")
 
-    def test_parakeet_runner_uses_parakeet_core(self) -> None:
+    def test_nemo_runner_uses_nemo_core(self) -> None:
         """Runner module must import and reference NemoInference."""
-        module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_core_ref")
+        module = _load_runner_module(_NEMO_RUNNER_PATH, "nemo_runner_core_ref")
         from dalston.engine_sdk.inference.nemo_inference import NemoInference
 
         assert module.NemoInference is NemoInference
 
-    def test_parakeet_onnx_runner_uses_parakeet_onnx_core(self) -> None:
+    def test_onnx_runner_uses_onnx_core(self) -> None:
         """Runner module must import and reference OnnxInference."""
-        module = _load_runner_module(
-            _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_core_ref"
-        )
+        module = _load_runner_module(_ONNX_RUNNER_PATH, "onnx_runner_core_ref")
         from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 
         assert module.OnnxInference is OnnxInference
@@ -161,8 +155,8 @@ class TestAdmittedProcessLogic:
     @pytest.mark.parametrize(
         "runner_path,module_name",
         [
-            (_PARAKEET_RUNNER_PATH, "parakeet_runner_adm"),
-            (_PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_adm"),
+            (_NEMO_RUNNER_PATH, "nemo_runner_adm"),
+            (_ONNX_RUNNER_PATH, "onnx_runner_adm"),
         ],
     )
     def test_rejects_when_batch_slots_full(self, runner_path, module_name) -> None:
@@ -190,8 +184,8 @@ class TestAdmittedProcessLogic:
     @pytest.mark.parametrize(
         "runner_path,module_name",
         [
-            (_PARAKEET_RUNNER_PATH, "parakeet_runner_adm2"),
-            (_PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_adm2"),
+            (_NEMO_RUNNER_PATH, "nemo_runner_adm2"),
+            (_ONNX_RUNNER_PATH, "onnx_runner_adm2"),
         ],
     )
     def test_releases_slot_after_successful_call(
@@ -222,8 +216,8 @@ class TestAdmittedProcessLogic:
     @pytest.mark.parametrize(
         "runner_path,module_name",
         [
-            (_PARAKEET_RUNNER_PATH, "parakeet_runner_adm3"),
-            (_PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_adm3"),
+            (_NEMO_RUNNER_PATH, "nemo_runner_adm3"),
+            (_ONNX_RUNNER_PATH, "onnx_runner_adm3"),
         ],
     )
     def test_releases_slot_on_exception(self, runner_path, module_name) -> None:
@@ -247,8 +241,8 @@ class TestAdmittedProcessLogic:
     @pytest.mark.parametrize(
         "runner_path,module_name",
         [
-            (_PARAKEET_RUNNER_PATH, "parakeet_runner_adm4"),
-            (_PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_adm4"),
+            (_NEMO_RUNNER_PATH, "nemo_runner_adm4"),
+            (_ONNX_RUNNER_PATH, "onnx_runner_adm4"),
         ],
     )
     def test_rt_rejected_when_at_full_capacity(self, runner_path, module_name) -> None:
@@ -274,8 +268,8 @@ class TestAdmittedProcessLogic:
 class TestRegisterEngineModules:
     """_register_engine_modules must register the correct module names."""
 
-    def test_parakeet_registers_correct_names(self) -> None:
-        module = _load_runner_module(_PARAKEET_RUNNER_PATH, "parakeet_runner_reg")
+    def test_nemo_registers_correct_names(self) -> None:
+        module = _load_runner_module(_NEMO_RUNNER_PATH, "nemo_runner_reg")
 
         with patch("importlib.util.spec_from_file_location") as mock_spec:
             fake_spec = MagicMock()
@@ -289,10 +283,8 @@ class TestRegisterEngineModules:
         assert "engines.stt_transcribe_nemo" in registered_names
         assert "engines.stt_rt_nemo" in registered_names
 
-    def test_parakeet_onnx_registers_correct_names(self) -> None:
-        module = _load_runner_module(
-            _PARAKEET_ONNX_RUNNER_PATH, "parakeet_onnx_runner_reg"
-        )
+    def test_onnx_registers_correct_names(self) -> None:
+        module = _load_runner_module(_ONNX_RUNNER_PATH, "onnx_runner_reg")
 
         with patch("importlib.util.spec_from_file_location") as mock_spec:
             fake_spec = MagicMock()
@@ -306,26 +298,26 @@ class TestRegisterEngineModules:
         assert "engines.stt_transcribe_onnx" in registered_names
         assert "engines.stt_rt_onnx" in registered_names
 
-    def test_parakeet_batch_engine_path_exists(self) -> None:
+    def test_nemo_batch_engine_path_exists(self) -> None:
         """The batch engine file referenced by _register_engine_modules exists."""
-        engines_root = _PARAKEET_RUNNER_PATH.resolve().parents[2]
+        engines_root = _NEMO_RUNNER_PATH.resolve().parents[2]
         batch_path = engines_root / "stt-transcribe" / "nemo" / "engine.py"
         assert batch_path.exists(), f"Batch engine not found: {batch_path}"
 
-    def test_parakeet_rt_engine_path_exists(self) -> None:
+    def test_nemo_rt_engine_path_exists(self) -> None:
         """The RT engine file referenced by _register_engine_modules exists."""
-        engines_root = _PARAKEET_RUNNER_PATH.resolve().parents[2]
+        engines_root = _NEMO_RUNNER_PATH.resolve().parents[2]
         rt_path = engines_root / "stt-rt" / "nemo" / "engine.py"
         assert rt_path.exists(), f"RT engine not found: {rt_path}"
 
-    def test_parakeet_onnx_batch_engine_path_exists(self) -> None:
+    def test_onnx_batch_engine_path_exists(self) -> None:
         """The batch ONNX engine file referenced by _register_engine_modules exists."""
-        engines_root = _PARAKEET_ONNX_RUNNER_PATH.resolve().parents[2]
+        engines_root = _ONNX_RUNNER_PATH.resolve().parents[2]
         batch_path = engines_root / "stt-transcribe" / "onnx" / "engine.py"
         assert batch_path.exists(), f"Batch ONNX engine not found: {batch_path}"
 
-    def test_parakeet_onnx_rt_engine_path_exists(self) -> None:
+    def test_onnx_rt_engine_path_exists(self) -> None:
         """The RT ONNX engine file referenced by _register_engine_modules exists."""
-        engines_root = _PARAKEET_ONNX_RUNNER_PATH.resolve().parents[2]
+        engines_root = _ONNX_RUNNER_PATH.resolve().parents[2]
         rt_path = engines_root / "stt-rt" / "onnx" / "engine.py"
         assert rt_path.exists(), f"RT ONNX engine not found: {rt_path}"

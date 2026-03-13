@@ -221,8 +221,8 @@ pytest -m e2e
 - **ParakeetOnnxCore** (`dalston/engine_sdk/cores/parakeet_onnx_core.py`):
   shared core with `OnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
   (`ParakeetOnnxStreamingEngine`) both delegate via `core=` injection.
-- **Unified runners implemented**: `UnifiedParakeetRunner`
-  (`engines/stt-unified/nemo/runner.py`) and `UnifiedParakeetOnnxRunner`
+- **Unified runners implemented**: `UnifiedNemoRunner`
+  (`engines/stt-unified/nemo/runner.py`) and `UnifiedOnnxRunner`
   (`engines/stt-unified/onnx/runner.py`) — same structure as the
   faster-whisper runner (one core, batch thread + RT async loop, shared
   admission controller).

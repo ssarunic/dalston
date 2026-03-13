@@ -136,7 +136,7 @@ ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
 | `engines/stt-diarize/pyannote-4.0/Dockerfile` | Update env vars |
 | `engines/stt-align/phoneme-align/Dockerfile` | Update env vars |
 | `engines/stt-detect/pii-presidio/Dockerfile` | Update env vars |
-| `engines/stt-transcribe/voxtral/Dockerfile` | Update env vars |
+| `engines/stt-transcribe/vllm-asr/Dockerfile` | Update env vars |
 
 ### Migration Path
 

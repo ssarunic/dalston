@@ -1,12 +1,9 @@
-"""Unified Parakeet runner: one process, one model, both interfaces.
+"""Unified NeMo runner: one process, one model, both interfaces.
 
 This runner creates a single NemoInference (one loaded NeMo model) and passes
 it to both the batch engine adapter (queue polling) and the realtime engine
 adapter (WebSocket server). An AdmissionController gates both paths to
 prevent realtime starvation under batch load.
-
-This is the M63 "unified engine instance" — batch and RT share the same
-GPU-resident model instead of loading independent copies.
 
 Usage:
     python -m engines.stt-unified.nemo.runner
@@ -37,8 +34,8 @@ from dalston.engine_sdk.inference.nemo_inference import NemoInference
 logger = structlog.get_logger()
 
 
-class UnifiedParakeetRunner:
-    """Runs batch + realtime Parakeet adapters in a single process.
+class UnifiedNemoRunner:
+    """Runs batch + realtime NeMo adapters in a single process.
 
     Key properties:
     - ONE NemoInference instance (one NeMo model in GPU memory)
@@ -64,7 +61,7 @@ class UnifiedParakeetRunner:
         self._running = False
 
         logger.info(
-            "unified_parakeet_runner_init",
+            "unified_nemo_runner_init",
             device=self._core.device,
             admission=self._admission.get_status(),
         )
@@ -167,7 +164,7 @@ class UnifiedParakeetRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_parakeet_runner_shutting_down")
+        logger.info("unified_nemo_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -187,7 +184,7 @@ class UnifiedParakeetRunner:
         self._core.shutdown()
 
         logger.info(
-            "unified_parakeet_runner_stopped",
+            "unified_nemo_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -238,5 +235,5 @@ def _register_engine_modules() -> None:
 
 if __name__ == "__main__":
     _register_engine_modules()
-    runner = UnifiedParakeetRunner()
+    runner = UnifiedNemoRunner()
     runner.run()

@@ -86,12 +86,12 @@ Apply engine_id-based names:
   - `ParakeetOnnxEngine` -> `OnnxBatchEngine`
   - `HFASREngine` -> `HfAsrBatchEngine`
   - `VLLMASREngine` -> `VllmAsrBatchEngine`
-  - `VoxtralEngine` -> `VoxtralBatchEngine`
+  - `VoxtralEngine` -> `VllmAsrBatchEngine`
 - Realtime:
   - `WhisperStreamingEngine` -> `FasterWhisperRealtimeEngine`
   - `ParakeetStreamingEngine` -> `NemoRealtimeEngine`
   - `ParakeetOnnxStreamingEngine` -> `OnnxRealtimeEngine`
-  - `VoxtralStreamingEngine` -> `VoxtralRealtimeEngine`
+  - `VoxtralStreamingEngine` -> `VllmAsrRealtimeEngine`
 
 Gate:
 

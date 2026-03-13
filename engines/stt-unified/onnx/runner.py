@@ -37,8 +37,8 @@ from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 logger = structlog.get_logger()
 
 
-class UnifiedParakeetOnnxRunner:
-    """Runs batch + realtime Parakeet-ONNX adapters in a single process.
+class UnifiedOnnxRunner:
+    """Runs batch + realtime ONNX adapters in a single process.
 
     Key properties:
     - ONE OnnxInference instance (one ONNX session in memory)
@@ -239,5 +239,5 @@ def _register_engine_modules() -> None:
 
 if __name__ == "__main__":
     _register_engine_modules()
-    runner = UnifiedParakeetOnnxRunner()
+    runner = UnifiedOnnxRunner()
     runner.run()
