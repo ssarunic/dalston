@@ -694,39 +694,23 @@ services:
     profiles: [riva]
     restart: unless-stopped
 
-  # Riva batch transcription engine — streams audio to NIM via gRPC
-  stt-batch-transcribe-riva:
-    image: dalston/stt-batch-transcribe-riva:1.0.0
+  # Unified Riva engine — batch + realtime in one process, gRPC to NIM sidecar
+  stt-unified-riva:
+    image: dalston/stt-riva:1.1.0
     build:
       context: .
-      dockerfile: engines/stt-transcribe/riva/Dockerfile
+      dockerfile: engines/stt-unified/riva/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: riva
-      DALSTON_WORKER_ID: riva-batch-1
+      DALSTON_WORKER_ID: riva-unified-1
+      DALSTON_INSTANCE: stt-unified-riva
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 8
       DALSTON_RIVA_URI: riva-nim:50051
       DALSTON_RIVA_CHUNK_MS: 100
     depends_on:
       <<: *batch-depends
-      riva-nim:
-        condition: service_healthy
-    profiles: [riva]
-    restart: unless-stopped
-
-  # Riva real-time transcription engine — WebSocket to gRPC bridge
-  stt-rt-riva:
-    image: dalston/stt-rt-riva:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-rt/riva/Dockerfile
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_INSTANCE: stt-rt-riva
-      DALSTON_WORKER_PORT: 9000
-      DALSTON_MAX_SESSIONS: 8
-      DALSTON_RIVA_URI: riva-nim:50051
-    depends_on:
-      <<: *realtime-depends
       riva-nim:
         condition: service_healthy
     healthcheck: *ws-healthcheck

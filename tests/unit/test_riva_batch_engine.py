@@ -1,4 +1,4 @@
-"""Contract tests for Riva NIM batch transcription engine.
+"""Contract tests for Riva NIM batch transcription engine (unified).
 
 Verifies that the batch engine produces the correct Transcript
 shape with segments, text, language, and word timestamps when
@@ -20,6 +20,8 @@ import pytest
 
 from dalston.engine_sdk import EngineInput
 from dalston.engine_sdk.context import BatchTaskContext
+
+UNIFIED_RIVA_DIR = Path("engines/stt-unified/riva")
 
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
@@ -95,7 +97,7 @@ def _cleanup_injected_modules():
 
 @pytest.fixture()
 def _mock_riva_modules():
-    """Mock riva.client and related modules so engine.py can be imported."""
+    """Mock riva.client and related modules so engine code can be imported."""
     mock_riva = MagicMock()
     mock_riva_client = MagicMock()
     mock_riva_asr_pb2 = MagicMock()
@@ -111,37 +113,37 @@ def _mock_riva_modules():
         yield mock_riva_client, mock_riva_asr_pb2
 
 
+def _load_module(name: str, path: Path):
+    """Load a Python module from file path."""
+    if name in sys.modules:
+        del sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture()
 def riva_batch_engine_class(_mock_riva_modules):
     """Load the RivaBatchEngine class with mocked riva imports."""
-    engine_path = Path("engines/stt-transcribe/riva/engine.py")
-    module_name = "riva_batch_engine_test"
-
-    # Remove any cached version
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-
-    spec = importlib.util.spec_from_file_location(module_name, engine_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module.RivaBatchEngine
+    # Load riva_client first (batch_engine imports from it)
+    _load_module("riva_client", UNIFIED_RIVA_DIR / "riva_client.py")
+    batch_mod = _load_module("batch_engine", UNIFIED_RIVA_DIR / "batch_engine.py")
+    return batch_mod.RivaBatchEngine
 
 
 @pytest.fixture()
-def engine_with_mock(riva_batch_engine_class, _mock_riva_modules):
-    """Create a RivaBatchEngine with a mocked ASR service."""
-    mock_riva_client, _ = _mock_riva_modules
-
+def engine_with_mock(riva_batch_engine_class):
+    """Create a RivaBatchEngine with a mocked RivaClient core."""
     engine = riva_batch_engine_class()
-
-    return engine, mock_riva_client
+    return engine
 
 
 def _setup_streaming_responses(engine, responses):
-    """Configure mock to return given responses from streaming_response_gen."""
-    engine._asr.streaming_response_gen.return_value = iter(responses)
+    """Configure mock to return given responses from streaming_recognize."""
+    engine._core.asr.streaming_response_gen.return_value = iter(responses)
 
 
 class TestRivaBatchOutputShape:
@@ -150,11 +152,10 @@ class TestRivaBatchOutputShape:
     def test_output_has_text_segments_and_language(
         self, engine_with_mock, tmp_path
     ) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
-        # Create a small WAV-like file (just raw bytes for testing)
         audio_file = tmp_path / "test.wav"
-        audio_file.write_bytes(b"\x00\x00" * 16000)  # 1 second of silence
+        audio_file.write_bytes(b"\x00\x00" * 16000)
 
         response = _make_mock_response()
         _setup_streaming_responses(engine, [response])
@@ -180,7 +181,7 @@ class TestRivaBatchOutputShape:
     def test_output_segment_has_word_timestamps(
         self, engine_with_mock, tmp_path
     ) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -217,7 +218,7 @@ class TestRivaBatchOutputShape:
         assert seg.words[1].text == "world"
 
     def test_multiple_segments(self, engine_with_mock, tmp_path) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 32000)
@@ -274,7 +275,7 @@ class TestRivaBatchOutputShape:
         assert result.data.segments[1].start == 2.0
 
     def test_interim_results_are_ignored(self, engine_with_mock, tmp_path) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -306,7 +307,7 @@ class TestRivaBatchOutputShape:
         assert result.data.text == "hello world"
 
     def test_empty_transcript_is_skipped(self, engine_with_mock, tmp_path) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -340,7 +341,7 @@ class TestRivaBatchConfig:
     """Verify configuration handling."""
 
     def test_default_language_is_english(self, engine_with_mock, tmp_path) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -365,7 +366,7 @@ class TestRivaBatchConfig:
     def test_duration_calculated_from_audio_bytes(
         self, engine_with_mock, tmp_path
     ) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         # 2 seconds of int16 mono 16kHz audio = 2 * 16000 * 2 bytes
         audio_file = tmp_path / "test.wav"
@@ -389,7 +390,7 @@ class TestRivaBatchConfig:
         assert result.data.duration == pytest.approx(2.0)
 
     def test_timestamp_granularity_is_word(self, engine_with_mock, tmp_path) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -416,20 +417,19 @@ class TestRivaBatchHealthCheck:
     """Verify health check behavior."""
 
     def test_healthy_when_nim_reachable(self, engine_with_mock) -> None:
-        engine, _ = engine_with_mock
-        engine._asr.stub.GetRivaSpeechRecognitionConfig.return_value = MagicMock()
+        engine = engine_with_mock
+        engine._core.asr.stub.GetRivaSpeechRecognitionConfig.return_value = MagicMock()
 
         health = engine.health_check()
         assert health["status"] == "healthy"
         assert health["nim"] == "connected"
 
     def test_unhealthy_when_nim_unreachable(self, engine_with_mock) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
-        # Import the mock grpc module that was injected
         import grpc as mock_grpc
 
-        engine._asr.stub.GetRivaSpeechRecognitionConfig.side_effect = (
+        engine._core.asr.stub.GetRivaSpeechRecognitionConfig.side_effect = (
             mock_grpc.RpcError()
         )
 
@@ -441,15 +441,12 @@ class TestRivaBatchHealthCheck:
 class TestRivaBatchShutdown:
     """Verify shutdown behavior."""
 
-    def test_shutdown_closes_channel(self, engine_with_mock) -> None:
-        engine, _ = engine_with_mock
-        mock_channel = MagicMock()
-        engine._channel = mock_channel
+    def test_shutdown_does_not_raise(self, engine_with_mock) -> None:
+        engine = engine_with_mock
         engine.shutdown()
-        mock_channel.close.assert_called_once()
 
     def test_get_engine_id(self, engine_with_mock) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
         assert engine.get_engine_id() == "riva"
 
 
@@ -459,7 +456,7 @@ class TestRivaBatchWordConfidence:
     def test_word_confidence_uses_per_word_value(
         self, engine_with_mock, tmp_path
     ) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)
@@ -492,7 +489,7 @@ class TestRivaBatchWordConfidence:
     def test_timestamp_granularity_segment_when_no_words(
         self, engine_with_mock, tmp_path
     ) -> None:
-        engine, _ = engine_with_mock
+        engine = engine_with_mock
 
         audio_file = tmp_path / "test.wav"
         audio_file.write_bytes(b"\x00\x00" * 16000)

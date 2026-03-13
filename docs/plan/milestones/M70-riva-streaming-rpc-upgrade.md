@@ -47,39 +47,46 @@ Unlike faster-whisper and parakeet (which load models in-process), Riva engines 
 thin gRPC adapters that delegate inference to a Riva NIM container:
 
 ```
-┌─────────────────┐     gRPC      ┌──────────────┐
-│  Batch Engine   │──────────────▶│              │
-│  (Python/Redis) │               │  Riva NIM    │
-└─────────────────┘               │  (GPU/CUDA)  │
-                                  │  :50051      │
-┌─────────────────┐     gRPC      │              │
-│  RT Engine      │──────────────▶│              │
-│  (Python/WS)    │               └──────────────┘
-└─────────────────┘
+┌─────────────────────────────────┐
+│  Unified Riva Engine            │
+│  ┌────────────┐ ┌─────────────┐│     gRPC      ┌──────────────┐
+│  │ Batch      │ │ RT          ││──────────────▶│  Riva NIM    │
+│  │ (Redis Q)  │ │ (WebSocket) ││               │  (GPU/CUDA)  │
+│  └────────────┘ └─────────────┘│               │  :50051      │
+│  shared RivaClient (gRPC ch.)  │               └──────────────┘
+└─────────────────────────────────┘
 ```
 
-Both engines share the same NIM sidecar. The NIM container manages GPU memory,
-model loading, and inference scheduling internally. Dalston engines handle only
-I/O adaptation (file→gRPC, WebSocket→gRPC) and registry integration.
+Both adapters share a single gRPC channel to the NIM sidecar via `RivaClient`.
+The NIM container manages GPU memory, model loading, and inference scheduling
+internally. The Dalston engine handles only I/O adaptation (file→gRPC,
+WebSocket→gRPC) and registry integration.
 
-## Why Two Containers Remain
+## Unified Runner (Updated)
 
-Merging into a unified runner adds no meaningful value here. Unlike faster-whisper/parakeet
-where the GPU model loaded in-process was the shared resource that justified a single
-process, the NIM sidecar already is the shared singleton. The two Dalston containers are
-I/O adapters with different concerns:
+The original M70 design kept batch and RT as separate containers, arguing that
+independent scaling justified the split. In practice, both adapters are
+stateless CPU processes whose scaling is governed by the NIM sidecar's capacity,
+not their own resource usage. Keeping them separate added operational overhead
+(two Dockerfiles, two compose services, two deployment units) without meaningful
+benefit.
 
-- **Batch** scales with Redis queue depth; restarts don't affect live sessions.
-- **RT** scales with concurrent WebSocket connections; restarts drop live sessions.
+The Riva engine was consolidated into `engines/stt-unified/riva/` following the
+same unified runner pattern as ONNX, faster-whisper, NeMo, HF-ASR, and vLLM-ASR.
+The shared resource is a `RivaClient` (gRPC channel + ASR service) rather than
+a GPU model, but the runner structure is identical:
 
-Keeping them separate preserves independent scaling, deployment, and fault-isolation.
+- `riva_client.py` — shared gRPC client (the "core")
+- `batch_engine.py` — batch adapter, accepts injected `RivaClient`
+- `rt_engine.py` — RT adapter, accepts injected `RivaClient`
+- `runner.py` — creates one `RivaClient`, wires both adapters with `AdmissionController`
+- Single Docker container, single compose service (`stt-unified-riva`)
 
 ## Scope
 
 In scope:
 
-- `engines/stt-transcribe/riva/` — engine.yaml, engine.py, Dockerfile, requirements.txt
-- `engines/stt-rt/riva/` — engine.yaml, engine.py, Dockerfile, requirements.txt
+- `engines/stt-unified/riva/` — unified engine (riva_client.py, batch_engine.py, rt_engine.py, runner.py, Dockerfile, requirements.txt, rt_engine.yaml)
 - Riva NIM sidecar service in `docker-compose.yml` (behind `riva` profile)
 - `DALSTON_RIVA_URI` env var (default `localhost:50051`) for NIM gRPC endpoint
 - `DALSTON_RIVA_CHUNK_MS` env var (default 100 ms) for batch chunk size
@@ -91,7 +98,6 @@ In scope:
 Out of scope:
 
 - Cache-aware streaming — that's M71 (Parakeet RNNT, different engine_id)
-- Merging batch and RT into a unified runner (see architecture rationale above)
 - Changing the Riva NIM container or NGC model configuration
 - Adding new Riva model variants
 

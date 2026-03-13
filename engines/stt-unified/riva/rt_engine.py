@@ -1,28 +1,21 @@
-"""Riva NIM real-time transcription engine.
+"""Riva NIM real-time transcription adapter.
 
 Uses offline_recognize() via the SessionHandler's periodic re-transcription
-pattern. SessionHandler calls transcribe() on accumulated audio periodically
-during speech and at utterance boundaries (supports_streaming=True).
+pattern.  Delegates gRPC communication to the shared RivaClient.
 
-Phase 2 can replace this with native gRPC streaming_recognize() where NIM
-itself emits incremental partial results.
-
-Environment variables:
-    DALSTON_RIVA_URI: gRPC endpoint for Riva NIM (default: localhost:50051)
-    DALSTON_ENGINE_ID: Runtime identifier for registration (default: riva)
-    DALSTON_INSTANCE: Unique worker identifier (required)
-    DALSTON_WORKER_PORT: WebSocket port (default: 9000)
-    DALSTON_MAX_SESSIONS: Max concurrent sessions (default: 8)
+When run standalone, creates its own RivaClient.  When used within the
+unified runner, accepts an injected client to share a single gRPC channel
+with the batch adapter.
 """
+
+from __future__ import annotations
 
 import os
 from typing import Any
 
-import grpc
 import numpy as np
-import riva.client
-import riva.client.proto.riva_asr_pb2 as riva_asr_pb2
 import structlog
+from riva_client import SUPPORTED_LANGUAGES, RivaClient
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
@@ -34,54 +27,43 @@ from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
 logger = structlog.get_logger()
 
-# Audio parameters matching Dalston's real-time pipeline
-_SAMPLE_RATE = 16000
-
-# gRPC timeout for offline_recognize — RT utterances are short (≤30s),
-# but allow headroom for NIM cold starts and queuing.
-_GRPC_TIMEOUT_S = 120
-
 
 class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription engine using Riva NIM gRPC.
 
     Uses offline_recognize() via the SessionHandler's periodic
-    re-transcription pattern. supports_streaming() returns True to
+    re-transcription pattern.  supports_streaming() returns True to
     enable partial results during speech.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, core: RivaClient | None = None) -> None:
         super().__init__()
-        self._uri = os.environ.get("DALSTON_RIVA_URI", "localhost:50051")
+        self._core: RivaClient | None = core
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
-        self._channel: grpc.Channel | None = None
-        self._asr: riva.client.ASRService | None = None
 
     def load_models(self) -> None:
         """Initialize gRPC connection to NIM sidecar.
 
-        No local models are loaded — all inference runs in the NIM container.
+        If a RivaClient was injected via __init__, this method uses it
+        instead of creating a new one.
         """
-        logger.info("riva_nim_connecting", uri=self._uri)
-        self._channel = grpc.insecure_channel(self._uri)
-        self._asr = riva.client.ASRService(self._channel)
-        logger.info("riva_nim_channel_ready", uri=self._uri)
+        if self._core is None:
+            self._core = RivaClient.from_env()
+
+        logger.info(
+            "riva_nim_ready",
+            uri=self._core.uri,
+            shared_core=True,
+        )
 
     def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint
         or periodically during speech (when supports_streaming=True).
-
-        Args:
-            audio: Audio samples as float32 numpy array, mono, 16kHz
-            params: Typed transcriber parameters for this utterance
-
-        Returns:
-            Transcript with text, words, language, confidence
         """
-        if self._asr is None:
-            raise RuntimeError("ASR service not initialized — call load_models() first")
+        if self._core is None:
+            raise RuntimeError("RivaClient not initialized -- call load_models() first")
 
         # Convert float32 [-1.0, 1.0] to int16 bytes for Riva
         audio_int16 = (audio * 32767).astype(np.int16)
@@ -91,18 +73,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             params.language if params.language and params.language != "auto" else "en"
         )
 
-        config = riva.client.RecognitionConfig(
-            language_code=lang_code,
-            max_alternatives=1,
-            enable_word_time_offsets=True,
-            enable_automatic_punctuation=True,
-            sample_rate_hertz=_SAMPLE_RATE,
-            audio_channel_count=1,
-        )
-
-        response = self._asr.offline_recognize(
-            audio_bytes, config, timeout=_GRPC_TIMEOUT_S
-        )
+        response = self._core.offline_recognize(audio_bytes, lang_code)
 
         segments = []
         text_parts: list[str] = []
@@ -155,52 +126,31 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         return True
 
     def get_models(self) -> list[str]:
-        """NIM manages models — no local model selection."""
+        """NIM manages models -- no local model selection."""
         return []
 
     def get_languages(self) -> list[str]:
-        """Languages supported by the NIM model."""
-        return ["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ru"]
+        return SUPPORTED_LANGUAGES
 
     def get_engine_id(self) -> str:
-        """Return the engine_id identifier."""
         return self._engine_id
 
     def get_supports_vocabulary(self) -> bool:
-        """Riva supports boosting but needs config mapping work."""
         return False
 
     def get_gpu_memory_usage(self) -> str:
-        """No local GPU usage — NIM handles GPU."""
+        """No local GPU usage -- NIM handles GPU."""
         return "0GB"
 
     def health_check(self) -> dict[str, Any]:
-        """Check NIM connectivity via gRPC."""
         base_health = super().health_check()
-
-        nim_status = "unknown"
-        if self._asr is not None:
-            try:
-                self._asr.stub.GetRivaSpeechRecognitionConfig(
-                    riva_asr_pb2.RivaSpeechRecognitionConfigRequest()
-                )
-                nim_status = "connected"
-            except grpc.RpcError:
-                nim_status = "unreachable"
-
-        return {
-            **base_health,
-            "nim": nim_status,
-            "nim_uri": self._uri,
-        }
+        if self._core is not None:
+            nim_health = self._core.health_check()
+            return {**base_health, **nim_health}
+        return {**base_health, "nim": "not_initialized"}
 
     def shutdown(self) -> None:
-        """Close gRPC channel on shutdown."""
         logger.info("riva_rt_shutdown")
-        if self._channel is not None:
-            self._channel.close()
-            self._channel = None
-            self._asr = None
 
 
 if __name__ == "__main__":
