@@ -195,7 +195,7 @@ class OnnxInference:
     ) -> OnnxTranscriptionResult:
         """Transcribe a file using VAD segmentation for long audio safety.
 
-        Silero VAD splits audio at speech boundaries (max 30s per segment),
+        Silero VAD splits audio at speech boundaries (max 60s per segment by default),
         then each segment is transcribed independently. This prevents GPU
         OOM on long recordings while producing properly-timed output.
         """

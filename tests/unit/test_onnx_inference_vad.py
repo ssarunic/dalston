@@ -241,21 +241,24 @@ class TestVadLifecycle:
         assert inference._vad is None
 
         mock_vad = MagicMock()
-        with patch("dalston.engine_sdk.inference.onnx_inference.load_vad", create=True):
-            from unittest.mock import patch as _patch
+        mock_load_vad = MagicMock(return_value=mock_vad)
 
-            with _patch.dict(
-                "sys.modules",
-                {"onnx_asr": MagicMock(load_vad=MagicMock(return_value=mock_vad))},
+        with patch.dict(
+            "sys.modules",
+            {"onnx_asr": MagicMock(load_vad=mock_load_vad)},
+        ):
+            # Patch the import target so _get_or_load_vad's
+            # `from onnx_asr import load_vad` resolves to our mock
+            with patch(
+                "dalston.engine_sdk.inference.onnx_inference.load_vad",
+                mock_load_vad,
+                create=True,
             ):
-                # Manually call _get_or_load_vad with mocked import
-                with _patch(
-                    "dalston.engine_sdk.inference.onnx_inference.OnnxInference._get_or_load_vad",
-                    return_value=mock_vad,
-                ):
-                    vad = inference._get_or_load_vad()
+                vad = inference._get_or_load_vad()
 
+        mock_load_vad.assert_called_once_with("silero")
         assert vad is mock_vad
+        assert inference._vad is mock_vad
 
     def test_shutdown_clears_vad(self, inference):
         """Shutdown should release the VAD model."""
