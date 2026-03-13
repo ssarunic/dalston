@@ -1,6 +1,4 @@
 # Unified vLLM-ASR Engine Dependencies (batch + realtime)
-# Union of engines/stt-transcribe/vllm-asr/requirements.txt
-# and  engines/stt-rt/vllm-asr/requirements.txt
 
 # vLLM with multimodal audio support
 vllm[audio]>=0.6.0

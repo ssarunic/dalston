@@ -471,7 +471,7 @@ services:
     image: dalston/stt-batch-transcribe-vllm-asr:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
+      dockerfile: engines/stt-unified/vllm-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: vllm-asr

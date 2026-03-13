@@ -35,12 +35,10 @@ ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface
 
-# Engine code (runner + adapters it imports via _register_engine_modules)
+# Engine code (all adapters colocated in stt-unified/vllm-asr/)
 WORKDIR /app
 COPY engines/stt-unified/vllm-asr/ engines/stt-unified/vllm-asr/
-COPY engines/stt-transcribe/vllm-asr/engine.py engines/stt-transcribe/vllm-asr/engine.py
-COPY engines/stt-rt/vllm-asr/engine.py engines/stt-rt/vllm-asr/engine.py
-COPY engines/stt-rt/vllm-asr/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-unified/vllm-asr/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true

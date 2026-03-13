@@ -130,9 +130,8 @@ class UnifiedVllmAsrRunner:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_vllm_asr import VllmAsrRealtimeEngine
-        from engines.stt_transcribe_vllm_asr import VllmAsrBatchEngine
+        from batch_engine import VllmAsrBatchEngine
+        from rt_engine import VllmAsrRealtimeEngine
 
         # Create adapters sharing the same vLLM instance
         self._batch_engine = VllmAsrBatchEngine(llm=self._llm)
@@ -254,43 +253,24 @@ class BatchRejectedError(TaskDeferredError):
 
 
 # ---------------------------------------------------------------------------
-# Import helpers: resolve engine modules from file paths since engines/
-# directories are not standard Python packages.
+# Import path: ensure the engine directory is on sys.path so that sibling
+# modules (batch_engine, rt_engine) can be imported by name.
 # ---------------------------------------------------------------------------
 
 
-def _register_engine_modules() -> None:
-    """Register engine modules so they can be imported by the runner."""
-    import importlib.util
+def _ensure_import_path() -> None:
+    """Add this file's directory to sys.path for sibling imports."""
     import sys
     from pathlib import Path
 
-    engines_root = Path(__file__).resolve().parents[2]
+    engine_dir = str(Path(__file__).resolve().parent)
+    if engine_dir not in sys.path:
+        sys.path.insert(0, engine_dir)
 
-    # Register batch engine
-    batch_path = engines_root / "stt-transcribe" / "vllm-asr" / "engine.py"
-    if batch_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "engines.stt_transcribe_vllm_asr", batch_path
-        )
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_transcribe_vllm_asr"] = module
-            spec.loader.exec_module(module)
 
-    # Register RT engine
-    rt_path = engines_root / "stt-rt" / "vllm-asr" / "engine.py"
-    if rt_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "engines.stt_rt_vllm_asr", rt_path
-        )
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_rt_vllm_asr"] = module
-            spec.loader.exec_module(module)
+_ensure_import_path()
 
 
 if __name__ == "__main__":
-    _register_engine_modules()
     runner = UnifiedVllmAsrRunner()
     runner.run()
