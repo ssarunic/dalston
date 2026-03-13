@@ -456,12 +456,14 @@ class TestVLLMASREngine:
 
         # Vocabulary terms should be injected into the LLM chat messages
         chat_call = mock_llm.chat.call_args
-        messages = chat_call[0][0][0]  # first conversation's messages
+        messages = chat_call[1]["messages"]  # passed as keyword arg
         # Find the text content that contains vocabulary terms
         message_texts = [
-            m["content"] if isinstance(m["content"], str)
+            m["content"]
+            if isinstance(m["content"], str)
             else " ".join(
-                part.get("text", "") for part in m["content"]
+                part.get("text", "")
+                for part in m["content"]
                 if isinstance(part, dict) and part.get("type") == "text"
             )
             for m in messages
