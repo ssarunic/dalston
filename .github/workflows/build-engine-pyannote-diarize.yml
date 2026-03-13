@@ -1,0 +1,71 @@
+# .github/workflows/build-engine-pyannote-diarize.yml
+#
+# Builds the Pyannote 4.0 diarization engine image and pushes to ECR.
+# Runs natively on x86 — no QEMU, no 40-minute builds.
+#
+# Triggers:
+#   - Push to main that changes engine code or its Dockerfile
+#   - Manual dispatch (for rebuilding without code changes)
+#
+# Prerequisites (one-time setup):
+#   1. Create OIDC identity provider in AWS IAM (see build-engine-onnx.yml)
+#   2. Create IAM role with ECR push permissions
+#   3. Create ECR repository: dalston/stt-diarize-pyannote
+#   4. Set repository variable: AWS_ACCOUNT_ID
+
+name: Build Pyannote Diarize Engine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engines/stt-diarize/pyannote-4.0/**'
+      - 'dalston/**'
+      - 'pyproject.toml'
+  workflow_dispatch:  # manual trigger
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPO: dalston/stt-diarize-pyannote
+
+permissions:
+  id-token: write   # needed for OIDC auth with AWS
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest  # x86 native — no QEMU needed
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # OIDC auth — no stored AWS credentials needed
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build with CUDA support for GPU deployment
+          docker build \
+            --build-arg DEVICE=cuda \
+            -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPO:latest \
+            -f engines/stt-diarize/pyannote-4.0/Dockerfile \
+            .
+
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:latest
+
+          echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$ECR_REGISTRY/$ECR_REPO:latest\`" >> $GITHUB_STEP_SUMMARY
