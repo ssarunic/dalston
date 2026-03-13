@@ -37,9 +37,7 @@ class TestUnifiedEngineYaml:
         assert caps["word_timestamps"] is True
         assert caps["streaming"] is True
         assert caps["max_concurrency"] == 8
-        assert caps["vocabulary"]["method"] == "word_boosting"
-        assert caps["vocabulary"]["batch"] is True
-        assert caps["vocabulary"]["realtime"] is True
+        assert "vocabulary" not in caps  # vocabulary support is reported by code, not YAML
         assert caps["max_audio_duration"] == 7200
 
     def test_input_format(self) -> None:

@@ -18,10 +18,6 @@ capabilities:
   streaming: true
   word_timestamps: true
   max_concurrency: 4
-  vocabulary:
-    method: phrase_boosting
-    batch: true
-    realtime: false  # GPU-PB not yet wired for realtime path
 
 input:
   audio_formats:

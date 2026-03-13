@@ -23,10 +23,6 @@ capabilities:
   streaming: true
   word_timestamps: true
   max_concurrency: 8
-  vocabulary:
-    method: word_boosting
-    batch: true
-    realtime: true
 
 input:
   audio_formats:

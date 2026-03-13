@@ -158,9 +158,9 @@ export function RealtimeLive() {
     if (vocabWorker) {
       const method = vocabWorker.vocabulary_support?.method
       const methodLabel = method && method !== 'none'
-        ? ` (${method.replace('_', ' ')})`
-        : ''
-      return { supported: true, text: methodLabel ? `Via ${method?.replace('_', ' ')}` : null }
+        ? method.replace('_', ' ')
+        : null
+      return { supported: true, text: methodLabel ? `Via ${methodLabel}` : null }
     }
     return { supported: false, text: 'This model does not support vocabulary boosting' }
   }, [model, enginesData, registryData])

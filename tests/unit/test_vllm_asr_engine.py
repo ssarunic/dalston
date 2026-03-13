@@ -421,8 +421,8 @@ class TestVLLMASREngine:
         assert result.data.language == "en"
         assert len(result.data.segments) == 1
 
-    def test_process_vocabulary_warning(self, engine, tmp_path):
-        """Process should add warning when vocabulary is provided."""
+    def test_process_vocabulary_passed_to_llm(self, engine, tmp_path):
+        """Process should pass vocabulary terms to the LLM via instruction prompting."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -452,10 +452,23 @@ class TestVLLMASREngine:
         with patch.dict(
             sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
         ):
-            result = engine.process(mock_input, _ctx(mock_input))
+            engine.process(mock_input, _ctx(mock_input))
 
-        assert len(result.data.warnings) > 0
-        assert "not supported" in result.data.warnings[0].lower()
+        # Vocabulary terms should be injected into the LLM chat messages
+        chat_call = mock_llm.chat.call_args
+        messages = chat_call[0][0][0]  # first conversation's messages
+        # Find the text content that contains vocabulary terms
+        message_texts = [
+            m["content"] if isinstance(m["content"], str)
+            else " ".join(
+                part.get("text", "") for part in m["content"]
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+            for m in messages
+        ]
+        combined = " ".join(message_texts)
+        assert "Dalston" in combined
+        assert "vLLM" in combined
 
     def test_transcribe_audio_array_with_mocked_vllm(self, engine):
         """Engine should support in-memory audio transcription bridge."""
