@@ -74,10 +74,17 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
 
-    def __init__(self) -> None:
+    def __init__(self, llm: Any = None) -> None:
+        """Initialize the engine.
+
+        Args:
+            llm: Optional shared vLLM LLM instance. If provided, the engine
+                 skips creating its own and uses the injected one. This is how
+                 the unified runner shares a single model across batch and RT.
+        """
         super().__init__()
 
-        self._llm = None
+        self._llm = llm
         self._loaded_model_id: str | None = None
         self._loaded_model_path: str | None = None
         self._tokenizer = None

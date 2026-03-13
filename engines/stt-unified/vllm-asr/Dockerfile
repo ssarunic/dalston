@@ -1,0 +1,56 @@
+# Unified vLLM-ASR Engine
+#
+# One process, one vLLM model, both batch and realtime interfaces.
+# Supports Voxtral, Qwen2-Audio, and any model in the adapter registry.
+#
+# Build from repo root:
+#   docker build -t dalston/stt-vllm-asr:latest -f engines/stt-unified/vllm-asr/Dockerfile .
+
+# --- GPU only (vLLM requires CUDA) ---
+FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3.11-dev python3-pip \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dalston SDK
+WORKDIR /opt/dalston
+COPY pyproject.toml .
+COPY dalston/ dalston/
+RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
+
+# vLLM engine dependencies
+WORKDIR /engine
+COPY engines/stt-unified/vllm-asr/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Model cache
+ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
+RUN mkdir -p /models/huggingface
+
+# Engine code (runner + adapters it imports via _register_engine_modules)
+WORKDIR /app
+COPY engines/stt-unified/vllm-asr/ engines/stt-unified/vllm-asr/
+COPY engines/stt-transcribe/vllm-asr/engine.py engines/stt-transcribe/vllm-asr/engine.py
+COPY engines/stt-rt/vllm-asr/engine.py engines/stt-rt/vllm-asr/engine.py
+COPY engines/stt-rt/vllm-asr/engine.yaml /etc/dalston/engine.yaml
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
+
+EXPOSE 9000
+
+CMD ["python", "engines/stt-unified/vllm-asr/runner.py"]

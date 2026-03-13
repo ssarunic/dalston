@@ -464,27 +464,6 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # Voxtral Mini 3B (GPU - multilingual transcription)
-  # Note: Voxtral uses different framework (HF transformers), not part of M36 consolidation.
-  stt-batch-transcribe-voxtral-mini-3b:
-    image: dalston/stt-batch-transcribe-voxtral-mini-3b:1.0.0
-    build:
-      context: .
-      dockerfile: engines/stt-transcribe/voxtral/Dockerfile
-      args:
-        MODEL_VARIANT: mini-3b
-        DEVICE: cuda
-    environment:
-      <<: [*common-env, *observability-env]
-      DALSTON_ENGINE_ID: vllm-asr
-      DALSTON_MODEL_VARIANT: mini-3b
-    volumes:
-      - model-cache:/models
-    depends_on: *batch-depends
-    deploy: *gpu-deploy
-    profiles: [gpu]
-    restart: unless-stopped
-
   # vLLM Audio ASR (GPU - audio LLMs via vLLM)
   # Supports Voxtral and Qwen2-Audio model families
   # Models are downloaded from S3 at runtime via S3ModelStorage

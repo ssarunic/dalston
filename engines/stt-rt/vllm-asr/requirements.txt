@@ -1,9 +1,9 @@
-# Voxtral realtime on vLLM
+# vLLM ASR Realtime Engine Dependencies
 
 # vLLM with multimodal audio support
 vllm[audio]>=0.6.0
 
-# Audio utilities used by engine_id + tests
+# Audio processing
 soundfile>=0.12.0
 librosa>=0.10.0
 numpy>=1.24.0
