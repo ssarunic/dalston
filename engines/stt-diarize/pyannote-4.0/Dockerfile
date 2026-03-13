@@ -53,11 +53,13 @@ WORKDIR /engine
 COPY engines/stt-diarize/pyannote-4.0/requirements.txt .
 
 # Install pyannote 4.0 and dependencies
-# GPU: install PyTorch with CUDA support, then pyannote on top
+# GPU: use --extra-index-url so pip resolves CUDA-enabled torch wheels
+#       that satisfy pyannote's torch>=2.8.0 requirement in one pass.
+#       cu126 matches the nvidia/cuda:12.6 base image.
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
-            torch torchaudio --index-url https://download.pytorch.org/whl/cu124 && \
-        pip install --no-cache-dir --break-system-packages -r requirements.txt; \
+            --extra-index-url https://download.pytorch.org/whl/cu126 \
+            -r requirements.txt; \
     else \
         pip install --no-cache-dir --break-system-packages -r requirements.txt; \
     fi
