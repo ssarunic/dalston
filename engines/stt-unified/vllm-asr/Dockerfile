@@ -23,12 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/dalston
 COPY pyproject.toml .
 COPY dalston/ dalston/
-RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
+RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime-sdk]"
 
 # vLLM engine dependencies
 WORKDIR /engine
 COPY engines/stt-unified/vllm-asr/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
 ENV HF_HUB_CACHE=/models/huggingface

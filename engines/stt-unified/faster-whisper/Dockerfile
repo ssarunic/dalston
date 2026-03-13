@@ -32,17 +32,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/dalston
 COPY pyproject.toml .
 COPY dalston/ dalston/
-RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
+RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime-sdk]"
 
 # Faster Whisper engine dependencies
 WORKDIR /engine
 COPY engines/stt-unified/faster-whisper/requirements.txt .
 RUN if [ "$DEVICE" = "cpu" ]; then \
-        pip install --no-cache-dir \
+        pip install --no-cache-dir --break-system-packages \
             torch --index-url https://download.pytorch.org/whl/cpu && \
-        pip install --no-cache-dir torchaudio; \
+        pip install --no-cache-dir --break-system-packages torchaudio; \
     fi
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
 ENV HF_HUB_CACHE=/models/huggingface
