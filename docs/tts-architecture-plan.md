@@ -10,6 +10,8 @@
 | **Qwen3-TTS** | 0.6B–1.7B | Yes (3s sample) | Yes | Partial | Yes (97ms TTFA) | 10 (EN, ZH, JA, KO, DE, FR, RU, PT, ES, IT) | Transformer, dual-track streaming | 8–16 GB VRAM | Apache 2.0 |
 | **CosyVoice 3** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes (150ms TTFA) | EN, ZH, JA, KO | Flow matching + GRPO post-training | 8–12 GB VRAM | Apache 2.0 |
 | **F5-TTS** | ~300M | Yes (10s sample, zero-shot) | Partial | No | Yes | Multilingual | Non-autoregressive, flow-matching DiT | 6–8 GB VRAM | MIT |
+| **Kyutai Pocket TTS** | 100M | Yes (zero-shot, few seconds) | No | No | Yes (6x RT on CPU, ~200ms first chunk) | English (more planned) | CALM (Continuous Audio Language Model) + inner monologue | CPU only (2 cores, no GPU needed) | MIT |
+| **Kyutai TTS 1.6B** | 1.8B | Yes (pre-computed voice embeddings) | No | No | Yes (streaming, ~200ms latency) | EN, FR | Hierarchical Transformer + Mimi codec, delayed streams | 8–16 GB VRAM (64 sessions on L40S) | MIT |
 | **Kokoro** | 82M | No | Limited (voice presets) | No | Yes (96x RT) | Limited | StyleTTS2-based | 2–4 GB VRAM (runs on CPU) | Apache 2.0 |
 | **Dia** | 1.6B | Yes | Yes (tag-based) | Yes — `(laughs)`, `(coughs)`, `(gasps)` | No (batch) | English only | Autoregressive + DAC codec | 8–12 GB VRAM | Apache 2.0 |
 | **Chatterbox** | ~0.5B | Yes (zero-shot) | Yes | Partial | Yes | 23 languages | Built-in watermarking | 6–8 GB VRAM | MIT |
@@ -43,9 +45,11 @@
 2. **Qwen3-TTS** is the best balance of quality, speed, and features — cloning, streaming (97ms), multilingual, Apache 2.0
 3. **CosyVoice 3** (Alibaba, May 2025) — state-of-the-art content consistency, GRPO post-training, 150ms streaming
 4. **F5-TTS** is the best pure cloning engine — fast, high quality, MIT license
-5. **Kokoro** is the speed king — tiny model, CPU-friendly, great for low-latency where cloning isn't needed
-6. **Dia** is unique for non-speech sounds and dialogue — `(laughs)`, `(coughs)` tags are exactly what you described wanting
-7. **Chatterbox** is the dark horse — beats ElevenLabs in blind tests, 23 langs, MIT, built-in audio watermarking
+5. **Kyutai Pocket TTS** is the new CPU champion — 100M params, voice cloning, 6x real-time on M4 CPU, MIT license. Replaces Kokoro as the go-to lightweight option since it adds cloning
+6. **Kyutai TTS 1.6B** is the production streaming pick — 1.8B params, Mimi codec, Rust server serves 64 sessions on one L40S GPU, powers Unmute.sh
+7. **Kokoro** remains the smallest/fastest option when cloning isn't needed
+8. **Dia** is unique for non-speech sounds and dialogue — `(laughs)`, `(coughs)` tags are exactly what you described wanting
+9. **Chatterbox** is the dark horse — beats ElevenLabs in blind tests, 23 langs, MIT, built-in audio watermarking
 
 ### Key trends (2025–2026)
 
@@ -185,6 +189,18 @@ Following the unified engine pattern from `engines/stt-unified/`:
 ```
 engines/
   tts-unified/
+    kyutai-pocket/             # CPU cloning, 100M params
+      engine.yaml
+      batch_engine.py
+      rt_engine.py
+      core.py
+      Dockerfile
+    kyutai-1.6b/               # Production streaming, Rust server
+      engine.yaml
+      batch_engine.py
+      rt_engine.py
+      core.py
+      Dockerfile
     kokoro/                    # Speed-focused, no cloning
       engine.yaml
       batch_engine.py
@@ -305,6 +321,8 @@ MODEL_PARAM_SYNTHESIZE = "model"        # reuse "model" since it's a different e
 | F5-TTS | Zero-shot, 10s sample | 10s | Highest |
 | Dia | Reference audio | 5s | Good |
 | Chatterbox | Zero-shot | 5s | High |
+| Kyutai Pocket TTS | Zero-shot, few seconds | 3s | High (CPU!) |
+| Kyutai TTS 1.6B | Pre-computed embeddings | 5s | High |
 | Kokoro | Not supported | N/A | N/A |
 
 ### Voice management API
@@ -369,6 +387,8 @@ If an engine doesn't support a tag, TEXT_PREPARE strips it and logs a warning. N
 | Engine | Batch | Real-time Streaming | Notes |
 |---|---|---|---|
 | Qwen3-TTS | Yes | Yes (97ms TTFA) | Best all-rounder |
+| Kyutai Pocket TTS | Yes | Yes (~200ms, CPU) | Voice cloning on CPU! |
+| Kyutai TTS 1.6B | Yes | Yes (~200ms, GPU) | Rust server, 64 sessions/GPU |
 | Kokoro | Yes | Yes (fastest) | No cloning, but lowest latency |
 | F5-TTS | Yes | Yes | Good balance |
 | Dia | Yes | No | Batch-only, but best for dialogue |
@@ -419,9 +439,88 @@ If an engine doesn't support a tag, TEXT_PREPARE strips it and logs a warning. N
 
 ---
 
-## 8. Open Questions
+## 8. TTS vs STT: Hardware, Runtimes, and Formats
 
-1. **ElevenLabs API compatibility** — Do we want to mirror their TTS API surface the way we mirror their STT API? Their v3 Audio Tags format is becoming a de facto standard.
+### 8.1 Hardware comparison
+
+TTS models are **significantly lighter** than STT models. Here's a side-by-side:
+
+| | STT (current Dalston engines) | TTS (proposed engines) |
+|---|---|---|
+| **Heaviest model** | vLLM Voxtral 3B — 16 GB RAM, 8+ GB VRAM | Fish Audio OpenAudio S1 4B — 16–24 GB VRAM |
+| **Mainstream models** | Faster Whisper large-v3-turbo — 8 GB RAM, 4 GB VRAM | Qwen3-TTS 1.7B — 8–16 GB VRAM |
+| **Mid-range** | NeMo Parakeet 1.1B — 8 GB RAM, 4 GB VRAM | Kyutai TTS 1.8B — 8–16 GB VRAM |
+| **Lightweight** | Parakeet ONNX 0.6B — 4 GB RAM, 2 GB VRAM | F5-TTS 300M — 6–8 GB VRAM |
+| **CPU-capable** | Faster Whisper int8 — 4 GB RAM, 0 GPU | **Kyutai Pocket TTS 100M — 2 cores, 0 GPU** |
+| **Tiny** | — | Kokoro 82M — runs on CPU |
+
+**Key differences:**
+- STT processes variable-length audio input → model must handle arbitrary durations
+- TTS generates audio output → generation time scales with text length, not model size
+- TTS models tend to be **cheaper per request** because text input is small; the expensive part is audio generation which can be streamed
+- **GPU sharing is viable**: Kyutai Pocket TTS (100M) or Kokoro (82M) on CPU alongside a Whisper GPU engine is a natural pairing
+
+### 8.2 Runtimes — fewer options than STT
+
+STT has 6 distinct runtimes in Dalston:
+
+| STT Runtime | Library | Purpose |
+|---|---|---|
+| CTranslate2 | faster-whisper | Optimized Whisper inference |
+| ONNX Runtime | onnxruntime | Portable, lightweight, CPU-friendly |
+| NVIDIA NeMo | nemo_toolkit | NVIDIA-native, best for Parakeet |
+| HuggingFace | transformers | Universal, any HF ASR model |
+| vLLM | vllm | Audio LLMs (Voxtral, Qwen2-Audio) |
+| NVIDIA Riva | nvidia-riva-client | Managed GPU sidecar |
+
+**TTS has fewer runtime options** because the ecosystem is younger and less fragmented:
+
+| TTS Runtime | Library | Models | Notes |
+|---|---|---|---|
+| **PyTorch** | torch | Most models (Qwen3, F5, Dia, Chatterbox, Kokoro) | Default for research models |
+| **Rust (Kyutai)** | kyutai-tts-server | Kyutai TTS 1.6B | Production server, 64 sessions/GPU |
+| **ONNX** | onnxruntime | Kokoro, Piper | Lightweight, CPU-friendly |
+| **MLX** | mlx | Kyutai Pocket TTS | Apple Silicon only |
+
+**Implications for Dalston:**
+- Start with **PyTorch-only** — it covers all Tier 1 models
+- Kyutai TTS 1.6B's **Rust server** is interesting for production but would need a sidecar pattern (like Riva NIM) since it doesn't use the Python engine SDK
+- ONNX variants may appear as models mature, but aren't necessary for Phase 1
+- No CTranslate2 or vLLM equivalent exists for TTS yet (the models are end-to-end, not Whisper-like encoder-decoder)
+
+### 8.3 Audio formats — simpler than STT
+
+STT input formats (what we accept today):
+
+| Format | Use case |
+|---|---|
+| `pcm_s16le` | Primary raw format |
+| `pcm_f32le` | High-precision |
+| `mulaw` / `alaw` | Telephony |
+| `wav` | Container format (Riva) |
+| Any (via audio-prepare) | FFmpeg converts to 16kHz mono WAV |
+
+**TTS output formats** are simpler — we generate audio and encode it:
+
+| Format | Sample Rate | Use case |
+|---|---|---|
+| `wav` (pcm_s16le) | 24000 Hz (model native) | Default, lossless |
+| `mp3` | 24000 Hz | Compressed, web delivery |
+| `opus` | 24000 Hz | Low-bitrate streaming |
+| `pcm_s16le` (raw) | 24000 Hz | Real-time streaming over WebSocket |
+| `aac` | 24000 Hz | Mobile/browser compatibility |
+
+**Key difference:** STT standardizes on **16 kHz input** (speech recognition standard). TTS models typically output at **24 kHz** (better audio quality for playback). Some models (Kyutai TTS 1.6B with Mimi codec) output at **24 kHz natively**; Kokoro at **24 kHz**; Qwen3-TTS at **24 kHz**.
+
+Format conversion in TTS is an **output concern** handled by the AUDIO_ENHANCE stage or inline in the engine. No equivalent of the STT `audio-prepare` input stage is needed — text is text.
+
+---
+
+## 9. Open Questions
+
+1. **Kyutai TTS 1.6B integration** — Its Rust WebSocket server is production-grade (64 sessions on one L40S) but doesn't fit the Python engine SDK. Do we use a sidecar pattern like Riva NIM, or write a Python adapter that calls the Rust server?
+
+2. **ElevenLabs API compatibility** — Do we want to mirror their TTS API surface the way we mirror their STT API? Their v3 Audio Tags format is becoming a de facto standard.
 
 2. **Multi-speaker scripts** — Should we support a structured dialogue format (e.g., screenplay-style) or rely on Dia's natural tag parsing?
 
@@ -429,4 +528,4 @@ If an engine doesn't support a tag, TEXT_PREPARE strips it and logs a warning. N
 
 4. **GPU sharing** — TTS models are smaller than ASR models. Can we colocate TTS + ASR engines on the same GPU? Kokoro at 82M params could easily share with a Whisper instance.
 
-5. **Which engine first?** — Kokoro is simplest to integrate (small, fast, CPU, no cloning complexity). Qwen3-TTS is most feature-complete. F5-TTS has the best cloning. Dia has the sound effects you want.
+6. **Which engine first?** — Kyutai Pocket TTS is now the strongest Phase 1 candidate: CPU-only, voice cloning, MIT license, 100M params. Alternatively, Kokoro (no cloning) or Qwen3-TTS (most features) for different priorities.
