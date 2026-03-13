@@ -33,6 +33,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install system dependencies (ffmpeg for audio processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libsndfile1 \
     git \
     && rm -rf /var/lib/apt/lists/*
 
