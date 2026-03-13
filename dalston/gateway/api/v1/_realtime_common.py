@@ -144,7 +144,10 @@ class RTRoutingParams:
         self.effective_model = effective_model
 
 
-async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
+async def resolve_rt_routing(
+    requested_model: str | None,
+    language: str = "auto",
+) -> RTRoutingParams:
     """Resolve routing parameters for a real-time session.
 
     When a specific model is requested, looks up its engine_id for worker matching.
@@ -152,16 +155,24 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
     streaming model from the registry (M48) and collects valid engine_ids for
     fallback routing.
 
+    If a specific language is requested (not "auto"), validates that the resolved
+    model supports it. Raises ValueError if the model cannot handle the language.
+
     Args:
         requested_model: Model ID from client, or None/empty for auto-select.
+        language: Requested language code, or "auto" for auto-detection.
 
     Returns:
         Routing parameters to pass to the session allocator.
+
+    Raises:
+        ValueError: If the resolved model does not support the requested language.
     """
     routing_model = requested_model or None
     model_engine_id: str | None = None
     valid_engine_ids: set[str] | None = None
     effective_model: str = requested_model or ""
+    model_languages: list[str] | None = None
 
     if routing_model:
         try:
@@ -169,6 +180,7 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
                 model_entry = await ModelRegistryService().get_model(db, routing_model)
                 if model_entry:
                     model_engine_id = model_entry.engine_id
+                    model_languages = model_entry.languages
                 break
         except Exception as e:
             logger.warning("model_lookup_failed", model=routing_model, error=str(e))
@@ -183,11 +195,22 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
                 rt_models = [m for m in downloaded_models if m.streaming]
                 candidates = rt_models if rt_models else list(downloaded_models)
 
+                # If a specific language is requested, prefer models that support it
+                if language and language != "auto" and candidates:
+                    lang_candidates = [
+                        m
+                        for m in candidates
+                        if not m.languages or language in m.languages
+                    ]
+                    if lang_candidates:
+                        candidates = lang_candidates
+
                 if candidates:
                     largest = max(candidates, key=lambda m: m.size_bytes or 0)
                     routing_model = largest.id
                     model_engine_id = largest.engine_id
                     effective_model = largest.id
+                    model_languages = largest.languages
                     logger.info(
                         "auto_selected_rt_model",
                         model_id=largest.id,
@@ -201,6 +224,18 @@ async def resolve_rt_routing(requested_model: str | None) -> RTRoutingParams:
                 break
         except Exception as e:
             logger.warning("registry_lookup_failed", error=str(e))
+
+    # Validate language support against the resolved model
+    if (
+        language
+        and language != "auto"
+        and model_languages
+        and language not in model_languages
+    ):
+        raise ValueError(
+            f"Model '{effective_model}' does not support language '{language}'. "
+            f"Supported: {', '.join(sorted(model_languages))}"
+        )
 
     return RTRoutingParams(
         routing_model, model_engine_id, valid_engine_ids, effective_model

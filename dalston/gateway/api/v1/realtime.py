@@ -332,7 +332,20 @@ async def realtime_transcription(
             )
             return
 
-        rt = await _resolve_rt_routing(model if model else None)
+        try:
+            rt = await _resolve_rt_routing(model if model else None, language=language)
+        except ValueError as e:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "language_not_supported",
+                    "message": str(e),
+                }
+            )
+            await websocket.close(
+                code=WS_CLOSE_INVALID_REQUEST, reason="Language not supported"
+            )
+            return
 
         # Resolve optional resume session UUID
         previous_session_uuid = None
@@ -562,7 +575,23 @@ async def elevenlabs_realtime_transcription(
                 return
 
         # ElevenLabs model_id (scribe_v1, scribe_v2, etc.) is treated as "auto"
-        rt = await _resolve_rt_routing(None)
+        try:
+            rt = await _resolve_rt_routing(None, language=language_code)
+        except ValueError as e:
+            await websocket.send_json(
+                {
+                    "message_type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "code": "language_not_supported",
+                        "message": str(e),
+                    },
+                }
+            )
+            await websocket.close(
+                code=WS_CLOSE_INVALID_REQUEST, reason="Language not supported"
+            )
+            return
 
         # Delegate allocation / keepalive / release to the proxy.
         # ElevenLabs handler sends session_started inside the connect callback
