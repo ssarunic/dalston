@@ -99,7 +99,7 @@ except ImportError:
 
 def load_whisper_engine():
     """Load FasterWhisperBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-transcribe/faster-whisper/engine.py")
+    engine_path = Path("engines/stt-unified/faster-whisper/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("Faster-whisper engine not found")
 

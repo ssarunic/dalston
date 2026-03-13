@@ -57,12 +57,10 @@ ENV TORCH_HOME=/models/torch
 ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
 RUN mkdir -p /models/huggingface /models/torch /models/ctranslate2/faster-whisper
 
-# Engine code (runner + adapters it imports via _register_engine_modules)
+# Engine code (all adapters colocated in stt-unified/faster-whisper/)
 WORKDIR /app
 COPY engines/stt-unified/faster-whisper/ engines/stt-unified/faster-whisper/
-COPY engines/stt-transcribe/faster-whisper/engine.py engines/stt-transcribe/faster-whisper/engine.py
-COPY engines/stt-rt/faster-whisper/engine.py engines/stt-rt/faster-whisper/engine.py
-COPY engines/stt-rt/faster-whisper/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-unified/faster-whisper/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
