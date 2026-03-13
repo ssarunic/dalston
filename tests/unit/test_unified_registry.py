@@ -97,17 +97,6 @@ class TestEngineRecord:
         record = self._make_record(status="offline")
         assert record.is_healthy is False
 
-    def test_supports_language(self):
-        record = self._make_record(languages=["en", "es", "fr"])
-        assert record.supports_language("en") is True
-        assert record.supports_language("EN") is True
-        assert record.supports_language("de") is False
-
-    def test_supports_language_none_means_all(self):
-        record = self._make_record(languages=None)
-        assert record.supports_language("en") is True
-        assert record.supports_language("zh") is True
-
     def test_supports_interface(self):
         record = self._make_record(interfaces=["batch", "realtime"])
         assert record.supports_interface("batch") is True
@@ -132,7 +121,6 @@ class TestRecordSerialization:
             engine_id="faster-whisper",
             version="1.0",
             stages=["transcribe"],
-            languages=["en"],
             supports_word_timestamps=True,
         )
         original = EngineRecord(
@@ -181,7 +169,6 @@ class TestRecordSerialization:
             active_realtime=1,
             endpoint="ws://localhost:9000",
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["en", "auto"],
             gpu_memory_used="4.2GB",
             gpu_memory_total="8.0GB",
             last_heartbeat=now,
@@ -195,7 +182,6 @@ class TestRecordSerialization:
         assert restored.interfaces == ["realtime"]
         assert restored.endpoint == "ws://localhost:9000"
         assert restored.models_loaded == ["Systran/faster-whisper-large-v3"]
-        assert restored.languages == ["en", "auto"]
         assert restored.gpu_memory_used == "4.2GB"
 
     def test_mapping_to_record_missing_engine_id(self):
@@ -211,13 +197,11 @@ class TestRecordSerialization:
                 "engine_id": "test",
                 "interfaces": "not-json",
                 "models_loaded": "{bad}",
-                "languages": "also-bad",
             },
         )
         assert result is not None
         assert result.interfaces == ["batch"]  # fallback
         assert result.models_loaded is None
-        assert result.languages is None
 
 
 # ---------------------------------------------------------------------------
@@ -451,49 +435,6 @@ class TestUnifiedEngineRegistry:
         )
         assert len(batch_available) == 1
         assert batch_available[0].instance == "batch-1"
-
-    @pytest.mark.asyncio
-    async def test_get_available_filters_by_language(self, registry, mock_redis):
-        now = datetime.now(UTC).isoformat()
-        mock_redis.smembers.return_value = {"en-only", "multilingual"}
-
-        async def mock_hgetall(key):
-            if "en-only" in key:
-                return {
-                    "engine_id": "faster-whisper",
-                    "stage": "transcribe",
-                    "status": "idle",
-                    "interfaces": '["batch"]',
-                    "capacity": "4",
-                    "active_batch": "0",
-                    "active_realtime": "0",
-                    "languages": '["en"]',
-                    "last_heartbeat": now,
-                }
-            elif "multilingual" in key:
-                return {
-                    "engine_id": "nemo",
-                    "stage": "transcribe",
-                    "status": "idle",
-                    "interfaces": '["batch"]',
-                    "capacity": "4",
-                    "active_batch": "0",
-                    "active_realtime": "0",
-                    "languages": '["en", "es", "fr"]',
-                    "last_heartbeat": now,
-                }
-            return {}
-
-        mock_redis.hgetall.side_effect = mock_hgetall
-
-        # French - only multilingual matches
-        fr_available = await registry.get_available(stage="transcribe", language="fr")
-        assert len(fr_available) == 1
-        assert fr_available[0].instance == "multilingual"
-
-        # English - both match
-        en_available = await registry.get_available(stage="transcribe", language="en")
-        assert len(en_available) == 2
 
     @pytest.mark.asyncio
     async def test_get_available_model_via_capabilities_model_variants(

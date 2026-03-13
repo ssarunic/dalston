@@ -139,14 +139,6 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
                 terms_count=len(vocabulary),
             )
 
-        # Parakeet is English-only, ignore language parameter
-        if language != "auto" and language != "en":
-            logger.warning(
-                "language_not_supported",
-                requested=language,
-                using="en",
-            )
-
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
@@ -184,9 +176,9 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         return self.build_transcript(
             text=result.text,
             segments=segments,
-            language="en",
+            language=language if language != "auto" else "en",
             engine_id="nemo",
-            language_confidence=1.0,
+            language_confidence=1.0 if language != "auto" else 0.5,
         )
 
     def use_streaming_decode(self, model_variant: str | None = None) -> bool:
@@ -220,7 +212,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         Args:
             audio_iter: Iterator of float32 audio chunks
-            language: Language code (ignored — Parakeet is English-only)
+            language: Language code
             model_variant: Model name
 
         Yields:
@@ -262,7 +254,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
                         confidence=confidence,
                     )
                 ],
-                language="en",
+                language=language if language != "auto" else "en",
                 engine_id="nemo",
                 language_confidence=confidence,
             )
@@ -324,10 +316,6 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         """Return list of supported model identifiers."""
         return NemoInference.SUPPORTED_MODELS
-
-    def get_languages(self) -> list[str]:
-        """Return list of supported languages. Parakeet only supports English."""
-        return ["en"]
 
     def get_engine_id(self) -> str:
         """Return the inference framework identifier."""

@@ -176,10 +176,6 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return list of supported model variants."""
         return FasterWhisperInference.SUPPORTED_MODELS
 
-    def get_languages(self) -> list[str]:
-        """Return list of supported languages."""
-        return ["auto"]
-
     def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
         return "faster-whisper"

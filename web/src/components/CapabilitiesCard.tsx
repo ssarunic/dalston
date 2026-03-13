@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import {
-  Globe,
   Zap,
   CheckCircle,
   XCircle,
@@ -43,10 +42,6 @@ export function CapabilitiesCard() {
 
   if (!capabilities) return null
 
-  const languageCount = capabilities.languages.includes('*')
-    ? 'All'
-    : capabilities.languages.length
-
   return (
     <Card>
       <CardContent className="py-4 space-y-3">
@@ -72,17 +67,8 @@ export function CapabilitiesCard() {
           </div>
         </div>
 
-        {/* Features row: Languages + all features */}
+        {/* Features row */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          {/* Languages */}
-          <div className="flex items-center gap-2">
-            <Globe className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm">
-              {languageCount === 'All' ? 'Multilingual' : `${languageCount} languages`}
-            </span>
-          </div>
-
-          {/* Features */}
           {FEATURES.map(({ key, label }) => {
             const isEnabled = capabilities.features[key]
             return (

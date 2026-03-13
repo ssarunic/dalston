@@ -48,7 +48,6 @@ def mock_registry():
 def mock_catalog():
     """Create mock engine catalog."""
     catalog = MagicMock()
-    catalog.validate_language_support = MagicMock(return_value=None)
     catalog.get_engine = MagicMock(return_value=None)
     return catalog
 

@@ -98,7 +98,6 @@ class TestTransformRuntimeToEntry:
         assert entry["stage"] == "transcribe"
         assert entry["execution_profile"] == "venv"
         assert entry["capabilities"]["stages"] == ["transcribe"]
-        assert entry["capabilities"]["languages"] == ["en", "es"]
         assert entry["capabilities"]["supports_word_timestamps"] is True
         assert entry["hardware"]["gpu_required"] is False
         assert entry["hardware"]["gpu_optional"] is True
@@ -127,12 +126,6 @@ class TestTransformRuntimeToEntry:
         assert entry["hardware"]["gpu_optional"] is True
         assert entry["hardware"]["memory"] is None
 
-    def test_all_languages_converted_to_null(self, valid_engine_id_yaml: dict) -> None:
-        """Languages ['all'] should be converted to None."""
-        valid_engine_id_yaml["capabilities"]["languages"] = ["all"]
-        entry = transform_engine_id_to_entry(valid_engine_id_yaml, Path("test.yaml"))
-        assert entry["capabilities"]["languages"] is None
-
     def test_gpu_required(self, valid_engine_id_yaml: dict) -> None:
         """GPU required should be detected correctly."""
         valid_engine_id_yaml["container"]["gpu"] = "required"
@@ -151,8 +144,8 @@ class TestFindRuntimeYamls:
             files = find_engine_id_yamls(engines_dir)
             # Should find engine.yaml files
             assert len(files) >= 5
-            # All files should be engine.yaml
-            assert all(f.name == "engine.yaml" for f in files)
+            # All files should be engine.yaml or rt_engine.yaml
+            assert all(f.name in ("engine.yaml", "rt_engine.yaml") for f in files)
 
     def test_empty_for_nonexistent_dir(self) -> None:
         """Should return empty list for non-existent directory."""

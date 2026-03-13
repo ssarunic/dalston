@@ -354,12 +354,13 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 f"Vocabulary boosting ({len(vocabulary)} terms) failed to configure - transcribed without boosting"
             )
 
+        language = params.language or "en"
         return self.build_transcript(
             text=core_result.text,
             segments=segments,
-            language="en",
+            language=language if language != "auto" else "en",
             engine_id=self._engine_id,
-            language_confidence=1.0,
+            language_confidence=1.0 if language != "auto" else 0.5,
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,
@@ -408,7 +409,6 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             engine_id=self._engine_id,
             version="1.0.0",
             stages=["transcribe"],
-            languages=["en"],  # English only
             supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=sorted(self.SUPPORTED_MODELS),

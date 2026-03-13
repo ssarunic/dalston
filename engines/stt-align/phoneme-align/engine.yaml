@@ -19,8 +19,6 @@ container:
   model_cache: /models
 
 capabilities:
-  languages:
-    - all  # Supports languages with wav2vec2 models
   max_audio_duration: 7200  # 2 hours
   streaming: false
   word_timestamps: true

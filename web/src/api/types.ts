@@ -176,7 +176,6 @@ export interface WorkerStatus {
   capacity: number
   active_sessions: number
   models: string[]  // M43: Currently loaded models (dynamic)
-  languages: string[]
   engine_id?: string | null  // M43: Model engine_id (e.g., "faster-whisper")
   supports_vocabulary?: boolean
 }
@@ -587,7 +586,6 @@ export interface CreateJobResponse {
 
 // Capabilities types (for /v1/engines and /v1/engines/capabilities)
 export interface EngineCapabilities {
-  languages: string[] | null
   supports_word_timestamps: boolean
   supports_streaming: boolean
   max_audio_duration_s: number | null
@@ -610,13 +608,11 @@ export interface EnginesListResponse {
 
 export interface StageCapabilities {
   engines: string[]
-  languages: string[] | null
   supports_word_timestamps: boolean
   supports_streaming: boolean
 }
 
 export interface CapabilitiesResponse {
-  languages: string[]
   stages: Record<string, StageCapabilities>
   max_audio_duration_s: number | null
   supported_formats: string[]

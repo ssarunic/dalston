@@ -22,8 +22,6 @@ container:
   memory: 256M
 
 capabilities:
-  languages:
-    - all
   max_audio_duration: 86400
   streaming: false
   word_timestamps: false

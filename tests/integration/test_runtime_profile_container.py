@@ -83,7 +83,6 @@ def _catalog_entry(engine_id: str, execution_profile: str) -> CatalogEntry:
             engine_id=engine_id,
             version="test",
             stages=["transcribe"],
-            languages=None,
         ),
         execution_profile=execution_profile,
     )

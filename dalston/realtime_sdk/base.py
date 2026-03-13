@@ -204,17 +204,6 @@ class RealtimeEngine(ABC):
         """
         return []
 
-    def get_languages(self) -> list[str]:
-        """Return list of supported languages.
-
-        Override to report supported languages.
-        Used when registering with Session Router.
-
-        Returns:
-            List of language codes. Default: ["auto"]
-        """
-        return ["auto"]
-
     def get_engine_id(self) -> str:
         """Return the inference framework identifier.
 
@@ -310,7 +299,6 @@ class RealtimeEngine(ABC):
                 engine_id=self.get_engine_id(),
                 version="unknown",
                 stages=["transcribe"],
-                languages=self.get_languages() or None,
                 supports_streaming=self.supports_streaming(),
                 max_concurrency=self.max_sessions,
             )
@@ -332,11 +320,6 @@ class RealtimeEngine(ABC):
         else:
             gpu_required = gpu_field == "required"
 
-        # Languages: convert ["all"] to None (meaning all languages)
-        languages = caps.get("languages")
-        if languages == ["all"]:
-            languages = None
-
         # Stages: derive from stage field
         stage = card.get("stage")
         stages = [stage] if stage else ["transcribe"]
@@ -345,7 +328,6 @@ class RealtimeEngine(ABC):
             engine_id=card.get("engine_id") or card.get("id", self.get_engine_id()),
             version=card.get("version", "unknown"),
             stages=stages,
-            languages=languages,
             supports_word_timestamps=caps.get("word_timestamps", False),
             supports_streaming=caps.get("streaming", self.supports_streaming()),
             model_variants=None,
@@ -451,7 +433,6 @@ class RealtimeEngine(ABC):
                 capacity=self.max_sessions,
                 endpoint=self._worker_endpoint,
                 models_loaded=self.get_models(),
-                languages=self.get_languages(),
                 capabilities=capabilities,
                 supports_word_timestamps=capabilities.supports_word_timestamps,
                 includes_diarization=capabilities.includes_diarization,

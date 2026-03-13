@@ -45,7 +45,6 @@ lite_router = APIRouter(prefix="/lite", tags=["lite"])
 class EngineCapabilitiesResponse(BaseModel):
     """Engine capabilities in API response format."""
 
-    languages: list[str] | None = None
     supports_word_timestamps: bool = False
     supports_streaming: bool = False
     max_audio_duration_s: int | None = None
@@ -95,7 +94,6 @@ class StageCapabilities(BaseModel):
     """Capabilities for a specific pipeline stage."""
 
     engines: list[str]
-    languages: list[str] | None = None
     supports_word_timestamps: bool = False
     supports_streaming: bool = False
 
@@ -103,7 +101,6 @@ class StageCapabilities(BaseModel):
 class AggregateCapabilitiesResponse(BaseModel):
     """Response for GET /v1/capabilities."""
 
-    languages: list[str]
     stages: dict[str, StageCapabilities]
     max_audio_duration_s: int | None = None
     supported_formats: list[str]
@@ -183,7 +180,6 @@ async def list_engines(
                 loaded_model=loaded_model,
                 available_models=available_models,
                 capabilities=EngineCapabilitiesResponse(
-                    languages=caps.languages,
                     supports_word_timestamps=caps.supports_word_timestamps,
                     supports_streaming=caps.supports_streaming,
                     max_audio_duration_s=None,  # Not in current schema
@@ -235,7 +231,6 @@ async def get_capabilities(
     running_ids = {e.engine_id for e in running_engines if e.is_available}
 
     # Aggregate capabilities from running engines
-    all_languages: set[str] = set()
     stages: dict[str, StageCapabilities] = {}
     max_duration: int | None = None
 
@@ -245,20 +240,11 @@ async def get_capabilities(
 
         caps = entry.capabilities
 
-        # Aggregate languages
-        if caps.languages is None:
-            # None means all languages - we can't enumerate them all
-            # but we should indicate this somehow
-            all_languages.add("*")  # Wildcard to indicate all
-        else:
-            all_languages.update(caps.languages)
-
         # Aggregate by stage
         for stage in caps.stages:
             if stage not in stages:
                 stages[stage] = StageCapabilities(
                     engines=[],
-                    languages=None,
                     supports_word_timestamps=False,
                     supports_streaming=False,
                 )
@@ -266,29 +252,12 @@ async def get_capabilities(
             stage_caps = stages[stage]
             stage_caps.engines.append(entry.engine_id)
 
-            # Merge capabilities (union for booleans, intersection for languages)
             if caps.supports_word_timestamps:
                 stage_caps.supports_word_timestamps = True
             if caps.supports_streaming:
                 stage_caps.supports_streaming = True
 
-            # Languages: None means all, so if any engine supports all, stage supports all
-            if caps.languages is None:
-                stage_caps.languages = None
-            elif stage_caps.languages is not None:
-                # Merge language lists
-                existing = set(stage_caps.languages)
-                existing.update(caps.languages)
-                stage_caps.languages = sorted(existing)
-
-    # Convert wildcard to indication
-    languages_list = sorted(all_languages - {"*"})
-    if "*" in all_languages:
-        # At least one engine supports all languages
-        languages_list = ["*"]  # Or could return empty to indicate "all"
-
     return AggregateCapabilitiesResponse(
-        languages=languages_list,
         stages=stages,
         max_audio_duration_s=max_duration,
         supported_formats=["wav", "flac", "mp3", "m4a", "ogg", "webm"],

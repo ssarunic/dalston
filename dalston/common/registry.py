@@ -62,7 +62,6 @@ class EngineRecord:
         active_batch: Number of active batch tasks
         active_realtime: Number of active realtime sessions
         models_loaded: List of currently loaded model IDs
-        languages: List of supported language codes
         supports_word_timestamps: Whether engine produces word-level timestamps
         includes_diarization: Whether engine includes speaker labels
         endpoint: WebSocket endpoint URL (RT engines only)
@@ -85,7 +84,6 @@ class EngineRecord:
     active_batch: int = 0
     active_realtime: int = 0
     models_loaded: list[str] | None = None
-    languages: list[str] | None = None
     supports_word_timestamps: bool = False
     includes_diarization: bool = False
     endpoint: str | None = None
@@ -130,12 +128,6 @@ class EngineRecord:
             return age < HEARTBEAT_TIMEOUT_SECONDS
         return False
 
-    def supports_language(self, language: str) -> bool:
-        """Check language support."""
-        if self.languages is None:
-            return True
-        return language.lower() in [lang.lower() for lang in self.languages]
-
     def supports_interface(self, interface: str) -> bool:
         """Check if engine supports a specific interface (batch/realtime)."""
         return interface in self.interfaces
@@ -170,8 +162,6 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
 
     if record.models_loaded is not None:
         mapping["models_loaded"] = json.dumps(record.models_loaded)
-    if record.languages is not None:
-        mapping["languages"] = json.dumps(record.languages)
     if record.endpoint is not None:
         mapping["endpoint"] = record.endpoint
     if record.stream_name is not None:
@@ -222,7 +212,6 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
 
     # Parse JSON list fields
     models_loaded = _parse_json_list(data.get("models_loaded"))
-    languages = _parse_json_list(data.get("languages"))
 
     # Parse capabilities
     capabilities = None
@@ -250,7 +239,6 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
         active_batch=active_batch,
         active_realtime=active_realtime,
         models_loaded=models_loaded,
-        languages=languages,
         supports_word_timestamps=data.get("supports_word_timestamps") == "true",
         includes_diarization=data.get("includes_diarization") == "true",
         endpoint=data.get("endpoint"),
@@ -305,7 +293,7 @@ class UnifiedEngineRegistry:
 
         # Get available RT workers
         rt_workers = await registry.get_available(
-            interface="realtime", language="en"
+            interface="realtime"
         )
     """
 
@@ -437,7 +425,6 @@ class UnifiedEngineRegistry:
         stage: str | None = None,
         interface: str | None = None,
         engine_id: str | None = None,
-        language: str | None = None,
         model: str | None = None,
         valid_engine_ids: set[str] | None = None,
     ) -> list[EngineRecord]:
@@ -447,7 +434,6 @@ class UnifiedEngineRegistry:
             stage: Filter by pipeline stage
             interface: Filter by interface ("batch" or "realtime")
             engine_id: Filter by engine_id framework
-            language: Filter by language support
             model: Filter by loaded model
             valid_engine_ids: Only consider engines with these engine_ids
 
@@ -477,10 +463,6 @@ class UnifiedEngineRegistry:
                 and record.engine_id not in valid_engine_ids
             ):
                 continue
-
-            if language and language != "auto":
-                if not record.supports_language(language):
-                    continue
 
             if model is not None:
                 if record.models_loaded and model in record.models_loaded:

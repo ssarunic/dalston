@@ -18,7 +18,6 @@ export function useEnginesList() {
 }
 
 export interface SystemCapabilities {
-  languages: string[]
   features: {
     word_timestamps: boolean
     speaker_diarization: boolean
@@ -61,7 +60,6 @@ export function useSystemCapabilities() {
       const models_total = modelsData.length
 
       return {
-        languages: capabilities.languages,
         features,
         engines_by_stage,
         models_ready,

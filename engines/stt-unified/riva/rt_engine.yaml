@@ -19,17 +19,6 @@ container:
   memory: 1G
 
 capabilities:
-  languages:
-    - en
-    - es
-    - fr
-    - de
-    - it
-    - pt
-    - zh
-    - ja
-    - ko
-    - ru
   max_audio_duration: 7200
   streaming: true
   word_timestamps: true

@@ -38,7 +38,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=2,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -57,7 +56,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=4,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -76,7 +74,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=5,  # Over capacity
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -95,7 +92,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=2,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -114,7 +110,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=3,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="3GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -133,7 +128,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=0,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="0GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -152,7 +146,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=1,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="1GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -171,7 +164,6 @@ class TestEngineRecord:
             capacity=4,
             active_realtime=4,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",
             last_heartbeat=datetime.now(UTC),
@@ -203,7 +195,6 @@ class TestUnifiedEngineRegistry:
             "capacity": "4",
             "active_realtime": "2",
             "models_loaded": '["Systran/faster-whisper-large-v3", "Systran/faster-distil-whisper-large-v3"]',
-            "languages": '["auto"]',
             "gpu_memory_used": "2GB",
             "gpu_memory_total": "8GB",
             "last_heartbeat": "2024-01-15T10:30:00+00:00",
@@ -222,7 +213,6 @@ class TestUnifiedEngineRegistry:
             "Systran/faster-whisper-large-v3",
             "Systran/faster-distil-whisper-large-v3",
         ]
-        assert worker.languages == ["auto"]
 
     @pytest.mark.asyncio
     async def test_get_worker_not_found(
@@ -249,7 +239,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",
                     "models_loaded": "[]",
-                    "languages": "[]",
                 }
             elif "worker-2" in key:
                 return {
@@ -261,7 +250,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "3",
                     "models_loaded": "[]",
-                    "languages": "[]",
                 }
             return {}
 
@@ -291,7 +279,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "4",  # Full
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
@@ -304,7 +291,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",  # Available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
@@ -314,7 +300,6 @@ class TestUnifiedEngineRegistry:
         available = await registry.get_available(
             interface="realtime",
             model="Systran/faster-whisper-large-v3",
-            language="auto",
         )
 
         assert len(available) == 1
@@ -337,7 +322,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
@@ -350,7 +334,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",
                     "models_loaded": '["Systran/faster-distil-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
@@ -361,7 +344,6 @@ class TestUnifiedEngineRegistry:
         available = await registry.get_available(
             interface="realtime",
             model="Systran/faster-distil-whisper-large-v3",
-            language="auto",
         )
 
         assert len(available) == 1
@@ -384,7 +366,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "3",  # 1 available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
@@ -397,7 +378,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "1",  # 3 available (most)
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-3" in key:
@@ -410,7 +390,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",  # 2 available
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
@@ -420,7 +399,6 @@ class TestUnifiedEngineRegistry:
         available = await registry.get_available(
             interface="realtime",
             model="Systran/faster-whisper-large-v3",
-            language="auto",
         )
 
         # Should be sorted by available capacity descending
@@ -457,7 +435,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",
                     "models_loaded": '["parakeet-rnnt-0.6b"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             elif "worker-2" in key:
@@ -470,7 +447,6 @@ class TestUnifiedEngineRegistry:
                     "capacity": "4",
                     "active_realtime": "2",
                     "models_loaded": '["Systran/faster-whisper-large-v3"]',
-                    "languages": '["auto"]',
                     "last_heartbeat": datetime.now(UTC).isoformat(),
                 }
             return {}
@@ -478,9 +454,7 @@ class TestUnifiedEngineRegistry:
         mock_redis.hgetall.side_effect = mock_hgetall
 
         # model=None should return ALL available workers
-        available = await registry.get_available(
-            interface="realtime", model=None, language="auto"
-        )
+        available = await registry.get_available(interface="realtime", model=None)
 
         assert len(available) == 2
 
@@ -500,16 +474,13 @@ class TestUnifiedEngineRegistry:
             "capacity": "4",
             "active_realtime": "2",
             "models_loaded": '["parakeet-rnnt-0.6b"]',
-            "languages": '["auto"]',
             "last_heartbeat": datetime.now(UTC).isoformat(),
         }
 
         # Empty string is a literal value, not None
         # The gateway converts empty string to None before calling the registry
         # This test verifies the registry requires exact model match for non-None
-        available = await registry.get_available(
-            interface="realtime", model="", language="auto"
-        )
+        available = await registry.get_available(interface="realtime", model="")
 
         # "" is not in models_loaded, so no workers match
         assert len(available) == 0
@@ -547,7 +518,6 @@ class TestSessionAllocator:
             capacity=4,
             active_realtime=2,
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             endpoint="ws://localhost:9000",
             gpu_memory_used="2GB",
             gpu_memory_total="8GB",
@@ -629,7 +599,6 @@ class TestSessionAllocator:
             capacity=4,
             active_realtime=4,  # Already at capacity
             models_loaded=["Systran/faster-whisper-large-v3"],
-            languages=["auto"],
             endpoint="ws://localhost:9000",
             gpu_memory_used="4GB",
             gpu_memory_total="8GB",

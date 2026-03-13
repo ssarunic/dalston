@@ -204,14 +204,6 @@ class NoCapableEngineError(Exception):
 
         caps = engine.capabilities
 
-        lang = self.requirements.get("language")
-        if (
-            lang
-            and caps.languages
-            and lang.lower() not in [lng.lower() for lng in caps.languages]
-        ):
-            reasons.append(f"language '{lang}' not supported (has: {caps.languages})")
-
         if self.requirements.get("streaming") and not caps.supports_streaming:
             reasons.append("streaming not supported")
 
@@ -228,8 +220,7 @@ class NoCapableEngineError(Exception):
                 for e in self.candidates
             ],
             "catalog_alternatives": [
-                {"id": a.engine_id, "languages": a.capabilities.languages}
-                for a in self.catalog_alternatives
+                {"id": a.engine_id} for a in self.catalog_alternatives
             ],
         }
 
@@ -382,12 +373,6 @@ def _meets_requirements(caps: EngineCapabilities, requirements: dict) -> bool:
     Returns:
         True if all requirements are satisfied
     """
-    # Language (hard requirement)
-    lang = requirements.get("language")
-    if lang and caps.languages is not None:
-        if lang.lower() not in [lng.lower() for lng in caps.languages]:
-            return False
-
     # Streaming (hard requirement)
     if requirements.get("streaming") and not caps.supports_streaming:
         return False
@@ -404,8 +389,7 @@ def _rank_capable_engines(
     Ranking criteria (in order of priority):
     1. Native word timestamps (skips alignment stage)
     2. Native diarization (skips diarize stage)
-    3. Language specificity (specialized > universal)
-    4. Speed (lower RTF is better)
+    3. Speed (lower RTF is better)
 
     Args:
         capable: List of engines that meet hard requirements
@@ -415,23 +399,10 @@ def _rank_capable_engines(
         Ranked list with best engine first.
     """
 
-    requested_language = requirements.get("language")
-
     def score(engine: EngineRecord) -> tuple:
         caps = engine.capabilities
         if caps is None:
-            return (0, 0, 0, 0, -999.0)
-
-        # For unknown language ("auto"), prioritize language-safe engines:
-        # universal (None) > multilingual > single-language.
-        if requested_language:
-            unknown_lang_safety = 0
-        elif caps.languages is None:
-            unknown_lang_safety = 2
-        elif len(caps.languages) > 1:
-            unknown_lang_safety = 1
-        else:
-            unknown_lang_safety = 0
+            return (0, 0, -999.0)
 
         # Prefer native word timestamps (skips alignment stage)
         native_ts = 1 if caps.supports_word_timestamps else 0
@@ -439,14 +410,11 @@ def _rank_capable_engines(
         # Prefer native diarization (skips diarize stage)
         native_diar = 1 if caps.includes_diarization else 0
 
-        # Prefer language-specific engines over universal
-        specific = 1 if caps.languages is not None else 0
-
         # Prefer faster (lower RTF is better, so negate)
         rtf = caps.rtf_gpu if caps.rtf_gpu else 999.0
         speed = -rtf
 
-        return (unknown_lang_safety, native_ts, native_diar, specific, speed)
+        return (native_ts, native_diar, speed)
 
     return sorted(capable, key=score, reverse=True)
 

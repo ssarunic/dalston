@@ -8,4 +8,4 @@ def test_generated_catalog_contains_migrated_execution_profiles() -> None:
 
     assert catalog.get_engine("audio-prepare").execution_profile == "container"
     assert catalog.get_engine("nemo-msdd").execution_profile == "container"
-    assert catalog.get_engine("faster-whisper").execution_profile == "container"
+    assert catalog.get_engine("phoneme-align").execution_profile == "container"

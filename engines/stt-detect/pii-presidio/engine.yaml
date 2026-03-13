@@ -14,9 +14,7 @@ container:
   memory: 4G
   model_cache: /models
 
-capabilities:
-  languages:
-    - all  # GLiNER is multilingual, Presidio regex works on any language
+capabilities: {}
 
 config_schema:
   type: object

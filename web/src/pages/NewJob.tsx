@@ -15,7 +15,7 @@ import {
 import { ModelSelector } from '@/components/ModelSelector'
 import { ModelCompatibilityWarning } from '@/components/ModelCompatibilityWarning'
 import { useCreateJob } from '@/hooks/useCreateJob'
-import { useCapabilities } from '@/hooks/useCapabilities'
+
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import type {
   SpeakerDetection,
@@ -208,8 +208,7 @@ export function NewJob() {
   const createJob = useCreateJob()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch capabilities and models for dynamic options
-  const { data: capabilities } = useCapabilities()
+  // Fetch models for dynamic options
   const { data: modelsResponse } = useModelRegistry({ stage: 'transcribe' })
 
   // Source
@@ -245,25 +244,18 @@ export function NewJob() {
       }))
   }, [modelsResponse])
 
-  // Compute available languages based on capabilities and selected model
+  // Compute available languages based on selected model
   const languageOptions = useMemo(() => {
     let languages: string[] = []
 
     if (model !== 'auto' && availableModels.length > 0) {
-      // Filter to languages supported by selected model
-      const selectedEngine = availableModels.find((m) => m.id === model)
-      if (selectedEngine?.languages && selectedEngine.languages.length > 0) {
-        languages = selectedEngine.languages
-      } else {
-        // Engine supports all languages (null means all)
-        languages = capabilities?.languages || []
+      const selectedModel = availableModels.find((m) => m.id === model)
+      if (selectedModel?.languages && selectedModel.languages.length > 0) {
+        languages = selectedModel.languages
       }
-    } else {
-      // Use aggregate capabilities
-      languages = capabilities?.languages || []
     }
 
-    // If "*" in list, it means all languages supported - show common ones
+    // No model selected or model is multilingual — show common languages
     if (languages.includes('*') || languages.length === 0) {
       languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi']
     }
@@ -276,7 +268,7 @@ export function NewJob() {
         .sort((a, b) => getLanguageLabel(a).localeCompare(getLanguageLabel(b)))
         .map((code) => ({ value: code, label: getLanguageLabel(code) })),
     ]
-  }, [capabilities, model, availableModels])
+  }, [model, availableModels])
 
   // PII settings
   const [piiDetection, setPiiDetection] = useState(false)

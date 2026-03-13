@@ -34,7 +34,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
-                languages=None,  # All languages
                 supports_word_timestamps=True,
                 supports_streaming=False,
                 gpu_required=False,
@@ -54,7 +53,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="parakeet",
                 version="1.0.0",
                 stages=["transcribe"],
-                languages=["en"],
                 supports_word_timestamps=True,
                 supports_streaming=True,
                 gpu_required=True,
@@ -72,7 +70,6 @@ def mock_catalog() -> EngineCatalog:
                 engine_id="pyannote-4.0",
                 version="1.0.0",
                 stages=["diarize"],
-                languages=None,
                 supports_word_timestamps=False,
                 supports_streaming=False,
                 gpu_required=True,
@@ -104,7 +101,6 @@ def mock_running_engines() -> list[EngineRecord]:
                 engine_id="faster-whisper",
                 version="1.0.0",
                 stages=["transcribe"],
-                languages=None,
                 supports_word_timestamps=True,
             ),
         ),
@@ -242,7 +238,6 @@ class TestListEngines:
             engines_by_id = {e["id"]: e for e in data["engines"]}
 
             fw = engines_by_id["faster-whisper"]
-            assert fw["capabilities"]["languages"] is None
             assert fw["capabilities"]["supports_word_timestamps"] is True
             assert fw["hardware"]["supports_cpu"] is True
             assert fw["performance"]["rtf_gpu"] == 0.05
@@ -305,12 +300,8 @@ class TestGetCapabilities:
             assert response.status_code == 200
             data = response.json()
 
-            assert "languages" in data
             assert "stages" in data
             assert "supported_formats" in data
-
-            # Only faster-whisper is running, which supports all languages
-            assert "*" in data["languages"]
 
             # Only transcribe stage should be available
             assert "transcribe" in data["stages"]
@@ -361,4 +352,3 @@ class TestGetCapabilities:
             data = response.json()
 
             assert data["stages"] == {}
-            assert data["languages"] == []

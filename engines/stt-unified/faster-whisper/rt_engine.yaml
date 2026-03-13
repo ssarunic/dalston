@@ -15,8 +15,6 @@ container:
   model_cache: /models/faster-whisper
 
 capabilities:
-  languages:
-    - all  # 99 languages supported
   streaming: true
   word_timestamps: true
   max_concurrency: 4

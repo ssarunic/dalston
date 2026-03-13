@@ -32,7 +32,6 @@ from dalston.orchestrator.engine_selector import (
 
 def make_capabilities(
     engine_id: str = "test-engine",
-    languages: list[str] | None = None,
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
     supports_streaming: bool = False,
@@ -43,7 +42,6 @@ def make_capabilities(
         engine_id=engine_id,
         version="1.0.0",
         stages=["transcribe"],
-        languages=languages,
         supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
         supports_streaming=supports_streaming,
@@ -76,13 +74,12 @@ def make_engine_state(
 
 def make_catalog_entry(
     engine_id: str = "test-engine",
-    languages: list[str] | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
         engine_id=engine_id,
         image=f"dalston/{engine_id}:latest",
-        capabilities=make_capabilities(engine_id=engine_id, languages=languages),
+        capabilities=make_capabilities(engine_id=engine_id),
     )
 
 
@@ -134,22 +131,8 @@ class TestExtractRequirements:
 
 class TestMeetsRequirements:
     def test_no_requirements_always_matches(self):
-        caps = make_capabilities(languages=["en"])
+        caps = make_capabilities()
         assert _meets_requirements(caps, {}) is True
-
-    def test_language_matches(self):
-        caps = make_capabilities(languages=["en", "es"])
-        assert _meets_requirements(caps, {"language": "en"}) is True
-        assert _meets_requirements(caps, {"language": "ES"}) is True  # Case insensitive
-
-    def test_language_not_supported(self):
-        caps = make_capabilities(languages=["en"])
-        assert _meets_requirements(caps, {"language": "hr"}) is False
-
-    def test_null_languages_means_all(self):
-        caps = make_capabilities(languages=None)  # All languages
-        assert _meets_requirements(caps, {"language": "hr"}) is True
-        assert _meets_requirements(caps, {"language": "zh"}) is True
 
     def test_streaming_required_but_not_supported(self):
         caps = make_capabilities(supports_streaming=False)
@@ -210,38 +193,6 @@ class TestRankAndSelect:
         result = _rank_and_select(engines, {})
         assert result.engine_id == "fast"
 
-    def test_prefers_language_specific_over_universal(self):
-        """When language is specified, prefer language-specific engines."""
-        engines = [
-            make_engine_state(
-                "universal",
-                capabilities=make_capabilities("universal", languages=None),
-            ),
-            make_engine_state(
-                "english-only",
-                capabilities=make_capabilities("english-only", languages=["en"]),
-            ),
-        ]
-        # Specify English - should prefer the English-specific engine
-        result = _rank_and_select(engines, {"language": "en"})
-        assert result.engine_id == "english-only"
-
-    def test_prefers_universal_for_auto_detection(self):
-        """When no language specified (auto), prefer universal engines for safety."""
-        engines = [
-            make_engine_state(
-                "universal",
-                capabilities=make_capabilities("universal", languages=None),
-            ),
-            make_engine_state(
-                "english-only",
-                capabilities=make_capabilities("english-only", languages=["en"]),
-            ),
-        ]
-        # No language specified - should prefer universal for safety
-        result = _rank_and_select(engines, {})
-        assert result.engine_id == "universal"
-
 
 # =============================================================================
 # Test select_engine
@@ -262,7 +213,7 @@ class TestSelectEngine:
 
     @pytest.mark.asyncio
     async def test_single_capable_engine_selected(self, mock_registry, mock_catalog):
-        caps = make_capabilities("only-one", languages=["en"])
+        caps = make_capabilities("only-one")
         engine = make_engine_state("only-one", capabilities=caps)
 
         mock_registry.get_by_stage.return_value = [engine]
@@ -312,28 +263,8 @@ class TestSelectEngine:
         assert "Attempted engine_ids: engine_id-a, engine_id-b." in str(error)
 
     @pytest.mark.asyncio
-    async def test_raises_when_no_capable_engine(self, mock_registry, mock_catalog):
-        # Engine only supports English
-        caps = make_capabilities("parakeet", languages=["en"])
-        engine = make_engine_state("parakeet", capabilities=caps)
-
-        mock_registry.get_by_stage.return_value = [engine]
-        mock_catalog.find_engines.return_value = [
-            make_catalog_entry("faster-whisper", languages=None)
-        ]
-
-        with pytest.raises(NoCapableEngineError) as exc_info:
-            await select_engine(
-                "transcribe", {"language": "hr"}, mock_registry, mock_catalog
-            )
-
-        assert exc_info.value.stage == "transcribe"
-        assert "parakeet" in str(exc_info.value)
-        assert len(exc_info.value.catalog_alternatives) == 1
-
-    @pytest.mark.asyncio
     async def test_user_preference_validated(self, mock_registry, mock_catalog):
-        caps = make_capabilities("preferred", languages=["en"])
+        caps = make_capabilities("preferred")
         engine = make_engine_state("preferred", capabilities=caps)
 
         mock_registry.get_engine.return_value = engine
@@ -348,23 +279,6 @@ class TestSelectEngine:
 
         assert result.engine_id == "preferred"
         assert result.selection_reason == "user preference"
-
-    @pytest.mark.asyncio
-    async def test_user_preference_rejects_incapable(self, mock_registry, mock_catalog):
-        caps = make_capabilities("english-only", languages=["en"])
-        engine = make_engine_state("english-only", capabilities=caps)
-
-        mock_registry.get_engine.return_value = engine
-        mock_catalog.find_engines.return_value = []
-
-        with pytest.raises(NoCapableEngineError):
-            await select_engine(
-                "transcribe",
-                {"language": "hr"},
-                mock_registry,
-                mock_catalog,
-                user_preference="english-only",
-            )
 
     @pytest.mark.asyncio
     async def test_stage_model_preference_success(self, mock_registry, mock_catalog):
@@ -588,7 +502,7 @@ class TestNoCapableEngineError:
         assert "transcribe" in str(err)
 
     def test_message_explains_mismatch(self):
-        caps = make_capabilities("parakeet", languages=["en"])
+        caps = make_capabilities("parakeet")
         engine = make_engine_state("parakeet", capabilities=caps)
 
         err = NoCapableEngineError(
@@ -602,9 +516,9 @@ class TestNoCapableEngineError:
         assert "hr" in str(err)
 
     def test_to_dict_structure(self):
-        caps = make_capabilities("parakeet", languages=["en"])
+        caps = make_capabilities("parakeet")
         engine = make_engine_state("parakeet", capabilities=caps)
-        alt = make_catalog_entry("faster-whisper", languages=None)
+        alt = make_catalog_entry("faster-whisper")
 
         err = NoCapableEngineError(
             stage="transcribe",
@@ -718,7 +632,7 @@ class TestSelectPipelineEngines:
             stages_caps = {
                 "prepare": make_capabilities("audio-prepare"),
                 "transcribe": make_capabilities(
-                    "parakeet", languages=["en"], supports_word_timestamps=True
+                    "parakeet", supports_word_timestamps=True
                 ),
             }
             caps = stages_caps.get(stage)

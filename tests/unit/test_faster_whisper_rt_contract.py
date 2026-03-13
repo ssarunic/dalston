@@ -298,7 +298,3 @@ class TestRTEngineMetadata:
     def test_get_supports_vocabulary(self) -> None:
         engine = _load_rt_engine()()
         assert engine.get_supports_vocabulary() is True
-
-    def test_get_languages(self) -> None:
-        engine = _load_rt_engine()()
-        assert engine.get_languages() == ["auto"]

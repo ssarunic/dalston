@@ -34,7 +34,6 @@ class TestUnifiedEngineYaml:
             data = yaml.safe_load(f)
 
         caps = data["capabilities"]
-        assert "en" in caps["languages"]
         assert caps["word_timestamps"] is True
         assert caps["streaming"] is True
         assert caps["max_concurrency"] == 8
@@ -63,12 +62,3 @@ class TestUnifiedEngineYaml:
             data = yaml.safe_load(f)
 
         assert data["schema_version"] == "1.1"
-
-    def test_ten_languages_supported(self) -> None:
-        with open(UNIFIED_YAML) as f:
-            data = yaml.safe_load(f)
-
-        langs = data["capabilities"]["languages"]
-        assert len(langs) == 10
-        assert "en" in langs
-        assert "es" in langs

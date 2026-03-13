@@ -124,7 +124,6 @@ class TestRealtimeManagementEndpoints:
                 capacity=4,
                 active_sessions=2,
                 models=["faster-whisper-large-v3"],
-                languages=["auto"],
             ),
             WorkerStatus(
                 instance="worker-2",
@@ -133,7 +132,6 @@ class TestRealtimeManagementEndpoints:
                 capacity=4,
                 active_sessions=4,
                 models=["faster-whisper-distil-large-v3"],
-                languages=["auto"],
             ),
         ]
 
@@ -156,7 +154,6 @@ class TestRealtimeManagementEndpoints:
             capacity=4,
             active_sessions=2,
             models=["faster-whisper-large-v3"],
-            languages=["auto"],
         )
 
         response = client.get("/v1/realtime/workers/worker-1")
@@ -402,7 +399,6 @@ class TestWorkerStatus:
             capacity=4,
             active_sessions=2,
             models=["faster-whisper-large-v3"],
-            languages=["auto", "en", "es"],
         )
 
         assert status.instance == "stt-rt-transcribe-whisper-1"
@@ -411,4 +407,3 @@ class TestWorkerStatus:
         assert status.capacity == 4
         assert status.active_sessions == 2
         assert "faster-whisper-large-v3" in status.models
-        assert "auto" in status.languages

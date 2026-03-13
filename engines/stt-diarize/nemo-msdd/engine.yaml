@@ -19,8 +19,6 @@ container:
   memory: 8G
 
 capabilities:
-  languages:
-    - all  # Language-agnostic speaker diarization
   max_audio_duration: 7200  # 2 hours
   streaming: false
 

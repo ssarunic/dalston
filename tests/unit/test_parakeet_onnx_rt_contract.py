@@ -140,11 +140,6 @@ class TestOnnxRTEngineMetadata:
         engine = _build_rt_engine(result)
         assert engine.get_engine_id() == "onnx"
 
-    def test_get_languages(self) -> None:
-        result = _make_core_result()
-        engine = _build_rt_engine(result)
-        assert engine.get_languages() == ["en"]
-
     def test_supports_streaming(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)

@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
@@ -41,7 +41,6 @@ class TestEngineCapabilities:
         assert caps.engine_id == "test-engine"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
-        assert caps.languages is None
         assert caps.supports_word_timestamps is False
         assert caps.supports_streaming is False
         assert caps.gpu_required is False
@@ -52,7 +51,6 @@ class TestEngineCapabilities:
             engine_id="parakeet",
             version="1.0.0",
             stages=["transcribe"],
-            languages=["en"],
             supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=["tdt-110m", "rnnt-1.1b"],
@@ -61,7 +59,6 @@ class TestEngineCapabilities:
         )
 
         assert caps.engine_id == "parakeet"
-        assert caps.languages == ["en"]
         assert caps.supports_word_timestamps is True
         assert caps.model_variants == ["tdt-110m", "rnnt-1.1b"]
         assert caps.gpu_required is True
@@ -73,23 +70,20 @@ class TestEngineCapabilities:
             engine_id="test",
             version="1.0.0",
             stages=["transcribe"],
-            languages=["en", "de"],
         )
 
         json_str = caps.model_dump_json()
         parsed = json.loads(json_str)
 
         assert parsed["engine_id"] == "test"
-        assert parsed["languages"] == ["en", "de"]
 
     def test_deserialize_json(self):
         """Test deserializing capabilities from JSON."""
-        json_str = '{"engine_id":"test","version":"1.0.0","stages":["transcribe"],"languages":["en"]}'
+        json_str = '{"engine_id":"test","version":"1.0.0","stages":["transcribe"]}'
 
         caps = EngineCapabilities.model_validate_json(json_str)
 
         assert caps.engine_id == "test"
-        assert caps.languages == ["en"]
 
 
 class TestEngineGetCapabilities:
@@ -125,7 +119,6 @@ class TestEngineGetCapabilities:
                     engine_id="custom",
                     version="2.0.0",
                     stages=["transcribe"],
-                    languages=["en", "de"],
                     supports_word_timestamps=True,
                     gpu_required=True,
                     gpu_vram_mb=4000,
@@ -136,106 +129,7 @@ class TestEngineGetCapabilities:
 
         assert caps.engine_id == "custom"
         assert caps.version == "2.0.0"
-        assert caps.languages == ["en", "de"]
         assert caps.supports_word_timestamps is True
-
-
-class TestEngineRecordWithCapabilities:
-    """Tests for EngineRecord with capabilities."""
-
-    def test_supports_language_with_capabilities(self):
-        """Test language support check with capabilities."""
-        caps = EngineCapabilities(
-            engine_id="test",
-            version="1.0.0",
-            stages=["transcribe"],
-            languages=["en", "de"],
-        )
-
-        state = EngineRecord(
-            engine_id="test",
-            instance="test-abc123",
-            stage="transcribe",
-            interfaces=["batch"],
-            stream_name="dalston:stream:test",
-            status="idle",
-            languages=["en", "de"],
-            last_heartbeat=datetime.now(UTC),
-            registered_at=datetime.now(UTC),
-            capabilities=caps,
-        )
-
-        assert state.supports_language("en") is True
-        assert state.supports_language("de") is True
-        assert state.supports_language("hr") is False
-
-    def test_supports_language_case_insensitive(self):
-        """Test language support is case insensitive."""
-        caps = EngineCapabilities(
-            engine_id="test",
-            version="1.0.0",
-            stages=["transcribe"],
-            languages=["EN", "De"],
-        )
-
-        state = EngineRecord(
-            engine_id="test",
-            instance="test-abc123",
-            stage="transcribe",
-            interfaces=["batch"],
-            stream_name="dalston:stream:test",
-            status="idle",
-            languages=["EN", "De"],
-            last_heartbeat=datetime.now(UTC),
-            registered_at=datetime.now(UTC),
-            capabilities=caps,
-        )
-
-        assert state.supports_language("en") is True
-        assert state.supports_language("DE") is True
-
-    def test_supports_language_null_means_all(self):
-        """Test that languages=null means all languages supported."""
-        caps = EngineCapabilities(
-            engine_id="test",
-            version="1.0.0",
-            stages=["transcribe"],
-            languages=None,  # All languages
-        )
-
-        state = EngineRecord(
-            engine_id="test",
-            instance="test-abc123",
-            stage="transcribe",
-            interfaces=["batch"],
-            stream_name="dalston:stream:test",
-            status="idle",
-            last_heartbeat=datetime.now(UTC),
-            registered_at=datetime.now(UTC),
-            capabilities=caps,
-        )
-
-        assert state.supports_language("en") is True
-        assert state.supports_language("hr") is True
-        assert state.supports_language("ja") is True
-
-    def test_supports_language_no_capabilities(self):
-        """Test backward compatibility - no capabilities means all supported."""
-        state = EngineRecord(
-            engine_id="test",
-            instance="test-abc123",
-            stage="transcribe",
-            interfaces=["batch"],
-            stream_name="dalston:stream:test",
-            status="idle",
-            last_heartbeat=datetime.now(UTC),
-            registered_at=datetime.now(UTC),
-            capabilities=None,  # No capabilities (M28 engine)
-        )
-
-        # Backward compat: assume all languages supported
-        assert state.supports_language("en") is True
-        assert state.supports_language("hr") is True
 
 
 class TestEngineCatalog:
@@ -256,7 +150,6 @@ class TestEngineCatalog:
                     "execution_profile": "inproc",
                     "capabilities": {
                         "stages": ["transcribe"],
-                        "languages": ["en"],
                         "supports_word_timestamps": True,
                         "supports_streaming": False,
                     },
@@ -274,7 +167,6 @@ class TestEngineCatalog:
                     "image": "dalston/faster-whisper:latest",
                     "capabilities": {
                         "stages": ["transcribe"],
-                        "languages": None,
                         "supports_word_timestamps": False,
                         "supports_streaming": False,
                     },
@@ -292,7 +184,6 @@ class TestEngineCatalog:
                     "image": "dalston/audio-prepare:latest",
                     "capabilities": {
                         "stages": ["prepare"],
-                        "languages": None,
                         "supports_word_timestamps": False,
                         "supports_streaming": False,
                     },
@@ -327,7 +218,6 @@ class TestEngineCatalog:
         assert entry.engine_id == "parakeet"
         assert entry.image == "dalston/parakeet:latest"
         assert entry.execution_profile == "inproc"
-        assert entry.capabilities.languages == ["en"]
         assert entry.capabilities.supports_word_timestamps is True
 
     def test_execution_profile_defaults_to_container(self, catalog_json):
@@ -365,44 +255,6 @@ class TestEngineCatalog:
         assert len(transcribers) == 2
         engine_ids = {e.engine_id for e in transcribers}
         assert engine_ids == {"parakeet", "faster-whisper"}
-
-    def test_find_engines_supporting_language(self, catalog_json):
-        """Test finding engines that support a language."""
-        catalog = EngineCatalog.load(catalog_json)
-
-        # English - both parakeet (explicitly) and faster-whisper (null=all)
-        en_engines = catalog.find_engines_supporting_language("transcribe", "en")
-        assert len(en_engines) == 2
-
-        # Croatian - only faster-whisper (null=all)
-        hr_engines = catalog.find_engines_supporting_language("transcribe", "hr")
-        assert len(hr_engines) == 1
-        assert hr_engines[0].engine_id == "faster-whisper"
-
-    def test_validate_language_support_ok(self, catalog_json):
-        """Test validation passes for supported language."""
-        catalog = EngineCatalog.load(catalog_json)
-
-        error = catalog.validate_language_support("transcribe", "en")
-
-        assert error is None
-
-    def test_validate_language_support_fail(self, catalog_json):
-        """Test validation fails for language only supported by whisper."""
-        catalog = EngineCatalog.load(catalog_json)
-
-        # Croatian is supported by faster-whisper (null=all), so no error
-        error = catalog.validate_language_support("transcribe", "hr")
-        assert error is None
-
-    def test_validate_language_support_no_stage(self, catalog_json):
-        """Test validation fails for unsupported stage."""
-        catalog = EngineCatalog.load(catalog_json)
-
-        error = catalog.validate_language_support("diarize", "en")
-
-        assert error is not None
-        assert "No engine in catalog handles stage 'diarize'" in error
 
 
 class TestExceptions:
@@ -457,7 +309,6 @@ class TestServerRegistryCapabilities:
                 "engine_id": "parakeet",
                 "version": "1.0.0",
                 "stages": ["transcribe"],
-                "languages": ["en"],
                 "supports_word_timestamps": True,
                 "supports_streaming": False,
                 "model_variants": None,
@@ -485,7 +336,6 @@ class TestServerRegistryCapabilities:
         assert engine is not None
         assert engine.capabilities is not None
         assert engine.capabilities.engine_id == "parakeet"
-        assert engine.capabilities.languages == ["en"]
         assert engine.capabilities.supports_word_timestamps is True
         assert engine.capabilities.gpu_vram_mb == 4000
 
@@ -511,8 +361,6 @@ class TestServerRegistryCapabilities:
 
         assert engine is not None
         assert engine.capabilities is None
-        # Should still support all languages (backward compat)
-        assert engine.supports_language("hr") is True
 
     @pytest.mark.asyncio
     async def test_get_engine_malformed_capabilities(self, registry, mock_redis):

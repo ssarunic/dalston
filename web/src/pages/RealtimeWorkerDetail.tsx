@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Radio,
-  Globe,
   Zap,
   CheckCircle,
   XCircle,
@@ -381,26 +380,6 @@ export function RealtimeWorkerDetail() {
         </CardContent>
       </Card>
 
-      {/* Languages */}
-      {worker.languages.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Globe className="h-4 w-4" />
-              Supported Languages
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {worker.languages.map((lang) => (
-                <Badge key={lang} variant="secondary">
-                  {lang.toUpperCase()}
-                </Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Worker Details */}
       <Card>

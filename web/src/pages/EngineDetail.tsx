@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Server,
-  Globe,
   Clock,
   Zap,
   CheckCircle,
@@ -315,36 +314,6 @@ export function EngineDetail() {
         </Card>
       )}
 
-      {/* Languages - for transcribe and diarize stages */}
-      {engineInfo && (stage === 'transcribe' || stage === 'diarize') && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Globe className="h-4 w-4" />
-              {S.engineDetail.supportedLanguages}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!engineInfo.capabilities.languages ? (
-              <p className="text-sm text-muted-foreground">
-                {S.engineDetail.multilingual}
-              </p>
-            ) : engineInfo.capabilities.languages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {S.engineDetail.noLanguageInfo}
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {engineInfo.capabilities.languages.map((lang) => (
-                  <Badge key={lang} variant="secondary">
-                    {lang.toUpperCase()}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Models - only for transcribe stage (diarize doesn't use model registry) */}
       {stage === 'transcribe' && (

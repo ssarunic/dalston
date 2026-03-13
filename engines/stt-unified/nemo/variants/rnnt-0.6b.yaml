@@ -17,8 +17,6 @@ container:
   model_cache: /models
 
 capabilities:
-  languages:
-    - en
   max_concurrency: 2
   streaming: true
   word_timestamps: true

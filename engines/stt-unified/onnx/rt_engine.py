@@ -123,43 +123,6 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
                 terms_count=len(vocabulary),
             )
 
-        # TDT v3 supports 25 European languages; other models are English-only.
-        # Log a warning only for languages outside the supported set.
-        _supported = {
-            "auto",
-            "bg",
-            "cs",
-            "da",
-            "de",
-            "el",
-            "en",
-            "es",
-            "et",
-            "fi",
-            "fr",
-            "hr",
-            "hu",
-            "it",
-            "lt",
-            "lv",
-            "mt",
-            "nl",
-            "pl",
-            "pt",
-            "ro",
-            "ru",
-            "sk",
-            "sl",
-            "sv",
-            "uk",
-        }
-        if language not in _supported:
-            logger.warning(
-                "language_not_supported",
-                requested=language,
-                supported=sorted(_supported - {"auto"}),
-            )
-
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
@@ -197,9 +160,9 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         return self.build_transcript(
             text=result.text,
             segments=segments,
-            language="en",
+            language=language if language != "auto" else "en",
             engine_id="onnx",
-            language_confidence=1.0,
+            language_confidence=1.0 if language != "auto" else 0.5,
         )
 
     def _normalize_model_id(self, model_id: str) -> str:
@@ -227,10 +190,6 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         """Return list of curated model aliases."""
         return OnnxInference.CURATED_MODELS
-
-    def get_languages(self) -> list[str]:
-        """Return list of supported languages."""
-        return ["en"]
 
     def get_engine_id(self) -> str:
         """Return the inference framework identifier."""

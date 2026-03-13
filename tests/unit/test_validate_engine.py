@@ -10,7 +10,6 @@ import yaml
 
 from dalston.tools.validate_engine import (
     find_all_engine_yamls,
-    format_languages,
     load_schema,
     validate_engine,
 )
@@ -324,27 +323,6 @@ class TestFindAllEngineYamls:
         """Should return empty list for non-existent directory."""
         files = find_all_engine_yamls(Path("/nonexistent/directory"))
         assert files == []
-
-
-class TestFormatLanguages:
-    """Tests for format_languages function."""
-
-    def test_none_returns_none(self) -> None:
-        """None should return 'none'."""
-        assert format_languages(None) == "none"
-
-    def test_all_returns_all(self) -> None:
-        """['all'] should return 'all'."""
-        assert format_languages(["all"]) == "all"
-
-    def test_few_languages_returns_comma_separated(self) -> None:
-        """Few languages should return comma-separated list."""
-        assert format_languages(["en", "es", "fr"]) == "en, es, fr"
-
-    def test_many_languages_truncates(self) -> None:
-        """Many languages should be truncated."""
-        result = format_languages(["en", "es", "fr", "de", "it", "pt", "nl"])
-        assert result == "en, es, fr, de, +3 more"
 
 
 class TestAllExistingEngines:

@@ -58,20 +58,6 @@ class TestParakeetOnnxStreamingGetModels:
         assert len(models) >= 5  # At least 5 supported models
 
 
-class TestParakeetOnnxStreamingGetLanguages:
-    """Tests for get_languages() English-only restriction."""
-
-    def test_get_languages_returns_english_only(self):
-        """Test that get_languages returns only English."""
-        Engine = load_parakeet_onnx_streaming_engine()
-        engine = Engine()
-        languages = engine.get_languages()
-
-        assert languages == ["en"]
-        assert "fr" not in languages
-        assert "de" not in languages
-
-
 class TestParakeetOnnxStreamingNoStreaming:
     """Tests for ONNX engine (no native streaming)."""
 

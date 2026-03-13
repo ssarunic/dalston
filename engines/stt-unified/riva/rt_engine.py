@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 import structlog
-from riva_client import SUPPORTED_LANGUAGES, RivaClient
+from riva_client import RivaClient
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
@@ -128,9 +128,6 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         """NIM manages models -- no local model selection."""
         return []
-
-    def get_languages(self) -> list[str]:
-        return SUPPORTED_LANGUAGES
 
     def get_engine_id(self) -> str:
         return self._engine_id

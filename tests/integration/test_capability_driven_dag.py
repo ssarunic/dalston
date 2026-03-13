@@ -17,10 +17,7 @@ from dalston.common.registry import EngineRecord
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.dag import build_task_dag
-from dalston.orchestrator.engine_selector import (
-    ModelSelectionError,
-    NoCapableEngineError,
-)
+from dalston.orchestrator.engine_selector import ModelSelectionError
 
 # =============================================================================
 # Test Fixtures
@@ -30,7 +27,6 @@ from dalston.orchestrator.engine_selector import (
 def make_capabilities(
     engine_id: str,
     stage: str = "transcribe",
-    languages: list[str] | None = None,
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
     supports_streaming: bool = False,
@@ -41,7 +37,6 @@ def make_capabilities(
         engine_id=engine_id,
         version="1.0.0",
         stages=[stage],
-        languages=languages,
         supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
         supports_streaming=supports_streaming,
@@ -73,15 +68,12 @@ def make_engine_state(
 def make_catalog_entry(
     engine_id: str,
     stage: str = "transcribe",
-    languages: list[str] | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
         engine_id=engine_id,
         image=f"dalston/{engine_id}:latest",
-        capabilities=make_capabilities(
-            engine_id=engine_id, stage=stage, languages=languages
-        ),
+        capabilities=make_capabilities(engine_id=engine_id, stage=stage),
     )
 
 
@@ -172,7 +164,6 @@ class TestDagShapeWithNativeWordTimestamps:
                     "engine_id": "parakeet",
                     "capabilities": {
                         "supports_word_timestamps": True,
-                        "languages": ["en"],
                     },
                 },
             }
@@ -306,7 +297,7 @@ class TestDagShapeWithLanguageRequirements:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"languages": None},  # Universal
+                    "capabilities": {},  # Universal
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -322,33 +313,6 @@ class TestDagShapeWithLanguageRequirements:
 
         by_stage = {t.stage: t for t in tasks}
         assert by_stage["transcribe"].engine_id == "faster-whisper"
-
-    @pytest.mark.asyncio
-    async def test_raises_error_when_no_engine_supports_language(
-        self, job_id, audio_uri, mock_catalog
-    ):
-        """NoCapableEngineError raised when no engine supports the language."""
-        registry = create_mock_registry(
-            {
-                "prepare": {"engine_id": "audio-prepare"},
-                "transcribe": {
-                    "engine_id": "parakeet",
-                    "capabilities": {"languages": ["en"]},  # English only
-                },
-            }
-        )
-
-        with pytest.raises(NoCapableEngineError) as exc_info:
-            await build_task_dag(
-                job_id=job_id,
-                audio_uri=audio_uri,
-                parameters={"language": "hr"},  # Croatian - not supported
-                registry=registry,
-                catalog=mock_catalog,
-            )
-
-        assert exc_info.value.stage == "transcribe"
-        assert "hr" in str(exc_info.value)
 
 
 class TestDagWithTimestampGranularity:
@@ -423,7 +387,6 @@ class TestDagPerChannelWithCapabilities:
                     "engine_id": "parakeet",
                     "capabilities": {
                         "supports_word_timestamps": True,
-                        "languages": ["en"],
                     },
                 },
             }
@@ -530,56 +493,6 @@ class TestEngineRanking:
         assert by_stage["transcribe"].engine_id == "parakeet"
         assert "align" not in [t.stage for t in tasks]  # Skipped
 
-    @pytest.mark.asyncio
-    async def test_prefers_language_specific_over_universal(
-        self, job_id, audio_uri, mock_catalog
-    ):
-        """When multiple engines available, prefer language-specific over universal."""
-        registry = AsyncMock()
-
-        universal = make_engine_state(
-            "faster-whisper",
-            "transcribe",
-            make_capabilities(
-                "faster-whisper",
-                stage="transcribe",
-                languages=None,  # Universal
-            ),
-        )
-        english_specific = make_engine_state(
-            "parakeet",
-            "transcribe",
-            make_capabilities(
-                "parakeet",
-                stage="transcribe",
-                languages=["en"],  # English only
-            ),
-        )
-
-        async def get_by_stage(stage: str):
-            if stage == "transcribe":
-                return [universal, english_specific]
-            if stage == "prepare":
-                caps = make_capabilities("audio-prepare", stage="prepare")
-                return [make_engine_state("audio-prepare", "prepare", caps)]
-            if stage == "align":
-                caps = make_capabilities("phoneme-align", stage="align")
-                return [make_engine_state("phoneme-align", "align", caps)]
-            return []
-
-        registry.get_by_stage.side_effect = get_by_stage
-
-        tasks = await build_task_dag(
-            job_id=job_id,
-            audio_uri=audio_uri,
-            parameters={"language": "en"},
-            registry=registry,
-            catalog=mock_catalog,
-        )
-
-        by_stage = {t.stage: t for t in tasks}
-        assert by_stage["transcribe"].engine_id == "parakeet"
-
 
 class TestDagDependencies:
     """Tests that DAG dependencies are correctly wired with capability-driven selection."""
@@ -668,7 +581,7 @@ class TestMergedWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"languages": None},  # Universal
+                    "capabilities": {},  # Universal
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -697,7 +610,7 @@ class TestMergedWavScenarios:
         universal = make_engine_state(
             "faster-whisper",
             "transcribe",
-            make_capabilities("faster-whisper", "transcribe", languages=None),
+            make_capabilities("faster-whisper", "transcribe"),
         )
         english_only = make_engine_state(
             "parakeet",
@@ -705,7 +618,6 @@ class TestMergedWavScenarios:
             make_capabilities(
                 "parakeet",
                 "transcribe",
-                languages=["en"],
                 supports_word_timestamps=True,
             ),
         )
@@ -757,7 +669,6 @@ class TestMergedWavScenarios:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "languages": None,
                         "supports_word_timestamps": False,
                         "includes_diarization": False,
                     },
@@ -790,7 +701,7 @@ class TestMergedWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"languages": None},
+                    "capabilities": {},
                 },
                 "align": {"engine_id": "phoneme-align"},
             }
@@ -819,7 +730,6 @@ class TestMergedWavScenarios:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },
@@ -1026,7 +936,7 @@ class TestPiiCombinedWavScenarios:
                 "prepare": {"engine_id": "audio-prepare"},
                 "transcribe": {
                     "engine_id": "faster-whisper",
-                    "capabilities": {"languages": None},  # Supports all languages
+                    "capabilities": {},  # Supports all languages
                 },
                 "align": {"engine_id": "phoneme-align"},
                 "merge": {"engine_id": "final-merger"},
@@ -1043,33 +953,6 @@ class TestPiiCombinedWavScenarios:
 
         by_stage = {t.stage: t for t in tasks}
         assert by_stage["transcribe"].engine_id == "faster-whisper"
-
-    @pytest.mark.asyncio
-    async def test_croatian_rejects_english_only_engine(self, mock_catalog):
-        """Croatian language rejects English-only engine."""
-        job_id = uuid4()
-        registry = create_mock_registry(
-            {
-                "prepare": {"engine_id": "audio-prepare"},
-                "transcribe": {
-                    "engine_id": "parakeet",
-                    "capabilities": {"languages": ["en"]},  # English only
-                },
-                "merge": {"engine_id": "final-merger"},
-            }
-        )
-
-        with pytest.raises(NoCapableEngineError) as exc_info:
-            await build_task_dag(
-                job_id=job_id,
-                audio_uri="s3://test-bucket/audio/test_pii_combined.wav",
-                parameters={"language": "hr"},
-                registry=registry,
-                catalog=mock_catalog,
-            )
-
-        assert exc_info.value.stage == "transcribe"
-        assert "hr" in str(exc_info.value)
 
 
 class TestStereoSpeakersWavScenarios:
@@ -1091,7 +974,6 @@ class TestStereoSpeakersWavScenarios:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },
@@ -1127,7 +1009,6 @@ class TestStereoSpeakersWavScenarios:
                 "transcribe": {
                     "engine_id": "parakeet",
                     "capabilities": {
-                        "languages": ["en"],
                         "supports_word_timestamps": True,
                     },
                 },
@@ -1160,7 +1041,6 @@ class TestStereoSpeakersWavScenarios:
                 "transcribe": {
                     "engine_id": "faster-whisper",
                     "capabilities": {
-                        "languages": None,
                         "supports_word_timestamps": False,
                     },
                 },

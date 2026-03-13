@@ -61,12 +61,8 @@ class EngineCatalog:
     Example:
         catalog = EngineCatalog.load()
 
-        # Check if any engine in catalog supports Croatian transcription
+        # Get all transcription engines
         engines = catalog.get_engines_for_stage("transcribe")
-        supports_hr = any(
-            e.capabilities.languages is None or "hr" in e.capabilities.languages
-            for e in engines
-        )
     """
 
     def __init__(self, entries: dict[str, CatalogEntry]) -> None:
@@ -157,18 +153,10 @@ class EngineCatalog:
         if not stages:
             raise ValueError("capabilities.stages cannot be empty")
 
-        # Validate languages if present (None means multilingual)
-        languages = caps_data.get("languages")
-        if languages is not None and not isinstance(languages, list):
-            raise TypeError(
-                f"capabilities.languages must be a list or null, got {type(languages).__name__}"
-            )
-
         capabilities = EngineCapabilities(
             engine_id=engine_id,
             version=engine_data.get("version", "unknown"),
             stages=stages,
-            languages=languages,
             supports_word_timestamps=caps_data.get("supports_word_timestamps", False),
             supports_streaming=caps_data.get("supports_streaming", False),
             model_variants=None,
@@ -241,50 +229,6 @@ class EngineCatalog:
         """
         return [e for e in self._entries.values() if stage in e.capabilities.stages]
 
-    def find_engines_supporting_language(
-        self, stage: str, language: str
-    ) -> list[CatalogEntry]:
-        """Find engines for a stage that support a specific language.
-
-        Args:
-            stage: Pipeline stage
-            language: ISO 639-1 language code
-
-        Returns:
-            List of engines that support the language for the stage
-        """
-        result = []
-        for entry in self.get_engines_for_stage(stage):
-            caps = entry.capabilities
-            # None means all languages
-            if caps.languages is None:
-                result.append(entry)
-            elif language.lower() in [lang.lower() for lang in caps.languages]:
-                result.append(entry)
-        return result
-
-    def validate_language_support(self, stage: str, language: str) -> str | None:
-        """Check if any engine in catalog supports a language for a stage.
-
-        Args:
-            stage: Pipeline stage
-            language: ISO 639-1 language code
-
-        Returns:
-            None if supported, error message if not supported
-        """
-        engines = self.find_engines_supporting_language(stage, language)
-        if not engines:
-            available_engines = self.get_engines_for_stage(stage)
-            if not available_engines:
-                return f"No engine in catalog handles stage '{stage}'"
-            return (
-                f"No engine in catalog supports language '{language}' "
-                f"for stage '{stage}'. Available engine_ids: "
-                f"{[e.engine_id for e in available_engines]}"
-            )
-        return None
-
     def find_engines(self, stage: str, requirements: dict) -> list[CatalogEntry]:
         """Find catalog engines that could satisfy requirements (M31).
 
@@ -294,7 +238,6 @@ class EngineCatalog:
         Args:
             stage: Pipeline stage (e.g., "transcribe", "diarize")
             requirements: Dict of requirements to match:
-                - language: ISO 639-1 code (optional)
                 - streaming: bool (optional)
 
         Returns:
@@ -318,12 +261,6 @@ class EngineCatalog:
         Returns:
             True if all requirements are satisfied
         """
-        # Language check
-        lang = requirements.get("language")
-        if lang and caps.languages is not None:
-            if lang.lower() not in [lng.lower() for lng in caps.languages]:
-                return False
-
         # Streaming check
         if requirements.get("streaming") and not caps.supports_streaming:
             return False

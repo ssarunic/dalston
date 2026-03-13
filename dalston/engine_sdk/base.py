@@ -200,11 +200,6 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         else:
             gpu_required = gpu_field == "required"
 
-        # Languages: convert ["all"] to None (meaning all languages)
-        languages = caps.get("languages")
-        if languages == ["all"]:
-            languages = None
-
         # Stages: derive from stage field for batch engines
         stage = card.get("stage")
         stages = [stage] if stage else []
@@ -213,7 +208,6 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
             engine_id=card.get("engine_id") or card.get("id", "unknown"),
             version=card.get("version", "unknown"),
             stages=stages,
-            languages=languages,
             supports_word_timestamps=caps.get("word_timestamps", False),
             supports_streaming=caps.get("streaming", False),
             model_variants=None,

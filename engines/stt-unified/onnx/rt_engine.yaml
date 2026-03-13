@@ -15,8 +15,6 @@ container:
   model_cache: /models/onnx
 
 capabilities:
-  languages:
-    - en  # English only
   streaming: true
   word_timestamps: true
   max_concurrency: 4

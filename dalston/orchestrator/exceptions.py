@@ -11,7 +11,6 @@ class EngineInfo:
     """Summary of an engine for error context."""
 
     id: str
-    languages: list[str] | None = None
     supports_word_timestamps: bool = False
     status: str = "unknown"
 
@@ -19,7 +18,6 @@ class EngineInfo:
         """Convert to dictionary for JSON serialization."""
         return {
             "id": self.id,
-            "languages": self.languages,
             "word_timestamps": self.supports_word_timestamps,
             "status": self.status,
         }
@@ -167,38 +165,10 @@ def build_engine_suggestion(
     if not available_engines:
         return f"No engines configured for stage '{stage}'. Check your deployment."
 
-    # Find engines that support all languages
-    all_lang_engines = [
-        e for e in available_engines if e.languages is None and e.status != "running"
-    ]
+    not_running = [e for e in available_engines if e.status != "running"]
 
-    # Find engines that support the specific language but aren't running
-    if language:
-        lang_engines = [
-            e
-            for e in available_engines
-            if e.languages is not None
-            and language.lower() in [lang.lower() for lang in e.languages]
-            and e.status != "running"
-        ]
-    else:
-        lang_engines = []
+    if not_running:
+        engine_names = ", ".join(e.id for e in not_running[:2])
+        return f"Start {engine_names}"
 
-    suggestions = []
-
-    if all_lang_engines:
-        engine_names = ", ".join(e.id for e in all_lang_engines[:2])
-        suggestions.append(f"Start {engine_names} (supports all languages)")
-
-    if lang_engines and language:
-        engine_names = ", ".join(e.id for e in lang_engines[:2])
-        suggestions.append(f"Start {engine_names} (supports {language})")
-
-    if not suggestions:
-        # All capable engines are already running - suggest alternative
-        if language:
-            suggestions.append(
-                f"Try a different language, or wait for an engine that supports '{language}'"
-            )
-
-    return " or ".join(suggestions) if suggestions else None
+    return None

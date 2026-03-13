@@ -31,17 +31,18 @@ VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
 
 
 def find_engine_id_yamls(engines_dir: Path) -> list[Path]:
-    """Find all engine.yaml files (engine_id definitions)."""
+    """Find all engine YAML files (engine_id definitions)."""
     yamls: list[Path] = []
 
-    for yaml_path in engines_dir.glob("**/engine.yaml"):
-        # Skip realtime engines for now (separate migration)
-        if "stt-rt" in str(yaml_path):
-            continue
-        # Merge engine_id was replaced by orchestrator transcript assembly.
-        if "stt-merge" in str(yaml_path):
-            continue
-        yamls.append(yaml_path)
+    for pattern in ("**/engine.yaml", "**/rt_engine.yaml"):
+        for yaml_path in engines_dir.glob(pattern):
+            # Skip realtime engines for now (separate migration)
+            if "stt-rt" in str(yaml_path):
+                continue
+            # Merge engine_id was replaced by orchestrator transcript assembly.
+            if "stt-merge" in str(yaml_path):
+                continue
+            yamls.append(yaml_path)
 
     return sorted(yamls)
 
@@ -79,10 +80,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
     stages = [stage] if stage else []
 
     # Extract capabilities
-    caps = data.get("capabilities", {})
-    languages = caps.get("languages")
-    if languages == ["all"]:
-        languages = None  # null means all languages in catalog format
+    caps = data.get("capabilities") or {}
 
     # Extract hardware info
     hardware = data.get("hardware", {})
@@ -115,7 +113,6 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
         "image": derive_image_name(engine_id, stage, version),
         "capabilities": {
             "stages": stages,
-            "languages": languages,
             "supports_word_timestamps": caps.get("word_timestamps", False),
             "supports_streaming": caps.get("streaming", False),
             "max_audio_duration": caps.get("max_audio_duration"),

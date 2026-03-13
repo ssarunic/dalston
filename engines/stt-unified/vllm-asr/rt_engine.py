@@ -171,23 +171,6 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         return sorted(ADAPTER_REGISTRY.keys())
 
-    def get_languages(self) -> list[str]:
-        return [
-            "en",
-            "zh",
-            "hi",
-            "es",
-            "ar",
-            "fr",
-            "pt",
-            "ru",
-            "de",
-            "ja",
-            "ko",
-            "it",
-            "nl",
-        ]
-
     def get_engine_id(self) -> str:
         return self._engine_id
 

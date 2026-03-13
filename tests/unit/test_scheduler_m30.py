@@ -157,7 +157,6 @@ class TestErrorDetails:
 
         info = EngineInfo(
             id="faster-whisper",
-            languages=["en", "es"],
             supports_word_timestamps=True,
             status="running",
         )
@@ -165,23 +164,8 @@ class TestErrorDetails:
         result = info.to_dict()
 
         assert result["id"] == "faster-whisper"
-        assert result["languages"] == ["en", "es"]
         assert result["word_timestamps"] is True
         assert result["status"] == "running"
-
-    def test_engine_info_with_null_languages(self):
-        """EngineInfo with None languages (all) should serialize correctly."""
-        from dalston.orchestrator.exceptions import EngineInfo
-
-        info = EngineInfo(
-            id="whisper",
-            languages=None,
-            supports_word_timestamps=True,
-            status="available",
-        )
-
-        result = info.to_dict()
-        assert result["languages"] is None
 
     def test_error_details_to_dict(self):
         """ErrorDetails should serialize to dict correctly."""
@@ -190,10 +174,10 @@ class TestErrorDetails:
         details = ErrorDetails(
             required={"stage": "transcribe", "language": "hr"},
             available_engines=[
-                EngineInfo(id="whisper", languages=None, status="available"),
-                EngineInfo(id="parakeet", languages=["en"], status="running"),
+                EngineInfo(id="whisper", status="available"),
+                EngineInfo(id="parakeet", status="running"),
             ],
-            suggestion="Start whisper (supports all languages)",
+            suggestion="Start whisper",
         )
 
         result = details.to_dict()
@@ -201,7 +185,7 @@ class TestErrorDetails:
         assert result["required"] == {"stage": "transcribe", "language": "hr"}
         assert len(result["available_engines"]) == 2
         assert result["available_engines"][0]["id"] == "whisper"
-        assert result["suggestion"] == "Start whisper (supports all languages)"
+        assert result["suggestion"] == "Start whisper"
 
     def test_build_engine_suggestion_no_engines(self):
         """Should suggest checking deployment when no engines available."""
@@ -221,8 +205,8 @@ class TestErrorDetails:
         from dalston.orchestrator.exceptions import EngineInfo, build_engine_suggestion
 
         engines = [
-            EngineInfo(id="whisper", languages=None, status="available"),
-            EngineInfo(id="parakeet", languages=["en"], status="running"),
+            EngineInfo(id="whisper", status="available"),
+            EngineInfo(id="parakeet", status="running"),
         ]
 
         suggestion = build_engine_suggestion(
@@ -232,14 +216,13 @@ class TestErrorDetails:
         )
 
         assert "whisper" in suggestion
-        assert "all languages" in suggestion
 
     def test_build_engine_suggestion_with_language_specific_engine(self):
         """Should suggest language-specific engines when available."""
         from dalston.orchestrator.exceptions import EngineInfo, build_engine_suggestion
 
         engines = [
-            EngineInfo(id="hr-model", languages=["hr"], status="available"),
+            EngineInfo(id="hr-model", status="available"),
         ]
 
         suggestion = build_engine_suggestion(
@@ -249,7 +232,6 @@ class TestErrorDetails:
         )
 
         assert "hr-model" in suggestion
-        assert "hr" in suggestion
 
 
 class TestExceptionSerialization:
@@ -266,7 +248,7 @@ class TestExceptionSerialization:
         details = ErrorDetails(
             required={"stage": "transcribe", "language": "hr"},
             available_engines=[
-                EngineInfo(id="whisper", languages=None, status="available"),
+                EngineInfo(id="whisper", status="available"),
             ],
             suggestion="Start whisper",
         )
@@ -298,7 +280,7 @@ class TestExceptionSerialization:
         details = ErrorDetails(
             required={"stage": "transcribe"},
             available_engines=[
-                EngineInfo(id="whisper", languages=None, status="available"),
+                EngineInfo(id="whisper", status="available"),
             ],
         )
 
@@ -327,7 +309,7 @@ class TestExceptionSerialization:
         details = ErrorDetails(
             required={"stage": "transcribe", "language": "hr"},
             available_engines=[
-                EngineInfo(id="parakeet", languages=["en"], status="running"),
+                EngineInfo(id="parakeet", status="running"),
             ],
         )
 

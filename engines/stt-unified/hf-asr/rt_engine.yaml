@@ -16,8 +16,6 @@ container:
   model_cache: /models/huggingface
 
 capabilities:
-  languages:
-    - all  # Model-dependent
   streaming: true
   word_timestamps: true  # Model-dependent; Whisper provides timestamps
   max_concurrency: 4

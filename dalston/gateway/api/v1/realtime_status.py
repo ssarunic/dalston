@@ -43,7 +43,6 @@ class WorkerStatusResponse(BaseModel):
     capacity: int
     active_sessions: int
     models: list[str]
-    languages: list[str]
 
 
 class WorkersListResponse(BaseModel):
@@ -112,7 +111,6 @@ async def list_realtime_workers(
                 capacity=w.capacity,
                 active_sessions=w.active_sessions,
                 models=w.models,
-                languages=w.languages,
             )
             for w in workers
         ],
@@ -148,5 +146,4 @@ async def get_worker_status(
         capacity=worker.capacity,
         active_sessions=worker.active_sessions,
         models=worker.models,
-        languages=worker.languages,
     )

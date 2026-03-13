@@ -149,7 +149,6 @@ class SessionAllocator:
             # Find available workers
             available = await self._registry.get_available(
                 interface="realtime",
-                language=language,
                 engine_id=engine_id,
                 model=model,
                 valid_engine_ids=valid_engine_ids,

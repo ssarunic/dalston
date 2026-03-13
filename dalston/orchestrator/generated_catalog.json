@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-11T08:55:27.153871+00:00",
+  "generated_at": "2026-03-13T15:15:00.199751+00:00",
   "schema_version": "3.0",
   "engine_count": 12,
   "engines": {
@@ -16,7 +16,6 @@
         "stages": [
           "align"
         ],
-        "languages": null,
         "supports_word_timestamps": true,
         "supports_streaming": false,
         "max_audio_duration": 7200,
@@ -52,7 +51,6 @@
         "stages": [
           "pii_detect"
         ],
-        "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
@@ -86,7 +84,6 @@
         "stages": [
           "diarize"
         ],
-        "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
@@ -123,7 +120,6 @@
         "stages": [
           "diarize"
         ],
-        "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 7200,
@@ -159,7 +155,6 @@
         "stages": [
           "prepare"
         ],
-        "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": 14400,
@@ -193,7 +188,6 @@
         "stages": [
           "audio_redact"
         ],
-        "languages": null,
         "supports_word_timestamps": false,
         "supports_streaming": false,
         "max_audio_duration": null,
@@ -216,27 +210,26 @@
     },
     "faster-whisper": {
       "id": "faster-whisper",
-      "name": "Faster Whisper Runtime",
+      "name": "Faster Whisper Realtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for faster-whisper (CTranslate2-based Whisper) transcription.\nCan load any Whisper-compatible model at engine_id via loaded_model_id.\n\nM36: This is a engine_id-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.",
+      "description": "Real-time streaming transcription using faster-whisper (CTranslate2).\nVAD-chunked transcription with word-level timestamps.",
       "image": "dalston/stt-batch-transcribe-faster-whisper:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": null,
-        "supports_word_timestamps": false,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": null
+        "supports_word_timestamps": true,
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
         "gpu_optional": true,
-        "min_vram_gb": 2,
+        "min_vram_gb": 4,
         "recommended_gpu": [
           "t4",
           "a10g"
@@ -253,22 +246,21 @@
     },
     "hf-asr": {
       "id": "hf-asr",
-      "name": "HuggingFace Transformers ASR",
+      "name": "HuggingFace ASR Realtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Generic ASR engine for HuggingFace Transformers models.\nSupports Whisper, Wav2Vec2, HuBERT, MMS, and other ASR architectures\nwith pipeline_tag=automatic-speech-recognition.\n\nUse for community fine-tunes and research models. Any of the 10,000+\nASR models on HuggingFace Hub can be loaded at engine_id via loaded_model_id.",
+      "description": "Real-time VAD-chunked transcription via HuggingFace Transformers ASR pipelines.\nSupports any model with pipeline_tag=automatic-speech-recognition on HuggingFace Hub\n(Whisper, Wav2Vec2, HuBERT, MMS, community fine-tunes).",
       "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": null,
         "supports_word_timestamps": true,
-        "supports_streaming": false,
-        "max_audio_duration": 3600,
-        "max_concurrency": null
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -290,65 +282,57 @@
     },
     "nemo": {
       "id": "nemo",
-      "name": "NVIDIA NeMo Parakeet Runtime",
+      "name": "Parakeet Realtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Runtime engine for NVIDIA NeMo Parakeet transcription models.\nCan load any Parakeet model at engine_id via loaded_model_id.\n\nM36: This is a engine_id-level configuration. The engine loads specific model\nvariants on demand, without requiring separate Docker images per variant.\nSee models/*.yaml for pre-defined model variants.\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage.",
+      "description": "Real-time streaming transcription using NVIDIA NeMo Parakeet FastConformer.\nCache-aware streaming for ~100ms end-to-end latency with native word timestamps.",
       "image": "dalston/stt-batch-transcribe-nemo:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": [
-          "en"
-        ],
         "supports_word_timestamps": true,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": null
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
       },
       "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
+        "gpu_required": true,
+        "gpu_optional": false,
         "min_vram_gb": 4,
         "recommended_gpu": [
-          "a10g",
-          "a100"
+          "t4",
+          "a10g"
         ],
-        "supports_cpu": true,
-        "min_ram_gb": 12,
-        "memory": "12G"
+        "supports_cpu": false,
+        "min_ram_gb": 8,
+        "memory": "8G"
       },
       "performance": {
         "rtf_gpu": 0.0006,
-        "rtf_cpu": 0.5,
-        "warm_start_latency_ms": 150
+        "rtf_cpu": null,
+        "warm_start_latency_ms": 100
       }
     },
     "onnx": {
       "id": "onnx",
-      "name": "ONNX Runtime ASR",
+      "name": "ONNX Realtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Lightweight ONNX Runtime engine for ASR models.\nUses the onnx-asr library for fast inference without the full NeMo toolkit.\nSupports CTC, TDT, and RNNT decoders, plus any model compatible with\nonnx_asr.load_model() (Whisper, GigaAM, Vosk, etc.).\n\nM41: This engine_id provides the same Parakeet model accuracy with significantly\nsmaller container images (~1GB vs ~12GB) and faster startup. Uses ONNX Runtime\nfor inference and supports both CPU and GPU execution.\n\nCurated model aliases:\n  - parakeet-onnx-ctc-0.6b (CTC, fast, 600M params)\n  - parakeet-onnx-ctc-1.1b (CTC, accurate, 1.1B params)\n  - parakeet-onnx-tdt-0.6b-v2 (TDT, English-only, 600M params)\n  - parakeet-onnx-tdt-0.6b-v3 (TDT, 25 languages, punctuation + capitalization, 600M params)\n  - parakeet-onnx-rnnt-0.6b (RNNT, English-only, 600M params)\n\nAll Parakeet models produce native word-level timestamps without needing\na separate alignment stage. Unknown model IDs are passed through to\nonnx-asr as-is.",
+      "description": "Real-time VAD-chunked transcription via ONNX Runtime.\nSimpler deployment than NeMo (no PyTorch) with slightly higher per-utterance latency.",
       "image": "dalston/stt-batch-transcribe-onnx:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": [
-          "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
-          "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro",
-          "ru", "sk", "sl", "sv", "uk"
-        ],
         "supports_word_timestamps": true,
-        "supports_streaming": false,
-        "max_audio_duration": 7200,
-        "max_concurrency": null
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 4
       },
       "hardware": {
         "gpu_required": false,
@@ -364,39 +348,27 @@
       },
       "performance": {
         "rtf_gpu": 0.0003,
-        "rtf_cpu": 0.15,
+        "rtf_cpu": 0.01,
         "warm_start_latency_ms": 50
       }
     },
     "riva": {
       "id": "riva",
-      "name": "Riva NIM Batch Transcription",
-      "version": "1.0.0",
+      "name": "Riva NIM Unified",
+      "version": "1.1.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Batch transcription engine using NVIDIA Riva NIM as a gRPC sidecar.\nStreams audio chunks to NIM via streaming_recognize() for robust\nprocessing of long recordings without gRPC deadline risk.\n\nThe engine itself is a thin CPU adapter; all GPU inference runs\nin the Riva NIM sidecar container.",
-      "image": "dalston/stt-batch-transcribe-riva:1.0.0",
+      "description": "Unified batch + realtime transcription using NVIDIA Riva NIM as a gRPC\nsidecar.  The engine itself is a thin CPU adapter; all GPU inference runs\nin the Riva NIM container.\n\nBatch: streams audio chunks via streaming_recognize(interim_results=False).\nRT: VAD-chunked utterances via offline_recognize() with periodic\nre-transcription for partial results.",
+      "image": "dalston/stt-batch-transcribe-riva:1.1.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": [
-          "en",
-          "es",
-          "fr",
-          "de",
-          "it",
-          "pt",
-          "zh",
-          "ja",
-          "ko",
-          "ru"
-        ],
         "supports_word_timestamps": true,
-        "supports_streaming": false,
+        "supports_streaming": true,
         "max_audio_duration": 7200,
-        "max_concurrency": null
+        "max_concurrency": 8
       },
       "hardware": {
         "gpu_required": false,
@@ -415,49 +387,38 @@
     },
     "vllm-asr": {
       "id": "vllm-asr",
-      "name": "Voxtral Batch",
+      "name": "vLLM ASR Realtime",
       "version": "1.0.0",
       "stage": "transcribe",
       "type": null,
-      "description": "Batch transcription using Mistral Voxtral models via HuggingFace Transformers.\nSupports Mini 3B and Small 24B variants for multilingual transcription\nacross 8 languages. GPU required for inference.\n\nNote: Produces segment-level output without word timestamps.\nChain with phoneme-align stage if word-level timestamps are needed.",
+      "description": "Real-time transcription using audio-capable LLMs via vLLM.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.",
       "image": "dalston/stt-batch-transcribe-vllm-asr:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
           "transcribe"
         ],
-        "languages": [
-          "en",
-          "es",
-          "fr",
-          "pt",
-          "hi",
-          "de",
-          "nl",
-          "it"
-        ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
-        "max_audio_duration": 1800,
-        "max_concurrency": null
+        "supports_streaming": true,
+        "max_audio_duration": null,
+        "max_concurrency": 2
       },
       "hardware": {
         "gpu_required": true,
         "gpu_optional": false,
-        "min_vram_gb": 10,
+        "min_vram_gb": 8,
         "recommended_gpu": [
           "a10g",
-          "l4",
-          "rtx4090"
+          "a100"
         ],
         "supports_cpu": false,
         "min_ram_gb": 16,
-        "memory": "12G"
+        "memory": "16G"
       },
       "performance": {
-        "rtf_gpu": 0.05,
+        "rtf_gpu": 0.15,
         "rtf_cpu": null,
-        "warm_start_latency_ms": 500
+        "warm_start_latency_ms": 5000
       }
     }
   }

@@ -91,20 +91,6 @@ class TestParakeetStreamingEngineGetModels:
         assert len(models) == 6
 
 
-class TestParakeetStreamingEngineGetLanguages:
-    """Tests for get_languages() English-only restriction."""
-
-    def test_get_languages_returns_english_only(self, mock_cuda_available):
-        """Test that get_languages returns only English."""
-        NemoRealtimeEngine = load_parakeet_streaming_engine()
-        engine = NemoRealtimeEngine()
-        languages = engine.get_languages()
-
-        assert languages == ["en"]
-        assert "fr" not in languages
-        assert "de" not in languages
-
-
 class TestParakeetStreamingEngineHealthCheck:
     """Tests for streaming engine health check - M44 dynamic model loading."""
 

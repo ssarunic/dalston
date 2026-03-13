@@ -253,12 +253,6 @@ class TestRivaRtStreamingSupport:
         engine = riva_rt_engine_class()
         assert engine.get_engine_id() == "riva-nim-2"
 
-    def test_get_languages(self, engine_with_mock) -> None:
-        languages = engine_with_mock.get_languages()
-        assert "en" in languages
-        assert "es" in languages
-        assert len(languages) == 10
-
     def test_get_models_returns_empty(self, engine_with_mock) -> None:
         assert engine_with_mock.get_models() == []
 

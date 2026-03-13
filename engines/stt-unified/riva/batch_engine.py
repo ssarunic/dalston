@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from riva_client import BYTES_PER_SAMPLE, SAMPLE_RATE, SUPPORTED_LANGUAGES, RivaClient
+from riva_client import BYTES_PER_SAMPLE, SAMPLE_RATE, RivaClient
 
 from dalston.common.pipeline_types import (
     Transcript,
@@ -146,7 +146,6 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
             engine_id=self._engine_id,
             version="1.1.0",
             stages=["transcribe"],
-            languages=SUPPORTED_LANGUAGES,
             supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=[],

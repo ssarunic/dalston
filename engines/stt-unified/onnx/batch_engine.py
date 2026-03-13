@@ -180,12 +180,13 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             char_count=len(core_result.text),
         )
 
+        language = params.language or "en"
         return self.build_transcript(
             text=core_result.text,
             segments=segments,
-            language="en",
+            language=language if language != "auto" else "en",
             engine_id=self._engine_id,
-            language_confidence=1.0,
+            language_confidence=1.0 if language != "auto" else 0.5,
             alignment_method=alignment_method,
             channel=channel,
         )
@@ -221,44 +222,12 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             "quantization": self._core.quantization,
         }
 
-    # Languages supported by TDT v3 (25 European languages).
-    # Other models (CTC, TDT v2, RNNT) are English-only but the engine
-    # advertises the union so the orchestrator can route multilingual jobs.
-    SUPPORTED_LANGUAGES = [
-        "bg",
-        "cs",
-        "da",
-        "de",
-        "el",
-        "en",
-        "es",
-        "et",
-        "fi",
-        "fr",
-        "hr",
-        "hu",
-        "it",
-        "lt",
-        "lv",
-        "mt",
-        "nl",
-        "pl",
-        "pt",
-        "ro",
-        "ru",
-        "sk",
-        "sl",
-        "sv",
-        "uk",
-    ]
-
     def get_capabilities(self) -> EngineCapabilities:
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
             engine_id=self._engine_id,
             version="1.2.0",
             stages=["transcribe"],
-            languages=self.SUPPORTED_LANGUAGES,
             supports_word_timestamps=True,
             supports_streaming=False,
             model_variants=sorted(self.CURATED_MODELS),

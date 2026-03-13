@@ -36,7 +36,6 @@ class WorkerStatus:
     capacity: int
     active_sessions: int
     models: list[str]
-    languages: list[str]
     engine_id: str | None = None
     supports_vocabulary: bool = False
 
@@ -50,7 +49,6 @@ class WorkerStatus:
             capacity=record.capacity,
             active_sessions=record.active_realtime,
             models=record.models_loaded or [],
-            languages=record.languages or [],
             engine_id=record.engine_id,
             supports_vocabulary=False,
         )

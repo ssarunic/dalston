@@ -53,7 +53,6 @@ class ScaffoldConfig(NamedTuple):
     description: str
     gpu: str  # required, optional, none
     memory: str
-    languages: list[str] | None
     word_timestamps: bool
     supports_cpu: bool
     min_vram_gb: int | None
@@ -71,7 +70,6 @@ class VariantConfig(NamedTuple):
     description: str
     gpu: str
     memory: str
-    languages: list[str] | None
     word_timestamps: bool
     supports_cpu: bool
     min_vram_gb: int | None
@@ -178,14 +176,6 @@ def generate_engine_yaml(config: ScaffoldConfig) -> str:
     """Generate engine.yaml content."""
     pipeline_tag = PIPELINE_TAG_MAP.get(config.stage, "audio-classification")
 
-    # Format languages
-    if config.languages is None:
-        languages_yaml = "    - all  # Supports all languages"
-    elif config.languages == ["en"]:
-        languages_yaml = "    - en"
-    else:
-        languages_yaml = "\n".join(f"    - {lang}" for lang in config.languages)
-
     # Hardware section
     hardware_lines = []
     if config.min_vram_gb:
@@ -225,8 +215,6 @@ container:
   model_cache: /models
 
 capabilities:
-  languages:
-{languages_yaml}
   max_audio_duration: 7200
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
@@ -356,7 +344,6 @@ class {class_name}(Engine):
             engine_id="{config.engine_id}",
             version="1.0.0",
             stages=["{config.stage}"],
-            languages={repr(config.languages)},
             supports_word_timestamps={config.word_timestamps},
             supports_streaming=False,
             gpu_required={config.gpu == "required"},
@@ -496,14 +483,6 @@ def generate_variant_yaml(config: VariantConfig) -> str:
     """Generate variant-specific engine.yaml content."""
     pipeline_tag = PIPELINE_TAG_MAP.get(config.stage, "audio-classification")
 
-    # Format languages
-    if config.languages is None:
-        languages_yaml = "    - all  # Supports all languages"
-    elif config.languages == ["en"]:
-        languages_yaml = "    - en"
-    else:
-        languages_yaml = "\n".join(f"    - {lang}" for lang in config.languages)
-
     # Hardware section
     hardware_lines = []
     if config.min_vram_gb:
@@ -536,8 +515,6 @@ container:
   model_cache: /models
 
 capabilities:
-  languages:
-{languages_yaml}
   max_audio_duration: 7200
   streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
@@ -712,7 +689,6 @@ def scaffold_variant_engine(
     stage: str,
     variants: list[str],
     description: str,
-    languages: list[str] | None,
     word_timestamps: bool,
     engines_dir: Path,
     dry_run: bool,
@@ -765,7 +741,6 @@ This engine supports multiple variants with different hardware requirements:
             description=f"{engine_family.title()} {variant} variant.",
             gpu=defaults.get("gpu", "optional"),
             memory=defaults.get("memory", "4G"),
-            languages=languages,
             word_timestamps=word_timestamps,
             supports_cpu=defaults.get("supports_cpu", True),
             min_vram_gb=defaults.get("min_vram_gb", 4),
@@ -916,13 +891,6 @@ Examples:
         help="Memory requirement (default: 4G)",
     )
     parser.add_argument(
-        "--languages",
-        type=str,
-        nargs="+",
-        default=None,
-        help="Supported languages (default: all). Use 'all' for universal support.",
-    )
-    parser.add_argument(
         "--word-timestamps",
         action="store_true",
         help="Engine produces word-level timestamps",
@@ -972,11 +940,6 @@ Examples:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
-    # Process languages
-    languages = args.languages
-    if languages == ["all"]:
-        languages = None
-
     dry_run = not args.no_dry_run
 
     # Handle variant-based scaffolding
@@ -987,7 +950,6 @@ Examples:
             stage=args.stage,
             variants=variants,
             description=args.description,
-            languages=languages,
             word_timestamps=args.word_timestamps,
             engines_dir=args.engines_dir,
             dry_run=dry_run,
@@ -1013,7 +975,6 @@ Examples:
         description=args.description,
         gpu=args.gpu,
         memory=args.memory,
-        languages=languages,
         word_timestamps=args.word_timestamps,
         supports_cpu=supports_cpu,
         min_vram_gb=min_vram_gb,

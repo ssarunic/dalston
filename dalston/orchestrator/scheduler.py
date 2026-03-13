@@ -29,7 +29,6 @@ from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
-    EngineCapabilityError,
     EngineInfo,
     EngineUnavailableError,
     ErrorDetails,
@@ -63,7 +62,6 @@ def _build_engine_info(
 
     return EngineInfo(
         id=entry.engine_id,
-        languages=entry.capabilities.languages,
         supports_word_timestamps=entry.capabilities.supports_word_timestamps,
         status=status,
     )
@@ -263,7 +261,6 @@ async def queue_task(
     Raises:
         CatalogValidationError: If no engine in catalog supports the requirements
         EngineUnavailableError: If the required engine is not running
-        EngineCapabilityError: If running engine doesn't support job requirements
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
@@ -294,20 +291,6 @@ async def queue_task(
 
     # Get word_timestamps requirement from config
     word_timestamps = task.config.get("word_timestamps") if task.config else None
-
-    if language and task.stage == "transcribe":
-        catalog_error = catalog.validate_language_support(task.stage, language)
-        if catalog_error:
-            # Build detailed error context (M30)
-            details = await _build_error_details(
-                catalog, registry, task.stage, language, word_timestamps
-            )
-            raise CatalogValidationError(
-                catalog_error,
-                stage=task.stage,
-                language=language,
-                details=details,
-            )
 
     # 2. Registry check - is the engine currently running? (M28)
     # Check config for behavior when engine is unavailable
@@ -352,24 +335,6 @@ async def queue_task(
                 job_id=task.job_id,
                 task_id=task.id,
                 language=language,
-            )
-
-    # 3. Capabilities check - does running engine support job requirements? (M29)
-    if language and task.stage == "transcribe":
-        engine_state = await registry.get_engine(task.engine_id)
-        if engine_state and not engine_state.supports_language(language):
-            # Build detailed error context (M30)
-            details = await _build_error_details(
-                catalog, registry, task.stage, language, word_timestamps
-            )
-            raise EngineCapabilityError(
-                f"Engine '{task.engine_id}' is running but does not support "
-                f"language '{language}'. Supported languages: "
-                f"{engine_state.languages or 'unknown'}",
-                engine_id=task.engine_id,
-                stage=task.stage,
-                language=language,
-                details=details,
             )
 
     log = logger.bind(task_id=task_id_str, job_id=job_id_str, engine_id=task.engine_id)

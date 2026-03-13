@@ -264,9 +264,6 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         return [self._default_model_id]
 
-    def get_languages(self) -> list[str]:
-        return ["all"]
-
     def get_engine_id(self) -> str:
         return self._engine_id
 

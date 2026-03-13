@@ -31,7 +31,6 @@ class ValidationResult(NamedTuple):
     version: str | None
     schema_version: str | None
     stage_or_type: str | None
-    languages: list[str] | None
     errors: list[str]
 
 
@@ -64,7 +63,6 @@ def validate_engine(
             version=None,
             schema_version=None,
             stage_or_type=None,
-            languages=None,
             errors=[f"YAML parse error: {e}"],
         )
     except FileNotFoundError:
@@ -75,7 +73,6 @@ def validate_engine(
             version=None,
             schema_version=None,
             stage_or_type=None,
-            languages=None,
             errors=[f"File not found: {engine_path}"],
         )
 
@@ -94,7 +91,6 @@ def validate_engine(
     version = data.get("version")
     schema_version = data.get("schema_version")
     stage_or_type = data.get("stage") or data.get("type")
-    languages = data.get("capabilities", {}).get("languages")
 
     return ValidationResult(
         path=engine_path,
@@ -103,7 +99,6 @@ def validate_engine(
         version=version,
         schema_version=schema_version,
         stage_or_type=stage_or_type,
-        languages=languages,
         errors=errors,
     )
 
@@ -131,17 +126,6 @@ def find_all_engine_yamls(engines_dir: Path) -> list[Path]:
     return sorted(yamls)
 
 
-def format_languages(languages: list[str] | None) -> str:
-    """Format language list for display."""
-    if languages is None:
-        return "none"
-    if languages == ["all"]:
-        return "all"
-    if len(languages) <= 5:
-        return ", ".join(languages)
-    return f"{', '.join(languages[:4])}, +{len(languages) - 4} more"
-
-
 def print_result(result: ValidationResult, verbose: bool = False) -> None:
     """Print validation result in a human-readable format."""
     status = "\u2713" if result.valid else "\u2717"
@@ -151,7 +135,6 @@ def print_result(result: ValidationResult, verbose: bool = False) -> None:
             f"{status} {result.engine_id} v{result.version} (schema {result.schema_version})"
         )
         print(f"  Stage: {result.stage_or_type}")
-        print(f"  Languages: {format_languages(result.languages)}")
     else:
         engine_info = result.engine_id or result.path.name
         print(f"{status} {engine_info}")

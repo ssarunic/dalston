@@ -343,7 +343,6 @@ class TestVLLMASREngine:
         assert caps.engine_id == "vllm-asr"
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
-        assert caps.languages is None  # Multilingual
         assert caps.supports_word_timestamps is False
         assert caps.supports_streaming is False
         assert caps.gpu_required is True

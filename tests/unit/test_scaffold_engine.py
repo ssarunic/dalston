@@ -116,7 +116,6 @@ class TestGenerateEngineYaml:
             description="A test engine for testing.",
             gpu="optional",
             memory="4G",
-            languages=None,  # All languages
             word_timestamps=True,
             supports_cpu=True,
             min_vram_gb=4,
@@ -143,21 +142,6 @@ class TestGenerateEngineYaml:
         assert "performance" in data
         assert data["hf_compat"]["pipeline_tag"] == "automatic-speech-recognition"
 
-    def test_handles_all_languages(self, basic_config: ScaffoldConfig) -> None:
-        """Should handle 'all' languages correctly."""
-        content = generate_engine_yaml(basic_config)
-        data = yaml.safe_load(content)
-
-        assert data["capabilities"]["languages"] == ["all"]
-
-    def test_handles_specific_languages(self, basic_config: ScaffoldConfig) -> None:
-        """Should handle specific language list."""
-        config = basic_config._replace(languages=["en", "es"])
-        content = generate_engine_yaml(config)
-        data = yaml.safe_load(content)
-
-        assert data["capabilities"]["languages"] == ["en", "es"]
-
     def test_gpu_none_config(self, basic_config: ScaffoldConfig) -> None:
         """Should handle GPU none configuration."""
         config = basic_config._replace(gpu="none", supports_cpu=True, min_vram_gb=None)
@@ -177,7 +161,6 @@ class TestGenerateEngineYaml:
                 description="Test engine for testing.",
                 gpu="optional",
                 memory="4G",
-                languages=None,
                 word_timestamps=False,
                 supports_cpu=True,
                 min_vram_gb=4,
@@ -203,7 +186,6 @@ class TestGenerateEnginePy:
             description="A test engine for testing.",
             gpu="optional",
             memory="4G",
-            languages=None,
             word_timestamps=True,
             supports_cpu=True,
             min_vram_gb=4,
@@ -253,7 +235,6 @@ class TestGenerateDockerfile:
             description="A test engine for testing.",
             gpu="optional",
             memory="4G",
-            languages=None,
             word_timestamps=True,
             supports_cpu=True,
             min_vram_gb=4,
@@ -289,7 +270,6 @@ class TestGenerateDockerfile:
             description="A test engine.",
             gpu="required",
             memory="8G",
-            languages=None,
             word_timestamps=False,
             supports_cpu=False,
             min_vram_gb=4,
@@ -312,7 +292,6 @@ class TestGenerateRequirementsTxt:
             description="A test engine.",
             gpu="optional",
             memory="4G",
-            languages=None,
             word_timestamps=True,
             supports_cpu=True,
             min_vram_gb=4,
@@ -337,7 +316,6 @@ class TestGenerateReadme:
             description="A test engine for testing.",
             gpu="optional",
             memory="4G",
-            languages=None,
             word_timestamps=True,
             supports_cpu=True,
             min_vram_gb=4,
@@ -381,7 +359,6 @@ class TestScaffoldEngine:
                 description="A test engine.",
                 gpu="optional",
                 memory="4G",
-                languages=None,
                 word_timestamps=True,
                 supports_cpu=True,
                 min_vram_gb=4,
@@ -405,7 +382,6 @@ class TestScaffoldEngine:
                 description="A test engine.",
                 gpu="optional",
                 memory="4G",
-                languages=None,
                 word_timestamps=True,
                 supports_cpu=True,
                 min_vram_gb=4,
@@ -436,7 +412,6 @@ class TestScaffoldEngine:
                 description="A test engine.",
                 gpu="optional",
                 memory="4G",
-                languages=None,
                 word_timestamps=True,
                 supports_cpu=True,
                 min_vram_gb=4,
@@ -469,7 +444,6 @@ class TestScaffoldEngine:
                 description="A test engine.",
                 gpu="optional",
                 memory="4G",
-                languages=None,
                 word_timestamps=True,
                 supports_cpu=True,
                 min_vram_gb=4,

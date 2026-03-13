@@ -212,7 +212,6 @@ class EngineRunner:
                 stream_name=self.stream_key,
                 capabilities=capabilities,
                 execution_profile=self._execution_profile,
-                languages=capabilities.languages if capabilities else None,
                 supports_word_timestamps=(
                     capabilities.supports_word_timestamps if capabilities else False
                 ),

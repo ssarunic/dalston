@@ -61,7 +61,6 @@ def _make_worker(
         capacity=capacity,
         active_realtime=active_sessions,
         models_loaded=models_loaded or ["Systran/faster-whisper-large-v3"],
-        languages=["auto"],
         gpu_memory_used="2GB",
         gpu_memory_total="8GB",
         last_heartbeat=datetime.now(UTC),
@@ -496,7 +495,6 @@ def test_worker_status_from_engine_record() -> None:
     assert status.status == "busy"
     assert status.engine_id == "parakeet"
     assert status.models == ["parakeet-tdt-0.6b-v3"]
-    assert status.languages == ["auto"]
 
 
 # ---------------------------------------------------------------------------
