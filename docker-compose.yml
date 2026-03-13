@@ -304,7 +304,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
       DALSTON_INSTANCE: stt-unified-nemo
@@ -332,7 +332,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-nemo-cpu
@@ -361,7 +361,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
       DALSTON_INSTANCE: stt-unified-faster-whisper-cpu
@@ -387,7 +387,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
       DALSTON_INSTANCE: stt-unified-faster-whisper
@@ -418,7 +418,7 @@ services:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-onnx-cpu
@@ -445,7 +445,7 @@ services:
         DEVICE: cuda
     environment:
       <<: [*common-env, *observability-env]
-      DALSTON_UNIFIED_ENGINE_ENABLED: "true"
+
       DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
       DALSTON_INSTANCE: stt-unified-onnx
@@ -495,7 +495,7 @@ services:
     image: dalston/stt-batch-transcribe-hf-asr:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-transcribe/hf-asr/Dockerfile
+      dockerfile: engines/stt-unified/hf-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: hf-asr

@@ -569,7 +569,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_S3_REGION=eu-west-2 \
   -e AWS_ACCESS_KEY_ID=minioadmin \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
-  -e DALSTON_UNIFIED_ENGINE_ENABLED=true \
+
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
@@ -645,7 +645,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_S3_REGION=eu-west-2 \
   -e AWS_ACCESS_KEY_ID=minioadmin \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
-  -e DALSTON_UNIFIED_ENGINE_ENABLED=true \
+
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
@@ -728,7 +728,7 @@ echo "Starting ONNX Parakeet TDT 0.6B v3..."
 docker run -d --name onnx-parakeet --gpus all --restart unless-stopped \
   -p 9000:9000 -v /data/models:/models \
   "${COMMON_ENV[@]}" \
-  -e DALSTON_UNIFIED_ENGINE_ENABLED=true \
+
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \

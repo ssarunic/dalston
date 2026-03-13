@@ -46,8 +46,7 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
 # Model cache
 ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
-ENV ONNX_MODEL_CACHE=/models/onnx
-RUN mkdir -p /models/huggingface /models/onnx
+RUN mkdir -p /models/huggingface
 
 # Engine code (all ONNX engine files in a single directory)
 WORKDIR /app
@@ -55,7 +54,7 @@ COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/
 COPY engines/stt-unified/onnx/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
+
 
 EXPOSE 9000
 

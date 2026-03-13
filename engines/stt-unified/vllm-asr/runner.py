@@ -14,7 +14,7 @@ Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
-    DALSTON_UNIFIED_ENGINE_ENABLED: Set to "true" to use this runner (default: false)
+
     DALSTON_DEFAULT_MODEL_ID: HF model ID to preload (default: mistralai/Voxtral-Mini-3B-2507)
     DALSTON_VLLM_GPU_MEMORY_UTILIZATION: GPU memory fraction (default: 0.9)
     DALSTON_VLLM_MAX_MODEL_LEN: Maximum context length (default: 4096)

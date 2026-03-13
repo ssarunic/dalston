@@ -59,7 +59,7 @@ COPY engines/stt-unified/nemo/ engines/stt-unified/nemo/
 COPY engines/stt-unified/nemo/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
+
 
 EXPOSE 9000
 

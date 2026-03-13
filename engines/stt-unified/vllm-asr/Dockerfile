@@ -41,7 +41,7 @@ COPY engines/stt-unified/vllm-asr/ engines/stt-unified/vllm-asr/
 COPY engines/stt-unified/vllm-asr/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
+
 
 EXPOSE 9000
 

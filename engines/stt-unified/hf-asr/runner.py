@@ -15,7 +15,7 @@ Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
-    DALSTON_UNIFIED_ENGINE_ENABLED: Set to "true" to use this runner (default: false)
+
     DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: openai/whisper-large-v3)
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
@@ -138,9 +138,9 @@ class UnifiedHfAsrRunner:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        # Import adapters here to avoid circular imports at module level
-        from engines.stt_rt_hf_asr import HfAsrRealtimeEngine
-        from engines.stt_transcribe_hf_asr import HfAsrBatchEngine
+        # Import adapters (sibling modules, on sys.path via _ensure_import_path)
+        from batch_engine import HfAsrBatchEngine
+        from rt_engine import HfAsrRealtimeEngine
 
         # Create adapters sharing the same manager
         self._batch_engine = HfAsrBatchEngine(manager=self._manager)
@@ -256,41 +256,24 @@ class BatchRejectedError(TaskDeferredError):
 
 
 # ---------------------------------------------------------------------------
-# Import helpers: resolve engine modules from file paths since engines/
-# directories are not standard Python packages.
+# Import path: ensure the engine directory is on sys.path so that sibling
+# modules (batch_engine, rt_engine) can be imported by name.
 # ---------------------------------------------------------------------------
 
 
-def _register_engine_modules() -> None:
-    """Register engine modules so they can be imported by the runner."""
-    import importlib.util
+def _ensure_import_path() -> None:
+    """Add this file's directory to sys.path for sibling imports."""
     import sys
     from pathlib import Path
 
-    engines_root = Path(__file__).resolve().parents[2]
+    engine_dir = str(Path(__file__).resolve().parent)
+    if engine_dir not in sys.path:
+        sys.path.insert(0, engine_dir)
 
-    # Register batch engine
-    batch_path = engines_root / "stt-transcribe" / "hf-asr" / "engine.py"
-    if batch_path.exists():
-        spec = importlib.util.spec_from_file_location(
-            "engines.stt_transcribe_hf_asr", batch_path
-        )
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_transcribe_hf_asr"] = module
-            spec.loader.exec_module(module)
 
-    # Register RT engine
-    rt_path = engines_root / "stt-rt" / "hf-asr" / "engine.py"
-    if rt_path.exists():
-        spec = importlib.util.spec_from_file_location("engines.stt_rt_hf_asr", rt_path)
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["engines.stt_rt_hf_asr"] = module
-            spec.loader.exec_module(module)
+_ensure_import_path()
 
 
 if __name__ == "__main__":
-    _register_engine_modules()
     runner = UnifiedHfAsrRunner()
     runner.run()

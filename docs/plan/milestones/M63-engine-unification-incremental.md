@@ -175,7 +175,6 @@ pytest -m e2e
 
 ## Rollback and Safety Controls
 
-- `DALSTON_UNIFIED_ENGINE_ENABLED` (engine_id-level opt-in).
 - `DALSTON_ENGINE_REGISTRY_MODE=dual|legacy|unified`.
 - Keep legacy engine_id path deployable until post-canary signoff.
 - Rollback rule: if parity or latency SLA fails, flip flag to legacy path and halt rollout.
@@ -207,7 +206,6 @@ pytest -m e2e
 - **Unified runner**: `UnifiedFasterWhisperRunner`
   (`engines/stt-unified/faster-whisper/runner.py`) — single process with one
   `TranscribeCore`, batch adapter in background thread, RT adapter in async loop.
-  Gated by `DALSTON_UNIFIED_ENGINE_ENABLED=true`.
 - **Admission control**: `AdmissionController`
   (`dalston/engine_sdk/admission.py`) with `DALSTON_RT_RESERVATION`,
   `DALSTON_BATCH_MAX_INFLIGHT`, `DALSTON_TOTAL_CAPACITY`. Thread-safe, wired

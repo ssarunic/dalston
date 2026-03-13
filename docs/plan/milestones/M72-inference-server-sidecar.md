@@ -531,9 +531,7 @@ engines register.
 
 Once sidecar mode is validated:
 
-1. Mark unified runner env var `DALSTON_UNIFIED_ENGINE_ENABLED` as deprecated
-   in settings.
-2. Remove unified runner compose services (`stt-unified-faster-whisper`,
+1. Remove unified runner compose services (`stt-unified-faster-whisper`,
    `stt-unified-nemo`).
 3. Delete `engines/stt-unified/faster-whisper/runner.py` and
    `engines/stt-unified/nemo/runner.py`.
