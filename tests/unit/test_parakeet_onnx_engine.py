@@ -138,7 +138,7 @@ class TestParakeetOnnxEngineCapabilities:
         engine = OnnxBatchEngine()
         caps = engine.get_capabilities()
 
-        assert caps.supports_streaming is False
+        assert caps.supports_native_streaming is False
 
 
 class TestParakeetOnnxEngineModelLoading:

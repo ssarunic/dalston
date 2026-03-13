@@ -376,7 +376,7 @@ class SessionHandler:
         config: SessionConfig,
         transcribe_fn: TranscribeCallback,
         on_session_end: Callable[[str, float, str], Awaitable[None]] | None = None,
-        supports_streaming: bool = False,
+        supports_native_streaming: bool = False,
         streaming_decode_fn: StreamingDecodeCallback | None = None,
     ) -> None:
         """Initialize session handler.
@@ -386,7 +386,7 @@ class SessionHandler:
             config: Session configuration
             transcribe_fn: Callback to engine's transcribe method
             on_session_end: Optional async callback when session ends
-            supports_streaming: Whether engine supports streaming partial results
+            supports_native_streaming: Whether engine supports native streaming partial results
             streaming_decode_fn: M71 callback for cache-aware streaming decode.
                 When set, audio chunks are fed directly to the engine's
                 streaming decoder, bypassing VAD accumulation. VAD still
@@ -397,7 +397,7 @@ class SessionHandler:
         self.config = config
         self._transcribe_fn = transcribe_fn
         self._on_session_end = on_session_end
-        self._supports_streaming = supports_streaming
+        self._supports_native_streaming = supports_native_streaming
         self._streaming_decode_fn = streaming_decode_fn
 
         # Initialize components
@@ -640,7 +640,7 @@ class SessionHandler:
         # Handle streaming partial results during speech
         elif (
             self._vad.is_speaking
-            and self._supports_streaming
+            and self._supports_native_streaming
             and self.config.interim_results
         ):
             # Accumulate audio for partial transcription
@@ -893,7 +893,7 @@ class SessionHandler:
         self._chunks_since_partial += 1
 
         # Send partial results if streaming is enabled
-        if self._supports_streaming and self.config.interim_results:
+        if self._supports_native_streaming and self.config.interim_results:
             if self._chunks_since_partial >= self.PARTIAL_RESULT_INTERVAL_CHUNKS:
                 await self._send_partial_result()
                 self._chunks_since_partial = 0

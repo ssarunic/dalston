@@ -15,7 +15,7 @@ container:
   model_cache: /models/onnx
 
 capabilities:
-  streaming: true
+  native_streaming: true
   word_timestamps: true
   max_concurrency: 4
   supports_vocabulary: false

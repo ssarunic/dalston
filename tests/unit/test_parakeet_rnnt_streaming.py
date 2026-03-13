@@ -1,7 +1,7 @@
 """Tests for M71: Parakeet RNNT/TDT cache-aware streaming inference.
 
 Covers:
-- NemoInference.decoder_type() and supports_streaming_decode()
+- NemoInference.decoder_type() and supports_native_streaming_decode()
 - NemoInference.transcribe_streaming() with mock chunk iterator
 - CTC variant raises RuntimeError if transcribe_streaming() called
 - RT engine decoder-aware dispatch (use_streaming_decode, get_streaming_decode_fn)
@@ -79,7 +79,7 @@ def _make_mock_core() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# T1: NemoInference decoder_type and supports_streaming_decode
+# T1: NemoInference decoder_type and supports_native_streaming_decode
 # ---------------------------------------------------------------------------
 
 
@@ -109,17 +109,17 @@ class TestParakeetCoreDecoderType:
         core = self._make_core()
         assert core.decoder_type("parakeet-ctc-0.6b") == "ctc"
 
-    def test_rnnt_supports_streaming(self) -> None:
+    def test_rnnt_supports_native_streaming(self) -> None:
         core = self._make_core()
-        assert core.supports_streaming_decode("parakeet-rnnt-1.1b") is True
+        assert core.supports_native_streaming_decode("parakeet-rnnt-1.1b") is True
 
-    def test_tdt_supports_streaming(self) -> None:
+    def test_tdt_supports_native_streaming(self) -> None:
         core = self._make_core()
-        assert core.supports_streaming_decode("parakeet-tdt-1.1b") is True
+        assert core.supports_native_streaming_decode("parakeet-tdt-1.1b") is True
 
     def test_ctc_does_not_support_streaming(self) -> None:
         core = self._make_core()
-        assert core.supports_streaming_decode("parakeet-ctc-0.6b") is False
+        assert core.supports_native_streaming_decode("parakeet-ctc-0.6b") is False
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ class TestRTEngineStreamingDispatch:
     def test_use_streaming_decode_rnnt(self) -> None:
         """RNNT model with streaming enabled should use streaming decode."""
         mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
+        mock_core.supports_native_streaming_decode.return_value = True
         engine = self._build_engine(mock_core)
 
         assert engine.use_streaming_decode("parakeet-rnnt-1.1b") is True
@@ -264,7 +264,7 @@ class TestRTEngineStreamingDispatch:
     def test_use_streaming_decode_ctc(self) -> None:
         """CTC model should never use streaming decode."""
         mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = False
+        mock_core.supports_native_streaming_decode.return_value = False
         engine = self._build_engine(mock_core)
 
         assert engine.use_streaming_decode("parakeet-ctc-0.6b") is False
@@ -272,7 +272,7 @@ class TestRTEngineStreamingDispatch:
     def test_use_streaming_decode_tdt(self) -> None:
         """TDT model with streaming enabled should use streaming decode."""
         mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
+        mock_core.supports_native_streaming_decode.return_value = True
         engine = self._build_engine(mock_core)
 
         assert engine.use_streaming_decode("parakeet-tdt-1.1b") is True
@@ -280,7 +280,7 @@ class TestRTEngineStreamingDispatch:
     def test_get_streaming_decode_fn_rnnt(self) -> None:
         """get_streaming_decode_fn returns callback for RNNT."""
         mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = True
+        mock_core.supports_native_streaming_decode.return_value = True
         engine = self._build_engine(mock_core)
         engine._core = mock_core  # Ensure core is set
 
@@ -290,7 +290,7 @@ class TestRTEngineStreamingDispatch:
     def test_get_streaming_decode_fn_ctc_returns_none(self) -> None:
         """get_streaming_decode_fn returns None for CTC."""
         mock_core = _make_mock_core()
-        mock_core.supports_streaming_decode.return_value = False
+        mock_core.supports_native_streaming_decode.return_value = False
         engine = self._build_engine(mock_core)
 
         fn = engine.get_streaming_decode_fn("parakeet-ctc-0.6b")
@@ -310,7 +310,7 @@ class TestRTEngineTranscribeStreaming:
         mock_core = _make_mock_core()
 
         # Setup streaming to yield word results
-        mock_core.supports_streaming_decode.return_value = True
+        mock_core.supports_native_streaming_decode.return_value = True
         mock_core.decoder_type.return_value = "rnnt"
         mock_core.transcribe_streaming.return_value = iter(
             [

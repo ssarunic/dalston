@@ -146,10 +146,10 @@ class TestParakeetRTEngineMetadata:
         engine = _build_rt_engine(result)
         assert engine.get_engine_id() == "nemo"
 
-    def test_supports_streaming(self) -> None:
+    def test_supports_native_streaming(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.supports_streaming() is True
+        assert engine.supports_native_streaming() is True
 
     def test_get_supports_vocabulary(self) -> None:
         result = _make_core_result()

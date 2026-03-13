@@ -15,7 +15,7 @@ container:
   model_cache: /models/huggingface
 
 capabilities:
-  streaming: true
+  native_streaming: true
   word_timestamps: false
   max_concurrency: 2
   supports_vocabulary: false

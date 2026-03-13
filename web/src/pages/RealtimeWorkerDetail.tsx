@@ -340,7 +340,7 @@ export function RealtimeWorkerDetail() {
                         {model.word_timestamps && (
                           <Badge variant="outline" className="text-xs">word timestamps</Badge>
                         )}
-                        {model.streaming && (
+                        {model.native_streaming && (
                           <Badge variant="outline" className="text-xs">streaming</Badge>
                         )}
                         {sizeGb && (

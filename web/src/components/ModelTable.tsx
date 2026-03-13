@@ -270,7 +270,7 @@ function ModelTableRow({
                 {S.modelTable.capSegment}
               </Badge>
             )}
-            {model.streaming && (
+            {model.native_streaming && (
               <Badge variant="outline" className="text-xs">
                 {S.modelTable.capStream}
               </Badge>
@@ -364,8 +364,8 @@ function ModelExpandedDetails({ model }: { model: ModelRegistryEntry }) {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={model.streaming ? 'text-green-500' : ''}>
-              {model.streaming ? S.modelTable.streamingSupport : S.modelTable.batchOnly}
+            <span className={model.native_streaming ? 'text-green-500' : ''}>
+              {model.native_streaming ? S.modelTable.streamingSupport : S.modelTable.batchOnly}
             </span>
           </div>
         </div>

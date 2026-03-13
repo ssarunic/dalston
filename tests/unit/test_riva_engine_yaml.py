@@ -35,7 +35,7 @@ class TestUnifiedEngineYaml:
 
         caps = data["capabilities"]
         assert caps["word_timestamps"] is True
-        assert caps["streaming"] is True
+        assert caps["native_streaming"] is True
         assert caps["max_concurrency"] == 8
         assert caps["supports_vocabulary"] is False
         assert caps["max_audio_duration"] == 7200

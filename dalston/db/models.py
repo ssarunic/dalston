@@ -811,7 +811,7 @@ class ModelRegistryModel(Base):
     word_timestamps: Mapped[bool] = mapped_column(Boolean, server_default="false")
     punctuation: Mapped[bool] = mapped_column(Boolean, server_default="false")
     capitalization: Mapped[bool] = mapped_column(Boolean, server_default="false")
-    streaming: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    native_streaming: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
     # Hardware requirements
     min_vram_gb: Mapped[float | None] = mapped_column(Float, nullable=True)

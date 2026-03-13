@@ -209,7 +209,7 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
             version=card.get("version", "unknown"),
             stages=stages,
             supports_word_timestamps=caps.get("word_timestamps", False),
-            supports_streaming=caps.get("streaming", False),
+            supports_native_streaming=caps.get("native_streaming", False),
             model_variants=None,
             gpu_required=gpu_required,
             gpu_vram_mb=(

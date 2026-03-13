@@ -240,8 +240,8 @@ class TestRivaRtTranscript:
 class TestRivaRtStreamingSupport:
     """Verify streaming behavior configuration."""
 
-    def test_supports_streaming_returns_true(self, engine_with_mock) -> None:
-        assert engine_with_mock.supports_streaming() is True
+    def test_supports_native_streaming_returns_true(self, engine_with_mock) -> None:
+        assert engine_with_mock.supports_native_streaming() is True
 
     def test_get_engine_id_returns_env_value(self, engine_with_mock) -> None:
         assert engine_with_mock.get_engine_id() == "riva"

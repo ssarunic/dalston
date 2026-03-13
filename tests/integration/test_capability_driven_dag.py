@@ -29,7 +29,7 @@ def make_capabilities(
     stage: str = "transcribe",
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
-    supports_streaming: bool = False,
+    supports_native_streaming: bool = False,
     rtf_gpu: float | None = None,
 ) -> EngineCapabilities:
     """Create EngineCapabilities for testing."""
@@ -39,7 +39,7 @@ def make_capabilities(
         stages=[stage],
         supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
-        supports_streaming=supports_streaming,
+        supports_native_streaming=supports_native_streaming,
         rtf_gpu=rtf_gpu,
     )
 

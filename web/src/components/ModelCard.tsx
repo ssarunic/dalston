@@ -75,7 +75,7 @@ export function ModelCard({ model, onPull, onRemove, isPulling, isRemoving }: Mo
               punctuation
             </Badge>
           )}
-          {model.streaming && (
+          {model.native_streaming && (
             <Badge variant="outline" className="text-xs">
               streaming
             </Badge>

@@ -34,7 +34,7 @@ def make_capabilities(
     engine_id: str = "test-engine",
     supports_word_timestamps: bool = False,
     includes_diarization: bool = False,
-    supports_streaming: bool = False,
+    supports_native_streaming: bool = False,
     rtf_gpu: float | None = None,
 ) -> EngineCapabilities:
     """Create EngineCapabilities for testing."""
@@ -44,7 +44,7 @@ def make_capabilities(
         stages=["transcribe"],
         supports_word_timestamps=supports_word_timestamps,
         includes_diarization=includes_diarization,
-        supports_streaming=supports_streaming,
+        supports_native_streaming=supports_native_streaming,
         rtf_gpu=rtf_gpu,
     )
 
@@ -135,11 +135,11 @@ class TestMeetsRequirements:
         assert _meets_requirements(caps, {}) is True
 
     def test_streaming_required_but_not_supported(self):
-        caps = make_capabilities(supports_streaming=False)
+        caps = make_capabilities(supports_native_streaming=False)
         assert _meets_requirements(caps, {"streaming": True}) is False
 
     def test_streaming_required_and_supported(self):
-        caps = make_capabilities(supports_streaming=True)
+        caps = make_capabilities(supports_native_streaming=True)
         assert _meets_requirements(caps, {"streaming": True}) is True
 
 

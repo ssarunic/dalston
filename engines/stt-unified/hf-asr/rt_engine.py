@@ -257,7 +257,7 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             ),
         )
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         """HF ASR pipelines don't support native streaming (use VAD-chunked mode)."""
         return False
 

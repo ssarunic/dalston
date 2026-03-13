@@ -17,7 +17,7 @@
           "align"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
       },
@@ -52,7 +52,7 @@
           "pii_detect"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": null,
         "max_concurrency": null
       },
@@ -85,7 +85,7 @@
           "diarize"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
       },
@@ -121,7 +121,7 @@
           "diarize"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": 7200,
         "max_concurrency": null
       },
@@ -156,7 +156,7 @@
           "prepare"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": 14400,
         "max_concurrency": null
       },
@@ -189,7 +189,7 @@
           "audio_redact"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": false,
+        "supports_native_streaming": false,
         "max_audio_duration": null,
         "max_concurrency": null
       },
@@ -222,7 +222,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
       },
@@ -258,7 +258,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
       },
@@ -294,7 +294,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
       },
@@ -330,7 +330,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 4
       },
@@ -366,7 +366,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": true,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": 7200,
         "max_concurrency": 8
       },
@@ -399,7 +399,7 @@
           "transcribe"
         ],
         "supports_word_timestamps": false,
-        "supports_streaming": true,
+        "supports_native_streaming": true,
         "max_audio_duration": null,
         "max_concurrency": 2
       },

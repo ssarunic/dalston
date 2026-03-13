@@ -32,7 +32,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription engine using Riva NIM gRPC.
 
     Uses offline_recognize() via the SessionHandler's periodic
-    re-transcription pattern.  supports_streaming() returns True to
+    re-transcription pattern.  supports_native_streaming() returns True to
     enable partial results during speech.
     """
 
@@ -60,7 +60,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint
-        or periodically during speech (when supports_streaming=True).
+        or periodically during speech (when supports_native_streaming=True).
         """
         if self._core is None:
             raise RuntimeError("RivaClient not initialized -- call load_models() first")
@@ -121,7 +121,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             language_confidence=max_confidence,
         )
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         """Enable partial results via SessionHandler's periodic re-transcription."""
         return True
 

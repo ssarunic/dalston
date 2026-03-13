@@ -66,7 +66,7 @@ class ModelYAMLEntry:
     word_timestamps: bool = False
     punctuation: bool = False
     capitalization: bool = False
-    streaming: bool = False
+    native_streaming: bool = False
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
     supports_cpu: bool = False
@@ -167,7 +167,7 @@ def _load_single_yaml(yaml_path: Path) -> ModelYAMLEntry:
         word_timestamps=caps.get("word_timestamps", False),
         punctuation=caps.get("punctuation", False),
         capitalization=caps.get("capitalization", False),
-        streaming=caps.get("streaming", False),
+        native_streaming=caps.get("native_streaming", False),
         min_vram_gb=hardware.get("min_vram_gb"),
         min_ram_gb=hardware.get("min_ram_gb"),
         supports_cpu=hardware.get("supports_cpu", False),

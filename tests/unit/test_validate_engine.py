@@ -43,7 +43,7 @@ def valid_batch_engine() -> dict:
         },
         "capabilities": {
             "languages": ["en", "es"],
-            "streaming": False,
+            "native_streaming": False,
             "word_timestamps": True,
         },
         "config_schema": {"type": "object"},
@@ -67,7 +67,7 @@ def valid_realtime_engine() -> dict:
         },
         "capabilities": {
             "languages": ["all"],
-            "streaming": True,
+            "native_streaming": True,
             "max_sessions": 4,
         },
         "server": {

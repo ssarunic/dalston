@@ -42,7 +42,7 @@ def valid_engine_id_yaml() -> dict:
         },
         "capabilities": {
             "languages": ["en", "es"],
-            "streaming": False,
+            "native_streaming": False,
             "word_timestamps": True,
             "max_audio_duration": 7200,
         },

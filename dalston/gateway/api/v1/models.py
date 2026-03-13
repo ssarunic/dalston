@@ -55,7 +55,7 @@ class ModelCapabilitiesResponse(BaseModel):
     word_timestamps: bool = False
     punctuation: bool = False
     capitalization: bool = False
-    streaming: bool = False
+    native_streaming: bool = False
     max_audio_duration_s: int | None = None
 
 
@@ -131,7 +131,7 @@ class ModelRegistryResponse(BaseModel):
     word_timestamps: bool = False
     punctuation: bool = False
     capitalization: bool = False
-    streaming: bool = False
+    native_streaming: bool = False
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
     supports_cpu: bool = True
@@ -214,7 +214,7 @@ async def list_models(
             word_timestamps=m.word_timestamps,
             punctuation=m.punctuation,
             capitalization=m.capitalization,
-            streaming=m.streaming,
+            native_streaming=m.native_streaming,
             min_vram_gb=m.min_vram_gb,
             min_ram_gb=m.min_ram_gb,
             supports_cpu=m.supports_cpu,
@@ -271,7 +271,7 @@ class UpdateModelRequest(BaseModel):
     word_timestamps: bool | None = None
     punctuation: bool | None = None
     capitalization: bool | None = None
-    streaming: bool | None = None
+    native_streaming: bool | None = None
     min_vram_gb: float | None = None
     min_ram_gb: float | None = None
     supports_cpu: bool | None = None
@@ -364,7 +364,7 @@ async def update_model(
         word_timestamps=model.word_timestamps,
         punctuation=model.punctuation,
         capitalization=model.capitalization,
-        streaming=model.streaming,
+        native_streaming=model.native_streaming,
         min_vram_gb=model.min_vram_gb,
         min_ram_gb=model.min_ram_gb,
         supports_cpu=model.supports_cpu,
@@ -768,7 +768,7 @@ async def get_model(
         word_timestamps=model.word_timestamps,
         punctuation=model.punctuation,
         capitalization=model.capitalization,
-        streaming=model.streaming,
+        native_streaming=model.native_streaming,
         min_vram_gb=model.min_vram_gb,
         min_ram_gb=model.min_ram_gb,
         supports_cpu=model.supports_cpu,

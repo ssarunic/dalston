@@ -15,7 +15,7 @@ container:
 
 capabilities:
   max_concurrency: 2
-  streaming: true
+  native_streaming: true
   word_timestamps: true
 
 server:

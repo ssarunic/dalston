@@ -192,7 +192,7 @@ async def resolve_rt_routing(
                 downloaded_models = await ModelRegistryService().list_models(
                     db, stage="transcribe", status="ready"
                 )
-                rt_models = [m for m in downloaded_models if m.streaming]
+                rt_models = [m for m in downloaded_models if m.native_streaming]
                 candidates = rt_models if rt_models else list(downloaded_models)
 
                 # If a specific language is requested, prefer models that support it
