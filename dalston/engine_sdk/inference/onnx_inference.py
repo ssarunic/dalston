@@ -6,6 +6,9 @@ share a single loaded model and inference path via ONNX Runtime.
 
 This module owns the OnnxModelManager and provides an engine_id-neutral
 interface for transcription using the onnx-asr library.
+
+Long audio is automatically segmented using Silero VAD so that no single
+inference call exceeds GPU memory limits.
 """
 
 from __future__ import annotations
@@ -20,6 +23,15 @@ import structlog
 from dalston.engine_sdk.managers import OnnxModelManager
 
 logger = structlog.get_logger()
+
+# Default VAD settings for long-audio segmentation.
+# max_speech_duration_s controls peak VRAM per inference call — Silero VAD
+# splits at the nearest silence boundary before this limit. Safe defaults:
+#   60s for 16GB (T4), 120s for 24GB+ (A10/L4/A100).
+# Override via DALSTON_VAD_MAX_SPEECH_S env var.
+_DEFAULT_MAX_SPEECH_DURATION_S = 60.0
+_DEFAULT_MIN_SILENCE_DURATION_MS = 100.0
+_DEFAULT_VAD_BATCH_SIZE = 8
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +103,7 @@ class OnnxInference:
         )
         self._device = device
         self._quantization = quantization
+        self._vad: Any | None = None  # Lazy-loaded Silero VAD
 
         logger.info(
             "onnx_inference_init",
@@ -146,6 +159,10 @@ class OnnxInference:
     ) -> OnnxTranscriptionResult:
         """Run transcription with an already-acquired model.
 
+        For file paths (batch mode), uses Silero VAD to segment long audio
+        before transcription, preventing GPU OOM on large files. For numpy
+        arrays (realtime mode), transcribes directly since chunks are short.
+
         Args:
             model: An acquired onnx-asr model instance
             audio: File path string or numpy float32 array
@@ -153,20 +170,69 @@ class OnnxInference:
         Returns:
             OnnxTranscriptionResult with text, segments, and words.
         """
-        # Enable timestamps on the model
-        ts_model = model.with_timestamps()
-
-        # Prepare audio for onnx-asr
         if isinstance(audio, np.ndarray):
-            if audio.dtype != np.float32:
-                audio = audio.astype(np.float32)
-            if audio.ndim > 1:
-                audio = audio.squeeze()
-            result = ts_model.recognize(audio, sample_rate=16000)
-        else:
-            result = ts_model.recognize(str(audio))
+            return self._transcribe_direct(model, audio)
+        return self._transcribe_with_vad(model, str(audio))
 
+    def _transcribe_direct(
+        self,
+        model: Any,
+        audio: np.ndarray,
+    ) -> OnnxTranscriptionResult:
+        """Transcribe a numpy array directly (no VAD, for short realtime chunks)."""
+        ts_model = model.with_timestamps()
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        if audio.ndim > 1:
+            audio = audio.squeeze()
+        result = ts_model.recognize(audio, sample_rate=16000)
         return self._parse_result(result)
+
+    def _transcribe_with_vad(
+        self,
+        model: Any,
+        audio_path: str,
+    ) -> OnnxTranscriptionResult:
+        """Transcribe a file using VAD segmentation for long audio safety.
+
+        Silero VAD splits audio at speech boundaries (max 30s per segment),
+        then each segment is transcribed independently. This prevents GPU
+        OOM on long recordings while producing properly-timed output.
+        """
+        vad = self._get_or_load_vad()
+
+        max_speech_s = float(
+            os.environ.get("DALSTON_VAD_MAX_SPEECH_S", _DEFAULT_MAX_SPEECH_DURATION_S)
+        )
+
+        # Chain: model → VAD segmentation → timestamped recognition
+        vad_ts_model = model.with_vad(
+            vad,
+            max_speech_duration_s=max_speech_s,
+            min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
+            batch_size=_DEFAULT_VAD_BATCH_SIZE,
+        ).with_timestamps()
+
+        # recognize() returns Iterator[TimestampedSegmentResult]
+        vad_segments = vad_ts_model.recognize(audio_path)
+
+        return self._parse_vad_result(vad_segments)
+
+    def _get_or_load_vad(self) -> Any:
+        """Lazy-load Silero VAD model."""
+        if self._vad is None:
+            try:
+                from onnx_asr import load_vad
+            except ImportError as e:
+                raise ImportError(
+                    "onnx-asr VAD support not available. "
+                    "Install with: pip install onnx-asr[hub]"
+                ) from e
+
+            logger.info("loading_silero_vad")
+            self._vad = load_vad("silero")
+            logger.info("silero_vad_loaded")
+        return self._vad
 
     # -- Result parsing ------------------------------------------------------
 
@@ -217,6 +283,72 @@ class OnnxInference:
         return OnnxTranscriptionResult(
             text=text,
             segments=segments,
+            language="en",
+            language_probability=1.0,
+        )
+
+    def _parse_vad_result(self, vad_segments: Any) -> OnnxTranscriptionResult:
+        """Parse VAD-segmented recognition results into neutral types.
+
+        Each VAD segment is a TimestampedSegmentResult with:
+        - start/end: absolute position in the full audio (seconds)
+        - text: recognized text for this segment
+        - timestamps/tokens: token-level timing relative to segment start
+
+        Token timestamps are offset by segment.start to produce absolute times.
+        """
+        all_segments: list[OnnxSegmentResult] = []
+        all_text_parts: list[str] = []
+
+        for seg in vad_segments:
+            seg_text = str(seg.text).strip()
+            if not seg_text:
+                continue
+
+            all_text_parts.append(seg_text)
+            seg_start = float(seg.start)
+            seg_end = float(seg.end)
+
+            # Parse words from token-level timestamps (offset to absolute time)
+            seg_words: list[OnnxWordResult] = []
+            if (
+                hasattr(seg, "tokens")
+                and hasattr(seg, "timestamps")
+                and seg.tokens
+                and seg.timestamps
+            ):
+                raw_words = self._tokens_to_words(seg.tokens, seg.timestamps)
+                for w in raw_words:
+                    seg_words.append(
+                        OnnxWordResult(
+                            word=w.word,
+                            start=round(w.start + seg_start, 3),
+                            end=round(w.end + seg_start, 3),
+                            confidence=w.confidence,
+                        )
+                    )
+
+            all_segments.append(
+                OnnxSegmentResult(
+                    start=round(seg_start, 3),
+                    end=round(seg_end, 3),
+                    text=seg_text,
+                    words=seg_words,
+                )
+            )
+
+        full_text = " ".join(all_text_parts)
+
+        logger.info(
+            "vad_transcription_parsed",
+            segment_count=len(all_segments),
+            word_count=sum(len(s.words) for s in all_segments),
+            char_count=len(full_text),
+        )
+
+        return OnnxTranscriptionResult(
+            text=full_text,
+            segments=all_segments,
             language="en",
             language_probability=1.0,
         )
@@ -330,6 +462,7 @@ class OnnxInference:
     def shutdown(self) -> None:
         """Shutdown core and release all models."""
         logger.info("onnx_inference_shutdown")
+        self._vad = None
         self._manager.shutdown()
 
     # -- Factory -------------------------------------------------------------
