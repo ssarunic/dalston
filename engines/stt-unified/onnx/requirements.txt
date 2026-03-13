@@ -1,7 +1,8 @@
 # Unified ONNX Engine Dependencies (batch + realtime)
 
 # ONNX ASR library - handles model loading, preprocessing, and CTC/TDT/RNNT decoding
-onnx-asr[cpu,hub]>=0.5.0
+onnx-asr[hub]>=0.5.0
+onnxruntime>=1.18.0
 
 # Audio processing
 soundfile>=0.12.0
