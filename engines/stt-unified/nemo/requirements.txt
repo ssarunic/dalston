@@ -1,6 +1,4 @@
 # Unified NeMo Engine Dependencies (batch + realtime)
-# Union of engines/stt-transcribe/nemo/requirements.txt
-# and  engines/stt-rt/nemo/requirements.txt
 
 # NeMo toolkit for ASR models
 nemo_toolkit[asr]>=1.23.0

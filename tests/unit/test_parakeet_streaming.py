@@ -17,7 +17,7 @@ torch = pytest.importorskip("torch")
 
 def load_parakeet_streaming_engine():
     """Load NemoRealtimeEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-rt/nemo/engine.py")
+    engine_path = Path("engines/stt-unified/nemo/rt_engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
 

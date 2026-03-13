@@ -16,7 +16,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -269,32 +269,17 @@ class TestAdmittedProcessLogic:
 class TestRegisterEngineModules:
     """_register_engine_modules must register the correct module names."""
 
-    def test_nemo_registers_correct_names(self) -> None:
-        module = _load_runner_module(_NEMO_RUNNER_PATH, "nemo_runner_reg")
-
-        with patch("importlib.util.spec_from_file_location") as mock_spec:
-            fake_spec = MagicMock()
-            fake_spec.loader = MagicMock()
-            mock_spec.return_value = fake_spec
-
-            module._register_engine_modules()
-
-            registered_names = [c[0][0] for c in mock_spec.call_args_list]
-
-        assert "engines.stt_transcribe_nemo" in registered_names
-        assert "engines.stt_rt_nemo" in registered_names
-
     def test_nemo_batch_engine_path_exists(self) -> None:
-        """The batch engine file referenced by _register_engine_modules exists."""
+        """The batch NeMo engine file exists in the consolidated directory."""
         engines_root = _NEMO_RUNNER_PATH.resolve().parents[2]
-        batch_path = engines_root / "stt-transcribe" / "nemo" / "engine.py"
-        assert batch_path.exists(), f"Batch engine not found: {batch_path}"
+        batch_path = engines_root / "stt-unified" / "nemo" / "batch_engine.py"
+        assert batch_path.exists(), f"Batch NeMo engine not found: {batch_path}"
 
     def test_nemo_rt_engine_path_exists(self) -> None:
-        """The RT engine file referenced by _register_engine_modules exists."""
+        """The RT NeMo engine file exists in the consolidated directory."""
         engines_root = _NEMO_RUNNER_PATH.resolve().parents[2]
-        rt_path = engines_root / "stt-rt" / "nemo" / "engine.py"
-        assert rt_path.exists(), f"RT engine not found: {rt_path}"
+        rt_path = engines_root / "stt-unified" / "nemo" / "rt_engine.py"
+        assert rt_path.exists(), f"RT NeMo engine not found: {rt_path}"
 
     def test_onnx_batch_engine_path_exists(self) -> None:
         """The batch ONNX engine file exists in the consolidated directory."""

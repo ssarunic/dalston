@@ -34,7 +34,7 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 def _load_parakeet_engine_class():
     """Load NemoBatchEngine class from file to avoid import path issues."""
-    engine_path = Path("engines/stt-transcribe/nemo/engine.py")
+    engine_path = Path("engines/stt-unified/nemo/batch_engine.py")
     spec = importlib.util.spec_from_file_location("m63_parakeet_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

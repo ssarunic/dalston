@@ -34,17 +34,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/dalston
 COPY pyproject.toml .
 COPY dalston/ dalston/
-RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
+RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime-sdk]"
 
 # NeMo engine dependencies
 WORKDIR /engine
 COPY engines/stt-unified/nemo/requirements.txt .
 RUN if [ "$DEVICE" = "cpu" ]; then \
-        pip install --no-cache-dir \
+        pip install --no-cache-dir --break-system-packages \
             torch --index-url https://download.pytorch.org/whl/cpu && \
-        pip install --no-cache-dir torchaudio; \
+        pip install --no-cache-dir --break-system-packages torchaudio; \
     fi
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
 ENV HF_HUB_CACHE=/models/huggingface
@@ -53,12 +53,10 @@ ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
-# Engine code (runner + adapters it imports via _register_engine_modules)
+# Engine code (all adapters colocated in stt-unified/nemo/)
 WORKDIR /app
 COPY engines/stt-unified/nemo/ engines/stt-unified/nemo/
-COPY engines/stt-transcribe/nemo/engine.py engines/stt-transcribe/nemo/engine.py
-COPY engines/stt-rt/nemo/engine.py engines/stt-rt/nemo/engine.py
-COPY engines/stt-rt/nemo/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-unified/nemo/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
