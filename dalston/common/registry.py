@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     # trigger engine_sdk/__init__.py → runner.py → registry.py (circular).
     from dalston.engine_sdk.types import EngineCapabilities
 
+from dalston.common.pipeline_types import VocabularySupport
+
 logger = structlog.get_logger()
 
 
@@ -95,6 +97,7 @@ class EngineRecord:
     capabilities: EngineCapabilities | None = None
     loaded_model: str | None = None
     execution_profile: str = "container"
+    vocabulary_support: VocabularySupport | None = None
 
     @property
     def available_capacity(self) -> int:
@@ -170,6 +173,8 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
         mapping["capabilities"] = record.capabilities.model_dump_json()
     if record.loaded_model is not None:
         mapping["loaded_model"] = record.loaded_model
+    if record.vocabulary_support is not None:
+        mapping["vocabulary_support"] = record.vocabulary_support.model_dump_json()
 
     return mapping
 
@@ -229,6 +234,18 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
                 instance=instance,
             )
 
+    # Parse vocabulary support
+    vocabulary_support = None
+    vocab_json = data.get("vocabulary_support")
+    if vocab_json:
+        try:
+            vocabulary_support = VocabularySupport.model_validate_json(vocab_json)
+        except Exception:
+            logger.warning(
+                "unified_registry_invalid_vocabulary_support",
+                instance=instance,
+            )
+
     return EngineRecord(
         instance=data.get("instance", instance),
         engine_id=engine_id,
@@ -250,6 +267,7 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
         capabilities=capabilities,
         loaded_model=data.get("loaded_model") or None,
         execution_profile=data.get("execution_profile", "container"),
+        vocabulary_support=vocabulary_support,
     )
 
 

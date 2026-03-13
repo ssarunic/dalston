@@ -151,10 +151,14 @@ class TestParakeetRTEngineMetadata:
         engine = _build_rt_engine(result)
         assert engine.supports_streaming() is True
 
-    def test_get_supports_vocabulary(self) -> None:
+    def test_get_vocabulary_support(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.get_supports_vocabulary() is False
+        vocab_support = engine.get_vocabulary_support()
+        assert vocab_support.method == "phrase_boosting"
+        assert vocab_support.batch is True
+        assert vocab_support.realtime is False
+        assert vocab_support.supported is True
 
     def test_get_models(self) -> None:
         result = _make_core_result()

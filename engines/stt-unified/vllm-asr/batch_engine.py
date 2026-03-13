@@ -280,13 +280,10 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         warnings: list[str] = []
         if vocabulary:
-            self.logger.warning(
-                "vocabulary_not_supported",
-                message="Vocabulary boosting is not supported for vLLM-ASR. Terms will be ignored.",
+            self.logger.info(
+                "vocabulary_via_instruction",
                 terms_count=len(vocabulary),
-            )
-            warnings.append(
-                f"Vocabulary boosting ({len(vocabulary)} terms) not supported by vLLM-ASR engine"
+                loaded_model_id=loaded_model_id,
             )
 
         self._ensure_model_loaded(loaded_model_id)
@@ -305,6 +302,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                     loaded_model_id=loaded_model_id,
                     audio_path=Path(audio_path),
                     language=language,
+                    vocabulary=vocabulary,
                 )
             elif audio is not None:
                 self.logger.info(
@@ -320,6 +318,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                     audio=audio,
                     language=language,
                     sample_rate=sample_rate,
+                    vocabulary=vocabulary,
                 )
             else:
                 raise ValueError("Either audio_path or audio must be provided")

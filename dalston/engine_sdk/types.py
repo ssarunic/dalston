@@ -17,6 +17,7 @@ from dalston.common.pipeline_types import (
     PrepareOutput,
     TranscribeInput,
     Transcript,
+    VocabularySupport,
 )
 
 # Type variable for generic output model parsing
@@ -44,6 +45,8 @@ class EngineCapabilities(BaseModel):
     max_concurrency: int | None = None
     # M31: Capability-driven routing - output includes speaker labels (skip diarize stage)
     includes_diarization: bool = False
+    # Vocabulary boosting capability
+    vocabulary_support: VocabularySupport | None = None
 
 
 @dataclass

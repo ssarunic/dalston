@@ -187,10 +187,24 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             # Request word-level timestamps when supported
             pipe_kwargs["return_timestamps"] = "word"
 
-            # Pass language for models that support it (e.g. Whisper)
+            # Pass language and vocabulary for models that support it (e.g. Whisper)
             generate_kwargs: dict[str, Any] = {}
             if language:
                 generate_kwargs["language"] = language
+
+            # Vocabulary → prompt_ids for Whisper models (prompt conditioning).
+            # Whisper's generate() expects tokenized prompt_ids, not a raw string.
+            vocabulary = params.vocabulary
+            if vocabulary and hasattr(pipe.tokenizer, "get_prompt_ids"):
+                prompt_text = ", ".join(vocabulary)
+                prompt_ids = pipe.tokenizer.get_prompt_ids(prompt_text)
+                generate_kwargs["prompt_ids"] = prompt_ids
+                self.logger.debug(
+                    "vocabulary_as_prompt_ids",
+                    terms_count=len(vocabulary),
+                    loaded_model_id=loaded_model_id,
+                )
+
             if generate_kwargs:
                 pipe_kwargs["generate_kwargs"] = generate_kwargs
 

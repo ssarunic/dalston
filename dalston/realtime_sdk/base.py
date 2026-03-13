@@ -35,7 +35,7 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
     RESAMPLE_QUALITY_PROFILES,
 )
-from dalston.common.pipeline_types import TranscribeInput, Transcript
+from dalston.common.pipeline_types import TranscribeInput, Transcript, VocabularySupport
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.common.ws_close_codes import (
@@ -215,17 +215,18 @@ class RealtimeEngine(ABC):
         """
         return "unknown"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return whether this engine supports vocabulary boosting.
+    def get_vocabulary_support(self) -> VocabularySupport:
+        """Return vocabulary boosting capability for this engine.
 
-        Override to return True for engines that support vocabulary/hotwords
-        (e.g., faster-whisper via hotwords parameter).
-        Used when registering with Session Router.
+        Override to declare the vocabulary method and which modes
+        (batch/realtime) support it. Used when registering with
+        Session Router and reported to the console API.
 
         Returns:
-            True if vocabulary boosting is supported. Default: False
+            VocabularySupport describing method and availability.
+            Default: no vocabulary support.
         """
-        return False
+        return VocabularySupport()
 
     def get_loaded_models(self) -> list[str] | None:
         """Return list of currently loaded model IDs.
@@ -301,6 +302,7 @@ class RealtimeEngine(ABC):
                 stages=["transcribe"],
                 supports_streaming=self.supports_streaming(),
                 max_concurrency=self.max_sessions,
+                vocabulary_support=self.get_vocabulary_support(),
             )
 
         # Extract capabilities from engine.yaml
@@ -342,6 +344,7 @@ class RealtimeEngine(ABC):
             rtf_gpu=performance.get("rtf_gpu"),
             rtf_cpu=performance.get("rtf_cpu"),
             max_concurrency=caps.get("max_concurrency", self.max_sessions),
+            vocabulary_support=self.get_vocabulary_support(),
         )
 
     def _load_engine_yaml(self) -> dict[str, Any] | None:
@@ -423,6 +426,7 @@ class RealtimeEngine(ABC):
             self.redis_url, encoding="utf-8", decode_responses=True
         )
         self._unified_registry = UnifiedEngineRegistry(unified_redis)
+        vocab_support = self.get_vocabulary_support()
         await self._unified_registry.register(
             EngineRecord(
                 instance=self.instance,
@@ -436,6 +440,7 @@ class RealtimeEngine(ABC):
                 capabilities=capabilities,
                 supports_word_timestamps=capabilities.supports_word_timestamps,
                 includes_diarization=capabilities.includes_diarization,
+                vocabulary_support=vocab_support,
             )
         )
         logger.info("engine_registered", instance=self.instance)

@@ -119,7 +119,8 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         if vocabulary:
             logger.debug(
                 "vocabulary_not_supported_onnx",
-                message="Vocabulary boosting not supported for ONNX engine. Terms ignored.",
+                message="ONNX Runtime has no decoding graph manipulation API. "
+                "Use the NeMo engine for vocabulary boosting with Parakeet models.",
                 terms_count=len(vocabulary),
             )
 
@@ -195,9 +196,17 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return the inference framework identifier."""
         return "onnx"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return whether this engine supports vocabulary boosting."""
-        return False
+    def get_vocabulary_support(self):
+        """ONNX Runtime has no vocabulary boosting mechanism.
+
+        Parakeet models support phrase boosting when run on NeMo
+        (which provides GPU-PB decoding graph manipulation), but ONNX
+        Runtime does not expose decoding strategy APIs. Use the NeMo
+        engine if vocabulary boosting is required.
+        """
+        from dalston.common.pipeline_types import VocabularySupport
+
+        return VocabularySupport()
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

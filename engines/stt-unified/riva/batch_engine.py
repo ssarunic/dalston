@@ -64,7 +64,10 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
         self._set_runtime_state(status="processing")
 
         try:
-            responses = self._core.streaming_recognize(audio_bytes, language)
+            vocabulary = params.vocabulary or None
+            responses = self._core.streaming_recognize(
+                audio_bytes, language, vocabulary=vocabulary
+            )
             segments = self._collect_segments(responses, language)
             full_text = " ".join(s.text for s in segments)
 

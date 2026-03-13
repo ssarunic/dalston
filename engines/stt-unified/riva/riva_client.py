@@ -35,6 +35,10 @@ GRPC_OFFLINE_TIMEOUT_S = 120
 # Languages supported by Riva NIM
 SUPPORTED_LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ru"]
 
+# Default boost score for vocabulary word boosting (range 0-100).
+# NVIDIA recommends 20-100 for most use cases.
+VOCABULARY_BOOST_SCORE = 20.0
+
 
 class RivaClient:
     """Shared gRPC client for Riva NIM.
@@ -61,25 +65,58 @@ class RivaClient:
         """Create a RivaClient from environment variables."""
         return cls()
 
+    def _build_recognition_config(
+        self,
+        language: str = "en",
+        vocabulary: list[str] | None = None,
+    ) -> riva.client.RecognitionConfig:
+        """Build a RecognitionConfig with optional word boosting.
+
+        Args:
+            language: Language code.
+            vocabulary: Optional list of terms to boost recognition.
+                Uses Riva's SpeechContext with a default boost score of 20.
+        """
+        config = riva.client.RecognitionConfig(
+            language_code=language,
+            max_alternatives=1,
+            enable_word_time_offsets=True,
+            enable_automatic_punctuation=True,
+            sample_rate_hertz=SAMPLE_RATE,
+            audio_channel_count=1,
+        )
+
+        if vocabulary:
+            riva.client.add_word_boosting_to_config(
+                config, vocabulary, VOCABULARY_BOOST_SCORE
+            )
+            logger.debug(
+                "vocabulary_boosting_enabled",
+                terms_count=len(vocabulary),
+                boost_score=VOCABULARY_BOOST_SCORE,
+            )
+
+        return config
+
     def streaming_recognize(
         self,
         audio_bytes: bytes,
         language: str = "en",
+        vocabulary: list[str] | None = None,
     ) -> Any:
         """Stream audio chunks to NIM via streaming_recognize().
 
         Used by the batch adapter for robust processing of long recordings
         without gRPC deadline risk.
+
+        Args:
+            audio_bytes: Raw PCM audio bytes (int16, 16kHz mono).
+            language: Language code.
+            vocabulary: Optional list of terms to boost recognition.
         """
+        config = self._build_recognition_config(language, vocabulary)
         streaming_config = riva.client.StreamingRecognitionConfig(
-            config=riva.client.RecognitionConfig(
-                language_code=language,
-                max_alternatives=1,
-                enable_word_time_offsets=True,
-                enable_automatic_punctuation=True,
-                sample_rate_hertz=SAMPLE_RATE,
-                audio_channel_count=1,
-            ),
+            config=config,
             interim_results=False,
         )
 
@@ -92,19 +129,18 @@ class RivaClient:
         self,
         audio_bytes: bytes,
         language: str = "en",
+        vocabulary: list[str] | None = None,
     ) -> Any:
         """Transcribe audio via offline_recognize().
 
         Used by the RT adapter for VAD-chunked utterances.
+
+        Args:
+            audio_bytes: Raw PCM audio bytes (int16, 16kHz mono).
+            language: Language code.
+            vocabulary: Optional list of terms to boost recognition.
         """
-        config = riva.client.RecognitionConfig(
-            language_code=language,
-            max_alternatives=1,
-            enable_word_time_offsets=True,
-            enable_automatic_punctuation=True,
-            sample_rate_hertz=SAMPLE_RATE,
-            audio_channel_count=1,
-        )
+        config = self._build_recognition_config(language, vocabulary)
 
         return self.asr.offline_recognize(
             audio_bytes, config, timeout=GRPC_OFFLINE_TIMEOUT_S

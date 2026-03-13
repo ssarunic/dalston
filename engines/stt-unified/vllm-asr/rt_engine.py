@@ -134,15 +134,12 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
         if language == "" or language == "auto":
             language = None
 
-        warnings: list[str] = []
-        if params.vocabulary:
+        vocabulary = params.vocabulary or None
+        if vocabulary:
             logger.debug(
-                "vocabulary_not_supported",
-                terms_count=len(params.vocabulary),
-            )
-            warnings.append(
-                f"Vocabulary boosting ({len(params.vocabulary)} terms) "
-                "not supported by vLLM-ASR"
+                "vocabulary_via_instruction",
+                terms_count=len(vocabulary),
+                model_id=model_id,
             )
 
         if audio.dtype != np.float32:
@@ -156,12 +153,11 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             audio=audio,
             language=language,
             sample_rate=16000,
+            vocabulary=vocabulary,
         )
 
         transcript.engine_id = self._engine_id
         transcript.channel = params.channel
-        if warnings:
-            transcript.warnings = warnings + list(transcript.warnings)
 
         return transcript
 
@@ -173,6 +169,16 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def get_engine_id(self) -> str:
         return self._engine_id
+
+    def get_vocabulary_support(self):
+        """vLLM-ASR supports vocabulary via instruction prompting."""
+        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
+
+        return VocabularySupport(
+            method=VocabularyMethod.INSTRUCTION,
+            batch=True,
+            realtime=True,
+        )
 
     def get_gpu_memory_usage(self) -> str:
         if torch.cuda.is_available():

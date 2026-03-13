@@ -73,7 +73,10 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             params.language if params.language and params.language != "auto" else "en"
         )
 
-        response = self._core.offline_recognize(audio_bytes, lang_code)
+        vocabulary = params.vocabulary or None
+        response = self._core.offline_recognize(
+            audio_bytes, lang_code, vocabulary=vocabulary
+        )
 
         segments = []
         text_parts: list[str] = []
@@ -132,8 +135,15 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_engine_id(self) -> str:
         return self._engine_id
 
-    def get_supports_vocabulary(self) -> bool:
-        return False
+    def get_vocabulary_support(self):
+        """Riva NIM supports word boosting via SpeechContext in both modes."""
+        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
+
+        return VocabularySupport(
+            method=VocabularyMethod.WORD_BOOSTING,
+            batch=True,
+            realtime=True,
+        )
 
     def get_gpu_memory_usage(self) -> str:
         """No local GPU usage -- NIM handles GPU."""

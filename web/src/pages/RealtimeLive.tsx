@@ -128,7 +128,7 @@ export function RealtimeLive() {
     if (!model) {
       // "Any available" selected - check if any worker supports vocabulary
       const anySupportsVocab = enginesData.realtime_engines.some(
-        (w) => w.supports_vocabulary
+        (w) => w.vocabulary_support?.realtime
       )
       if (anySupportsVocab) {
         return { supported: null, text: 'Vocabulary support depends on the engine selected' }
@@ -151,10 +151,16 @@ export function RealtimeLive() {
       return { supported: null, text: null }
     }
 
-    // Check if any worker with this engine_id supports vocabulary
-    const supportsVocab = workersForRuntime.some((w) => w.supports_vocabulary)
-    if (supportsVocab) {
-      return { supported: true, text: null }
+    // Check if any worker with this engine_id supports vocabulary in realtime
+    const vocabWorker = workersForRuntime.find(
+      (w) => w.vocabulary_support?.realtime
+    )
+    if (vocabWorker) {
+      const method = vocabWorker.vocabulary_support?.method
+      const methodLabel = method && method !== 'none'
+        ? method.replace('_', ' ')
+        : null
+      return { supported: true, text: methodLabel ? `Via ${methodLabel}` : null }
     }
     return { supported: false, text: 'This model does not support vocabulary boosting' }
   }, [model, enginesData, registryData])

@@ -18,10 +18,13 @@ def transcribe_audio_path(
     loaded_model_id: str,
     audio_path: Path,
     language: str | None,
+    vocabulary: list[str] | None = None,
 ) -> tuple[str, Transcript]:
     """Run one vLLM audio chat inference and parse it into ``Transcript``."""
     adapter = get_adapter(loaded_model_id)
-    messages = adapter.build_messages(audio_path=audio_path, language=language)
+    messages = adapter.build_messages(
+        audio_path=audio_path, language=language, vocabulary=vocabulary
+    )
 
     from vllm import SamplingParams
 
@@ -49,6 +52,7 @@ def transcribe_audio_array(
     audio: np.ndarray,
     language: str | None,
     sample_rate: int = 16000,
+    vocabulary: list[str] | None = None,
 ) -> tuple[str, Transcript]:
     """Run vLLM audio inference from an in-memory numpy waveform.
 
@@ -61,4 +65,5 @@ def transcribe_audio_array(
             loaded_model_id=loaded_model_id,
             audio_path=audio_path,
             language=language,
+            vocabulary=vocabulary,
         )

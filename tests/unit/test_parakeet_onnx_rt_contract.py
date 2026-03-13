@@ -145,10 +145,14 @@ class TestOnnxRTEngineMetadata:
         engine = _build_rt_engine(result)
         assert engine.supports_streaming() is False
 
-    def test_get_supports_vocabulary(self) -> None:
+    def test_get_vocabulary_support(self) -> None:
         result = _make_core_result()
         engine = _build_rt_engine(result)
-        assert engine.get_supports_vocabulary() is False
+        vocab_support = engine.get_vocabulary_support()
+        assert vocab_support.method == "none"
+        assert vocab_support.batch is False
+        assert vocab_support.realtime is False
+        assert vocab_support.supported is False
 
     def test_get_models(self) -> None:
         result = _make_core_result()

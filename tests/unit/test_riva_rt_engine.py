@@ -256,8 +256,11 @@ class TestRivaRtStreamingSupport:
     def test_get_models_returns_empty(self, engine_with_mock) -> None:
         assert engine_with_mock.get_models() == []
 
-    def test_get_supports_vocabulary_false(self, engine_with_mock) -> None:
-        assert engine_with_mock.get_supports_vocabulary() is False
+    def test_get_vocabulary_support(self, engine_with_mock) -> None:
+        vocab = engine_with_mock.get_vocabulary_support()
+        assert vocab.method.value == "word_boosting"
+        assert vocab.batch is True
+        assert vocab.realtime is True
 
     def test_get_gpu_memory_usage_zero(self, engine_with_mock) -> None:
         assert engine_with_mock.get_gpu_memory_usage() == "0GB"

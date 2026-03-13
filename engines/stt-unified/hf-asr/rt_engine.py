@@ -148,15 +148,7 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             language = None
 
         warnings: list[str] = []
-        if params.vocabulary:
-            logger.debug(
-                "vocabulary_not_supported",
-                terms_count=len(params.vocabulary),
-            )
-            warnings.append(
-                f"Vocabulary boosting ({len(params.vocabulary)} terms) "
-                "not supported by hf-asr"
-            )
+        vocabulary = params.vocabulary
 
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
@@ -172,6 +164,19 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             generate_kwargs: dict[str, Any] = {}
             if language:
                 generate_kwargs["language"] = language
+
+            # Vocabulary → prompt_ids for Whisper models (prompt conditioning).
+            # Whisper's generate() expects tokenized prompt_ids, not a raw string.
+            if vocabulary and hasattr(pipe.tokenizer, "get_prompt_ids"):
+                prompt_text = ", ".join(vocabulary)
+                prompt_ids = pipe.tokenizer.get_prompt_ids(prompt_text)
+                generate_kwargs["prompt_ids"] = prompt_ids
+                logger.debug(
+                    "vocabulary_as_prompt_ids",
+                    terms_count=len(vocabulary),
+                    model_id=model_id,
+                )
+
             if generate_kwargs:
                 pipe_kwargs["generate_kwargs"] = generate_kwargs
 
@@ -267,8 +272,15 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_engine_id(self) -> str:
         return self._engine_id
 
-    def get_supports_vocabulary(self) -> bool:
-        return False
+    def get_vocabulary_support(self):
+        """HF-ASR supports prompt conditioning for Whisper models via initial_prompt."""
+        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
+
+        return VocabularySupport(
+            method=VocabularyMethod.PROMPT_CONDITIONING,
+            batch=True,
+            realtime=True,
+        )
 
     def get_gpu_memory_usage(self) -> str:
         if torch.cuda.is_available():

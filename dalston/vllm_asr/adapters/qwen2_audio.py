@@ -37,12 +37,14 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         self,
         audio_path: Path,
         language: str | None = None,
+        vocabulary: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build Qwen2-Audio chat messages.
 
         Args:
             audio_path: Path to the audio file
             language: Language code or None for auto-detect
+            vocabulary: Optional domain terms to include in instruction
 
         Returns:
             Chat messages list for vLLM
@@ -57,6 +59,10 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
                 "Please transcribe the following audio. "
                 "Output only the transcription text."
             )
+
+        if vocabulary:
+            terms = ", ".join(vocabulary)
+            prompt_text += f" Pay special attention to these terms: {terms}."
 
         return [
             {

@@ -295,6 +295,9 @@ class TestRTEngineMetadata:
         assert "large-v3" in models
         assert len(models) >= 5
 
-    def test_get_supports_vocabulary(self) -> None:
+    def test_get_vocabulary_support(self) -> None:
         engine = _load_rt_engine()()
-        assert engine.get_supports_vocabulary() is True
+        vocab = engine.get_vocabulary_support()
+        assert vocab.method.value == "prompt_conditioning"
+        assert vocab.batch is True
+        assert vocab.realtime is True

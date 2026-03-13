@@ -18,7 +18,6 @@ capabilities:
   streaming: true
   word_timestamps: true
   max_concurrency: 4
-  supports_vocabulary: false
 
 input:
   audio_formats:

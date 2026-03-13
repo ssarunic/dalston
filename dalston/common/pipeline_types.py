@@ -55,6 +55,48 @@ class AlignmentMethod(StrEnum):
     UNKNOWN = "unknown"  # Not specified
 
 
+class VocabularyMethod(StrEnum):
+    """How an engine implements vocabulary boosting.
+
+    Each method reflects a fundamentally different mechanism:
+    - PROMPT_CONDITIONING: Injects terms as decoder context tokens (Whisper initial_prompt).
+      Limited to ~224 tokens, biases first segment only. Weakest method.
+    - PHRASE_BOOSTING: GPU-accelerated CTC/TDT decoding graph manipulation (NeMo GPU-PB).
+      Applies to full utterance with configurable boosting strength.
+    - WORD_BOOSTING: Riva SpeechContext with per-phrase boost scores via flashlight decoder.
+      Strong, supports OOV words, boost scores 0-100.
+    - INSTRUCTION: Vocabulary terms included in LLM instruction prompt.
+      Effectiveness depends on model instruction-following quality.
+    - NONE: Not supported by this engine.
+    """
+
+    PROMPT_CONDITIONING = "prompt_conditioning"
+    PHRASE_BOOSTING = "phrase_boosting"
+    WORD_BOOSTING = "word_boosting"
+    INSTRUCTION = "instruction"
+    NONE = "none"
+
+
+class VocabularySupport(BaseModel):
+    """Vocabulary boosting capability for an engine.
+
+    Reports what method the engine uses and whether it's available
+    in batch, realtime, or both modes. Engines override
+    get_vocabulary_support() to declare their capabilities.
+    """
+
+    method: VocabularyMethod = VocabularyMethod.NONE
+    batch: bool = False
+    realtime: bool = False
+
+    model_config = ConfigDict(frozen=True)
+
+    @property
+    def supported(self) -> bool:
+        """Whether vocabulary is supported in any mode."""
+        return self.method != VocabularyMethod.NONE
+
+
 class SpeakerDetectionMode(StrEnum):
     """Speaker detection mode for transcription jobs."""
 
