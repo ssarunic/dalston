@@ -62,9 +62,7 @@ def _get_model_path() -> Path:
             f"DALSTON_SILERO_VAD_ONNX={env_path} does not exist or is not a file"
         )
 
-    cache_dir = Path(
-        os.environ.get("DALSTON_MODEL_CACHE", _DEFAULT_CACHE_DIR)
-    )
+    cache_dir = Path(os.environ.get("DALSTON_MODEL_CACHE", _DEFAULT_CACHE_DIR))
     cache_dir.mkdir(parents=True, exist_ok=True)
     model_path = cache_dir / "silero_vad.onnx"
 
@@ -126,9 +124,7 @@ class _SileroOnnxModel:
 
         # Initialise context on the very first call.
         if self._context.size == 0:
-            self._context = np.zeros(
-                (batch_size, context_size), dtype=np.float32
-            )
+            self._context = np.zeros((batch_size, context_size), dtype=np.float32)
 
         # Prepend context from the previous chunk (Silero v5 requirement).
         x = np.concatenate([self._context, audio.astype(np.float32)], axis=1)
