@@ -34,7 +34,7 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 
 def _load_onnx_engine_class():
-    engine_path = Path("engines/stt-transcribe/onnx/engine.py")
+    engine_path = Path("engines/stt-unified/onnx/batch_engine.py")
     spec = importlib.util.spec_from_file_location(
         "m63_parakeet_onnx_engine", engine_path
     )

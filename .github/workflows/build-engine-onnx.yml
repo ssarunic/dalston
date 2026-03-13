@@ -20,8 +20,6 @@ on:
     branches: [main]
     paths:
       - 'engines/stt-unified/onnx/**'
-      - 'engines/stt-transcribe/onnx/**'
-      - 'engines/stt-rt/onnx/**'
       - 'dalston/**'
       - 'pyproject.toml'
   workflow_dispatch:  # manual trigger

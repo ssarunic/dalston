@@ -13,7 +13,7 @@ import pytest
 
 def load_parakeet_onnx_engine():
     """Load OnnxBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-transcribe/onnx/engine.py")
+    engine_path = Path("engines/stt-unified/onnx/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet ONNX engine not found")
 

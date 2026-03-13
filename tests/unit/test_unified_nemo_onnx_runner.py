@@ -6,7 +6,8 @@ Covers:
 - admitted_process rejects batch tasks when admission is full
 - admitted_process releases the slot after a successful call
 - admitted_process releases the slot when the underlying call raises
-- _register_engine_modules resolves correct module names / file paths
+- _register_engine_modules resolves correct module names / file paths (NeMo only)
+- ONNX engine files exist in the consolidated stt-unified/onnx/ directory
 """
 
 from __future__ import annotations
@@ -283,21 +284,6 @@ class TestRegisterEngineModules:
         assert "engines.stt_transcribe_nemo" in registered_names
         assert "engines.stt_rt_nemo" in registered_names
 
-    def test_onnx_registers_correct_names(self) -> None:
-        module = _load_runner_module(_ONNX_RUNNER_PATH, "onnx_runner_reg")
-
-        with patch("importlib.util.spec_from_file_location") as mock_spec:
-            fake_spec = MagicMock()
-            fake_spec.loader = MagicMock()
-            mock_spec.return_value = fake_spec
-
-            module._register_engine_modules()
-
-            registered_names = [c[0][0] for c in mock_spec.call_args_list]
-
-        assert "engines.stt_transcribe_onnx" in registered_names
-        assert "engines.stt_rt_onnx" in registered_names
-
     def test_nemo_batch_engine_path_exists(self) -> None:
         """The batch engine file referenced by _register_engine_modules exists."""
         engines_root = _NEMO_RUNNER_PATH.resolve().parents[2]
@@ -311,13 +297,13 @@ class TestRegisterEngineModules:
         assert rt_path.exists(), f"RT engine not found: {rt_path}"
 
     def test_onnx_batch_engine_path_exists(self) -> None:
-        """The batch ONNX engine file referenced by _register_engine_modules exists."""
+        """The batch ONNX engine file exists in the consolidated directory."""
         engines_root = _ONNX_RUNNER_PATH.resolve().parents[2]
-        batch_path = engines_root / "stt-transcribe" / "onnx" / "engine.py"
+        batch_path = engines_root / "stt-unified" / "onnx" / "batch_engine.py"
         assert batch_path.exists(), f"Batch ONNX engine not found: {batch_path}"
 
     def test_onnx_rt_engine_path_exists(self) -> None:
-        """The RT ONNX engine file referenced by _register_engine_modules exists."""
+        """The RT ONNX engine file exists in the consolidated directory."""
         engines_root = _ONNX_RUNNER_PATH.resolve().parents[2]
-        rt_path = engines_root / "stt-rt" / "onnx" / "engine.py"
+        rt_path = engines_root / "stt-unified" / "onnx" / "rt_engine.py"
         assert rt_path.exists(), f"RT ONNX engine not found: {rt_path}"

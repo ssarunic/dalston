@@ -1,6 +1,4 @@
 # Unified ONNX Engine Dependencies (batch + realtime)
-# Union of engines/stt-transcribe/onnx/requirements.txt
-# and  engines/stt-rt/onnx/requirements.txt
 
 # ONNX ASR library - handles model loading, preprocessing, and CTC/TDT/RNNT decoding
 onnx-asr[cpu,hub]>=0.5.0

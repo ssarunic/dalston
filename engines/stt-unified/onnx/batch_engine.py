@@ -1,4 +1,4 @@
-"""NVIDIA Parakeet ONNX transcription engine.
+"""NVIDIA Parakeet ONNX transcription engine (batch mode).
 
 Uses ONNX Runtime via the onnx-asr library for fast, lightweight inference
 of Parakeet CTC, TDT, and RNNT models without the full NeMo toolkit. Produces

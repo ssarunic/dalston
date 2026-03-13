@@ -55,12 +55,10 @@ ENV HF_HOME=/models/huggingface
 ENV ONNX_MODEL_CACHE=/models/onnx
 RUN mkdir -p /models/huggingface /models/onnx
 
-# Engine code (runner + adapters it imports via _register_engine_modules)
+# Engine code (all ONNX engine files in a single directory)
 WORKDIR /app
 COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/
-COPY engines/stt-transcribe/onnx/engine.py engines/stt-transcribe/onnx/engine.py
-COPY engines/stt-rt/onnx/engine.py engines/stt-rt/onnx/engine.py
-COPY engines/stt-rt/onnx/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-unified/onnx/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
