@@ -192,12 +192,15 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             if language:
                 generate_kwargs["language"] = language
 
-            # Vocabulary → initial_prompt for Whisper models (prompt conditioning)
+            # Vocabulary → prompt_ids for Whisper models (prompt conditioning).
+            # Whisper's generate() expects tokenized prompt_ids, not a raw string.
             vocabulary = params.vocabulary
-            if vocabulary:
-                generate_kwargs["prompt"] = ", ".join(vocabulary)
+            if vocabulary and hasattr(pipe.tokenizer, "get_prompt_ids"):
+                prompt_text = ", ".join(vocabulary)
+                prompt_ids = pipe.tokenizer.get_prompt_ids(prompt_text)
+                generate_kwargs["prompt_ids"] = prompt_ids
                 self.logger.debug(
-                    "vocabulary_as_prompt",
+                    "vocabulary_as_prompt_ids",
                     terms_count=len(vocabulary),
                     loaded_model_id=loaded_model_id,
                 )
