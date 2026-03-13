@@ -272,9 +272,6 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_engine_id(self) -> str:
         return self._engine_id
 
-    def get_supports_vocabulary(self) -> bool:
-        return True
-
     def get_vocabulary_support(self):
         """HF-ASR supports prompt conditioning for Whisper models via initial_prompt."""
         from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport

@@ -337,10 +337,6 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return the inference framework identifier."""
         return "nemo"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return whether this engine supports vocabulary boosting."""
-        return False
-
     def get_vocabulary_support(self):
         """NeMo supports GPU-PB phrase boosting in batch only (RT not yet implemented)."""
         from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport

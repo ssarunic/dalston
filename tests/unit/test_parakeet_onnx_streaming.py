@@ -127,13 +127,6 @@ class TestParakeetOnnxStreamingGPUMemory:
 class TestParakeetOnnxStreamingVocabulary:
     """Tests for vocabulary boosting support."""
 
-    def test_does_not_support_vocabulary(self):
-        """Test that ONNX engine reports no vocabulary support."""
-        Engine = load_parakeet_onnx_streaming_engine()
-        engine = Engine()
-
-        assert engine.get_supports_vocabulary() is False
-
     def test_get_vocabulary_support(self):
         """Test that ONNX engine reports VocabularySupport with method=none."""
         Engine = load_parakeet_onnx_streaming_engine()

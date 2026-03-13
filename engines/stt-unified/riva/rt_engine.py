@@ -135,9 +135,6 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_engine_id(self) -> str:
         return self._engine_id
 
-    def get_supports_vocabulary(self) -> bool:
-        return True
-
     def get_vocabulary_support(self):
         """Riva NIM supports word boosting via SpeechContext in both modes."""
         from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport

@@ -215,16 +215,6 @@ class RealtimeEngine(ABC):
         """
         return "unknown"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return whether this engine supports vocabulary boosting.
-
-        .. deprecated::
-            Use :meth:`get_vocabulary_support` instead. This method is
-            kept for backwards compatibility and derives its value from
-            ``get_vocabulary_support().realtime``.
-        """
-        return self.get_vocabulary_support().realtime
-
     def get_vocabulary_support(self) -> VocabularySupport:
         """Return vocabulary boosting capability for this engine.
 

@@ -295,10 +295,6 @@ class TestRTEngineMetadata:
         assert "large-v3" in models
         assert len(models) >= 5
 
-    def test_get_supports_vocabulary(self) -> None:
-        engine = _load_rt_engine()()
-        assert engine.get_supports_vocabulary() is True
-
     def test_get_vocabulary_support(self) -> None:
         engine = _load_rt_engine()()
         vocab = engine.get_vocabulary_support()

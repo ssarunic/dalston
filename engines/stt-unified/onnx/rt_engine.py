@@ -196,10 +196,6 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return the inference framework identifier."""
         return "onnx"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return whether this engine supports vocabulary boosting."""
-        return False
-
     def get_vocabulary_support(self):
         """ONNX Runtime has no vocabulary boosting mechanism.
 

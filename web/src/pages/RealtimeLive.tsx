@@ -128,7 +128,7 @@ export function RealtimeLive() {
     if (!model) {
       // "Any available" selected - check if any worker supports vocabulary
       const anySupportsVocab = enginesData.realtime_engines.some(
-        (w) => w.vocabulary_support?.realtime || w.supports_vocabulary
+        (w) => w.vocabulary_support?.realtime
       )
       if (anySupportsVocab) {
         return { supported: null, text: 'Vocabulary support depends on the engine selected' }
@@ -153,7 +153,7 @@ export function RealtimeLive() {
 
     // Check if any worker with this engine_id supports vocabulary in realtime
     const vocabWorker = workersForRuntime.find(
-      (w) => w.vocabulary_support?.realtime || w.supports_vocabulary
+      (w) => w.vocabulary_support?.realtime
     )
     if (vocabWorker) {
       const method = vocabWorker.vocabulary_support?.method

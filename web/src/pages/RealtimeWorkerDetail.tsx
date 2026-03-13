@@ -67,7 +67,7 @@ function CapabilityRow({
         {supported ? (
           <span className="flex items-center gap-1 text-sm text-green-500">
             <CheckCircle className="h-4 w-4" />
-            Supported
+            {value || 'Supported'}
           </span>
         ) : (
           <span className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -367,7 +367,7 @@ export function RealtimeWorkerDetail() {
         <CardContent className="space-y-1">
           <CapabilityRow
             label="Vocabulary Support"
-            supported={worker.supports_vocabulary ?? false}
+            supported={worker.vocabulary_support?.realtime ?? false}
             value={worker.vocabulary_support?.method && worker.vocabulary_support.method !== 'none'
               ? worker.vocabulary_support.method.replace('_', ' ')
               : undefined}

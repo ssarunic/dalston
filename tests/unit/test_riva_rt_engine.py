@@ -256,9 +256,6 @@ class TestRivaRtStreamingSupport:
     def test_get_models_returns_empty(self, engine_with_mock) -> None:
         assert engine_with_mock.get_models() == []
 
-    def test_get_supports_vocabulary_true(self, engine_with_mock) -> None:
-        assert engine_with_mock.get_supports_vocabulary() is True
-
     def test_get_vocabulary_support(self, engine_with_mock) -> None:
         vocab = engine_with_mock.get_vocabulary_support()
         assert vocab.method.value == "word_boosting"

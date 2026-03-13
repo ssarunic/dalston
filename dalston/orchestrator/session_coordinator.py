@@ -38,13 +38,11 @@ class WorkerStatus:
     active_sessions: int
     models: list[str]
     engine_id: str | None = None
-    supports_vocabulary: bool = False
     vocabulary_support: VocabularySupport | None = None
 
     @classmethod
     def from_engine_record(cls, record: EngineRecord) -> WorkerStatus:
         """Create from EngineRecord."""
-        vocab = record.vocabulary_support
         return cls(
             instance=record.instance,
             endpoint=record.endpoint or "",
@@ -53,8 +51,7 @@ class WorkerStatus:
             active_sessions=record.active_realtime,
             models=record.models_loaded or [],
             engine_id=record.engine_id,
-            supports_vocabulary=vocab.supported if vocab else False,
-            vocabulary_support=vocab,
+            vocabulary_support=record.vocabulary_support,
         )
 
 

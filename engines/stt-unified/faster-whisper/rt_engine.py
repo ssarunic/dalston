@@ -180,10 +180,6 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return the inference framework identifier."""
         return "faster-whisper"
 
-    def get_supports_vocabulary(self) -> bool:
-        """Return True - faster-whisper supports vocabulary via initial_prompt."""
-        return True
-
     def get_vocabulary_support(self):
         """Faster-whisper uses prompt conditioning (initial_prompt) in both modes."""
         from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport

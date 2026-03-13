@@ -186,7 +186,6 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]  // M43: Currently loaded models (dynamic)
   engine_id?: string | null  // M43: Model engine_id (e.g., "faster-whisper")
-  supports_vocabulary?: boolean  // Backwards-compatible boolean
   vocabulary_support?: VocabularySupportInfo | null
 }
 
