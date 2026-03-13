@@ -82,7 +82,7 @@ COPY engines/stt-transcribe/onnx/engine.yaml /etc/dalston/engine.yaml
 
 # Environment
 ENV DALSTON_MODEL_DIR=/models
-ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
 ENV DALSTON_ENGINE_ID=parakeet-onnx
 
 CMD ["python", "engine.py"]
@@ -182,7 +182,7 @@ class ParakeetOnnxModelManager(ModelManager[ort.InferenceSession]):
         from huggingface_hub import snapshot_download
         model_path = snapshot_download(
             hf_model_id,
-            cache_dir=os.environ.get("HF_HUB_CACHE", "/models/huggingface"),
+            cache_dir=os.environ.get("HF_HOME", "/models/huggingface"),
         )
 
         # Find ONNX file
@@ -423,7 +423,7 @@ COPY engines/stt-transcribe/hf-asr/engine.yaml /etc/dalston/engine.yaml
 
 # Environment
 ENV DALSTON_MODEL_DIR=/models
-ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
 ENV DALSTON_ENGINE_ID=hf-asr
 
 CMD ["python3", "engine.py"]
@@ -719,7 +719,7 @@ COPY engines/stt-transcribe/vllm-asr/engine.yaml /etc/dalston/engine.yaml
 
 # Environment
 ENV DALSTON_MODEL_DIR=/models
-ENV HF_HUB_CACHE=/models/huggingface
+ENV HF_HOME=/models/huggingface
 ENV DALSTON_ENGINE_ID=vllm-asr
 
 CMD ["python", "engine.py"]

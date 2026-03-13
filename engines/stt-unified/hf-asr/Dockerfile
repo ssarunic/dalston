@@ -41,7 +41,6 @@ COPY engines/stt-unified/hf-asr/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface
 

@@ -47,7 +47,6 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo

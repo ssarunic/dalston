@@ -13,7 +13,7 @@ Environment Variables:
 - DALSTON_MODEL_DIR: Base model directory
   - Docker: defaults to /models (mounted volume)
   - Local: defaults to ~/.cache/dalston/models
-- HF_HUB_CACHE: Overrides HuggingFace cache location
+- HF_HOME: HuggingFace home directory (cache lives at $HF_HOME/hub)
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def _get_default_model_dir() -> Path:
 MODEL_BASE = Path(os.environ.get("DALSTON_MODEL_DIR", str(_get_default_model_dir())))
 
 # Per-framework subdirectories
-HF_CACHE = Path(os.environ.get("HF_HUB_CACHE", str(MODEL_BASE / "huggingface")))
+HF_CACHE = Path(os.environ.get("HF_HOME", str(MODEL_BASE / "huggingface"))) / "hub"
 CTRANSLATE2_CACHE = MODEL_BASE / "ctranslate2"
 NEMO_CACHE = MODEL_BASE / "nemo"
 TORCH_CACHE = MODEL_BASE / "torch"
@@ -159,7 +159,6 @@ def get_model_size(model_id: str, framework: str = "huggingface") -> int | None:
 ENV_EXPORTS = """
 # Standardized model cache environment variables
 ENV DALSTON_MODEL_DIR=/models
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo

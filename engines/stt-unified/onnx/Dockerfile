@@ -44,7 +44,6 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
     fi
 
 # Model cache
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface
 

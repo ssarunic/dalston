@@ -118,7 +118,6 @@ def ensure_cache_dirs() -> None:
 ```dockerfile
 # Standardized environment variables
 ENV DALSTON_MODEL_DIR=/models
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo

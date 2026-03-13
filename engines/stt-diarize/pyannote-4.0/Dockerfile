@@ -46,7 +46,6 @@ COPY engines/stt-diarize/pyannote-4.0/engine.yaml .
 COPY engines/stt-diarize/pyannote-4.0/engine.py .
 
 # M39: Standardized model cache directories
-ENV HF_HUB_CACHE=/models/huggingface
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 RUN mkdir -p /models/huggingface /models/torch
