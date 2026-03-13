@@ -58,7 +58,15 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "openai/whisper-large-v3"
 
-    def __init__(self) -> None:
+    def __init__(self, manager: HFTransformersModelManager | None = None) -> None:
+        """Initialize the engine.
+
+        Args:
+            manager: Optional shared HFTransformersModelManager. If provided,
+                     the engine uses it instead of creating its own. This is
+                     how the unified runner shares a single model manager
+                     between batch and RT adapters.
+        """
         super().__init__()
 
         self._default_model_id = os.environ.get(
@@ -66,27 +74,32 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         )
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
 
-        # Auto-detect device and dtype
-        self._device, self._torch_dtype = self._detect_device()
+        if manager is not None:
+            self._manager = manager
+            self._device = manager.device
+            self._torch_dtype = manager.torch_dtype
+        else:
+            # Auto-detect device and dtype
+            self._device, self._torch_dtype = self._detect_device()
 
-        # Configure S3 storage if bucket is set
-        model_storage = None
-        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-        if s3_bucket:
-            from dalston.engine_sdk.model_storage import S3ModelStorage
+            # Configure S3 storage if bucket is set
+            model_storage = None
+            s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+            if s3_bucket:
+                from dalston.engine_sdk.model_storage import S3ModelStorage
 
-            model_storage = S3ModelStorage.from_env()
-            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+                model_storage = S3ModelStorage.from_env()
+                self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
 
-        # Initialize model manager with TTL eviction
-        self._manager = HFTransformersModelManager(
-            device=self._device,
-            torch_dtype=self._torch_dtype,
-            model_storage=model_storage,
-            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
-            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
-            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-        )
+            # Initialize model manager with TTL eviction
+            self._manager = HFTransformersModelManager(
+                device=self._device,
+                torch_dtype=self._torch_dtype,
+                model_storage=model_storage,
+                ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+                max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+                preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+            )
 
         self.logger.info(
             "engine_init",
@@ -96,6 +109,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             torch_dtype=str(self._torch_dtype),
             ttl_seconds=self._manager.ttl_seconds,
             max_loaded=self._manager.max_loaded,
+            shared_manager=manager is not None,
         )
 
     def _detect_device(self) -> tuple[str, torch.dtype]:
