@@ -24,12 +24,15 @@ class AudioLLMAdapter(ABC):
         self,
         audio_path: Path,
         language: str | None = None,
+        vocabulary: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build model-specific chat messages with audio input.
 
         Args:
             audio_path: Path to the audio file (16kHz mono WAV)
             language: ISO 639-1 language code, or None for auto-detect
+            vocabulary: Optional list of domain terms to include in the
+                instruction prompt for better recognition.
 
         Returns:
             List of message dicts in OpenAI chat format for vLLM

@@ -18,7 +18,8 @@ capabilities:
   streaming: true
   word_timestamps: true
   max_concurrency: 4
-  supports_vocabulary: false
+  vocabulary:
+    method: none  # ONNX Runtime has no decoding graph manipulation; use NeMo engine for vocabulary
 
 input:
   audio_formats:

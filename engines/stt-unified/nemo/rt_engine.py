@@ -131,7 +131,23 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         # Normalize model ID
         model_id = self._normalize_model_id(model_id)
 
-        # Vocabulary boosting not yet implemented for real-time Parakeet
+        # Vocabulary boosting not yet implemented for real-time Parakeet.
+        #
+        # Implementation plan for RT vocabulary boosting:
+        # 1. GPU-PB requires model.change_decoding_strategy() which needs
+        #    direct model access via manager.acquire().
+        # 2. The RT path currently delegates to NemoInference.transcribe()
+        #    which doesn't expose the model object.
+        # 3. To implement: add a vocabulary-aware transcribe path in
+        #    NemoInference that acquires the model, applies GPU-PB config
+        #    (same as batch_engine._configure_vocabulary_boosting), runs
+        #    inference, resets decoding strategy, and releases.
+        # 4. Need to evaluate latency impact of change_decoding_strategy()
+        #    per utterance vs caching the boosting tree across utterances
+        #    with the same vocabulary (session-scoped vocabulary is stable).
+        # 5. Default boosting parameters (context_score=1.0,
+        #    depth_scaling=2.0, boosting_tree_alpha=0.5) should be validated
+        #    for RT utterance lengths (typically shorter than batch).
         if vocabulary:
             logger.debug(
                 "vocabulary_not_supported_realtime",
@@ -324,6 +340,16 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_supports_vocabulary(self) -> bool:
         """Return whether this engine supports vocabulary boosting."""
         return False
+
+    def get_vocabulary_support(self):
+        """NeMo supports GPU-PB phrase boosting in batch only (RT not yet implemented)."""
+        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
+
+        return VocabularySupport(
+            method=VocabularyMethod.PHRASE_BOOSTING,
+            batch=True,
+            realtime=False,
+        )
 
     def get_gpu_memory_usage(self) -> str:
         """Return GPU memory usage string."""

@@ -19,7 +19,10 @@ capabilities:
   streaming: true
   word_timestamps: true  # Model-dependent; Whisper provides timestamps
   max_concurrency: 4
-  supports_vocabulary: false
+  vocabulary:
+    method: prompt_conditioning
+    batch: true
+    realtime: true
 
 input:
   audio_formats:

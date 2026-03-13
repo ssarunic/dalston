@@ -168,6 +168,15 @@ export interface TaskArtifact {
   output?: Record<string, unknown>
 }
 
+// Vocabulary boosting capability
+export type VocabularyMethod = 'prompt_conditioning' | 'phrase_boosting' | 'word_boosting' | 'instruction' | 'none'
+
+export interface VocabularySupportInfo {
+  method: VocabularyMethod
+  batch: boolean
+  realtime: boolean
+}
+
 // Realtime types
 export interface WorkerStatus {
   instance: string
@@ -177,7 +186,8 @@ export interface WorkerStatus {
   active_sessions: number
   models: string[]  // M43: Currently loaded models (dynamic)
   engine_id?: string | null  // M43: Model engine_id (e.g., "faster-whisper")
-  supports_vocabulary?: boolean
+  supports_vocabulary?: boolean  // Backwards-compatible boolean
+  vocabulary_support?: VocabularySupportInfo | null
 }
 
 export interface CapacityInfo {

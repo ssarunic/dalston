@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 import structlog
 
+from dalston.common.pipeline_types import VocabularySupport
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import REALTIME_SESSION_TTL_SECONDS
 from dalston.orchestrator.session_allocator import (
@@ -38,10 +39,12 @@ class WorkerStatus:
     models: list[str]
     engine_id: str | None = None
     supports_vocabulary: bool = False
+    vocabulary_support: VocabularySupport | None = None
 
     @classmethod
     def from_engine_record(cls, record: EngineRecord) -> WorkerStatus:
         """Create from EngineRecord."""
+        vocab = record.vocabulary_support
         return cls(
             instance=record.instance,
             endpoint=record.endpoint or "",
@@ -50,7 +53,8 @@ class WorkerStatus:
             active_sessions=record.active_realtime,
             models=record.models_loaded or [],
             engine_id=record.engine_id,
-            supports_vocabulary=False,
+            supports_vocabulary=vocab.supported if vocab else False,
+            vocabulary_support=vocab,
         )
 
 

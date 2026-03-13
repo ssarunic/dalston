@@ -133,3 +133,14 @@ class TestParakeetOnnxStreamingVocabulary:
         engine = Engine()
 
         assert engine.get_supports_vocabulary() is False
+
+    def test_get_vocabulary_support(self):
+        """Test that ONNX engine reports VocabularySupport with method=none."""
+        Engine = load_parakeet_onnx_streaming_engine()
+        engine = Engine()
+
+        vocab_support = engine.get_vocabulary_support()
+        assert vocab_support.method == "none"
+        assert vocab_support.batch is False
+        assert vocab_support.realtime is False
+        assert vocab_support.supported is False

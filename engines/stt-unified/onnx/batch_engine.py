@@ -12,6 +12,11 @@ Advantages over the NeMo engine_id:
   - Better CPU performance (ONNX Runtime optimizations + INT8 quantization)
   - No PyTorch dependency for CPU inference
 
+Limitations vs NeMo engine:
+  - No vocabulary boosting: ONNX Runtime does not expose decoding graph
+    manipulation APIs needed for GPU-PB phrase boosting. If vocabulary
+    boosting is required, use the NeMo engine with the same Parakeet models.
+
 Supported models:
   - parakeet-onnx-ctc-0.6b: Fastest inference, 600M params
   - parakeet-onnx-ctc-1.1b: Higher accuracy, 1.1B params

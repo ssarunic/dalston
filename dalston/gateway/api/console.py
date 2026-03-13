@@ -371,6 +371,14 @@ class BatchEngine(BaseModel):
     processing: int
 
 
+class VocabularySupportResponse(BaseModel):
+    """Vocabulary boosting capability for an engine."""
+
+    method: str = "none"
+    batch: bool = False
+    realtime: bool = False
+
+
 class RealtimeWorker(BaseModel):
     """Realtime worker status."""
 
@@ -381,7 +389,8 @@ class RealtimeWorker(BaseModel):
     active_sessions: int
     models: list[str]  # M43: Currently loaded models (dynamic)
     engine_id: str | None = None  # M43: Model engine_id (e.g., "faster-whisper")
-    supports_vocabulary: bool = False
+    supports_vocabulary: bool = False  # Backwards-compatible boolean
+    vocabulary_support: VocabularySupportResponse | None = None
 
 
 class EnginesResponse(BaseModel):
@@ -496,6 +505,13 @@ async def get_engines(
         workers = await session_router.list_workers()
         for worker in workers:
             running_engine_types.add(worker.engine_id or "unknown")
+            vocab_resp = None
+            if worker.vocabulary_support is not None:
+                vocab_resp = VocabularySupportResponse(
+                    method=worker.vocabulary_support.method.value,
+                    batch=worker.vocabulary_support.batch,
+                    realtime=worker.vocabulary_support.realtime,
+                )
             realtime_engines.append(
                 RealtimeWorker(
                     instance=worker.instance,
@@ -506,6 +522,7 @@ async def get_engines(
                     models=worker.models,  # M43: Dynamically loaded models
                     engine_id=worker.engine_id,  # M43: Model engine_id
                     supports_vocabulary=worker.supports_vocabulary,
+                    vocabulary_support=vocab_resp,
                 )
             )
     except Exception:

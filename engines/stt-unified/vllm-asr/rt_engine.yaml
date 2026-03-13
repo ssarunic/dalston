@@ -18,7 +18,10 @@ capabilities:
   streaming: true
   word_timestamps: false
   max_concurrency: 2
-  supports_vocabulary: false
+  vocabulary:
+    method: instruction
+    batch: true
+    realtime: true
 
 input:
   audio_formats:

@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     # trigger engine_sdk/__init__.py → runner.py → registry.py (circular).
     from dalston.engine_sdk.types import EngineCapabilities
 
+from dalston.common.pipeline_types import VocabularySupport
+
 logger = structlog.get_logger()
 
 
@@ -95,6 +97,7 @@ class EngineRecord:
     capabilities: EngineCapabilities | None = None
     loaded_model: str | None = None
     execution_profile: str = "container"
+    vocabulary_support: VocabularySupport | None = None
 
     @property
     def available_capacity(self) -> int:

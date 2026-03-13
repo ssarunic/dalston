@@ -368,6 +368,9 @@ export function RealtimeWorkerDetail() {
           <CapabilityRow
             label="Vocabulary Support"
             supported={worker.supports_vocabulary ?? false}
+            value={worker.vocabulary_support?.method && worker.vocabulary_support.method !== 'none'
+              ? worker.vocabulary_support.method.replace('_', ' ')
+              : undefined}
           />
           <CapabilityRow
             label="Runtime"
