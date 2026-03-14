@@ -1,18 +1,15 @@
 # Unified NeMo Engine Dependencies (batch + realtime)
 
-# NeMo toolkit for ASR models
-nemo_toolkit[asr]>=1.23.0
+# Pin NeMo to a stable 2.7.x line for cache-aware RNNT streaming.
+nemo_toolkit[asr]>=2.7.0,<2.8.0
 
-# Pin Lhotse to version compatible with NeMo (prevents __init__ TypeError)
-lhotse>=1.24.2,<1.30.0
-
-# Pin transformers for NeMo compatibility
-transformers>=4.40.0,<4.46.0
+# Align key transitive deps with NeMo 2.7 ASR metadata.
+lhotse>=1.32.2
+transformers>=4.57.0,<4.58.0
 
 # Audio processing
-# Pin NumPy < 2.0 for NeMo compatibility (np.sctypes removed in NumPy 2.0)
-numpy>=1.24.0,<2.0.0
-librosa>=0.10.0
+numpy>=1.22.0,<3.0.0
+librosa>=0.10.1
 soundfile>=0.12.0
 
 # Required by Silero VAD (realtime adapter)

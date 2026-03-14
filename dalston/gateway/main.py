@@ -178,6 +178,36 @@ async def lifespan(app: FastAPI):
             logger.error("model_seeding_failed", error=str(e))
             raise
 
+    # Reset any models stuck in 'downloading' from a prior interrupted gateway
+    if settings.runtime_mode == "distributed":
+        try:
+            from dalston.db.session import async_session
+
+            async with async_session() as db:
+                from sqlalchemy import update
+
+                from dalston.db.models import ModelRecord
+
+                result = await db.execute(
+                    update(ModelRecord)
+                    .where(ModelRecord.status == "downloading")
+                    .values(
+                        status="not_downloaded",
+                        downloaded_bytes=None,
+                        expected_total_bytes=None,
+                        progress_updated_at=None,
+                    )
+                )
+                if result.rowcount:
+                    await db.commit()
+                    logger.warning(
+                        "reset_stale_downloads",
+                        count=result.rowcount,
+                        msg="Models stuck in 'downloading' reset to 'not_downloaded'",
+                    )
+        except Exception as e:
+            logger.error("reset_stale_downloads_failed", error=str(e))
+
     if settings.runtime_mode == "distributed":
         # Ensure S3 bucket exists
         logger.info("Ensuring S3 bucket exists...")

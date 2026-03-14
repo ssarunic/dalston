@@ -213,7 +213,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             return False
 
         model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
-        return self._core.supports_streaming_decode(model_id)
+        return self._core.supports_native_streaming_decode(model_id)
 
     def transcribe_streaming(
         self,

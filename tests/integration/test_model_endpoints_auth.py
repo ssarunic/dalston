@@ -35,8 +35,8 @@ def app_no_auth(mock_model_registry_service):
     # Mock DB and service, but NOT auth - we want to test auth failures
     mock_db = AsyncMock()
     app.dependency_overrides[get_db] = lambda: mock_db
-    app.dependency_overrides[get_model_registry_service] = (
-        lambda: mock_model_registry_service
+    app.dependency_overrides[get_model_registry_service] = lambda: (
+        mock_model_registry_service
     )
 
     return app
@@ -147,8 +147,8 @@ class TestModelEndpointsRequireAdminPermission:
 
         mock_db = AsyncMock()
         app.dependency_overrides[get_db] = lambda: mock_db
-        app.dependency_overrides[get_model_registry_service] = (
-            lambda: mock_model_registry_service
+        app.dependency_overrides[get_model_registry_service] = lambda: (
+            mock_model_registry_service
         )
         # Override auth to return non-admin key
         app.dependency_overrides[require_auth] = lambda: non_admin_api_key

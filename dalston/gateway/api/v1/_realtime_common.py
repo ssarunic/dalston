@@ -193,17 +193,26 @@ async def resolve_rt_routing(
                     db, stage="transcribe", status="ready"
                 )
                 rt_models = [m for m in downloaded_models if m.native_streaming]
-                candidates = rt_models if rt_models else list(downloaded_models)
 
-                # If a specific language is requested, prefer models that support it
-                if language and language != "auto" and candidates:
-                    lang_candidates = [
+                if language and language != "auto":
+                    # Prefer native_streaming models that support the language;
+                    # fall back to any ready model supporting it so a valid
+                    # language request is never incorrectly rejected.
+                    lang_rt = [
                         m
-                        for m in candidates
+                        for m in rt_models
                         if not m.languages or language in m.languages
                     ]
-                    if lang_candidates:
-                        candidates = lang_candidates
+                    lang_all = [
+                        m
+                        for m in downloaded_models
+                        if not m.languages or language in m.languages
+                    ]
+                    candidates = (
+                        lang_rt or lang_all or (rt_models or list(downloaded_models))
+                    )
+                else:
+                    candidates = rt_models if rt_models else list(downloaded_models)
 
                 if candidates:
                     largest = max(candidates, key=lambda m: m.size_bytes or 0)
