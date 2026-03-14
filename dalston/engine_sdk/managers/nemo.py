@@ -4,15 +4,16 @@ This manager handles loading and lifecycle management for NeMo ASR models
 with support for RNNT, CTC, and TDT architectures.
 
 Supported models:
-    RNNT (streaming capable):
+    RNNT (offline; buffered streaming via BatchedFrameASRRNNT):
     - parakeet-rnnt-0.6b: nvidia/parakeet-rnnt-0.6b
     - parakeet-rnnt-1.1b: nvidia/parakeet-rnnt-1.1b
+    - nemotron-streaming-rnnt-0.6b: nvidia/nemotron-speech-streaming-en-0.6b (cache-aware)
 
     CTC (non-streaming):
     - parakeet-ctc-0.6b: nvidia/parakeet-ctc-0.6b
     - parakeet-ctc-1.1b: nvidia/parakeet-ctc-1.1b
 
-    TDT (non-streaming):
+    TDT (offline; buffered streaming via BatchedFrameASRRNNT):
     - parakeet-tdt-0.6b-v3: nvidia/parakeet-tdt-0.6b-v3
     - parakeet-tdt-1.1b: nvidia/parakeet-tdt-1.1b
 
@@ -73,13 +74,16 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
 
     # Model ID to NGC/HuggingFace model path mapping
     SUPPORTED_MODELS = {
-        # RNNT models (streaming capable)
+        # RNNT models (offline; streaming uses BatchedFrameASRRNNT buffered inference)
         "parakeet-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
         "parakeet-rnnt-1.1b": "nvidia/parakeet-rnnt-1.1b",
-        # CTC models (non-streaming)
+        # Nemotron streaming model — purpose-built for cache-aware streaming RNNT
+        # (released Jan 2026; supports 80/160/560/1120ms latency tiers)
+        "nemotron-streaming-rnnt-0.6b": "nvidia/nemotron-speech-streaming-en-0.6b",
+        # CTC models (non-streaming; requires full sequence for decode)
         "parakeet-ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
         "parakeet-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
-        # TDT models (non-streaming, use RNNT base)
+        # TDT models (offline; streaming uses BatchedFrameASRRNNT buffered inference)
         "parakeet-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
         "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }

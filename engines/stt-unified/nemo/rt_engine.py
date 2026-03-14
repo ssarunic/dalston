@@ -20,6 +20,7 @@ Environment variables:
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_RNNT_CHUNK_MS: Chunk duration in ms for streaming (default: 160)
+    DALSTON_RNNT_BUFFER_SECS: Total audio buffer for BatchedFrameASRRNNT (default: 4.0)
 """
 
 import os
@@ -292,6 +293,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             "parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
             "parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
+            "nemotron-streaming-rnnt-0.6b": "nemotron-streaming-rnnt-0.6b",
             # Short variants
             "0.6b": "parakeet-rnnt-0.6b",
             "1.1b": "parakeet-rnnt-1.1b",
@@ -301,13 +303,15 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             "ctc-1.1b": "parakeet-ctc-1.1b",
             "tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "tdt-1.1b": "parakeet-tdt-1.1b",
-            # NGC model IDs
+            "nemotron-0.6b": "nemotron-streaming-rnnt-0.6b",
+            # NGC / HuggingFace model IDs
             "nvidia/parakeet-rnnt-0.6b": "parakeet-rnnt-0.6b",
             "nvidia/parakeet-rnnt-1.1b": "parakeet-rnnt-1.1b",
             "nvidia/parakeet-ctc-0.6b": "parakeet-ctc-0.6b",
             "nvidia/parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
             "nvidia/parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "nvidia/parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
+            "nvidia/nemotron-speech-streaming-en-0.6b": "nemotron-streaming-rnnt-0.6b",
         }
         return mappings.get(model_id, model_id)
 

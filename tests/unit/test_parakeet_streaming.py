@@ -88,7 +88,8 @@ class TestParakeetStreamingEngineGetModels:
         assert "parakeet-ctc-1.1b" in models
         assert "parakeet-tdt-0.6b-v3" in models
         assert "parakeet-tdt-1.1b" in models
-        assert len(models) == 6
+        assert "nemotron-streaming-rnnt-0.6b" in models
+        assert len(models) == 7
 
 
 class TestParakeetStreamingEngineHealthCheck:
