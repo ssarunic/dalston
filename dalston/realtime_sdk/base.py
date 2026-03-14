@@ -331,7 +331,9 @@ class RealtimeEngine(ABC):
             version=card.get("version", "unknown"),
             stages=stages,
             supports_word_timestamps=caps.get("word_timestamps", False),
-            supports_native_streaming=caps.get("native_streaming", self.supports_native_streaming()),
+            supports_native_streaming=caps.get(
+                "native_streaming", self.supports_native_streaming()
+            ),
             model_variants=None,
             gpu_required=gpu_required,
             gpu_vram_mb=(

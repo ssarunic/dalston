@@ -139,7 +139,7 @@ def list_models(
                     "word_timestamps": model.capabilities.word_timestamps,
                     "punctuation": model.capabilities.punctuation,
                     "capitalization": model.capabilities.capitalization,
-                    "streaming": model.capabilities.streaming,
+                    "native_streaming": model.capabilities.native_streaming,
                 },
                 "hardware": {
                     "supports_cpu": model.hardware.supports_cpu
@@ -217,6 +217,7 @@ def list_models(
                             "word_timestamps": m.capabilities.word_timestamps,
                             "punctuation": m.capabilities.punctuation,
                             "capitalization": m.capabilities.capitalization,
+                            "native_streaming": m.capabilities.native_streaming,
                         },
                         "hardware": {
                             "supports_cpu": m.hardware.supports_cpu,

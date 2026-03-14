@@ -196,9 +196,9 @@
           "minimum": 0,
           "description": "Maximum audio duration in seconds"
         },
-        "streaming": {
+        "native_streaming": {
           "type": "boolean",
-          "description": "Whether engine supports streaming mode"
+          "description": "Whether engine supports native partial-decode streaming"
         },
         "word_timestamps": {
           "type": "boolean",
