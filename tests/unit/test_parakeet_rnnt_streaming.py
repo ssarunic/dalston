@@ -374,14 +374,18 @@ class TestRTEngineStreamingDispatch:
         assert engine.use_streaming_decode("parakeet-tdt-1.1b") is True
 
     def test_get_streaming_decode_fn_rnnt(self) -> None:
-        """get_streaming_decode_fn returns callback for RNNT."""
+        """get_streaming_decode_fn returns None for offline RNNT models.
+
+        RNNT/TDT models buffer the full audio before decoding, so they
+        use the VAD-accumulate path (fn=None) rather than the streaming
+        decode loop.  This ensures VAD speech_end flushes see real results.
+        """
         mock_core = _make_mock_core()
         mock_core.supports_native_streaming_decode.return_value = True
         engine = self._build_engine(mock_core)
-        engine._core = mock_core  # Ensure core is set
 
         fn = engine.get_streaming_decode_fn("parakeet-rnnt-1.1b")
-        assert fn is not None
+        assert fn is None
 
     def test_get_streaming_decode_fn_ctc_returns_none(self) -> None:
         """get_streaming_decode_fn returns None for CTC."""

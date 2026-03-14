@@ -316,21 +316,23 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         return mappings.get(model_id, model_id)
 
     def supports_native_streaming(self) -> bool:
-        """Parakeet supports native streaming with partial results."""
+        """RNNT/TDT models support real-time partial results via periodic batch inference."""
         return True
 
     def get_streaming_decode_fn(self, model_variant: str | None = None) -> Any:
-        """Return streaming decode callback for RNNT/TDT models.
+        """Return None to use the VAD-accumulate path for all NeMo models.
 
-        M71: When the model supports streaming decode, returns
-        ``self.transcribe_streaming`` so the SessionHandler can feed
-        audio chunks directly to the streaming decoder.
+        Parakeet RNNT/TDT models require the full audio context before
+        decoding (no limited right context), so transcribe_streaming()
+        buffers the entire utterance and emits words only after stream
+        exhaustion.  Exposing that as a streaming decode fn breaks
+        utterance boundary detection: VAD speech_end flushes find an
+        empty buffer because the sentinel hasn't been pushed yet.
 
-        Returns None for CTC models, causing the SessionHandler to
-        use the VAD-accumulate path.
+        Returning None here routes all models through the standard
+        VAD-accumulate path, which correctly invokes transcription at
+        each speech_end event with bounded per-utterance memory.
         """
-        if self.use_streaming_decode(model_variant):
-            return self.transcribe_streaming
         return None
 
     def get_models(self) -> list[str]:
