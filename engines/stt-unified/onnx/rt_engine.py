@@ -184,7 +184,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         }
         return mappings.get(model_id, model_id)
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         """ONNX models don't support native streaming (use VAD-chunked mode)."""
         return False
 

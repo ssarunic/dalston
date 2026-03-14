@@ -68,10 +68,10 @@ class TestModelRegistryModelDefaults:
         table = ModelRegistryModel.__table__
         assert table.c.punctuation.server_default.arg == "false"
 
-    def test_streaming_default(self):
-        """Test that streaming defaults to false."""
+    def test_native_streaming_default(self):
+        """Test that native_streaming defaults to false."""
         table = ModelRegistryModel.__table__
-        assert table.c.streaming.server_default.arg == "false"
+        assert table.c.native_streaming.server_default.arg == "false"
 
     def test_supports_cpu_default(self):
         """Test that supports_cpu defaults to true."""
@@ -147,7 +147,7 @@ class TestModelRegistryModelInstantiation:
             languages=["en"],
             word_timestamps=True,
             punctuation=True,
-            streaming=False,
+            native_streaming=False,
             min_vram_gb=4.0,
             min_ram_gb=8.0,
             supports_cpu=False,
@@ -164,7 +164,7 @@ class TestModelRegistryModelInstantiation:
         assert model.languages == ["en"]
         assert model.word_timestamps is True
         assert model.punctuation is True
-        assert model.streaming is False
+        assert model.native_streaming is False
         assert model.min_vram_gb == 4.0
         assert model.supports_cpu is False
         assert model.model_metadata == {"downloads": 1000, "likes": 50}

@@ -22,7 +22,7 @@ export interface SystemCapabilities {
     word_timestamps: boolean
     speaker_diarization: boolean
     pii_detection: boolean
-    streaming: boolean
+    native_streaming: boolean
   }
   engines_by_stage: Record<string, number>
   models_ready: number
@@ -46,7 +46,7 @@ export function useSystemCapabilities() {
         word_timestamps: stages.transcribe?.supports_word_timestamps ?? false,
         speaker_diarization: 'diarize' in stages,
         pii_detection: 'pii_detect' in stages,
-        streaming: stages.transcribe?.supports_streaming ?? false,
+        native_streaming: stages.transcribe?.supports_native_streaming ?? false,
       }
 
       // Count engines per stage

@@ -27,7 +27,7 @@ capabilities:
   word_timestamps: true
   punctuation: false
   capitalization: false
-  streaming: true
+  native_streaming: true
   max_audio_duration: 7200
 
 hardware:

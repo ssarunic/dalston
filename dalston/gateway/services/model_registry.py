@@ -896,7 +896,7 @@ class ModelRegistryService:
         word_timestamps: bool = False,
         punctuation: bool = False,
         capitalization: bool = False,
-        streaming: bool = False,
+        native_streaming: bool = False,
         min_vram_gb: float | None = None,
         min_ram_gb: float | None = None,
         supports_cpu: bool = True,
@@ -917,7 +917,7 @@ class ModelRegistryService:
             word_timestamps: Whether model provides word timestamps
             punctuation: Whether model provides punctuation
             capitalization: Whether model provides proper capitalization
-            streaming: Whether model supports streaming
+            native_streaming: Whether model supports native streaming
             min_vram_gb: Minimum GPU VRAM required
             min_ram_gb: Minimum RAM required
             supports_cpu: Whether model can run on CPU
@@ -938,7 +938,7 @@ class ModelRegistryService:
             word_timestamps=word_timestamps,
             punctuation=punctuation,
             capitalization=capitalization,
-            streaming=streaming,
+            native_streaming=native_streaming,
             min_vram_gb=min_vram_gb,
             min_ram_gb=min_ram_gb,
             supports_cpu=supports_cpu,
@@ -1032,7 +1032,7 @@ class ModelRegistryService:
                     word_timestamps=entry.word_timestamps,
                     punctuation=entry.punctuation,
                     capitalization=entry.capitalization,
-                    streaming=entry.streaming,
+                    native_streaming=entry.native_streaming,
                     min_vram_gb=entry.min_vram_gb,
                     min_ram_gb=entry.min_ram_gb,
                     supports_cpu=entry.supports_cpu,
@@ -1066,7 +1066,7 @@ class ModelRegistryService:
                         word_timestamps=entry.word_timestamps,
                         punctuation=entry.punctuation,
                         capitalization=entry.capitalization,
-                        streaming=entry.streaming,
+                        native_streaming=entry.native_streaming,
                         min_vram_gb=entry.min_vram_gb,
                         min_ram_gb=entry.min_ram_gb,
                         supports_cpu=entry.supports_cpu,
@@ -1117,7 +1117,7 @@ class ModelRegistryService:
             "word_timestamps",
             "punctuation",
             "capitalization",
-            "streaming",
+            "native_streaming",
             "min_vram_gb",
             "min_ram_gb",
             "supports_cpu",

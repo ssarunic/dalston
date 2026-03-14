@@ -42,7 +42,7 @@ class TestEngineCapabilities:
         assert caps.version == "1.0.0"
         assert caps.stages == ["transcribe"]
         assert caps.supports_word_timestamps is False
-        assert caps.supports_streaming is False
+        assert caps.supports_native_streaming is False
         assert caps.gpu_required is False
 
     def test_create_full(self):
@@ -52,7 +52,7 @@ class TestEngineCapabilities:
             version="1.0.0",
             stages=["transcribe"],
             supports_word_timestamps=True,
-            supports_streaming=False,
+            supports_native_streaming=False,
             model_variants=["tdt-110m", "rnnt-1.1b"],
             gpu_required=True,
             gpu_vram_mb=4000,
@@ -151,7 +151,7 @@ class TestEngineCatalog:
                     "capabilities": {
                         "stages": ["transcribe"],
                         "supports_word_timestamps": True,
-                        "supports_streaming": False,
+                        "supports_native_streaming": False,
                     },
                     "hardware": {
                         "gpu_required": True,
@@ -168,7 +168,7 @@ class TestEngineCatalog:
                     "capabilities": {
                         "stages": ["transcribe"],
                         "supports_word_timestamps": False,
-                        "supports_streaming": False,
+                        "supports_native_streaming": False,
                     },
                     "hardware": {
                         "gpu_required": True,
@@ -185,7 +185,7 @@ class TestEngineCatalog:
                     "capabilities": {
                         "stages": ["prepare"],
                         "supports_word_timestamps": False,
-                        "supports_streaming": False,
+                        "supports_native_streaming": False,
                     },
                     "hardware": {
                         "gpu_required": False,
@@ -310,7 +310,7 @@ class TestServerRegistryCapabilities:
                 "version": "1.0.0",
                 "stages": ["transcribe"],
                 "supports_word_timestamps": True,
-                "supports_streaming": False,
+                "supports_native_streaming": False,
                 "model_variants": None,
                 "gpu_required": True,
                 "gpu_vram_mb": 4000,

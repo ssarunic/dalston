@@ -234,7 +234,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             version="1.2.0",
             stages=["transcribe"],
             supports_word_timestamps=True,
-            supports_streaming=False,
+            supports_native_streaming=False,
             model_variants=sorted(self.CURATED_MODELS),
             gpu_required=False,
             gpu_vram_mb=2000,

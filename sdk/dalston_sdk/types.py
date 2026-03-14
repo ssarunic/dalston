@@ -438,7 +438,7 @@ class ModelCapabilities:
     """Model capabilities and features."""
 
     languages: list[str] | None  # Supported language codes, None = all languages
-    streaming: bool  # Supports real-time streaming
+    native_streaming: bool  # Supports native cache-aware streaming (RNNT/TDT)
     word_timestamps: bool  # Supports word-level timestamps
     punctuation: bool = False  # M36: Outputs punctuation
     capitalization: bool = False  # M36: Outputs capitalization
@@ -494,7 +494,7 @@ class EngineCapabilities:
 
     languages: list[str] | None = None
     supports_word_timestamps: bool = False
-    supports_streaming: bool = False
+    supports_native_streaming: bool = False
     max_audio_duration_s: int | None = None
     max_concurrency: int | None = None
 

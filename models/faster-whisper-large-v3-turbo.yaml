@@ -24,7 +24,7 @@ capabilities:
   word_timestamps: false  # Has timestamps but they're inaccurate; use alignment stage
   punctuation: true
   capitalization: true
-  streaming: false
+  native_streaming: false
   max_audio_duration: 7200
 
 hardware:

@@ -488,22 +488,30 @@ services:
     shm_size: '8gb'
     restart: unless-stopped
 
-  # HuggingFace Transformers ASR (generic ASR for community models)
+  # M63: Unified HF-ASR (CPU) — any HuggingFace ASR model, batch + realtime.
   # Supports: Whisper, Wav2Vec2, HuBERT, MMS, and 10,000+ HF ASR models
-  # Auto-detects GPU/CPU like faster-whisper.
-  stt-batch-transcribe-hf-asr:
-    image: dalston/stt-batch-transcribe-hf-asr:1.0.0
+  stt-unified-hf-asr-cpu:
+    image: dalston/stt-unified-hf-asr-cpu:1.0.0
     build:
       context: .
       dockerfile: engines/stt-unified/hf-asr/Dockerfile
+      args:
+        DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: hf-asr
       DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
-      DALSTON_WORKER_ID: hf-asr-1
+      DALSTON_INSTANCE: stt-unified-hf-asr-cpu
+      DALSTON_WORKER_PORT: 9000
+      DALSTON_MAX_SESSIONS: 2
+      DALSTON_DEVICE: cpu
+      DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-1}
+      DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-2}
+      DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-3}
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
+    healthcheck: *ws-healthcheck
     restart: unless-stopped
 
   # --- ALIGN STAGE ---

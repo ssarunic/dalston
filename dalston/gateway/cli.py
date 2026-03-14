@@ -454,7 +454,7 @@ async def _model_status(model_id: str) -> dict | None:
             "word_timestamps": model.word_timestamps,
             "punctuation": model.punctuation,
             "capitalization": model.capitalization,
-            "streaming": model.streaming,
+            "native_streaming": model.native_streaming,
             "supports_cpu": model.supports_cpu,
             "min_vram_gb": model.min_vram_gb,
             "min_ram_gb": model.min_ram_gb,
@@ -507,7 +507,7 @@ def model_status(
     typer.echo(f"  Word Timestamps: {model.get('word_timestamps', False)}")
     typer.echo(f"  Punctuation:     {model.get('punctuation', False)}")
     typer.echo(f"  Capitalization:  {model.get('capitalization', False)}")
-    typer.echo(f"  Streaming:       {model.get('streaming', False)}")
+    typer.echo(f"  Native Streaming: {model.get('native_streaming', False)}")
 
     typer.echo()
     typer.echo("Hardware:")

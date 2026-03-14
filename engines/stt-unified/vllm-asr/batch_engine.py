@@ -368,7 +368,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             version="1.0.0",
             stages=["transcribe"],
             supports_word_timestamps=False,  # Audio LLMs don't produce timestamps
-            supports_streaming=False,
+            supports_native_streaming=False,
             model_variants=sorted(ADAPTER_REGISTRY.keys()),
             gpu_required=True,
             gpu_vram_mb=8000,  # Minimum for smallest model

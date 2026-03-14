@@ -61,12 +61,12 @@ class TestParakeetOnnxStreamingGetModels:
 class TestParakeetOnnxStreamingNoStreaming:
     """Tests for ONNX engine (no native streaming)."""
 
-    def test_supports_streaming_returns_false(self):
+    def test_supports_native_streaming_returns_false(self):
         """Test that ONNX engine does not claim streaming support."""
         Engine = load_parakeet_onnx_streaming_engine()
         engine = Engine()
 
-        assert engine.supports_streaming() is False
+        assert engine.supports_native_streaming() is False
 
 
 class TestParakeetOnnxStreamingEngineType:

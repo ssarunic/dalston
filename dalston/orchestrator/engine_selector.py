@@ -204,7 +204,7 @@ class NoCapableEngineError(Exception):
 
         caps = engine.capabilities
 
-        if self.requirements.get("streaming") and not caps.supports_streaming:
+        if self.requirements.get("streaming") and not caps.supports_native_streaming:
             reasons.append("streaming not supported")
 
         return "; ".join(reasons) if reasons else "unknown"
@@ -374,7 +374,7 @@ def _meets_requirements(caps: EngineCapabilities, requirements: dict) -> bool:
         True if all requirements are satisfied
     """
     # Streaming (hard requirement)
-    if requirements.get("streaming") and not caps.supports_streaming:
+    if requirements.get("streaming") and not caps.supports_native_streaming:
         return False
 
     return True

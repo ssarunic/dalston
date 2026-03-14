@@ -150,7 +150,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
             version="1.1.0",
             stages=["transcribe"],
             supports_word_timestamps=True,
-            supports_streaming=False,
+            supports_native_streaming=False,
             model_variants=[],
             gpu_required=False,
             gpu_vram_mb=0,

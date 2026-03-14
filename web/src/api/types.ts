@@ -596,7 +596,7 @@ export interface CreateJobResponse {
 // Capabilities types (for /v1/engines and /v1/engines/capabilities)
 export interface EngineCapabilities {
   supports_word_timestamps: boolean
-  supports_streaming: boolean
+  supports_native_streaming: boolean
   max_audio_duration_s: number | null
   max_concurrency: number | null
 }
@@ -618,7 +618,7 @@ export interface EnginesListResponse {
 export interface StageCapabilities {
   engines: string[]
   supports_word_timestamps: boolean
-  supports_streaming: boolean
+  supports_native_streaming: boolean
 }
 
 export interface CapabilitiesResponse {
@@ -632,7 +632,7 @@ export interface ModelCapabilities {
   word_timestamps: boolean
   punctuation: boolean
   capitalization: boolean
-  streaming: boolean
+  native_streaming: boolean
   max_audio_duration_s: number | null
 }
 
@@ -689,7 +689,7 @@ export interface ModelRegistryEntry {
   word_timestamps: boolean
   punctuation: boolean
   capitalization: boolean
-  streaming: boolean
+  native_streaming: boolean
 
   // Hardware
   min_vram_gb: number | null

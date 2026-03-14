@@ -158,7 +158,7 @@ class EngineCatalog:
             version=engine_data.get("version", "unknown"),
             stages=stages,
             supports_word_timestamps=caps_data.get("supports_word_timestamps", False),
-            supports_streaming=caps_data.get("supports_streaming", False),
+            supports_native_streaming=caps_data.get("supports_native_streaming", False),
             model_variants=None,
             gpu_required=hw_data.get("gpu_required", False),
             gpu_vram_mb=(
@@ -262,7 +262,7 @@ class EngineCatalog:
             True if all requirements are satisfied
         """
         # Streaming check
-        if requirements.get("streaming") and not caps.supports_streaming:
+        if requirements.get("streaming") and not caps.supports_native_streaming:
             return False
 
         return True

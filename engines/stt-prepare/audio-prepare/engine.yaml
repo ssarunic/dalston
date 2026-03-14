@@ -17,7 +17,7 @@ container:
 
 capabilities:
   max_audio_duration: 14400  # 4 hours
-  streaming: false
+  native_streaming: false
   word_timestamps: false
 
 input:

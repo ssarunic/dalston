@@ -180,15 +180,15 @@ class RealtimeEngine(ABC):
         """
         raise NotImplementedError
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         """Whether this engine supports native streaming with partial results.
 
         Override to return True for engines like Parakeet that support
-        incremental transcription. When True, SessionHandler will send
-        partial results during speech.
+        cache-aware incremental decode (RNNT/TDT). When True,
+        SessionHandler will send partial results during speech.
 
         Returns:
-            True if engine supports streaming partials. Default: False
+            True if engine supports native streaming partials. Default: False
         """
         return False
 
@@ -300,7 +300,7 @@ class RealtimeEngine(ABC):
                 engine_id=self.get_engine_id(),
                 version="unknown",
                 stages=["transcribe"],
-                supports_streaming=self.supports_streaming(),
+                supports_native_streaming=self.supports_native_streaming(),
                 max_concurrency=self.max_sessions,
                 vocabulary_support=self.get_vocabulary_support(),
             )
@@ -331,7 +331,7 @@ class RealtimeEngine(ABC):
             version=card.get("version", "unknown"),
             stages=stages,
             supports_word_timestamps=caps.get("word_timestamps", False),
-            supports_streaming=caps.get("streaming", self.supports_streaming()),
+            supports_native_streaming=caps.get("native_streaming", self.supports_native_streaming()),
             model_variants=None,
             gpu_required=gpu_required,
             gpu_vram_mb=(
@@ -631,7 +631,7 @@ class RealtimeEngine(ABC):
             config=config,
             transcribe_fn=self.transcribe,
             on_session_end=self._on_session_end,
-            supports_streaming=self.supports_streaming(),
+            supports_native_streaming=self.supports_native_streaming(),
             streaming_decode_fn=streaming_decode_fn,
         )
 

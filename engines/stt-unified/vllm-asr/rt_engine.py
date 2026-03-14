@@ -161,7 +161,7 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         return transcript
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         return True
 
     def get_models(self) -> list[str]:

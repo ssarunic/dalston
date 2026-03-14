@@ -16,7 +16,7 @@ const FEATURES = [
   { key: 'word_timestamps', label: S.capabilities.wordTimestamps },
   { key: 'speaker_diarization', label: S.capabilities.speakerDiarization },
   { key: 'pii_detection', label: S.capabilities.piiDetection },
-  { key: 'streaming', label: S.capabilities.streaming },
+  { key: 'native_streaming', label: S.capabilities.streaming },
 ] as const
 
 export function CapabilitiesCard() {

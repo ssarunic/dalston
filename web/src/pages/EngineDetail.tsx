@@ -298,7 +298,7 @@ export function EngineDetail() {
             />
             <CapabilityRow
               label={S.engineDetail.streaming}
-              supported={engineInfo.capabilities.supports_streaming}
+              supported={engineInfo.capabilities.supports_native_streaming}
             />
             <CapabilityRow
               label={S.engineDetail.maxAudioDuration}
@@ -376,7 +376,7 @@ export function EngineDetail() {
                         {model.word_timestamps && (
                           <Badge variant="outline" className="text-xs">word timestamps</Badge>
                         )}
-                        {model.streaming && (
+                        {model.native_streaming && (
                           <Badge variant="outline" className="text-xs">streaming</Badge>
                         )}
                         {sizeGb && (

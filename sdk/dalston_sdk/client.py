@@ -718,7 +718,7 @@ class Dalston:
                     stage=m.get("stage", "transcribe"),
                     capabilities=ModelCapabilities(
                         languages=m.get("languages"),
-                        streaming=m["capabilities"].get("streaming", False),
+                        native_streaming=m["capabilities"].get("native_streaming", False),
                         word_timestamps=m["capabilities"].get("word_timestamps", False),
                         punctuation=m["capabilities"].get("punctuation", False),
                         capitalization=m["capabilities"].get("capitalization", False),
@@ -773,7 +773,7 @@ class Dalston:
             stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
                 languages=m.get("languages"),
-                streaming=m["capabilities"].get("streaming", False),
+                native_streaming=m["capabilities"].get("native_streaming", False),
                 word_timestamps=m["capabilities"].get("word_timestamps", False),
                 punctuation=m["capabilities"].get("punctuation", False),
                 capitalization=m["capabilities"].get("capitalization", False),
@@ -844,8 +844,8 @@ class Dalston:
                         supports_word_timestamps=e["capabilities"].get(
                             "supports_word_timestamps", False
                         ),
-                        supports_streaming=e["capabilities"].get(
-                            "supports_streaming", False
+                        supports_native_streaming=e["capabilities"].get(
+                            "supports_native_streaming", False
                         ),
                         max_audio_duration_s=e["capabilities"].get(
                             "max_audio_duration_s"
@@ -1653,7 +1653,7 @@ class AsyncDalston:
                     stage=m.get("stage", "transcribe"),
                     capabilities=ModelCapabilities(
                         languages=m.get("languages"),
-                        streaming=m["capabilities"].get("streaming", False),
+                        native_streaming=m["capabilities"].get("native_streaming", False),
                         word_timestamps=m["capabilities"].get("word_timestamps", False),
                         punctuation=m["capabilities"].get("punctuation", False),
                         capitalization=m["capabilities"].get("capitalization", False),
@@ -1708,7 +1708,7 @@ class AsyncDalston:
             stage=m.get("stage", "transcribe"),
             capabilities=ModelCapabilities(
                 languages=m.get("languages"),
-                streaming=m["capabilities"].get("streaming", False),
+                native_streaming=m["capabilities"].get("native_streaming", False),
                 word_timestamps=m["capabilities"].get("word_timestamps", False),
                 punctuation=m["capabilities"].get("punctuation", False),
                 capitalization=m["capabilities"].get("capitalization", False),
@@ -1779,8 +1779,8 @@ class AsyncDalston:
                         supports_word_timestamps=e["capabilities"].get(
                             "supports_word_timestamps", False
                         ),
-                        supports_streaming=e["capabilities"].get(
-                            "supports_streaming", False
+                        supports_native_streaming=e["capabilities"].get(
+                            "supports_native_streaming", False
                         ),
                         max_audio_duration_s=e["capabilities"].get(
                             "max_audio_duration_s"

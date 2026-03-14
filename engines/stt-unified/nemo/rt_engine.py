@@ -311,7 +311,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         }
         return mappings.get(model_id, model_id)
 
-    def supports_streaming(self) -> bool:
+    def supports_native_streaming(self) -> bool:
         """Parakeet supports native streaming with partial results."""
         return True
 

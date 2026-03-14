@@ -20,7 +20,7 @@ container:
 
 capabilities:
   max_audio_duration: 7200
-  streaming: true
+  native_streaming: true
   word_timestamps: true
   max_concurrency: 8
 

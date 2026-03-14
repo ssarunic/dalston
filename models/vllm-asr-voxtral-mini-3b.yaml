@@ -33,7 +33,7 @@ capabilities:
   word_timestamps: false
   punctuation: true
   capitalization: true
-  streaming: false
+  native_streaming: false
   max_audio_duration: 600
 
 hardware:

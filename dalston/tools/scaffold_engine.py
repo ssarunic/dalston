@@ -216,7 +216,7 @@ container:
 
 capabilities:
   max_audio_duration: 7200
-  streaming: false
+  native_streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 
 input:
@@ -345,7 +345,7 @@ class {class_name}(Engine):
             version="1.0.0",
             stages=["{config.stage}"],
             supports_word_timestamps={config.word_timestamps},
-            supports_streaming=False,
+            supports_native_streaming=False,
             gpu_required={config.gpu == "required"},
             gpu_vram_mb={config.min_vram_gb * 1024 if config.min_vram_gb else "None"},
         )
@@ -516,7 +516,7 @@ container:
 
 capabilities:
   max_audio_duration: 7200
-  streaming: false
+  native_streaming: false
   word_timestamps: {str(config.word_timestamps).lower()}
 
 input:
