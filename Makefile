@@ -128,6 +128,7 @@ build-cpu:
 		stt-batch-align-phoneme-cpu \
 		stt-batch-diarize-pyannote-4.0-cpu \
 		stt-batch-diarize-nemo-msdd-cpu \
+		stt-batch-diarize-nemo-sortformer-cpu \
 		stt-batch-pii-detect-presidio
 
 # Build GPU engine variants
