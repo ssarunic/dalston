@@ -342,6 +342,35 @@ class TestRunCacheAwareStreaming:
 
         assert words == []
 
+    def test_words_not_repeated_when_best_hyp_flickers_empty(self) -> None:
+        """Bug regression: prev_text should not be cleared when best_hyp is empty."""
+        core = self._make_core()
+        mock_model = MagicMock()
+        mock_model.encoder.get_initial_cache_state.return_value = (
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+        )
+
+        hyp_hello = MagicMock()
+        hyp_hello.text = "hello"
+
+        # Step 1: "hello"
+        # Step 2: [] (empty)
+        # Step 3: "hello world"
+        mock_model.conformer_stream_step.side_effect = [
+            ([], [], "c1", "t1", "l1", [hyp_hello]),
+            ([], [], "c2", "t2", "l2", []),
+            ([], [], "c3", "t3", "l3", [MagicMock(text="hello world")]),
+        ]
+
+        chunks = [np.zeros(2560), np.zeros(2560), np.zeros(2560)]
+        with patch(self._BUFFER_PATCH, return_value=self._make_mock_buffer()):
+            words = list(core._run_cache_aware_streaming(mock_model, iter(chunks), 160))
+
+        # Should only yield "hello" and "world", NOT "hello", "hello", "world"
+        assert [w.word for w in words] == ["hello", "world"]
+
 
 # ---------------------------------------------------------------------------
 # Step 3: RT engine get_streaming_decode_fn routing

@@ -418,6 +418,15 @@ class NemoInference:
                 processed_signal, processed_signal_length, stream_id = (
                     streaming_buffer.append_audio(arr, stream_id=stream_id)
                 )
+
+                # Skip inference if no new features produced for this chunk
+                if processed_signal_length.numel() == 0 or (
+                    processed_signal_length.dim() > 0
+                    and processed_signal_length.max() == 0
+                ):
+                    step_start += chunk_dur
+                    continue
+
                 # Buffer returns a 0-dim scalar; encoder expects shape [batch]
                 if processed_signal_length.dim() == 0:
                     processed_signal_length = processed_signal_length.unsqueeze(0)
@@ -440,14 +449,15 @@ class NemoInference:
                     keep_all_outputs=True,
                 )
 
-                previous_hypotheses = best_hyp
-
-                curr_text = ""
                 if best_hyp:
+                    # Update RNNT decoder state only when we have a valid hypothesis
+                    previous_hypotheses = best_hyp
+
                     hyp = best_hyp[0]
-                    if hyp.text:
+                    curr_text = ""
+                    if hasattr(hyp, "text") and hyp.text:
                         curr_text = str(hyp.text)
-                    elif hyp.y_sequence is not None:
+                    elif hasattr(hyp, "y_sequence") and hyp.y_sequence is not None:
                         # Fallback: decode token IDs when .text wasn't populated
                         tokens = (
                             hyp.y_sequence.tolist()
@@ -456,10 +466,12 @@ class NemoInference:
                         )
                         curr_text = model.tokenizer.ids_to_text(tokens)
 
-                yield from self._emit_new_words(
-                    curr_text, prev_text, step_start, chunk_dur
-                )
-                prev_text = curr_text
+                    if curr_text:
+                        yield from self._emit_new_words(
+                            curr_text, prev_text, step_start, chunk_dur
+                        )
+                        prev_text = curr_text
+
                 step_start += chunk_dur
 
     @staticmethod
