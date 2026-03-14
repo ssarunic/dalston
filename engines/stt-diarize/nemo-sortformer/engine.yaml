@@ -106,7 +106,7 @@ output_schema:
 hf_compat:
   pipeline_tag: speaker-diarization
   library_name: nemo
-  license: cc-by-4.0
+  license: nvidia-open-model
 
 hardware:
   min_vram_gb: 4

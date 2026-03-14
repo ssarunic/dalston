@@ -6,7 +6,7 @@ by sorting speakers in arrival-time order and natively handles overlapping
 speech.
 
 Supports up to 4 speakers.  No HF_TOKEN required — models are open under
-CC-BY-4.0 license.
+NVIDIA Open Model License.
 
 References:
 - https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1
