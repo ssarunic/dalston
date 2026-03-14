@@ -619,6 +619,46 @@ services:
     depends_on: *batch-depends
     restart: unless-stopped
 
+  # NeMo Sortformer Speaker Diarization (GPU, ≤4 speakers)
+  stt-batch-diarize-nemo-sortformer:
+    image: dalston/stt-batch-diarize-nemo-sortformer:latest
+    build:
+      context: .
+      dockerfile: engines/stt-diarize/nemo-sortformer/Dockerfile
+      args:
+        SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo-sortformer
+      DALSTON_WORKER_ID: nemo-sortformer-gpu1
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
+      DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
+    volumes:
+      - model-cache:/models
+    depends_on: *batch-depends
+    profiles: [gpu]
+    restart: unless-stopped
+
+  # NeMo Sortformer Speaker Diarization - CPU variant (slow but works, ≤4 speakers)
+  stt-batch-diarize-nemo-sortformer-cpu:
+    image: dalston/stt-batch-diarize-nemo-sortformer-cpu:latest
+    build:
+      context: .
+      dockerfile: engines/stt-diarize/nemo-sortformer/Dockerfile
+      args:
+        SKIP_MODEL_DOWNLOAD: ${SKIP_MODEL_DOWNLOAD:-false}
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: nemo-sortformer
+      DALSTON_WORKER_ID: nemo-sortformer-cpu1
+      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
+      DALSTON_NEMO_ALLOW_CPU: "true"
+    volumes:
+      - model-cache:/models
+    shm_size: '2gb'
+    depends_on: *batch-depends
+    restart: unless-stopped
+
   # --- PII DETECT STAGE ---
   stt-batch-pii-detect-presidio:
     image: dalston/stt-batch-pii-detect-presidio:latest

@@ -1,0 +1,122 @@
+schema_version: "1.1"
+id: nemo-sortformer
+engine_id: nemo-sortformer
+stage: diarize
+name: NeMo Sortformer Speaker Diarization
+version: 1.0.0
+description: |
+  Speaker diarization using NVIDIA NeMo SortformerEncLabelModel.
+  End-to-end Transformer encoder model that directly predicts speaker labels
+  from audio, resolving the permutation problem via arrival-time ordering.
+
+  No HuggingFace token required - models are open under CC-BY-4.0 license.
+  Supports up to 4 speakers with native overlap handling and low DER.
+  Supports optional min/max speaker count hints.
+
+execution_profile: container
+
+container:
+  gpu: optional
+  memory: 8G
+
+capabilities:
+  max_audio_duration: 7200  # 2 hours
+  max_speakers: 4
+  native_streaming: false
+
+input:
+  audio_formats:
+    - wav
+  sample_rate: 16000
+  channels: 1
+
+config_schema:
+  type: object
+  properties:
+    loaded_model_id:
+      type: string
+      description: Runtime model identifier for Sortformer model selection
+    min_speakers:
+      type: integer
+      minimum: 1
+      maximum: 4
+      description: Minimum number of speakers (hint)
+    max_speakers:
+      type: integer
+      minimum: 1
+      maximum: 4
+      description: Maximum number of speakers (hint, capped at 4)
+  additionalProperties: false
+
+output_schema:
+  type: object
+  required:
+    - speakers
+    - turns
+    - num_speakers
+  properties:
+    speakers:
+      type: array
+      description: List of detected speaker IDs
+      items:
+        type: string
+    turns:
+      type: array
+      description: Speaker turns with timestamps
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - speaker
+        properties:
+          start:
+            type: number
+            description: Segment start time in seconds
+          end:
+            type: number
+            description: Segment end time in seconds
+          speaker:
+            type: string
+            description: Speaker ID (e.g., "SPEAKER_00")
+    num_speakers:
+      type: integer
+      description: Number of speakers detected
+    overlap_duration:
+      type: number
+      description: Total duration of overlapping speech in seconds
+    overlap_ratio:
+      type: number
+      description: Fraction of audio with overlapping speech
+    engine_id:
+      type: string
+      description: Engine identifier
+    skipped:
+      type: boolean
+      description: Whether processing was skipped
+    skip_reason:
+      type: string
+      description: Reason for skipping if skipped
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Any processing warnings
+
+hf_compat:
+  pipeline_tag: speaker-diarization
+  library_name: nemo
+  license: cc-by-4.0
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.04
+  rtf_cpu: 2.5
+  warm_start_latency_ms: 800
