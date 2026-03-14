@@ -453,6 +453,9 @@ class SessionHandler:
         self._streaming_word_count = 0
         self._streaming_session_text_parts: list[str] = []
         self._streaming_word_results: list[Word] = []
+        # When True, stop accepting new client messages and begin graceful teardown.
+        # Distinct from _ended so streaming decode can drain before session.end.
+        self._close_requested = False
 
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
@@ -500,7 +503,7 @@ class SessionHandler:
                 else:
                     await self._handle_control(message)
 
-                if self._ended:
+                if self._ended or self._close_requested:
                     break
 
         except Exception as e:
@@ -517,8 +520,8 @@ class SessionHandler:
         finally:
             # M71: Stop streaming decode before final cleanup
             if self._streaming_decode_active:
-                await self._flush_streaming_final()
                 await self._stop_streaming_decode()
+                await self._flush_streaming_final()
             await self._stop_lag_monitor()
             # Send session.end if not already sent
             if not self._ended:
@@ -769,7 +772,13 @@ class SessionHandler:
                 ):
                     asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
             except Exception as e:
-                logger.error("streaming_thread_error", error=str(e))
+                import traceback
+
+                logger.error(
+                    "streaming_thread_error",
+                    error=str(e),
+                    traceback=traceback.format_exc(),
+                )
             finally:
                 asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
 
@@ -866,14 +875,27 @@ class SessionHandler:
         self._streaming_word_count = 0
 
     async def _stop_streaming_decode(self) -> None:
-        """Stop the streaming decode background task."""
+        """Stop the streaming decode background task.
+
+        Waits up to DALSTON_STREAMING_STOP_TIMEOUT seconds (default 60) for
+        the decode thread to complete inference and flush results.  On GPU,
+        inference completes well within 5s; on CPU dev machines longer audio
+        clips may take 30–60s.
+        """
         if self._streaming_chunk_queue is not None:
             # Send sentinel to stop the chunk iterator
             await self._streaming_chunk_queue.put(None)
 
         if self._streaming_decode_task is not None:
+            import os
+
+            stop_timeout = float(
+                os.environ.get("DALSTON_STREAMING_STOP_TIMEOUT", "60.0")
+            )
             try:
-                await asyncio.wait_for(self._streaming_decode_task, timeout=5.0)
+                await asyncio.wait_for(
+                    self._streaming_decode_task, timeout=stop_timeout
+                )
             except (TimeoutError, asyncio.CancelledError):
                 self._streaming_decode_task.cancel()
 
@@ -1153,9 +1175,16 @@ class SessionHandler:
             logger.debug("audio_buffers_cleared")
 
         elif isinstance(parsed, EndMessage):
-            # Graceful end
-            await self._send_session_end()
-            self._ended = True
+            # Graceful end.
+            #
+            # In streaming-decode mode, defer session_end until the background
+            # decoder drains queued audio and flushes final words in run().finally.
+            # Ending immediately here sets _ended too early and drops late tokens.
+            if self._streaming_decode_active:
+                self._close_requested = True
+            else:
+                await self._send_session_end()
+                self._ended = True
 
         await self._evaluate_lag_budget(source="control_message")
 

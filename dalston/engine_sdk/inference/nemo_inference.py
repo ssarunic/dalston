@@ -11,7 +11,6 @@ responsible for formatting the raw results into its own output contract.
 
 from __future__ import annotations
 
-import math
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -222,6 +221,13 @@ class NemoInference:
         """
         return self._manager.get_architecture(model_id)
 
+    def is_cache_aware_streaming(self, model_id: str) -> bool:
+        """Return True if model supports per-chunk BatchedFrameASRRNNT streaming.
+
+        Delegates to NeMoModelManager.is_cache_aware_streaming().
+        """
+        return self._manager.is_cache_aware_streaming(model_id)
+
     def supports_native_streaming_decode(self, model_id: str) -> bool:
         """Check whether a model supports cache-aware streaming inference.
 
@@ -243,13 +249,20 @@ class NemoInference:
         audio_iter: Iterator[np.ndarray],
         model_id: str,
         chunk_ms: int = 160,
+        buffer_secs: float = 4.0,  # unused; kept for API compatibility
     ) -> Iterator[NeMoWordResult]:
-        """Yield word results incrementally as audio chunks arrive.
+        """Yield word results from streaming inference.
 
-        Uses NeMo's ``CacheAwareStreamingConfig`` to run incremental
-        inference on RNNT/TDT models. Each audio chunk from *audio_iter*
-        is fed to the model's streaming decoder, and any newly emitted
-        tokens are yielded as ``NeMoWordResult`` objects.
+        Dispatches to one of two paths based on whether the model was trained
+        for cache-aware per-chunk streaming:
+
+        - **Cache-aware** (``nemotron-streaming-rnnt-0.6b``): uses
+          ``model.conformer_stream_step`` to emit tokens as each chunk arrives,
+          carrying encoder attention cache and RNNT decoder state across chunks.
+          Results are yielded during the stream with no pre-fill buffer.
+        - **Offline RNNT/TDT** (``parakeet-rnnt-*``, ``parakeet-tdt-*``): collects
+          all chunks, runs a single batch transcription, then yields words. Results
+          are emitted after the stream ends.
 
         Only valid for RNNT and TDT model variants. Raises ``RuntimeError``
         if called on a CTC model.
@@ -257,8 +270,8 @@ class NemoInference:
         Args:
             audio_iter: Iterator of float32 numpy arrays (audio chunks)
             model_id: Model identifier (must be RNNT or TDT)
-            chunk_ms: Chunk duration in milliseconds (default 160,
-                      one FastConformer encoder chunk)
+            chunk_ms: Chunk duration in milliseconds (default 160)
+            buffer_secs: Unused; retained for call-site compatibility
 
         Yields:
             NeMoWordResult for each decoded token
@@ -276,7 +289,10 @@ class NemoInference:
 
         model = self._manager.acquire(model_id)
         try:
-            yield from self._run_streaming_inference(model, audio_iter, chunk_ms)
+            if self._manager.is_cache_aware_streaming(model_id):
+                yield from self._run_cache_aware_streaming(model, audio_iter, chunk_ms)
+            else:
+                yield from self._run_streaming_inference(model, audio_iter, chunk_ms)
         finally:
             self._manager.release(model_id)
 
@@ -286,325 +302,219 @@ class NemoInference:
         audio_iter: Iterator[np.ndarray],
         chunk_ms: int,
     ) -> Iterator[NeMoWordResult]:
-        """Run cache-aware streaming inference on an acquired model.
+        """Run streaming inference by collecting all audio then calling batch transcribe.
 
-        Uses NeMo 2.x ``CacheAwareStreamingAudioBuffer`` to preprocess audio
-        and ``model.conformer_stream_step`` to run the encoder incrementally.
+        Offline RNNT/TDT models (parakeet-rnnt-*, parakeet-tdt-*) were not
+        trained with limited right context, so they require the full audio
+        to produce accurate transcriptions. This method collects all chunks
+        from *audio_iter*, concatenates them, runs a single batch transcription
+        via ``transcribe_with_model``, and yields one ``NeMoWordResult`` per
+        word with timestamps from the hypothesis.
 
-        Audio chunks are fed one at a time (stream_id=0 after the first) so
-        the buffer stays at batch-size 1 throughout.  ``keep_all_outputs`` is
-        kept False for all intermediate steps — setting it True mid-stream
-        (e.g. when the buffer temporarily empties between incoming chunks)
-        doubles the cache tensor size and causes a shape mismatch on the next
-        step.  A final flush pass after the iterator is exhausted runs with
-        ``keep_all_outputs=True`` to drain any remaining pending tokens.
+        Word results are emitted after the stream ends (not chunk-by-chunk).
+        This is the correct latency trade-off for offline models.
 
         Args:
             model: Acquired NeMo RNNT/TDT model instance
-            audio_iter: Audio chunk iterator (float32 numpy arrays)
-            chunk_ms: Target chunk duration in ms. Used to configure a bounded
-                      streaming window for RNNT/TDT decode.
+            audio_iter: Audio chunk iterator (float32 numpy arrays, 16 kHz)
+            chunk_ms: Unused; retained for API compatibility
 
         Yields:
-            NeMoWordResult for each newly decoded token
+            NeMoWordResult for each decoded word
+        """
+        chunks: list[np.ndarray] = []
+        for chunk in audio_iter:
+            if chunk.size == 0:
+                continue
+            arr = chunk.squeeze() if chunk.ndim > 1 else chunk
+            chunks.append(arr.astype(np.float32, copy=False))
+
+        if not chunks:
+            return
+
+        full_audio = np.concatenate(chunks)
+        result = self.transcribe_with_model(model, full_audio)
+
+        for seg in result.segments:
+            if seg.words:
+                for w in seg.words:
+                    yield NeMoWordResult(
+                        word=w.word,
+                        start=w.start,
+                        end=w.end,
+                        confidence=w.confidence,
+                    )
+            elif seg.text.strip():
+                # No word-level timestamps: emit one result per word with segment timing
+                words = seg.text.split()
+                if not words:
+                    continue
+                word_dur = (
+                    (seg.end - seg.start) / len(words) if seg.end > seg.start else 0.1
+                )
+                for i, word in enumerate(words):
+                    t = seg.start + i * word_dur
+                    yield NeMoWordResult(
+                        word=word,
+                        start=round(t, 3),
+                        end=round(t + word_dur, 3),
+                    )
+
+    def _run_cache_aware_streaming(
+        self,
+        model: Any,
+        audio_iter: Iterator[np.ndarray],
+        chunk_ms: int,
+    ) -> Iterator[NeMoWordResult]:
+        """Per-chunk cache-aware streaming via CacheAwareStreamingAudioBuffer.
+
+        Uses ``CacheAwareStreamingAudioBuffer`` to preprocess audio with
+        dithering disabled and no padding, which is required for correct
+        streaming inference. The buffer's preprocessor produces clean mel
+        features per chunk; ``conformer_stream_step`` then carries both
+        encoder attention cache and RNNT decoder state across chunks.
+
+        Args:
+            model: Acquired NeMo RNNT model with cache-aware encoder (Nemotron)
+            audio_iter: Audio chunk iterator (float32 numpy arrays, 16 kHz)
+            chunk_ms: Chunk duration in milliseconds
+
+        Yields:
+            NeMoWordResult for each newly decoded word
         """
         import torch
         from nemo.collections.asr.parts.utils.streaming_utils import (
             CacheAwareStreamingAudioBuffer,
         )
 
-        self._configure_bounded_streaming_params(model, chunk_ms=chunk_ms)
-        self._ensure_streaming_positional_capacity(model)
+        chunk_dur = chunk_ms / 1000.0
 
+        # CacheAwareStreamingAudioBuffer creates a dedicated preprocessor with
+        # dither=0.0 and pad_to=0 — required for streaming inference accuracy.
         streaming_buffer = CacheAwareStreamingAudioBuffer(model=model)
+
+        # Initialise encoder cache to correct shapes (vs None which could
+        # cause shape mismatches on the first step).
         cache_last_channel, cache_last_time, cache_last_channel_len = (
             model.encoder.get_initial_cache_state(batch_size=1)
         )
-        previous_hypotheses = None
-        previous_text = ""
-        step_num = 0
 
-        autocast_ctx = (
-            torch.amp.autocast("cuda")
-            if self.device == "cuda"
-            else torch.inference_mode()
-        )
+        previous_hypotheses: Any = None
+        prev_text = ""
+        step_start = 0.0
+        stream_id = -1  # -1 creates stream 0; subsequent calls use stream 0
 
-        pred_out_stream = None
-        elapsed_audio_s = 0.0
+        logger.debug("cache_aware_stream_start", chunk_ms=chunk_ms)
 
-        def _step(chunk_audio: Any, chunk_lengths: Any, keep_all: bool) -> str:
-            nonlocal cache_last_channel, cache_last_time, cache_last_channel_len
-            nonlocal previous_hypotheses, pred_out_stream, step_num
+        model.eval()
+        with torch.inference_mode():
+            for chunk in audio_iter:
+                if chunk.size == 0:
+                    continue
+                arr = chunk.squeeze() if chunk.ndim > 1 else chunk
+                arr = arr.astype(np.float32, copy=False)
 
-            result = model.conformer_stream_step(
-                processed_signal=chunk_audio,
-                processed_signal_length=chunk_lengths,
-                cache_last_channel=cache_last_channel,
-                cache_last_time=cache_last_time,
-                cache_last_channel_len=cache_last_channel_len,
-                keep_all_outputs=keep_all,
-                previous_hypotheses=previous_hypotheses,
-                previous_pred_out=pred_out_stream,
-                drop_extra_pre_encoded=(
-                    model.encoder.streaming_cfg.drop_extra_pre_encoded
-                    if step_num != 0
-                    else 0
-                ),
-                return_transcription=True,
-            )
-            (
-                pred_out_stream,
-                transcribed_texts,
-                cache_last_channel,
-                cache_last_time,
-                cache_last_channel_len,
-                previous_hypotheses,
-            ) = result
-            step_num += 1
-
-            # M71: Prefer the cumulative hypothesis text for word-splitting logic.
-            # conformer_stream_step often returns 'new-only' tokens in
-            # transcribed_texts, which breaks the _emit_new_words logic that
-            # expects cumulative input to find new tokens via indexing.
-            if previous_hypotheses:
-                first = previous_hypotheses[0]
-                if hasattr(first, "text"):
-                    return str(first.text or "")
-                return str(first)
-
-            # Fallback for non-transducer or if hypotheses list is empty
-            if not transcribed_texts:
-                return ""
-            first = transcribed_texts[0]
-            if isinstance(first, str):
-                return first
-            if hasattr(first, "text"):
-                return str(first.text or "")
-            return str(first)
-
-        def _emit_new_words(
-            current_text: str, chunk_audio: Any
-        ) -> Iterator[NeMoWordResult]:
-            nonlocal previous_text, elapsed_audio_s
-            n_frames = (
-                chunk_audio.shape[2] if chunk_audio.dim() == 3 else chunk_audio.shape[1]
-            )
-            step_dur = n_frames * 0.01  # ~10 ms per mel frame at 16 kHz
-            step_start = elapsed_audio_s
-            elapsed_audio_s += step_dur
-
-            if not current_text or current_text == previous_text:
-                return
-            prev_words = previous_text.split()
-            curr_words = current_text.split()
-            new_words = curr_words[len(prev_words) :]
-            previous_text = current_text
-            if not new_words:
-                return
-            word_dur = step_dur / len(new_words)
-            for i, word in enumerate(new_words):
-                t = step_start + i * word_dur
-                yield NeMoWordResult(
-                    word=word,
-                    start=round(t, 3),
-                    end=round(t + word_dur, 3),
+                # Preprocess via buffer (dither=0, pad_to=0, online norm off)
+                processed_signal, processed_signal_length, stream_id = (
+                    streaming_buffer.append_audio(arr, stream_id=stream_id)
                 )
 
-        def _iter_with_last(
-            chunks: Iterator[np.ndarray],
-        ) -> Iterator[tuple[np.ndarray, bool]]:
-            """Yield (chunk, is_last_input_chunk) with one-element lookahead."""
-            iterator = iter(chunks)
-            try:
-                current = next(iterator)
-            except StopIteration:
-                return
+                # Skip inference if no new features produced for this chunk
+                if processed_signal_length.numel() == 0 or (
+                    processed_signal_length.dim() > 0
+                    and processed_signal_length.max() == 0
+                ):
+                    step_start += chunk_dur
+                    continue
 
-            for next_chunk in iterator:
-                yield current, False
-                current = next_chunk
-            yield current, True
+                # Buffer returns a 0-dim scalar; encoder expects shape [batch]
+                if processed_signal_length.dim() == 0:
+                    processed_signal_length = processed_signal_length.unsqueeze(0)
 
-        min_append_samples = self._streaming_min_append_samples(model, chunk_ms)
-        coalesced_audio_iter = self._coalesce_audio_chunks(
-            audio_iter, min_append_samples
-        )
-
-        stream_id = -1  # -1 creates stream 0; 0 appends to stream 0
-        with autocast_ctx:
-            for audio_chunk, is_last_input_chunk in _iter_with_last(
-                coalesced_audio_iter
-            ):
-                streaming_buffer.append_audio(audio_chunk, stream_id=stream_id)
-                stream_id = 0
-                for chunk_audio, chunk_lengths in streaming_buffer:
-                    keep_all = (
-                        is_last_input_chunk and streaming_buffer.is_buffer_empty()
-                    )
-                    text = _step(chunk_audio, chunk_lengths, keep_all=keep_all)
-                    yield from _emit_new_words(text, chunk_audio)
-
-            # Final flush — drain frames that couldn't fill a full encoder step
-            # and emit any remaining pending tokens with keep_all_outputs=True.
-            for chunk_audio, chunk_lengths in streaming_buffer:
-                text = _step(
-                    chunk_audio,
-                    chunk_lengths,
-                    keep_all=streaming_buffer.is_buffer_empty(),
+                # Cache-aware encoder step + RNNT decode
+                (
+                    _greedy_predictions,
+                    _all_hyps,
+                    cache_last_channel,
+                    cache_last_time,
+                    cache_last_channel_len,
+                    best_hyp,
+                ) = model.conformer_stream_step(
+                    processed_signal=processed_signal,
+                    processed_signal_length=processed_signal_length,
+                    cache_last_channel=cache_last_channel,
+                    cache_last_time=cache_last_time,
+                    cache_last_channel_len=cache_last_channel_len,
+                    previous_hypotheses=previous_hypotheses,
+                    keep_all_outputs=True,
                 )
-                yield from _emit_new_words(text, chunk_audio)
+
+                if best_hyp:
+                    # Update RNNT decoder state only when we have a valid hypothesis
+                    previous_hypotheses = best_hyp
+
+                    hyp = best_hyp[0]
+                    curr_text = ""
+                    if hasattr(hyp, "text") and hyp.text:
+                        curr_text = str(hyp.text)
+                    elif hasattr(hyp, "y_sequence") and hyp.y_sequence is not None:
+                        # Fallback: decode token IDs when .text wasn't populated
+                        tokens = (
+                            hyp.y_sequence.tolist()
+                            if hasattr(hyp.y_sequence, "tolist")
+                            else list(hyp.y_sequence)
+                        )
+                        curr_text = model.tokenizer.ids_to_text(tokens)
+
+                    if curr_text:
+                        yield from self._emit_new_words(
+                            curr_text, prev_text, step_start, chunk_dur
+                        )
+                        prev_text = curr_text
+
+                step_start += chunk_dur
 
     @staticmethod
-    def _streaming_min_append_samples(model: Any, chunk_ms: int) -> int:
-        """Return minimum raw-sample chunk size before appending to NeMo buffer.
+    def _emit_new_words(
+        current_text: str,
+        previous_text: str,
+        step_start: float,
+        chunk_dur: float,
+    ) -> Iterator[NeMoWordResult]:
+        """Yield word results for the new portion of a cumulative hypothesis.
 
-        NeMo's cache-aware buffer can produce empty RNNT hypotheses when fed very
-        small append chunks (for example, 100 ms) incrementally. Coalescing input
-        chunks to at least one streaming window stabilizes incremental decode.
+        Diffs *current_text* against *previous_text* to find newly emitted
+        tokens and distributes them uniformly across the chunk window.
+
+        Args:
+            current_text: Cumulative hypothesis text after this step
+            previous_text: Cumulative text before this step
+            step_start: Start timestamp of this chunk (seconds)
+            chunk_dur: Duration of this chunk (seconds)
+
+        Yields:
+            NeMoWordResult for each new word token
         """
-        configured = int(os.environ.get("DALSTON_RNNT_MIN_APPEND_SAMPLES", "0"))
-        if configured > 0:
-            return configured
+        if not current_text or current_text == previous_text:
+            return
 
-        encoder = getattr(model, "encoder", None)
-        streaming_cfg = getattr(encoder, "streaming_cfg", None)
-        chunk_size = getattr(streaming_cfg, "chunk_size", None)
-
-        if isinstance(chunk_size, list):
-            # Use the subsequent-step size (index 1) when available.
-            frames = int(chunk_size[1])
-        elif chunk_size is not None:
-            frames = int(chunk_size)
+        if current_text.startswith(previous_text):
+            new_text = current_text[len(previous_text) :].lstrip()
         else:
-            frames = max(1, int(round(chunk_ms / 10.0)))
+            # Non-linear update (e.g. beam correction): emit the full new text.
+            new_text = current_text
 
-        # Mel hop is 10 ms at 16 kHz => 160 raw samples per frame.
-        return max(1600, frames * 160)
-
-    @staticmethod
-    def _coalesce_audio_chunks(
-        chunks: Iterator[np.ndarray],
-        min_samples: int,
-    ) -> Iterator[np.ndarray]:
-        """Coalesce small realtime chunks into larger append units."""
-        if min_samples <= 1:
-            yield from chunks
+        new_words = new_text.split()
+        if not new_words:
             return
 
-        pending: list[np.ndarray] = []
-        pending_samples = 0
-
-        for chunk in chunks:
-            if chunk.size == 0:
-                continue
-            if chunk.ndim > 1:
-                chunk = chunk.squeeze()
-            if chunk.dtype != np.float32:
-                chunk = chunk.astype(np.float32)
-
-            pending.append(chunk)
-            pending_samples += int(chunk.shape[0])
-
-            if pending_samples >= min_samples:
-                yield np.concatenate(pending).astype(np.float32, copy=False)
-                pending = []
-                pending_samples = 0
-
-        if pending:
-            yield np.concatenate(pending).astype(np.float32, copy=False)
-
-    @staticmethod
-    def _configure_bounded_streaming_params(model: Any, chunk_ms: int) -> None:
-        """Configure bounded cache-aware streaming params for RNNT/TDT.
-
-        Parakeet RNNT configs often use ``att_context_size=[-1, -1]``.
-        Calling ``setup_streaming_params()`` with defaults maps this to a very
-        large cache window (``last_channel_cache_size=10000``), which can
-        destabilize streaming decode in NeMo 2.x.
-
-        We force a bounded window:
-        - ``chunk_size`` and ``shift_size`` are derived from ``chunk_ms``
-          (10 ms features => ``chunk_ms / 10``).
-        - ``left_chunks`` defaults to 2 and can be overridden via
-          ``DALSTON_RNNT_LEFT_CHUNKS``.
-        """
-        encoder = getattr(model, "encoder", None)
-        if encoder is None or not hasattr(encoder, "setup_streaming_params"):
-            return
-
-        chunk_steps = max(1, int(round(chunk_ms / 10.0)))
-        left_chunks = max(1, int(os.environ.get("DALSTON_RNNT_LEFT_CHUNKS", "2")))
-
-        encoder.setup_streaming_params(
-            chunk_size=chunk_steps,
-            shift_size=chunk_steps,
-            left_chunks=left_chunks,
-        )
-
-        streaming_cfg = getattr(encoder, "streaming_cfg", None)
-        logger.debug(
-            "configured_bounded_streaming_params",
-            chunk_ms=chunk_ms,
-            chunk_steps=chunk_steps,
-            left_chunks=left_chunks,
-            stream_chunk_size=getattr(streaming_cfg, "chunk_size", None),
-            stream_shift_size=getattr(streaming_cfg, "shift_size", None),
-            stream_valid_out_len=getattr(streaming_cfg, "valid_out_len", None),
-            stream_cache_size=getattr(streaming_cfg, "last_channel_cache_size", None),
-        )
-
-    @staticmethod
-    def _ensure_streaming_positional_capacity(model: Any) -> None:
-        """Ensure positional encoding can cover cache-aware streaming context.
-
-        Some RNNT/TDT configs set an effectively unbounded left context
-        (``att_context_size[0] == -1``), which makes
-        ``streaming_cfg.last_channel_cache_size`` large (for example 10000).
-        If positional encodings are initialized with a smaller
-        ``pos_emb_max_len`` (for example 5000), the first
-        ``conformer_stream_step()`` can fail with an attention shape mismatch.
-
-        We proactively grow the encoder positional range to at least
-        cache_size + max_encoded_chunk_size before stepping.
-        """
-        encoder = getattr(model, "encoder", None)
-        if encoder is None:
-            return
-
-        streaming_cfg = getattr(encoder, "streaming_cfg", None)
-        if streaming_cfg is None and hasattr(encoder, "setup_streaming_params"):
-            encoder.setup_streaming_params()
-            streaming_cfg = getattr(encoder, "streaming_cfg", None)
-        if streaming_cfg is None:
-            return
-
-        cache_size = getattr(streaming_cfg, "last_channel_cache_size", None)
-        chunk_size = getattr(streaming_cfg, "chunk_size", None)
-        if cache_size is None or chunk_size is None:
-            return
-
-        if isinstance(chunk_size, list):
-            max_chunk = max(int(v) for v in chunk_size)
-        else:
-            max_chunk = int(chunk_size)
-
-        subsampling = int(getattr(encoder, "subsampling_factor", 1) or 1)
-        # Conservative bound for post-subsampling chunk width seen by attention.
-        max_encoded_chunk = max(2, math.ceil(max_chunk / subsampling) + 2)
-        required_max_audio_len = int(cache_size) + max_encoded_chunk
-
-        current_max_audio_len = int(getattr(encoder, "max_audio_length", 0) or 0)
-        if current_max_audio_len < required_max_audio_len and hasattr(
-            encoder, "set_max_audio_length"
-        ):
-            encoder.set_max_audio_length(required_max_audio_len)
-            logger.debug(
-                "expanded_streaming_positional_capacity",
-                previous_max_audio_length=current_max_audio_len,
-                required_max_audio_length=required_max_audio_len,
-                cache_size=int(cache_size),
-                max_encoded_chunk=max_encoded_chunk,
+        word_dur = chunk_dur / len(new_words)
+        for i, word in enumerate(new_words):
+            t = step_start + i * word_dur
+            yield NeMoWordResult(
+                word=word,
+                start=round(t, 3),
+                end=round(t + word_dur, 3),
             )
 
     # -- Hypothesis parsing --------------------------------------------------

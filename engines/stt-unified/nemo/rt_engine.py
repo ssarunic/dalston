@@ -20,6 +20,7 @@ Environment variables:
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_RNNT_CHUNK_MS: Chunk duration in ms for streaming (default: 160)
+    DALSTON_RNNT_BUFFER_SECS: Total audio buffer for BatchedFrameASRRNNT (default: 4.0)
 """
 
 import os
@@ -80,8 +81,11 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         super().__init__()
         self._core: NemoInference | None = core
 
-        # M71: Cache-aware streaming configuration
+        # M71/M72: Cache-aware streaming configuration
         self._rnnt_chunk_ms = int(os.environ.get("DALSTON_RNNT_CHUNK_MS", "160"))
+        self._rnnt_buffer_secs = float(
+            os.environ.get("DALSTON_RNNT_BUFFER_SECS", "4.0")
+        )
 
     def load_models(self) -> None:
         """Initialize NemoInference with optional preloading.
@@ -249,7 +253,10 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         )
 
         for word_result in self._core.transcribe_streaming(
-            audio_iter, model_id, chunk_ms=self._rnnt_chunk_ms
+            audio_iter,
+            model_id,
+            chunk_ms=self._rnnt_chunk_ms,
+            buffer_secs=self._rnnt_buffer_secs,
         ):
             confidence = word_result.confidence or 0.95
             yield self.build_transcript(
@@ -292,6 +299,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             "parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
             "parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
+            "nemotron-streaming-rnnt-0.6b": "nemotron-streaming-rnnt-0.6b",
             # Short variants
             "0.6b": "parakeet-rnnt-0.6b",
             "1.1b": "parakeet-rnnt-1.1b",
@@ -301,31 +309,45 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             "ctc-1.1b": "parakeet-ctc-1.1b",
             "tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "tdt-1.1b": "parakeet-tdt-1.1b",
-            # NGC model IDs
+            "nemotron-0.6b": "nemotron-streaming-rnnt-0.6b",
+            # NGC / HuggingFace model IDs
             "nvidia/parakeet-rnnt-0.6b": "parakeet-rnnt-0.6b",
             "nvidia/parakeet-rnnt-1.1b": "parakeet-rnnt-1.1b",
             "nvidia/parakeet-ctc-0.6b": "parakeet-ctc-0.6b",
             "nvidia/parakeet-ctc-1.1b": "parakeet-ctc-1.1b",
             "nvidia/parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
             "nvidia/parakeet-tdt-1.1b": "parakeet-tdt-1.1b",
+            "nvidia/nemotron-speech-streaming-en-0.6b": "nemotron-streaming-rnnt-0.6b",
         }
         return mappings.get(model_id, model_id)
 
     def supports_native_streaming(self) -> bool:
-        """Parakeet supports native streaming with partial results."""
+        """RNNT/TDT models support real-time partial results via periodic batch inference."""
         return True
 
     def get_streaming_decode_fn(self, model_variant: str | None = None) -> Any:
-        """Return streaming decode callback for RNNT/TDT models.
+        """Return a streaming decode callable for cache-aware models, else None.
 
-        M71: When the model supports streaming decode, returns
-        ``self.transcribe_streaming`` so the SessionHandler can feed
-        audio chunks directly to the streaming decoder.
+        **Nemotron** (``nemotron-streaming-rnnt-0.6b``) was trained with limited
+        right context and supports ``BatchedFrameASRRNNT(stateful_decoding=True)``.
+        Returning ``self.transcribe_streaming`` here activates the session
+        handler's per-chunk streaming loop, which feeds audio chunks directly to
+        the decoder and emits partial transcript events during speech.
 
-        Returns None for CTC models, causing the SessionHandler to
-        use the VAD-accumulate path.
+        **Offline Parakeet RNNT/TDT** (``parakeet-rnnt-*``, ``parakeet-tdt-*``)
+        require the full audio context before decoding.  Returning ``None`` keeps
+        them on the VAD-accumulate path, which buffers the utterance and
+        transcribes at ``speech_end``.  Exposing the incomplete stream as a
+        streaming decode fn would break utterance boundary detection: VAD
+        ``speech_end`` flushes would find an empty buffer because the sentinel
+        hasn't been pushed yet.
+
+        CTC models always return ``None`` (cannot stream).
         """
-        if self.use_streaming_decode(model_variant):
+        if self._core is None:
+            return None
+        model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
+        if self._core.is_cache_aware_streaming(model_id):
             return self.transcribe_streaming
         return None
 

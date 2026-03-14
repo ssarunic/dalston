@@ -4,15 +4,16 @@ This manager handles loading and lifecycle management for NeMo ASR models
 with support for RNNT, CTC, and TDT architectures.
 
 Supported models:
-    RNNT (streaming capable):
+    RNNT (offline; buffered streaming via BatchedFrameASRRNNT):
     - parakeet-rnnt-0.6b: nvidia/parakeet-rnnt-0.6b
     - parakeet-rnnt-1.1b: nvidia/parakeet-rnnt-1.1b
+    - nemotron-streaming-rnnt-0.6b: nvidia/nemotron-speech-streaming-en-0.6b (cache-aware)
 
     CTC (non-streaming):
     - parakeet-ctc-0.6b: nvidia/parakeet-ctc-0.6b
     - parakeet-ctc-1.1b: nvidia/parakeet-ctc-1.1b
 
-    TDT (non-streaming):
+    TDT (offline; buffered streaming via BatchedFrameASRRNNT):
     - parakeet-tdt-0.6b-v3: nvidia/parakeet-tdt-0.6b-v3
     - parakeet-tdt-1.1b: nvidia/parakeet-tdt-1.1b
 
@@ -71,15 +72,22 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
         **kwargs: Passed to ModelManager (ttl_seconds, max_loaded, preload)
     """
 
+    # Models trained with limited right context — support per-chunk BatchedFrameASRRNNT streaming.
+    # Offline RNNT/TDT (parakeet-*) require full audio and are NOT listed here.
+    CACHE_AWARE_STREAMING_MODELS = frozenset({"nemotron-streaming-rnnt-0.6b"})
+
     # Model ID to NGC/HuggingFace model path mapping
     SUPPORTED_MODELS = {
-        # RNNT models (streaming capable)
+        # RNNT models (offline; streaming uses BatchedFrameASRRNNT buffered inference)
         "parakeet-rnnt-0.6b": "nvidia/parakeet-rnnt-0.6b",
         "parakeet-rnnt-1.1b": "nvidia/parakeet-rnnt-1.1b",
-        # CTC models (non-streaming)
+        # Nemotron streaming model — purpose-built for cache-aware streaming RNNT
+        # (released Jan 2026; supports 80/160/560/1120ms latency tiers)
+        "nemotron-streaming-rnnt-0.6b": "nvidia/nemotron-speech-streaming-en-0.6b",
+        # CTC models (non-streaming; requires full sequence for decode)
         "parakeet-ctc-0.6b": "nvidia/parakeet-ctc-0.6b",
         "parakeet-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
-        # TDT models (non-streaming, use RNNT base)
+        # TDT models (offline; streaming uses BatchedFrameASRRNNT buffered inference)
         "parakeet-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
         "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }
@@ -109,6 +117,15 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
         )
 
         super().__init__(**kwargs)
+
+    def is_cache_aware_streaming(self, model_id: str) -> bool:
+        """Return True if model was trained for per-chunk cache-aware streaming.
+
+        Only models with limited right context (e.g. nemotron-speech-streaming-en-0.6b)
+        return True. Offline models (parakeet-rnnt-*, parakeet-tdt-*) return False even
+        though they share the RNNT/TDT architecture.
+        """
+        return model_id in self.CACHE_AWARE_STREAMING_MODELS
 
     def get_architecture(self, model_id: str) -> str:
         """Determine architecture from model ID.
