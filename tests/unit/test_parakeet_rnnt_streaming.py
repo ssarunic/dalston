@@ -68,6 +68,7 @@ def _make_mock_core() -> MagicMock:
     mock_core = MagicMock(spec=NemoInference)
     mock_core.device = "cpu"
     mock_core.manager = MagicMock()
+    mock_core.is_cache_aware_streaming.return_value = False
     mock_core.transcribe.return_value = NeMoTranscriptionResult(
         text="hello world",
         segments=[
@@ -164,6 +165,7 @@ class TestParakeetCoreTranscribeStreaming:
         core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
+        core._manager.is_cache_aware_streaming = MagicMock(return_value=False)
         core._manager.device = "cpu"
 
         # Mock _run_streaming_inference to yield nothing
@@ -187,6 +189,7 @@ class TestParakeetCoreTranscribeStreaming:
         core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="rnnt")
+        core._manager.is_cache_aware_streaming = MagicMock(return_value=False)
         core._manager.device = "cpu"
 
         def _failing_stream(*args, **kwargs):
@@ -212,6 +215,7 @@ class TestParakeetCoreTranscribeStreaming:
         core = object.__new__(NemoInference)
         core._manager = MagicMock()
         core._manager.get_architecture = MagicMock(return_value="tdt")
+        core._manager.is_cache_aware_streaming = MagicMock(return_value=False)
         core._manager.device = "cpu"
 
         with patch.object(

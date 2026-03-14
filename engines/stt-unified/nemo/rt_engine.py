@@ -81,8 +81,11 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         super().__init__()
         self._core: NemoInference | None = core
 
-        # M71: Cache-aware streaming configuration
+        # M71/M72: Cache-aware streaming configuration
         self._rnnt_chunk_ms = int(os.environ.get("DALSTON_RNNT_CHUNK_MS", "160"))
+        self._rnnt_buffer_secs = float(
+            os.environ.get("DALSTON_RNNT_BUFFER_SECS", "4.0")
+        )
 
     def load_models(self) -> None:
         """Initialize NemoInference with optional preloading.
@@ -250,7 +253,10 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         )
 
         for word_result in self._core.transcribe_streaming(
-            audio_iter, model_id, chunk_ms=self._rnnt_chunk_ms
+            audio_iter,
+            model_id,
+            chunk_ms=self._rnnt_chunk_ms,
+            buffer_secs=self._rnnt_buffer_secs,
         ):
             confidence = word_result.confidence or 0.95
             yield self.build_transcript(
@@ -320,19 +326,29 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         return True
 
     def get_streaming_decode_fn(self, model_variant: str | None = None) -> Any:
-        """Return None to use the VAD-accumulate path for all NeMo models.
+        """Return a streaming decode callable for cache-aware models, else None.
 
-        Parakeet RNNT/TDT models require the full audio context before
-        decoding (no limited right context), so transcribe_streaming()
-        buffers the entire utterance and emits words only after stream
-        exhaustion.  Exposing that as a streaming decode fn breaks
-        utterance boundary detection: VAD speech_end flushes find an
-        empty buffer because the sentinel hasn't been pushed yet.
+        **Nemotron** (``nemotron-streaming-rnnt-0.6b``) was trained with limited
+        right context and supports ``BatchedFrameASRRNNT(stateful_decoding=True)``.
+        Returning ``self.transcribe_streaming`` here activates the session
+        handler's per-chunk streaming loop, which feeds audio chunks directly to
+        the decoder and emits partial transcript events during speech.
 
-        Returning None here routes all models through the standard
-        VAD-accumulate path, which correctly invokes transcription at
-        each speech_end event with bounded per-utterance memory.
+        **Offline Parakeet RNNT/TDT** (``parakeet-rnnt-*``, ``parakeet-tdt-*``)
+        require the full audio context before decoding.  Returning ``None`` keeps
+        them on the VAD-accumulate path, which buffers the utterance and
+        transcribes at ``speech_end``.  Exposing the incomplete stream as a
+        streaming decode fn would break utterance boundary detection: VAD
+        ``speech_end`` flushes would find an empty buffer because the sentinel
+        hasn't been pushed yet.
+
+        CTC models always return ``None`` (cannot stream).
         """
+        if self._core is None:
+            return None
+        model_id = self._normalize_model_id(model_variant or self.DEFAULT_MODEL)
+        if self._core.is_cache_aware_streaming(model_id):
+            return self.transcribe_streaming
         return None
 
     def get_models(self) -> list[str]:

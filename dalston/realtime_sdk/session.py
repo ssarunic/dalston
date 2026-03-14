@@ -772,7 +772,13 @@ class SessionHandler:
                 ):
                     asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
             except Exception as e:
-                logger.error("streaming_thread_error", error=str(e))
+                import traceback
+
+                logger.error(
+                    "streaming_thread_error",
+                    error=str(e),
+                    traceback=traceback.format_exc(),
+                )
             finally:
                 asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
 
