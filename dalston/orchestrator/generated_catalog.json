@@ -251,7 +251,7 @@
       "stage": "transcribe",
       "type": null,
       "description": "Real-time VAD-chunked transcription via HuggingFace Transformers ASR pipelines.\nSupports any model with pipeline_tag=automatic-speech-recognition on HuggingFace Hub\n(Whisper, Wav2Vec2, HuBERT, MMS, community fine-tunes).",
-      "image": "dalston/stt-batch-transcribe-hf-asr:1.0.0",
+      "image": "dalston/stt-unified-hf-asr-cpu:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
