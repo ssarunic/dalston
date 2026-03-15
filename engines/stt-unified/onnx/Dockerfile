@@ -40,9 +40,7 @@ WORKDIR /engine
 COPY engines/stt-unified/onnx/requirements.txt .
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
-            "onnx-asr[hub]>=0.5.0" && \
-        pip install --no-cache-dir --break-system-packages \
-            --force-reinstall --no-deps \
+            "onnx-asr[hub]>=0.5.0" \
             "onnxruntime-gpu>=1.19.2"; \
     else \
         pip install --no-cache-dir --break-system-packages -r requirements.txt; \

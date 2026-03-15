@@ -246,7 +246,13 @@ class VADProcessor:
 
         try:
             import onnxruntime as ort
+        except ImportError as e:
+            raise RuntimeError(
+                "onnxruntime is required for Silero VAD but not installed. "
+                "Install with: pip install onnxruntime (CPU) or onnxruntime-gpu (GPU)"
+            ) from e
 
+        try:
             model_path = _get_model_path()
             session = ort.InferenceSession(
                 str(model_path),
