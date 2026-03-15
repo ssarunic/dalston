@@ -39,6 +39,7 @@ RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime
 WORKDIR /engine
 COPY engines/stt-unified/onnx/requirements.txt .
 RUN if [ "$DEVICE" = "cuda" ]; then \
+        pip uninstall -y onnxruntime 2>/dev/null || true && \
         pip install --no-cache-dir --break-system-packages \
             "onnx-asr[hub]>=0.5.0" \
             "onnxruntime-gpu==1.19.2"; \
@@ -54,6 +55,7 @@ RUN mkdir -p /models/huggingface
 WORKDIR /app
 COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/
 COPY engines/stt-unified/onnx/rt_engine.yaml /etc/dalston/engine.yaml
+COPY scripts/diagnose-gpu.py scripts/diagnose-gpu.py
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 

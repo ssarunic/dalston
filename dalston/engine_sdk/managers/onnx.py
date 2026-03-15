@@ -109,6 +109,7 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         self._providers: list[str | tuple[str, dict]] = []
         if device == "cuda":
             self._providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            self._validate_cuda_compute()
         else:
             self._providers = ["CPUExecutionProvider"]
 
@@ -120,6 +121,54 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         )
 
         super().__init__(**kwargs)
+
+    @staticmethod
+    def _validate_cuda_compute() -> None:
+        """Verify that ONNX Runtime can actually execute on GPU.
+
+        Checks for the known onnxruntime/onnxruntime-gpu package conflict
+        that causes CUDA EP to silently fall back to CPU.
+        """
+        try:
+            import importlib.metadata
+
+            import onnxruntime as ort
+
+            # Check for package conflict: both onnxruntime and onnxruntime-gpu
+            installed = {}
+            for dist in importlib.metadata.distributions():
+                name = dist.metadata["Name"].lower()
+                if name in ("onnxruntime", "onnxruntime-gpu"):
+                    installed[name] = dist.metadata["Version"]
+
+            if "onnxruntime" in installed and "onnxruntime-gpu" in installed:
+                logger.error(
+                    "onnxruntime_package_conflict",
+                    onnxruntime_version=installed["onnxruntime"],
+                    onnxruntime_gpu_version=installed["onnxruntime-gpu"],
+                    hint="Both onnxruntime and onnxruntime-gpu are installed. "
+                    "This causes CUDA EP to silently fall back to CPU. "
+                    "Fix: pip uninstall onnxruntime",
+                )
+                return
+
+            # Verify CUDA EP is available
+            providers = ort.get_available_providers()
+            if "CUDAExecutionProvider" not in providers:
+                logger.error(
+                    "cuda_ep_not_available",
+                    available_providers=providers,
+                    hint="CUDAExecutionProvider not found. Check onnxruntime-gpu installation.",
+                )
+                return
+
+            logger.info(
+                "cuda_compute_validated",
+                onnxruntime_gpu_version=installed.get("onnxruntime-gpu", "unknown"),
+                available_providers=providers,
+            )
+        except Exception:
+            logger.exception("cuda_validation_error")
 
     def _load_model(self, model_id: str) -> OnnxASRModel:
         """Load an ONNX ASR model.
