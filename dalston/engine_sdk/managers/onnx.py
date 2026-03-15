@@ -126,46 +126,29 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
     def _validate_cuda_compute() -> None:
         """Verify that ONNX Runtime can actually execute on GPU.
 
-        Checks for the known onnxruntime/onnxruntime-gpu package conflict
-        that causes CUDA EP to silently fall back to CPU.
+        Both onnxruntime (CPU) and onnxruntime-gpu install into the same
+        Python namespace. Whichever is installed last wins. If the CPU
+        package overwrites the GPU package's files, CUDAExecutionProvider
+        won't be available despite onnxruntime-gpu being "installed".
         """
         try:
-            import importlib.metadata
-
             import onnxruntime as ort
 
-            # Check for package conflict: both onnxruntime and onnxruntime-gpu
-            installed = {}
-            for dist in importlib.metadata.distributions():
-                name = dist.metadata["Name"].lower()
-                if name in ("onnxruntime", "onnxruntime-gpu"):
-                    installed[name] = dist.metadata["Version"]
-
-            if "onnxruntime" in installed and "onnxruntime-gpu" in installed:
-                if installed["onnxruntime"] != installed["onnxruntime-gpu"]:
-                    logger.error(
-                        "onnxruntime_version_mismatch",
-                        onnxruntime_version=installed["onnxruntime"],
-                        onnxruntime_gpu_version=installed["onnxruntime-gpu"],
-                        hint="onnxruntime and onnxruntime-gpu have different versions. "
-                        "This causes CUDA EP to silently fall back to CPU. "
-                        "Both must be pinned to the same version.",
-                    )
-                    return
-
-            # Verify CUDA EP is available
             providers = ort.get_available_providers()
             if "CUDAExecutionProvider" not in providers:
                 logger.error(
                     "cuda_ep_not_available",
                     available_providers=providers,
-                    hint="CUDAExecutionProvider not found. Check onnxruntime-gpu installation.",
+                    ort_version=ort.__version__,
+                    hint="CUDAExecutionProvider not found. The CPU onnxruntime "
+                    "package may have overwritten onnxruntime-gpu files. "
+                    "Fix: pip install --force-reinstall --no-deps onnxruntime-gpu",
                 )
                 return
 
             logger.info(
                 "cuda_compute_validated",
-                onnxruntime_gpu_version=installed.get("onnxruntime-gpu", "unknown"),
+                ort_version=ort.__version__,
                 available_providers=providers,
             )
         except Exception:
