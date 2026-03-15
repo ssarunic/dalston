@@ -33,6 +33,14 @@ export function Models() {
   const resolveHF = useResolveHFModel()
   const syncModels = useSyncModels()
 
+  // Fetch unfiltered registry to derive available engine IDs for the filter dropdown
+  const { data: allData } = useModelRegistry()
+  const allModels = allData?.data
+  const availableEngineIds = useMemo(() => {
+    if (!allModels) return []
+    return [...new Set(allModels.map((m) => m.engine_id))]
+  }, [allModels])
+
   const models = useMemo(() => data?.data ?? [], [data?.data])
 
   // Client-side search filtering
@@ -122,7 +130,7 @@ export function Models() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filters */}
-          <ModelFiltersBar filters={filters} onChange={setFilters} />
+          <ModelFiltersBar filters={filters} onChange={setFilters} availableEngineIds={availableEngineIds} />
 
           {/* Loading State */}
           {isLoading && (

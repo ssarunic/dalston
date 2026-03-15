@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Search, X } from 'lucide-react'
 import { S } from '@/lib/strings'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -7,20 +8,13 @@ import type { ModelFilters, ModelStatus } from '@/api/types'
 interface ModelFiltersBarProps {
   filters: ModelFilters
   onChange: (filters: ModelFilters) => void
+  availableEngineIds?: string[]
 }
 
 const STAGES = [
   { value: 'transcribe', label: 'Transcribe' },
   { value: 'align', label: 'Align' },
   { value: 'diarize', label: 'Diarize' },
-]
-
-const RUNTIMES = [
-  { value: 'faster-whisper', label: 'Faster Whisper' },
-  { value: 'nemo', label: 'NeMo' },
-  { value: 'whisperx', label: 'WhisperX' },
-  { value: 'hf-asr', label: 'HuggingFace ASR' },
-  { value: 'pyannote', label: 'Pyannote' },
 ]
 
 const STATUSES = [
@@ -30,8 +24,13 @@ const STATUSES = [
   { value: 'failed', label: 'Failed' },
 ]
 
-export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
+export function ModelFiltersBar({ filters, onChange, availableEngineIds }: ModelFiltersBarProps) {
   const hasActiveFilters = !!(filters.search || filters.stage || filters.engine_id || filters.status)
+
+  const engineOptions = useMemo(() => {
+    if (!availableEngineIds || availableEngineIds.length === 0) return []
+    return [...availableEngineIds].sort().map((id) => ({ value: id, label: id }))
+  }, [availableEngineIds])
 
   return (
     <div className="flex flex-wrap gap-3 items-center">
@@ -65,17 +64,17 @@ export function ModelFiltersBar({ filters, onChange }: ModelFiltersBarProps) {
         </SelectContent>
       </Select>
 
-      {/* Runtime Filter */}
+      {/* Engine Filter (dynamic) */}
       <Select
         value={filters.engine_id || ''}
         onValueChange={(v) => onChange({ ...filters, engine_id: v || undefined })}
       >
         <SelectTrigger className="w-[160px]">
-          <SelectValue placeholder={S.modelFilters.allRuntimes} />
+          <SelectValue placeholder={S.modelFilters.allEngines} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">{S.modelFilters.allRuntimes}</SelectItem>
-          {RUNTIMES.map((r) => (
+          <SelectItem value="">{S.modelFilters.allEngines}</SelectItem>
+          {engineOptions.map((r) => (
             <SelectItem key={r.value} value={r.value}>
               {r.label}
             </SelectItem>

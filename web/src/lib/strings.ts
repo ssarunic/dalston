@@ -307,17 +307,16 @@ const models = {
 const engines = {
   title: 'Engines',
   subtitle: 'Pipeline stages and processing capacity',
-  batchEngines: 'Batch Engines',
-  realtimeWorkers: 'Real-time Workers',
+  engines: 'Engines',
   pipelineStages: 'Pipeline Stages',
   issues: 'Issues',
-  batchPipeline: 'Batch Pipeline',
+  pipeline: 'Pipeline',
   noEngines: 'no engines',
   enginesReady: 'engines ready',
   processing: 'processing',
   queued: 'queued',
+  sessions: 'sessions',
   noEnginesForStage: 'No engines registered for this stage',
-  noRealtimeWorkers: 'No real-time workers registered',
   noneReady: '(none ready)',
 } as const
 
@@ -597,7 +596,7 @@ const createWebhookDialog = {
 } as const
 
 const modelTable = {
-  colRuntime: 'Runtime',
+  colRuntime: 'Engine',
   colSize: 'Size',
   colCapabilities: 'Capabilities',
   removeDownloaded: 'Remove downloaded files',
@@ -639,16 +638,8 @@ const modelTable = {
 const modelFilters = {
   searchPlaceholder: 'Search models...',
   allStages: 'All stages',
-  allRuntimes: 'All engine_ids',
+  allEngines: 'All engines',
   allStatuses: 'All statuses',
-  stages: { transcribe: 'Transcribe', align: 'Align', diarize: 'Diarize' },
-  engine_ids: {
-    fasterWhisper: 'Faster Whisper',
-    nemo: 'NeMo',
-    whisperx: 'WhisperX',
-    huggingfaceAsr: 'HuggingFace ASR',
-    pyannote: 'Pyannote',
-  },
   statuses: {
     ready: 'Ready',
     downloading: 'Downloading',
