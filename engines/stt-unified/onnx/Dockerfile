@@ -12,7 +12,7 @@ ARG DEVICE=cpu
 FROM python:3.12-slim AS base-cpu
 
 # --- GPU base ---
-FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu24.04 AS base-cuda
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-dev python3-pip \
@@ -41,7 +41,7 @@ COPY engines/stt-unified/onnx/requirements.txt .
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
             "onnx-asr[hub]>=0.5.0" \
-            "onnxruntime-gpu==1.19.2"; \
+            "onnxruntime-gpu>=1.19.2"; \
     else \
         pip install --no-cache-dir --break-system-packages -r requirements.txt; \
     fi
@@ -54,6 +54,7 @@ RUN mkdir -p /models/huggingface
 WORKDIR /app
 COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/
 COPY engines/stt-unified/onnx/rt_engine.yaml /etc/dalston/engine.yaml
+COPY scripts/diagnose-gpu.py scripts/diagnose-gpu.py
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 

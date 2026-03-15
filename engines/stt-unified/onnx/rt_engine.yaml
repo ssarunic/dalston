@@ -34,6 +34,6 @@ hardware:
   min_ram_gb: 4
 
 performance:
-  rtf_gpu: 0.0003
-  rtf_cpu: 0.01
+  rtf_gpu: 0.03
+  rtf_cpu: 0.12
   warm_start_latency_ms: 50

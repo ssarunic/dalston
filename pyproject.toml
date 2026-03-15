@@ -68,7 +68,12 @@ realtime-sdk = [
     "websockets>=12.0",
     "redis>=7.0.0",
     "numpy>=1.24.0",
-    "onnxruntime>=1.18.0",
+    # NOTE: onnxruntime is NOT listed here on purpose. It caused GPU namespace
+    # collisions when GPU engines installed realtime-sdk (CPU onnxruntime
+    # overwrote onnxruntime-gpu files). Each engine brings its own runtime:
+    # - ONNX engine: onnxruntime-gpu (GPU) or onnxruntime (CPU)
+    # - Other engines: don't need onnxruntime at all
+    # The realtime_sdk.vad module lazy-imports onnxruntime at runtime.
     "soxr>=0.3.0",  # High-quality sample rate conversion (libsoxr)
     "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
     "types-aiobotocore-s3>=2.13.0",
