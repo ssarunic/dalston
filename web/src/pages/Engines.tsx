@@ -4,39 +4,63 @@ import {
   ChevronDown,
   ChevronRight,
   Server,
-  Radio,
   AlertCircle,
   Layers,
   Box,
+  Users,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useEngines } from '@/hooks/useEngines'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
-import type { BatchEngine, EngineStatus, WorkerStatus, ModelRegistryEntry, ModelStatus } from '@/api/types'
+import type { EngineStatus, ModelRegistryEntry, ModelStatus, WorkerStatus } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
 
-// Pipeline stages in their natural processing order
-const PIPELINE_STAGES = [
-  { id: 'prepare', label: 'Prepare', description: 'Audio preprocessing' },
-  { id: 'transcribe', label: 'Transcribe', description: 'Speech-to-text' },
-  { id: 'align', label: 'Align', description: 'Word-level timestamps' },
-  { id: 'diarize', label: 'Diarize', description: 'Speaker identification' },
-  { id: 'pii_detect', label: 'PII Detect', description: 'Sensitive data detection' },
-  { id: 'audio_redact', label: 'Audio Redact', description: 'PII audio masking' },
-  { id: 'merge', label: 'Merge', description: 'Final assembly' },
-] as const
+// Sort-order hint for known stages — unknown stages appear at the end
+const STAGE_ORDER: Record<string, number> = {
+  prepare: 0,
+  transcribe: 1,
+  align: 2,
+  diarize: 3,
+  pii_detect: 4,
+  audio_redact: 5,
+  merge: 6,
+}
 
-type StageId = (typeof PIPELINE_STAGES)[number]['id']
+const STAGE_LABELS: Record<string, { label: string; description: string }> = {
+  prepare: { label: 'Prepare', description: 'Audio preprocessing' },
+  transcribe: { label: 'Transcribe', description: 'Speech-to-text' },
+  align: { label: 'Align', description: 'Word-level timestamps' },
+  diarize: { label: 'Diarize', description: 'Speaker identification' },
+  pii_detect: { label: 'PII Detect', description: 'Sensitive data detection' },
+  audio_redact: { label: 'Audio Redact', description: 'PII audio masking' },
+  merge: { label: 'Merge', description: 'Final assembly' },
+}
+
+/** Unified engine combining batch and realtime data. */
+interface UnifiedEngine {
+  engine_id: string
+  stage: string
+  status: EngineStatus
+  queue_depth: number
+  processing: number
+  // Realtime metrics (from matched worker)
+  active_sessions: number
+  capacity: number
+  worker_status: WorkerStatus['status'] | null
+}
 
 interface StageStatus {
-  stage: (typeof PIPELINE_STAGES)[number]
-  engines: BatchEngine[]
+  id: string
+  label: string
+  description: string
+  engines: UnifiedEngine[]
   healthyCount: number
-  unhealthyCount: number
   totalQueueDepth: number
   totalProcessing: number
+  totalSessions: number
+  totalCapacity: number
 }
 
 type DotStatus = 'healthy' | 'unhealthy' | 'warning' | 'empty'
@@ -51,7 +75,6 @@ function StatusDot({ status }: { status: DotStatus }) {
   return <span className={cn('inline-block w-2 h-2 rounded-full shrink-0', colors[status])} />
 }
 
-/** Map engine status to a dot status for the UI. */
 function engineStatusToDot(status: EngineStatus): DotStatus {
   switch (status) {
     case 'idle':
@@ -67,7 +90,6 @@ function engineStatusToDot(status: EngineStatus): DotStatus {
   }
 }
 
-/** Human-readable label for an engine status. */
 function engineStatusLabel(status: EngineStatus): string {
   switch (status) {
     case 'idle':
@@ -87,11 +109,11 @@ function engineStatusLabel(status: EngineStatus): string {
   }
 }
 
-function isEngineHealthy(engine: BatchEngine): boolean {
+function isEngineHealthy(engine: UnifiedEngine): boolean {
   return engineStatusToDot(engine.status) !== 'unhealthy'
 }
 
-function getStageAggregateStatus(engines: BatchEngine[]): DotStatus {
+function getStageAggregateStatus(engines: UnifiedEngine[]): DotStatus {
   if (engines.length === 0) return 'empty'
 
   let hasWarning = false
@@ -124,23 +146,22 @@ function StageHeader({
   isExpanded: boolean
   onToggle: () => void
 }) {
-  const { stage, engines, healthyCount, totalQueueDepth, totalProcessing } = stageStatus
+  const { engines, healthyCount, totalQueueDepth, totalProcessing, totalSessions } = stageStatus
   const aggregateStatus = getStageAggregateStatus(engines)
 
   const summaryParts: string[] = []
   if (engines.length === 0) {
     summaryParts.push(S.engines.noEngines)
   } else if (healthyCount === engines.length) {
-    // All engines ready - just show count
     summaryParts.push(`${engines.length} engine${engines.length !== 1 ? 's' : ''}`)
   } else {
-    // Some engines offline - show fraction
     summaryParts.push(`${healthyCount}/${engines.length} ${S.engines.enginesReady}`)
   }
-  if (totalQueueDepth > 0 || totalProcessing > 0) {
+  if (totalQueueDepth > 0 || totalProcessing > 0 || totalSessions > 0) {
     const activityParts: string[] = []
     if (totalProcessing > 0) activityParts.push(`${totalProcessing} ${S.engines.processing}`)
     if (totalQueueDepth > 0) activityParts.push(`${totalQueueDepth} ${S.engines.queued}`)
+    if (totalSessions > 0) activityParts.push(`${totalSessions} ${S.engines.sessions}`)
     summaryParts.push(activityParts.join(', '))
   }
 
@@ -161,9 +182,9 @@ function StageHeader({
         )}
         <StatusDot status={aggregateStatus} />
         <div>
-          <span className="font-medium">{stage.label}</span>
+          <span className="font-medium">{stageStatus.label}</span>
           <span className="text-muted-foreground ml-2 text-sm hidden sm:inline">
-            {stage.description}
+            {stageStatus.description}
           </span>
         </div>
       </div>
@@ -174,7 +195,7 @@ function StageHeader({
   )
 }
 
-// Model status styling (only ready vs not ready matters on this page)
+// Model status styling
 const modelStatusColors: Record<ModelStatus, string> = {
   ready: 'bg-green-500',
   downloading: 'bg-zinc-400',
@@ -189,12 +210,7 @@ const modelStatusLabels: Record<ModelStatus, string> = {
   failed: 'Not Downloaded',
 }
 
-// Stage-specific info to show in engine cards
-function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): React.ReactNode {
-  // Only show models for transcribe stage (diarize doesn't use model registry)
-  if (stage !== 'transcribe') return null
-
-  // No models in registry for this engine_id
+function getStageSpecificInfo(models: ModelRegistryEntry[]): React.ReactNode {
   if (models.length === 0) {
     return (
       <div className="mt-3 flex items-center gap-2">
@@ -204,7 +220,6 @@ function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): Reac
     )
   }
 
-  // Sort: ready first, then downloading, then not_downloaded, then failed
   const statusOrder: Record<ModelStatus, number> = { ready: 0, downloading: 1, not_downloaded: 2, failed: 3 }
   const sortedModels = [...models].sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
   const readyCount = models.filter((m) => m.status === 'ready').length
@@ -245,9 +260,11 @@ function getStageSpecificInfo(stage: string, models: ModelRegistryEntry[]): Reac
   )
 }
 
-function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegistryEntry[] }) {
+function EngineCard({ engine, models }: { engine: UnifiedEngine; models: ModelRegistryEntry[] }) {
   const dot = engineStatusToDot(engine.status)
   const hasActivity = engine.processing > 0 || engine.queue_depth > 0
+  const hasSessions = engine.capacity > 0
+  const utilization = engine.capacity > 0 ? (engine.active_sessions / engine.capacity) * 100 : 0
 
   return (
     <Link
@@ -268,24 +285,46 @@ function EngineCard({ engine, models }: { engine: BatchEngine; models: ModelRegi
             <span className="text-sm text-muted-foreground shrink-0">{engineStatusLabel(engine.status)}</span>
           </div>
         </div>
-        {hasActivity && (
-          <div className="text-right shrink-0">
-            {engine.processing > 0 && (
+        <div className="text-right shrink-0 flex items-center gap-4">
+          {hasActivity && (
+            <div>
+              {engine.processing > 0 && (
+                <div className="text-sm">
+                  <span className="font-medium">{engine.processing}</span>
+                  <span className="text-muted-foreground ml-1">{S.engines.processing}</span>
+                </div>
+              )}
+              {engine.queue_depth > 0 && (
+                <div className="text-sm">
+                  <span className="font-medium">{engine.queue_depth}</span>
+                  <span className="text-muted-foreground ml-1">{S.engines.queued}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {hasSessions && (
+            <div className="flex items-center gap-2">
+              <Users className="h-3.5 w-3.5 text-muted-foreground" />
               <div className="text-sm">
-                <span className="font-medium">{engine.processing}</span>
-                <span className="text-muted-foreground ml-1">{S.engines.processing}</span>
+                <span className="font-medium">{engine.active_sessions}</span>
+                <span className="text-muted-foreground">/{engine.capacity}</span>
               </div>
-            )}
-            {engine.queue_depth > 0 && (
-              <div className="text-sm">
-                <span className="font-medium">{engine.queue_depth}</span>
-                <span className="text-muted-foreground ml-1">{S.engines.queued}</span>
-              </div>
-            )}
-          </div>
-        )}
+              {utilization > 0 && (
+                <div className="h-1.5 w-16 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all',
+                      utilization > 80 ? 'bg-yellow-500' : 'bg-green-500'
+                    )}
+                    style={{ width: `${Math.min(utilization, 100)}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      {getStageSpecificInfo(engine.stage, models)}
+      {getStageSpecificInfo(models)}
     </Link>
   )
 }
@@ -294,12 +333,12 @@ function StageAccordion({
   stageStatus,
   isExpanded,
   onToggle,
-  modelsByRuntime,
+  modelsByEngine,
 }: {
   stageStatus: StageStatus
   isExpanded: boolean
   onToggle: () => void
-  modelsByRuntime: Map<string, ModelRegistryEntry[]>
+  modelsByEngine: Map<string, ModelRegistryEntry[]>
 }) {
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -310,7 +349,7 @@ function StageAccordion({
             <EngineCard
               key={engine.engine_id}
               engine={engine}
-              models={modelsByRuntime.get(engine.engine_id) ?? []}
+              models={modelsByEngine.get(engine.engine_id) ?? []}
             />
           ))}
         </div>
@@ -327,117 +366,70 @@ function StageAccordion({
   )
 }
 
-function RealtimeWorkerCard({ worker, models }: { worker: WorkerStatus; models: ModelRegistryEntry[] }) {
-  const isReady = worker.status === 'ready'
-  const utilization = worker.capacity > 0 ? (worker.active_sessions / worker.capacity) * 100 : 0
-  const loadedModelSet = new Set(worker.models)
-
-  // Sort: loaded first, then by status (ready > downloading > not_downloaded > failed)
-  const statusOrder: Record<ModelStatus, number> = { ready: 0, downloading: 1, not_downloaded: 2, failed: 3 }
-  const sortedModels = [...models].sort((a, b) => {
-    const aLoaded = loadedModelSet.has(a.id) || loadedModelSet.has(a.name || '')
-    const bLoaded = loadedModelSet.has(b.id) || loadedModelSet.has(b.name || '')
-    if (aLoaded !== bLoaded) return aLoaded ? -1 : 1
-    return statusOrder[a.status] - statusOrder[b.status]
-  })
-  const maxToShow = 4
-
-  return (
-    <Link
-      to={`/realtime/workers/${encodeURIComponent(worker.instance)}`}
-      className={cn(
-        'block p-4 rounded-lg border transition-all',
-        'hover:border-primary/50 hover:bg-accent/30',
-        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-        isReady ? 'border-border' : 'border-red-500/30 bg-red-500/5'
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <StatusDot status={isReady ? 'healthy' : 'unhealthy'} />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-medium truncate">{worker.instance}</span>
-              {worker.engine_id && (
-                <Badge variant="outline" className="text-xs shrink-0">
-                  {worker.engine_id}
-                </Badge>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground truncate">{worker.endpoint}</div>
-          </div>
-        </div>
-        <div className="text-right shrink-0">
-          <div className="text-sm">
-            <span className="font-medium">{worker.active_sessions}</span>
-            <span className="text-muted-foreground">/{worker.capacity}</span>
-            <span className="text-muted-foreground ml-1">sessions</span>
-          </div>
-          {utilization > 0 && (
-            <div className="mt-1 h-1.5 w-20 bg-muted rounded-full overflow-hidden">
-              <div
-                className={cn(
-                  'h-full rounded-full transition-all',
-                  utilization > 80 ? 'bg-yellow-500' : 'bg-green-500'
-                )}
-                style={{ width: `${Math.min(utilization, 100)}%` }}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-      {models.length > 0 && (
-        <div className="mt-3 flex items-center gap-2">
-          <Box className="h-3 w-3 text-muted-foreground shrink-0" />
-          <div className="flex flex-wrap gap-1">
-            {sortedModels.slice(0, maxToShow).map((model) => {
-              const isLoaded = loadedModelSet.has(model.id) || loadedModelSet.has(model.name || '')
-              return (
-                <Badge
-                  key={model.id}
-                  variant={isLoaded ? 'secondary' : 'outline'}
-                  className={cn('text-xs', !isLoaded && model.status === 'not_downloaded' && 'opacity-60')}
-                >
-                  <span
-                    className={cn('w-1.5 h-1.5 rounded-full mr-1', isLoaded ? 'bg-blue-500' : modelStatusColors[model.status])}
-                    title={isLoaded ? 'Loaded' : modelStatusLabels[model.status]}
-                  />
-                  {model.name || model.id}
-                </Badge>
-              )
-            })}
-            {models.length > maxToShow && (
-              <Badge variant="outline" className="text-xs">
-                +{models.length - maxToShow} more
-              </Badge>
-            )}
-          </div>
-        </div>
-      )}
-    </Link>
-  )
-}
-
 export function Engines() {
   const { data, isLoading, error } = useEngines()
   const { data: registryData } = useModelRegistry()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // Parse expanded stages from URL (e.g., ?expanded=transcribe,diarize)
+  // Merge batch engines with realtime worker data into unified engines
+  const unifiedEngines = useMemo(() => {
+    if (!data) return []
+
+    // Index realtime workers by engine_id
+    const workersByEngineId = new Map<string, WorkerStatus[]>()
+    for (const worker of data.realtime_engines ?? []) {
+      if (worker.engine_id) {
+        const existing = workersByEngineId.get(worker.engine_id) ?? []
+        existing.push(worker)
+        workersByEngineId.set(worker.engine_id, existing)
+      }
+    }
+
+    return (data.batch_engines ?? []).map((batch): UnifiedEngine => {
+      const workers = workersByEngineId.get(batch.engine_id) ?? []
+      const totalCapacity = workers.reduce((sum, w) => sum + w.capacity, 0)
+      const totalSessions = workers.reduce((sum, w) => sum + w.active_sessions, 0)
+      // Best worker status
+      const workerStatus = workers.length > 0
+        ? (workers.some((w) => w.status === 'ready') ? 'ready' : workers[0].status)
+        : null
+
+      return {
+        engine_id: batch.engine_id,
+        stage: batch.stage,
+        status: batch.status,
+        queue_depth: batch.queue_depth,
+        processing: batch.processing,
+        active_sessions: totalSessions,
+        capacity: totalCapacity,
+        worker_status: workerStatus,
+      }
+    })
+  }, [data])
+
+  // Derive stages dynamically from engine data
+  const stageIds = useMemo(() => {
+    const seen = new Set<string>()
+    for (const engine of unifiedEngines) {
+      seen.add(engine.stage)
+    }
+    return [...seen].sort((a, b) => {
+      const orderA = STAGE_ORDER[a] ?? 99
+      const orderB = STAGE_ORDER[b] ?? 99
+      if (orderA !== orderB) return orderA - orderB
+      return a.localeCompare(b)
+    })
+  }, [unifiedEngines])
+
+  // Parse expanded stages from URL
   const expandedStages = useMemo(() => {
     const param = searchParams.get('expanded')
-    if (!param) return new Set<StageId>()
-    const ids = param.split(',').filter((id): id is StageId =>
-      PIPELINE_STAGES.some((s) => s.id === id)
-    )
-    return new Set(ids)
-  }, [searchParams])
+    if (!param) return new Set<string>()
+    return new Set(param.split(',').filter((id) => stageIds.includes(id)))
+  }, [searchParams, stageIds])
 
-  const batchEngines = useMemo(() => data?.batch_engines ?? [], [data?.batch_engines])
-  const realtimeWorkers = data?.realtime_engines ?? []
-
-  // Group models by engine_id (engine)
-  const modelsByRuntime = useMemo(() => {
+  // Group models by engine_id
+  const modelsByEngine = useMemo(() => {
     const map = new Map<string, ModelRegistryEntry[]>()
     for (const model of registryData?.data ?? []) {
       const existing = map.get(model.engine_id) ?? []
@@ -449,40 +441,43 @@ export function Engines() {
 
   // Group engines by stage and compute stats
   const stageStatuses = useMemo((): StageStatus[] => {
-    const enginesByStage = new Map<string, BatchEngine[]>()
-    for (const engine of batchEngines) {
+    const enginesByStage = new Map<string, UnifiedEngine[]>()
+    for (const engine of unifiedEngines) {
       const existing = enginesByStage.get(engine.stage) ?? []
       existing.push(engine)
       enginesByStage.set(engine.stage, existing)
     }
 
-    return PIPELINE_STAGES.map((stage) => {
-      const engines = enginesByStage.get(stage.id) ?? []
+    return stageIds.map((stageId) => {
+      const info = STAGE_LABELS[stageId] ?? { label: stageId, description: '' }
+      const engines = enginesByStage.get(stageId) ?? []
       const healthyCount = engines.filter(isEngineHealthy).length
-      const unhealthyCount = engines.length - healthyCount
       const totalQueueDepth = engines.reduce((sum, e) => sum + e.queue_depth, 0)
       const totalProcessing = engines.reduce((sum, e) => sum + e.processing, 0)
+      const totalSessions = engines.reduce((sum, e) => sum + e.active_sessions, 0)
+      const totalCapacity = engines.reduce((sum, e) => sum + e.capacity, 0)
 
       return {
-        stage,
+        id: stageId,
+        label: info.label,
+        description: info.description,
         engines,
         healthyCount,
-        unhealthyCount,
         totalQueueDepth,
         totalProcessing,
+        totalSessions,
+        totalCapacity,
       }
     })
-  }, [batchEngines])
+  }, [unifiedEngines, stageIds])
 
-  // Toggle stage expansion and persist to URL
-  const toggleStage = (stageId: StageId) => {
+  const toggleStage = (stageId: string) => {
     const next = new Set(expandedStages)
     if (next.has(stageId)) {
       next.delete(stageId)
     } else {
       next.add(stageId)
     }
-    // Update URL params
     setSearchParams((prev) => {
       if (next.size === 0) {
         prev.delete('expanded')
@@ -494,10 +489,10 @@ export function Engines() {
   }
 
   // Summary stats
-  const totalEngines = batchEngines.length
-  const healthyEngines = batchEngines.filter(isEngineHealthy).length
-  const totalWorkers = realtimeWorkers.length
-  const readyWorkers = realtimeWorkers.filter((w) => w.status === 'ready').length
+  const totalEngines = unifiedEngines.length
+  const healthyEngines = unifiedEngines.filter(isEngineHealthy).length
+  const totalSessions = unifiedEngines.reduce((sum, e) => sum + e.active_sessions, 0)
+  const totalCapacity = unifiedEngines.reduce((sum, e) => sum + e.capacity, 0)
 
   return (
     <div className="space-y-6">
@@ -524,7 +519,7 @@ export function Engines() {
             <div className="flex items-center gap-3">
               <Server className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">{S.engines.batchEngines}</p>
+                <p className="text-xs text-muted-foreground">{S.engines.engines}</p>
                 <p className="text-lg font-semibold">
                   {healthyEngines}
                   <span className="text-muted-foreground text-sm font-normal">/{totalEngines}</span>
@@ -536,12 +531,12 @@ export function Engines() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <Radio className="h-5 w-5 text-muted-foreground" />
+              <Users className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">{S.engines.realtimeWorkers}</p>
+                <p className="text-xs text-muted-foreground">{S.engines.sessions}</p>
                 <p className="text-lg font-semibold">
-                  {readyWorkers}
-                  <span className="text-muted-foreground text-sm font-normal">/{totalWorkers}</span>
+                  {totalSessions}
+                  <span className="text-muted-foreground text-sm font-normal">/{totalCapacity}</span>
                 </p>
               </div>
             </div>
@@ -555,7 +550,7 @@ export function Engines() {
                 <p className="text-xs text-muted-foreground">{S.engines.pipelineStages}</p>
                 <p className="text-lg font-semibold">
                   {stageStatuses.filter((s) => s.engines.length > 0).length}
-                  <span className="text-muted-foreground text-sm font-normal">/{PIPELINE_STAGES.length}</span>
+                  <span className="text-muted-foreground text-sm font-normal">/{stageIds.length}</span>
                 </p>
               </div>
             </div>
@@ -568,7 +563,7 @@ export function Engines() {
               <div>
                 <p className="text-xs text-muted-foreground">{S.engines.issues}</p>
                 <p className="text-lg font-semibold">
-                  {totalEngines - healthyEngines + (totalWorkers - readyWorkers)}
+                  {totalEngines - healthyEngines}
                 </p>
               </div>
             </div>
@@ -576,11 +571,11 @@ export function Engines() {
         </Card>
       </div>
 
-      {/* Batch Pipeline */}
+      {/* Pipeline */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <Server className="h-5 w-5 text-muted-foreground" />
-          <CardTitle>{S.engines.batchPipeline}</CardTitle>
+          <CardTitle>{S.engines.pipeline}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {isLoading ? (
@@ -592,45 +587,13 @@ export function Engines() {
           ) : (
             stageStatuses.map((stageStatus) => (
               <StageAccordion
-                key={stageStatus.stage.id}
+                key={stageStatus.id}
                 stageStatus={stageStatus}
-                isExpanded={expandedStages.has(stageStatus.stage.id)}
-                onToggle={() => toggleStage(stageStatus.stage.id)}
-                modelsByRuntime={modelsByRuntime}
+                isExpanded={expandedStages.has(stageStatus.id)}
+                onToggle={() => toggleStage(stageStatus.id)}
+                modelsByEngine={modelsByEngine}
               />
             ))
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Real-time Workers */}
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-2">
-          <Radio className="h-5 w-5 text-muted-foreground" />
-          <CardTitle>{S.engines.realtimeWorkers}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              {[1, 2].map((i) => (
-                <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
-              ))}
-            </div>
-          ) : realtimeWorkers.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground p-4 rounded-lg bg-muted/30 border border-dashed">
-              <AlertCircle className="h-4 w-4" />
-              {S.engines.noRealtimeWorkers}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {realtimeWorkers.map((worker) => (
-                <RealtimeWorkerCard
-                  key={worker.instance}
-                  worker={worker}
-                  models={modelsByRuntime.get(worker.engine_id ?? '') ?? []}
-                />
-              ))}
-            </div>
           )}
         </CardContent>
       </Card>

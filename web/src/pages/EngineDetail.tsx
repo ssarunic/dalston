@@ -2,15 +2,13 @@ import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Server,
   Clock,
   Zap,
-  CheckCircle,
-  XCircle,
   AlertCircle,
   Layers,
   Activity,
   Box,
+  Users,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +17,7 @@ import { apiClient } from '@/api/client'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
-import type { Engine, BatchEngine, EngineStatus, ModelStatus } from '@/api/types'
+import type { Engine, BatchEngine, EngineStatus, ModelStatus, WorkerStatus } from '@/api/types'
 
 function StatusDot({ status }: { status: 'running' | 'available' | 'unhealthy' }) {
   const colors = {
@@ -56,31 +54,10 @@ function MetricCard({
 function CapabilityRow({
   label,
   value,
-  supported,
 }: {
   label: string
   value?: string | number | null
-  supported?: boolean
 }) {
-  if (supported !== undefined) {
-    return (
-      <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        {supported ? (
-          <span className="flex items-center gap-1 text-sm text-green-500">
-            <CheckCircle className="h-4 w-4" />
-            {S.engineDetail.supported}
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-sm text-muted-foreground">
-            <XCircle className="h-4 w-4" />
-            {S.engineDetail.notSupported}
-          </span>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
       <span className="text-sm text-muted-foreground">{label}</span>
@@ -100,13 +77,14 @@ export function EngineDetail() {
   const { engineId } = useParams()
   const decodedEngineId = engineId ? decodeURIComponent(engineId) : ''
 
-  // Fetch both engine lists to find the engine
+  // Fetch discovery API (capabilities)
   const { data: enginesListData, isLoading: isLoadingList } = useQuery({
     queryKey: ['engines-list'],
     queryFn: () => apiClient.getEnginesList(),
     staleTime: 30000,
   })
 
+  // Fetch console API (batch queue stats + realtime workers)
   const { data: consoleEnginesData, isLoading: isLoadingConsole } = useQuery({
     queryKey: ['engines'],
     queryFn: () => apiClient.getEngines(),
@@ -115,25 +93,40 @@ export function EngineDetail() {
 
   const isLoading = isLoadingList || isLoadingConsole
 
-  // Find the engine in the discovery API (has capabilities)
+  // Find engine in discovery API
   const engineInfo: Engine | undefined = enginesListData?.engines.find(
     (e) => e.id === decodedEngineId
   )
 
-  // Find the engine in console API (has queue stats)
+  // Find engine in console batch API
   const batchEngineInfo: BatchEngine | undefined = consoleEnginesData?.batch_engines.find(
     (e) => e.engine_id === decodedEngineId
   )
 
-  // Fetch models from registry and filter by this engine's engine_id
-  const { data: registryData } = useModelRegistry({ engine_id: decodedEngineId })
-  const engineModels = useMemo(() => {
-    return registryData?.data ?? []
-  }, [registryData?.data])
+  // Find matching realtime workers for this engine
+  const realtimeWorkers: WorkerStatus[] = useMemo(() => {
+    return (consoleEnginesData?.realtime_engines ?? []).filter(
+      (w) => w.engine_id === decodedEngineId
+    )
+  }, [consoleEnginesData?.realtime_engines, decodedEngineId])
 
-  // Determine status - prefer console API (heartbeat-based) over discovery API
-  // batchEngineInfo.status is EngineStatus (from console API heartbeats) - more accurate
-  // engineInfo.status is 'running' | 'available' | 'unhealthy' (from discovery API)
+  const totalCapacity = realtimeWorkers.reduce((sum, w) => sum + w.capacity, 0)
+  const totalSessions = realtimeWorkers.reduce((sum, w) => sum + w.active_sessions, 0)
+  const utilization = totalCapacity > 0 ? Math.round((totalSessions / totalCapacity) * 100) : 0
+
+  // Fetch models from registry for this engine
+  const { data: registryData } = useModelRegistry({ engine_id: decodedEngineId })
+  const engineModels = useMemo(() => registryData?.data ?? [], [registryData?.data])
+
+  // Capability summaries from models
+  const capSummary = useMemo(() => {
+    const total = engineModels.length
+    const wordTs = engineModels.filter((m) => m.word_timestamps).length
+    const streaming = engineModels.filter((m) => m.native_streaming).length
+    return { total, wordTs, streaming }
+  }, [engineModels])
+
+  // Status mapping
   function batchStatusToDiscovery(s: EngineStatus): 'running' | 'available' | 'unhealthy' {
     switch (s) {
       case 'idle':
@@ -148,7 +141,6 @@ export function EngineDetail() {
     }
   }
 
-  // Human-readable label for granular status
   function engineStatusLabel(s: EngineStatus): string {
     switch (s) {
       case 'idle':
@@ -168,7 +160,6 @@ export function EngineDetail() {
     }
   }
 
-  // Prefer batch status (from heartbeats) as it's more accurate than discovery API
   const status: 'running' | 'available' | 'unhealthy' = batchEngineInfo
     ? batchStatusToDiscovery(batchEngineInfo.status)
     : (engineInfo?.status ?? 'unhealthy')
@@ -243,7 +234,7 @@ export function EngineDetail() {
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Quick Stats — batch + realtime */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
         <MetricCard
           icon={Layers}
@@ -266,13 +257,6 @@ export function EngineDetail() {
             />
           </>
         )}
-        {engineInfo?.capabilities.max_audio_duration_s && (
-          <MetricCard
-            icon={Clock}
-            label={S.engineDetail.maxDuration}
-            value={formatDuration(engineInfo.capabilities.max_audio_duration_s)}
-          />
-        )}
         {engineInfo?.capabilities.max_concurrency && (
           <MetricCard
             icon={Zap}
@@ -282,115 +266,119 @@ export function EngineDetail() {
         )}
       </div>
 
-      {/* Capabilities - only for transcribe stage */}
-      {engineInfo && stage === 'transcribe' && (
+      {/* Realtime Utilization */}
+      {totalCapacity > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Server className="h-4 w-4" />
-              {S.engineDetail.capabilities}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <CapabilityRow
-              label={S.engineDetail.wordTimestamps}
-              supported={engineInfo.capabilities.supports_word_timestamps}
-            />
-            <CapabilityRow
-              label={S.engineDetail.streaming}
-              supported={engineInfo.capabilities.supports_native_streaming}
-            />
-            <CapabilityRow
-              label={S.engineDetail.maxAudioDuration}
-              value={formatDuration(engineInfo.capabilities.max_audio_duration_s)}
-            />
-            {engineInfo.capabilities.max_concurrency && (
-              <CapabilityRow
-                label={S.engineDetail.maxConcurrency}
-                value={engineInfo.capabilities.max_concurrency}
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-
-      {/* Models - only for transcribe stage (diarize doesn't use model registry) */}
-      {stage === 'transcribe' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Box className="h-4 w-4" />
-              {S.engineDetail.availableModels}
+              <Users className="h-4 w-4" />
+              Session Utilization
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {engineModels.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic">
-                {S.engineDetail.noModelsForEngine}
-              </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {engineModels.map((model) => {
-                  // Model status styling (only ready vs not ready matters on this page)
-                  const statusColors: Record<ModelStatus, string> = {
-                    ready: 'bg-green-500',
-                    downloading: 'bg-zinc-400',
-                    not_downloaded: 'bg-zinc-400',
-                    failed: 'bg-zinc-400',
-                  }
-                  const statusLabels: Record<ModelStatus, string> = {
-                    ready: 'Ready',
-                    downloading: 'Not Downloaded',
-                    not_downloaded: 'Not Downloaded',
-                    failed: 'Not Downloaded',
-                  }
-                  const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
-
-                  return (
-                    <div
-                      key={model.id}
-                      className={cn(
-                        'p-3 rounded-lg border bg-muted/30',
-                        model.status === 'ready' && 'border-green-500/30'
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium text-sm truncate">{model.name || model.id}</div>
-                          <div className="text-xs text-muted-foreground mt-1 truncate">
-                            {model.loaded_model_id}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span
-                            className={cn('w-2 h-2 rounded-full', statusColors[model.status])}
-                            title={statusLabels[model.status]}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            {statusLabels[model.status]}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {model.word_timestamps && (
-                          <Badge variant="outline" className="text-xs">word timestamps</Badge>
-                        )}
-                        {model.native_streaming && (
-                          <Badge variant="outline" className="text-xs">streaming</Badge>
-                        )}
-                        {sizeGb && (
-                          <Badge variant="secondary" className="text-xs">{sizeGb}GB</Badge>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">
+                  {totalSessions} active / {totalCapacity} capacity
+                  {realtimeWorkers.length > 1 && ` (${realtimeWorkers.length} workers)`}
+                </span>
+                <span className="font-medium">{utilization}%</span>
               </div>
-            )}
+              <div className="h-3 w-full bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all',
+                    utilization > 80 ? 'bg-yellow-500' : 'bg-green-500'
+                  )}
+                  style={{ width: `${Math.min(utilization, 100)}%` }}
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Models with per-model capabilities */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <Box className="h-4 w-4" />
+            {S.engineDetail.availableModels}
+            {capSummary.total > 0 && (
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                {capSummary.wordTs}/{capSummary.total} word timestamps · {capSummary.streaming}/{capSummary.total} streaming
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {engineModels.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">
+              {S.engineDetail.noModelsForEngine}
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {engineModels.map((model) => {
+                const statusColors: Record<ModelStatus, string> = {
+                  ready: 'bg-green-500',
+                  downloading: 'bg-zinc-400',
+                  not_downloaded: 'bg-zinc-400',
+                  failed: 'bg-zinc-400',
+                }
+                const statusLabels: Record<ModelStatus, string> = {
+                  ready: 'Ready',
+                  downloading: 'Not Downloaded',
+                  not_downloaded: 'Not Downloaded',
+                  failed: 'Not Downloaded',
+                }
+                const sizeGb = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) : null
+
+                return (
+                  <div
+                    key={model.id}
+                    className={cn(
+                      'p-3 rounded-lg border bg-muted/30',
+                      model.status === 'ready' && 'border-green-500/30'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-sm truncate">{model.name || model.id}</div>
+                        <div className="text-xs text-muted-foreground mt-1 truncate">
+                          {model.loaded_model_id}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          className={cn('w-2 h-2 rounded-full', statusColors[model.status])}
+                          title={statusLabels[model.status]}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {statusLabels[model.status]}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {model.word_timestamps && (
+                        <Badge variant="outline" className="text-xs">word timestamps</Badge>
+                      )}
+                      {model.native_streaming && (
+                        <Badge variant="outline" className="text-xs">streaming</Badge>
+                      )}
+                      {sizeGb && (
+                        <Badge variant="secondary" className="text-xs">{sizeGb}GB</Badge>
+                      )}
+                      {!model.supports_cpu && (
+                        <Badge variant="outline" className="text-xs text-amber-600 border-amber-400">GPU only</Badge>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Engine Info */}
       {engineInfo && (
@@ -404,6 +392,9 @@ export function EngineDetail() {
             <CapabilityRow label="Version" value={engineInfo.version} />
             <CapabilityRow label="Stage" value={engineInfo.stage} />
             <CapabilityRow label="Status" value={statusLabel} />
+            {engineInfo.capabilities.max_audio_duration_s && (
+              <CapabilityRow label={S.engineDetail.maxAudioDuration} value={formatDuration(engineInfo.capabilities.max_audio_duration_s)} />
+            )}
           </CardContent>
         </Card>
       )}

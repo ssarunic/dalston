@@ -24,6 +24,12 @@ export interface SystemCapabilities {
     pii_detection: boolean
     native_streaming: boolean
   }
+  feature_model_counts: {
+    word_timestamps: number
+    speaker_diarization: number
+    pii_detection: number
+    native_streaming: number
+  }
   engines_by_stage: Record<string, number>
   models_ready: number
   models_total: number
@@ -49,6 +55,15 @@ export function useSystemCapabilities() {
         native_streaming: stages.transcribe?.supports_native_streaming ?? false,
       }
 
+      // Count models with each capability
+      const readyModels = modelsData.filter(m => m.status === 'ready')
+      const feature_model_counts = {
+        word_timestamps: readyModels.filter(m => m.word_timestamps).length,
+        speaker_diarization: readyModels.filter(m => m.stage === 'diarize').length,
+        pii_detection: readyModels.filter(m => m.stage === 'pii_detect').length,
+        native_streaming: readyModels.filter(m => m.native_streaming).length,
+      }
+
       // Count engines per stage
       const engines_by_stage: Record<string, number> = {}
       for (const [stage, caps] of Object.entries(stages)) {
@@ -56,11 +71,12 @@ export function useSystemCapabilities() {
       }
 
       // Count models
-      const models_ready = modelsData.filter(m => m.status === 'ready').length
+      const models_ready = readyModels.length
       const models_total = modelsData.length
 
       return {
         features,
+        feature_model_counts,
         engines_by_stage,
         models_ready,
         models_total,

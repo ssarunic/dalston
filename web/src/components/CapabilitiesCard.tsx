@@ -1,15 +1,12 @@
 import { Link } from 'react-router-dom'
 import {
   Zap,
-  CheckCircle,
-  XCircle,
   ArrowRight,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSystemCapabilities } from '@/hooks/useCapabilities'
-import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
 
 const FEATURES = [
@@ -67,24 +64,22 @@ export function CapabilitiesCard() {
           </div>
         </div>
 
-        {/* Features row */}
+        {/* Features row — show model counts */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           {FEATURES.map(({ key, label }) => {
+            const count = capabilities.feature_model_counts?.[key] ?? 0
             const isEnabled = capabilities.features[key]
             return (
               <div
                 key={key}
-                className={cn(
-                  'flex items-center gap-1.5 text-sm',
-                  isEnabled ? 'text-foreground' : 'text-muted-foreground'
-                )}
+                className="flex items-center gap-1.5 text-sm text-foreground"
               >
+                <span className="font-medium">{label}:</span>
                 {isEnabled ? (
-                  <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                  <span className="text-green-600">{count} model{count !== 1 ? 's' : ''}</span>
                 ) : (
-                  <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground">none</span>
                 )}
-                <span>{label}</span>
               </div>
             )
           })}

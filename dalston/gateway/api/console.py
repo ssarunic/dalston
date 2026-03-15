@@ -369,6 +369,7 @@ class BatchEngine(BaseModel):
     ]
     queue_depth: int
     processing: int
+    interfaces: list[str] = ["batch", "realtime"]
 
 
 class VocabularySupportResponse(BaseModel):
@@ -384,12 +385,13 @@ class RealtimeWorker(BaseModel):
 
     instance: str
     endpoint: str
-    status: str
+    status: Literal["ready", "busy", "draining", "offline", "unhealthy"]
     capacity: int
     active_sessions: int
     models: list[str]  # M43: Currently loaded models (dynamic)
     engine_id: str | None = None  # M43: Model engine_id (e.g., "faster-whisper")
     vocabulary_support: VocabularySupportResponse | None = None
+    interfaces: list[str] = ["batch", "realtime"]
 
 
 class EnginesResponse(BaseModel):
@@ -432,9 +434,6 @@ async def get_engines(
     for instance_id in all_instance_ids:
         data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
         if data and "engine_id" in data:
-            # Skip realtime-only instances — their "ready" status isn't a valid BatchEngine status
-            if data.get("interfaces") == '["realtime"]':
-                continue
             engine_id = data["engine_id"]
             discovered_heartbeats.setdefault(engine_id, []).append(data)
 
@@ -454,6 +453,7 @@ async def get_engines(
         queue_depth = await _get_stream_backlog(redis, stream_key)
 
         instance_heartbeats = discovered_heartbeats.get(engine_id, [])
+        interfaces = ["batch", "realtime"]  # All engines are unified
         if not instance_heartbeats:
             # No heartbeats = offline
             status = "offline"
@@ -483,6 +483,16 @@ async def get_engines(
                     if heartbeat.get("current_task"):
                         total_processing += 1
 
+                # Pick up interfaces from heartbeat if available
+                hb_interfaces = heartbeat.get("interfaces")
+                if hb_interfaces:
+                    try:
+                        import json
+
+                        interfaces = json.loads(hb_interfaces)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
             status = best_status
             processing = total_processing
 
@@ -493,6 +503,7 @@ async def get_engines(
                 status=status,
                 queue_depth=queue_depth,
                 processing=processing,
+                interfaces=interfaces,
             )
         )
 
@@ -521,6 +532,7 @@ async def get_engines(
                     models=worker.models,  # M43: Dynamically loaded models
                     engine_id=worker.engine_id,  # M43: Model engine_id
                     vocabulary_support=vocab_resp,
+                    interfaces=["batch", "realtime"],
                 )
             )
     except Exception:
@@ -548,6 +560,7 @@ async def get_engines(
                     active_sessions=0,
                     models=[],
                     engine_id=entry.capabilities.engine_id,  # M43: Model engine_id
+                    interfaces=["batch", "realtime"],
                 )
             )
 
