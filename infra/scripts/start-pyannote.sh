@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-# start-stt-onnx.sh — Launch or terminate a spot GPU instance running the stt-onnx container
+# start-pyannote.sh — Launch or terminate a spot GPU instance running the pyannote diarization container
 #
 # Usage:
-#   start-stt-onnx.sh [start] [TAG]   # Launch instance (default command)
-#   start-stt-onnx.sh stop             # Terminate running instance
+#   start-pyannote.sh [start] [TAG]   # Launch instance (default command)
+#   start-pyannote.sh stop             # Terminate running instance
 set -euo pipefail
 
 # --- 1. Configuration ---
@@ -13,15 +13,15 @@ ROLE_NAME="dalston-gpu"
 KEY_NAME="dalston-dev"
 INSTANCE_TYPE="g4dn.xlarge"
 SSH_KEY_PATH="$HOME/.ssh/dalston-dev-london.pem"
-REPO="dalston/stt-onnx"
-INSTANCE_TAG="dalston-stt-unified-onnx"
-CONTAINER_NAME="stt-unified-onnx"
+REPO="dalston/stt-diarize-pyannote"
+INSTANCE_TAG="dalston-stt-batch-diarize-pyannote-4.0"
+CONTAINER_NAME="stt-batch-diarize-pyannote-4.0"
 
 # --- Subcommand routing ---
 COMMAND="${1:-start}"
 case "$COMMAND" in
   stop)
-    echo "--- Terminating stt-onnx instance ---"
+    echo "--- Terminating pyannote instance ---"
     INSTANCE_ID=$(aws ec2 describe-instances \
       --filters "Name=tag:Name,Values=$INSTANCE_TAG" \
                 "Name=instance-state-name,Values=pending,running,stopping,stopped" \
@@ -43,10 +43,16 @@ case "$COMMAND" in
     TAG="${2:-latest}"
     ;;
   *)
-    # Treat unknown arg as TAG for backward compat (e.g. ./start-stt-onnx.sh v1.2)
+    # Treat unknown arg as TAG for backward compat (e.g. ./start-pyannote.sh v1.2)
     TAG="$COMMAND"
     ;;
 esac
+
+# HF_TOKEN is required for pyannote model downloads
+if [[ -z "${HF_TOKEN:-}" ]]; then
+  echo "ERROR: HF_TOKEN environment variable is required for pyannote models"
+  exit 1
+fi
 
 echo "--- Initialising Environment ---"
 
@@ -134,9 +140,10 @@ systemctl restart docker
 aws ecr get-login-password --region DALSTON_REGION | docker login --username AWS --password-stdin DALSTON_ECR
 docker pull DALSTON_ECR/DALSTON_REPO:DALSTON_TAG
 docker run -d --name DALSTON_CONTAINER_NAME --gpus all --restart unless-stopped \
-  -p 9000:9000 \
   -e DALSTON_DEVICE=cuda \
-  -e DALSTON_ENGINE_ID=onnx \
+  -e DALSTON_ENGINE_ID=pyannote-4.0 \
+  -e DALSTON_WORKER_ID=pyannote-gpu-1 \
+  -e HF_TOKEN=DALSTON_HF_TOKEN \
   -e REDIS_URL=redis://DALSTON_MAC_TS_IP:6379 \
   -e DALSTON_S3_BUCKET=dalston-artifacts \
   -e DALSTON_S3_ENDPOINT_URL=http://DALSTON_MAC_TS_IP:9000 \
@@ -154,6 +161,7 @@ USER_DATA="${USER_DATA//DALSTON_TAG/$TAG}"
 USER_DATA="${USER_DATA//DALSTON_HOSTNAME/$INSTANCE_TAG}"
 USER_DATA="${USER_DATA//DALSTON_CONTAINER_NAME/$CONTAINER_NAME}"
 USER_DATA="${USER_DATA//DALSTON_MAC_TS_IP/$MAC_TS_IP}"
+USER_DATA="${USER_DATA//DALSTON_HF_TOKEN/$HF_TOKEN}"
 
 # base64-encode for run-instances
 USER_DATA_B64=$(echo "$USER_DATA" | base64)
