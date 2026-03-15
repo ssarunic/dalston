@@ -142,15 +142,16 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
                     installed[name] = dist.metadata["Version"]
 
             if "onnxruntime" in installed and "onnxruntime-gpu" in installed:
-                logger.error(
-                    "onnxruntime_package_conflict",
-                    onnxruntime_version=installed["onnxruntime"],
-                    onnxruntime_gpu_version=installed["onnxruntime-gpu"],
-                    hint="Both onnxruntime and onnxruntime-gpu are installed. "
-                    "This causes CUDA EP to silently fall back to CPU. "
-                    "Fix: pip uninstall onnxruntime",
-                )
-                return
+                if installed["onnxruntime"] != installed["onnxruntime-gpu"]:
+                    logger.error(
+                        "onnxruntime_version_mismatch",
+                        onnxruntime_version=installed["onnxruntime"],
+                        onnxruntime_gpu_version=installed["onnxruntime-gpu"],
+                        hint="onnxruntime and onnxruntime-gpu have different versions. "
+                        "This causes CUDA EP to silently fall back to CPU. "
+                        "Both must be pinned to the same version.",
+                    )
+                    return
 
             # Verify CUDA EP is available
             providers = ort.get_available_providers()
