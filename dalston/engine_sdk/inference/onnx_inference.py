@@ -204,13 +204,16 @@ class OnnxInference:
         max_speech_s = float(
             os.environ.get("DALSTON_VAD_MAX_SPEECH_S", _DEFAULT_MAX_SPEECH_DURATION_S)
         )
+        vad_batch_size = int(
+            os.environ.get("DALSTON_VAD_BATCH_SIZE", _DEFAULT_VAD_BATCH_SIZE)
+        )
 
         # Chain: model → VAD segmentation → timestamped recognition
         vad_ts_model = model.with_vad(
             vad,
             max_speech_duration_s=max_speech_s,
             min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
-            batch_size=_DEFAULT_VAD_BATCH_SIZE,
+            batch_size=vad_batch_size,
         ).with_timestamps()
 
         # recognize() returns Iterator[TimestampedSegmentResult]
@@ -477,6 +480,8 @@ class OnnxInference:
             DALSTON_MODEL_TTL_SECONDS: TTL in seconds (default: 3600)
             DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
             DALSTON_MODEL_PRELOAD: Model to preload (optional)
+            DALSTON_VAD_MAX_SPEECH_S: Max speech segment duration in seconds (default: 60)
+            DALSTON_VAD_BATCH_SIZE: Number of VAD segments per inference batch (default: 8)
         """
         device = os.environ.get("DALSTON_DEVICE", "").lower()
         if not device or device == "auto":
