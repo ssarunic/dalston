@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import shutil
@@ -105,6 +106,7 @@ class EngineRunner:
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
     DURABLE_EVENT_MAX_RETRIES = 5
     DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
+    DEFAULT_TASK_TIMEOUT = 600  # seconds — fallback if no timeout_at in task
 
     def __init__(self, engine: Engine) -> None:
         """Initialize the runner.
@@ -533,6 +535,18 @@ class EngineRunner:
         except Exception:
             logger.debug("clear_waiting_engine_marker_failed", task_id=task_id)
 
+    def _get_task_timeout(self, task_metadata: dict[str, Any]) -> float:
+        """Get remaining seconds until task timeout from metadata."""
+        timeout_str = task_metadata.get("timeout_at", "")
+        if timeout_str:
+            try:
+                timeout_at = datetime.fromisoformat(timeout_str)
+                remaining = (timeout_at - datetime.now(UTC)).total_seconds()
+                return max(remaining, 10.0)  # At least 10s to avoid instant timeout
+            except (ValueError, TypeError):
+                pass
+        return float(self.DEFAULT_TASK_TIMEOUT)
+
     def _process_task(self, task_id: str) -> None:
         """Process a single task.
 
@@ -624,8 +638,9 @@ class EngineRunner:
                 # Notify orchestrator that processing has started
                 self._publish_task_started(task_id, job_id)
 
-                # Process the task
-                logger.info("task_processing")
+                # Process the task with timeout guard
+                task_timeout = self._get_task_timeout(task_metadata)
+                logger.info("task_processing", timeout_s=round(task_timeout, 1))
                 process_start = time.time()
                 task_ctx = BatchTaskContext(
                     engine_id=self.engine_id,
@@ -637,7 +652,18 @@ class EngineRunner:
                     logger=self.engine.logger,
                 )
                 with dalston.telemetry.create_span("engine.process"):
-                    output = self.engine.process(task_input, task_ctx)
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=1
+                    ) as executor:
+                        future = executor.submit(
+                            self.engine.process, task_input, task_ctx
+                        )
+                        try:
+                            output = future.result(timeout=task_timeout)
+                        except concurrent.futures.TimeoutError as exc:
+                            raise TimeoutError(
+                                f"Task processing exceeded {task_timeout:.0f}s timeout"
+                            ) from exc
                 process_time = time.time() - process_start
 
                 # Boundary validation: validate transcribe outputs against

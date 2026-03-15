@@ -240,7 +240,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             gpu_vram_mb=2000,
             supports_cpu=True,
             min_ram_gb=4,
-            rtf_gpu=0.0003,
+            rtf_gpu=0.03,
             rtf_cpu=0.15,
         )
 
