@@ -105,6 +105,12 @@ USER_DATA=$(cat <<'USERDATA'
 #!/bin/bash
 set -euxo pipefail
 
+# Wait for unattended-upgrades to release the dpkg lock
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  echo "Waiting for dpkg lock (unattended-upgrades)..."
+  sleep 5
+done
+
 # Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 
