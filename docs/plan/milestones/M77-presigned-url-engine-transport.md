@@ -33,8 +33,8 @@
 
 The orchestrator holds S3 credentials and generates two presigned URLs per task at dispatch time:
 
-- A **presigned GET** for `jobs/{job_id}/tasks/{task_id}/input.json` — generated immediately after writing the file
-- A **presigned PUT** for `jobs/{job_id}/tasks/{task_id}/output.json` — pre-generated before writing `input.json`, embedded inside it
+- A **presigned GET** for `jobs/{job_id}/tasks/{task_id}/request.json` — generated immediately after writing the file
+- A **presigned PUT** for `jobs/{job_id}/tasks/{task_id}/response.json` — pre-generated before writing `request.json`, embedded inside it
 
 Both URLs are also written to the Redis task metadata hash (`dalston:task:{task_id}`) for auditability and retry support.
 
@@ -42,8 +42,8 @@ TTL is **7 days**. This is intentionally generous: the real security boundary is
 
 ### What does not change
 
-- The orchestrator retains S3 credentials and continues to write `input.json` and read `output.json` directly via boto3
-- `previous_outputs` in `TaskInputData` is unchanged — the orchestrator still assembles it from dependency stage outputs before writing `input.json`
+- The orchestrator retains S3 credentials and continues to write `request.json` and read `response.json` directly via boto3
+- `previous_responses` in `TaskRequestData` is unchanged — the orchestrator still assembles it from dependency stage outputs before writing `request.json`
 - Completion signaling is unchanged — engines continue to publish `task.completed` and `task.failed` to the Redis event stream
 - Real-time workers are out of scope — they never touch S3
 
@@ -53,29 +53,29 @@ TTL is **7 days**. This is intentionally generous: the real security boundary is
 │                                                                                 │
 │   Orchestrator (has S3 creds)         Redis hash             Engine (no creds) │
 │                                                                                 │
-│   1. build input.json                                                           │
-│      (previous_outputs, config)                                                 │
+│   1. build request.json                                                           │
+│      (previous_responses, config)                                                 │
 │                                                                                 │
-│   2. write input.json ──────────────▶ S3                                       │
+│   2. write request.json ──────────────▶ S3                                       │
 │                                                                                 │
-│   3. generate_get_url(input.json) ──▶ dalston:task:{id}                        │
-│      generate_put_url(output.json) ─▶  input_json_url: https://...             │
+│   3. generate_get_url(request.json) ──▶ dalston:task:{id}                        │
+│      generate_put_url(response.json) ─▶  input_json_url: https://...             │
 │                                        output_url:     https://...             │
 │                                                                                 │
 │   4. XADD task to stream ───────────────────────────────────▶ XREADGROUP       │
 │                                                                                 │
 │   5.                                                          HGET input_json_url
 │                                                               GET  https://...  │
-│                                                               ◀── input.json   │
+│                                                               ◀── request.json   │
 │                                                                                 │
 │   6.                                                          engine.process()  │
 │                                                                                 │
 │   7.                                                          PUT  output_url   │
-│                                                               ──▶ output.json  │
+│                                                               ──▶ response.json  │
 │                                                                                 │
 │   8.                                                          XADD task.completed
 │                                                                                 │
-│   9. HGET / S3 GET output.json ◀────────────────────────────────               │
+│   9. HGET / S3 GET response.json ◀────────────────────────────────               │
 │      advance DAG                                                                │
 │                                                                                 │
 └────────────────────────────────────────────────────────────────────────────────┘
@@ -122,28 +122,28 @@ No runtime changes in this step.
 **Files modified:**
 
 - `dalston/orchestrator/scheduler.py`
-- `dalston/common/types.py` (TaskInputData)
+- `dalston/common/types.py` (TaskRequestData)
 - `dalston/db/models.py`
 - `alembic/versions/` *(new migration)*
 
-**Changes to `TaskInputData`:**
+**Changes to `TaskRequestData`:**
 
 Add one field:
 
 ```python
 @dataclass
-class TaskInputData:
+class TaskRequestData:
     # ... existing fields ...
     output_url: str  # Presigned PUT for engine to store result
 ```
 
 **Changes to `scheduler.py:queue_task()`:**
 
-After step 5 (write `input.json` to S3), add:
+After step 5 (write `request.json` to S3), add:
 
-1. Generate presigned GET URL for the `input.json` just written: `input_json_url`
-2. Generate presigned PUT URL for `output.json` (path: `jobs/{job_id}/tasks/{task_id}/output.json`): `output_url`
-3. Re-write `input.json` with `output_url` embedded in the payload (or generate `output_url` before writing and include it in the first write — preferred, avoids a second S3 PUT)
+1. Generate presigned GET URL for the `request.json` just written: `input_json_url`
+2. Generate presigned PUT URL for `response.json` (path: `jobs/{job_id}/tasks/{task_id}/response.json`): `output_url`
+3. Re-write `request.json` with `output_url` embedded in the payload (or generate `output_url` before writing and include it in the first write — preferred, avoids a second S3 PUT)
 4. Write both URLs to the Redis task metadata hash:
 
 ```python
@@ -194,8 +194,8 @@ Replace S3 download at task start:
 
 ```python
 # Before
-input_uri = build_task_input_uri(settings.s3_bucket, job_id, task_id)
-task_input_data = io.download_json(input_uri)
+request_uri = build_task_request_uri(settings.s3_bucket, job_id, task_id)
+task_input_data = io.download_json(request_uri)
 
 # After
 input_json_url = redis.hget(f"dalston:task:{task_id}", "input_json_url")
@@ -206,8 +206,8 @@ Replace S3 upload at task completion:
 
 ```python
 # Before
-output_uri = build_task_output_uri(settings.s3_bucket, job_id, task_id)
-io.upload_json(output_data, output_uri)
+response_uri = build_task_response_uri(settings.s3_bucket, job_id, task_id)
+io.upload_json(output_data, response_uri)
 
 # After
 http.put_json(task_input.output_url, output_data)
@@ -351,7 +351,7 @@ EOF
 ## Checkpoint
 
 - [ ] `dalston/common/presigned.py` implemented and unit tested
-- [ ] `TaskInputData` gains `output_url` field
+- [ ] `TaskRequestData` gains `output_url` field
 - [ ] Orchestrator generates and stores both presigned URLs at dispatch time
 - [ ] `input_json_url` and `output_url` written to Redis task metadata hash
 - [ ] DB migration adds nullable `input_json_url`, `output_url` columns to `tasks`

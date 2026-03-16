@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
 
@@ -59,7 +59,7 @@ def test_temperature_list_is_forwarded_to_faster_whisper_decoder() -> None:
     task_id = str(uuid4())
     job_id = str(uuid4())
     output = engine.process(
-        EngineInput(
+        TaskRequest(
             task_id=task_id,
             job_id=job_id,
             audio_path=Path("/tmp/test.wav"),

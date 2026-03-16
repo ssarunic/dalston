@@ -1,6 +1,6 @@
 """Integration tests for per-channel speaker detection pipeline.
 
-Tests the full per-channel flow: DAG building, previous_outputs key
+Tests the full per-channel flow: DAG building, previous_responses key
 normalization, dependency wiring, and orchestrator transcript assembly
 (no merge engine).
 """
@@ -124,7 +124,7 @@ class TestPerChannelDAG:
 
 
 class TestPerChannelPreviousOutputs:
-    """Tests that _gather_previous_outputs normalizes per-channel keys."""
+    """Tests that _gather_previous_responses normalizes per-channel keys."""
 
     @pytest.fixture
     def mock_settings(self):
@@ -137,7 +137,7 @@ class TestPerChannelPreviousOutputs:
     @pytest.mark.asyncio
     async def test_gather_normalizes_channel_stage_names(self, mock_settings):
         """transcribe_ch0 output is available under both 'transcribe_ch0' and 'transcribe' keys."""
-        from dalston.orchestrator.handlers import _gather_previous_outputs
+        from dalston.orchestrator.handlers import _gather_previous_responses
 
         job_id = uuid4()
         transcribe_ch0_id = uuid4()
@@ -159,14 +159,14 @@ class TestPerChannelPreviousOutputs:
             prepare_id: prepare_task,
         }
 
-        transcribe_output = {
+        transcribe_response = {
             "data": {
                 "text": "hello world",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "hello world"}],
                 "language": "en",
             }
         }
-        prepare_output = {
+        prepare_response = {
             "data": {
                 "duration": 6.0,
                 "channels": 2,
@@ -174,18 +174,18 @@ class TestPerChannelPreviousOutputs:
             }
         }
 
-        async def mock_get_task_output(job_id, task_id, settings):
+        async def mock_get_task_response(job_id, task_id, settings):
             if task_id == transcribe_ch0_id:
-                return transcribe_output
+                return transcribe_response
             if task_id == prepare_id:
-                return prepare_output
+                return prepare_response
             return None
 
         with patch(
-            "dalston.orchestrator.handlers.get_task_output",
-            side_effect=mock_get_task_output,
+            "dalston.orchestrator.handlers.get_task_response",
+            side_effect=mock_get_task_response,
         ):
-            result = await _gather_previous_outputs(
+            result = await _gather_previous_responses(
                 dependency_ids=[prepare_id, transcribe_ch0_id],
                 task_by_id=task_by_id,
                 settings=mock_settings,
@@ -203,7 +203,7 @@ class TestPerChannelPreviousOutputs:
     @pytest.mark.asyncio
     async def test_gather_does_not_normalize_non_channel_stages(self, mock_settings):
         """Standard stage names like 'transcribe' are not duplicated."""
-        from dalston.orchestrator.handlers import _gather_previous_outputs
+        from dalston.orchestrator.handlers import _gather_previous_responses
 
         job_id = uuid4()
         transcribe_id = uuid4()
@@ -215,14 +215,14 @@ class TestPerChannelPreviousOutputs:
 
         task_by_id = {transcribe_id: transcribe_task}
 
-        async def mock_get_task_output(job_id, task_id, settings):
+        async def mock_get_task_response(job_id, task_id, settings):
             return {"data": {"text": "hello"}}
 
         with patch(
-            "dalston.orchestrator.handlers.get_task_output",
-            side_effect=mock_get_task_output,
+            "dalston.orchestrator.handlers.get_task_response",
+            side_effect=mock_get_task_response,
         ):
-            result = await _gather_previous_outputs(
+            result = await _gather_previous_responses(
                 dependency_ids=[transcribe_id],
                 task_by_id=task_by_id,
                 settings=mock_settings,
@@ -234,7 +234,7 @@ class TestPerChannelPreviousOutputs:
     @pytest.mark.asyncio
     async def test_both_channel_and_base_keys_present(self, mock_settings):
         """Both channel-specific and base keys are present in gathered outputs."""
-        from dalston.orchestrator.handlers import _gather_previous_outputs
+        from dalston.orchestrator.handlers import _gather_previous_responses
 
         job_id = uuid4()
         ids = {
@@ -253,17 +253,17 @@ class TestPerChannelPreviousOutputs:
             t.stage = stage
             task_by_id[task_id] = t
 
-        async def mock_get_task_output(job_id, task_id, settings):
+        async def mock_get_task_response(job_id, task_id, settings):
             for stage, tid in ids.items():
                 if task_id == tid:
                     return {"data": {"stage": stage, "segments": []}}
             return None
 
         with patch(
-            "dalston.orchestrator.handlers.get_task_output",
-            side_effect=mock_get_task_output,
+            "dalston.orchestrator.handlers.get_task_response",
+            side_effect=mock_get_task_response,
         ):
-            result = await _gather_previous_outputs(
+            result = await _gather_previous_responses(
                 dependency_ids=list(ids.values()),
                 task_by_id=task_by_id,
                 settings=mock_settings,

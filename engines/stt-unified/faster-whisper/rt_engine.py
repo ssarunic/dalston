@@ -13,8 +13,8 @@ import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
     TranscriptWord,
 )
 from dalston.engine_sdk.inference.faster_whisper_inference import (
@@ -89,7 +89,9 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             shared_core=self._core is not None,
         )
 
-    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+    def transcribe_v1(
+        self, audio: np.ndarray, params: TranscriptionRequest
+    ) -> Transcript:
         """Transcribe an audio segment via shared FasterWhisperInference.
 
         Args:

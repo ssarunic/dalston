@@ -40,13 +40,13 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.model_storage import S3ModelStorage
 
 from dalston.common.pipeline_types import (
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
 )
 from dalston.engine_sdk import (
     BatchTaskContext,
     EngineCapabilities,
-    EngineInput,
+    TaskRequest,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
@@ -220,19 +220,19 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def transcribe_audio(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
+        self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
         """Transcribe audio using a vLLM audio LLM.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
             ctx: Batch task context for tracing/logging
 
         Returns:
             Transcript with text and segments
         """
-        audio_path = engine_input.audio_path
-        params = engine_input.get_transcribe_params()
+        audio_path = task_request.audio_path
+        params = task_request.get_transcribe_params()
         language = params.language
         return self._transcribe_with_vllm(
             loaded_model_id=params.loaded_model_id or self._default_model_id,
@@ -245,7 +245,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     def transcribe_audio_array(
         self,
         audio: np.ndarray,
-        params: TranscribeInput,
+        params: TranscriptionRequest,
         sample_rate: int = 16000,
     ) -> Transcript:
         """Transcribe in-memory audio buffers via vLLM.

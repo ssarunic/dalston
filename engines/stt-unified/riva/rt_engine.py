@@ -19,8 +19,8 @@ from riva_client import RivaClient
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
     TranscriptWord,
 )
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
@@ -56,7 +56,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             shared_core=True,
         )
 
-    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+    def transcribe_v1(
+        self, audio: np.ndarray, params: TranscriptionRequest
+    ) -> Transcript:
         """Transcribe an audio segment via Riva NIM.
 
         Called by SessionHandler when VAD detects an utterance endpoint

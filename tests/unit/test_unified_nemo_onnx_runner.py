@@ -139,11 +139,11 @@ def _make_admitted_process(
 ):
     """Replicate the admitted_process closure from both runner implementations."""
 
-    def admitted_process(engine_input, ctx):
+    def admitted_process(task_request, ctx):
         if not controller.admit_batch():
             raise BatchRejectedError("Admission controller rejected batch task")
         try:
-            return original_process(engine_input, ctx)
+            return original_process(task_request, ctx)
         finally:
             controller.release_batch()
 

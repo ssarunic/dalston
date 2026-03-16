@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    AlignOutput,
+    AlignmentResponse,
     AudioMedia,
-    DiarizeOutput,
-    MergeOutput,
-    PrepareOutput,
+    DiarizationResponse,
+    MergeResponse,
+    PreparationResponse,
     Segment,
     SpeakerDetectionMode,
     SpeakerTurn,
@@ -22,27 +22,27 @@ from dalston.common.pipeline_types import (
     Word,
 )
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
-def _ctx(task_input: EngineInput) -> BatchTaskContext:
+def _ctx(task_request: TaskRequest) -> BatchTaskContext:
     return BatchTaskContext(
         engine_id="test-engine_id",
         instance="test-instance",
-        task_id=task_input.task_id,
-        job_id=task_input.job_id,
-        stage=task_input.stage,
+        task_id=task_request.task_id,
+        job_id=task_request.job_id,
+        stage=task_request.stage,
     )
 
 
-class TestFinalMergerEngineOutput:
+class TestFinalMergerTaskResponse:
     """Tests for Final Merger engine typed output.
 
     This engine has no external ML dependencies, so we can test it directly.
     """
 
     def test_merge_output_structure(self, tmp_path):
-        """Test that final-merger produces valid MergeOutput."""
+        """Test that final-merger produces valid MergeResponse."""
         import sys
 
         sys.path.insert(0, "engines/stt-merge/final-merger")
@@ -55,11 +55,11 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = EngineInput(
+            task_request = TaskRequest(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
-                previous_outputs={
+                previous_responses={
                     "prepare": {
                         "channel_files": [
                             {
@@ -121,11 +121,11 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "none", "word_timestamps": True},
             )
 
-            result = engine.process(task_input, _ctx(task_input))
+            result = engine.process(task_request, _ctx(task_request))
 
             # Verify output structure
-            assert isinstance(result, EngineOutput)
-            assert isinstance(result.data, MergeOutput)
+            assert isinstance(result, TaskResponse)
+            assert isinstance(result.data, MergeResponse)
 
             output = result.data
             assert output.job_id == "job-123"
@@ -160,11 +160,11 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = EngineInput(
+            task_request = TaskRequest(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
-                previous_outputs={
+                previous_responses={
                     "prepare": {
                         "channel_files": [
                             {
@@ -200,7 +200,7 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "diarize"},
             )
 
-            result = engine.process(task_input, _ctx(task_input))
+            result = engine.process(task_request, _ctx(task_request))
 
             output = result.data
             assert output.metadata.speaker_detection == SpeakerDetectionMode.DIARIZE
@@ -225,11 +225,11 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = EngineInput(
+            task_request = TaskRequest(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
-                previous_outputs={
+                previous_responses={
                     "prepare": {
                         "channel_files": [
                             {
@@ -275,7 +275,7 @@ class TestFinalMergerEngineOutput:
                 },
             )
 
-            result = engine.process(task_input, _ctx(task_input))
+            result = engine.process(task_request, _ctx(task_request))
 
             output = result.data
             assert output.metadata.speaker_detection == SpeakerDetectionMode.PER_CHANNEL
@@ -307,11 +307,11 @@ class TestFinalMergerEngineOutput:
             audio_file = tmp_path / "test.wav"
             audio_file.write_bytes(b"fake audio data")
 
-            task_input = EngineInput(
+            task_request = TaskRequest(
                 task_id="test-task",
                 job_id="job-123",
                 audio_path=audio_file,
-                previous_outputs={
+                previous_responses={
                     "prepare": {
                         "channel_files": [
                             {
@@ -345,7 +345,7 @@ class TestFinalMergerEngineOutput:
                 config={"speaker_detection": "none"},
             )
 
-            result = engine.process(task_input, _ctx(task_input))
+            result = engine.process(task_request, _ctx(task_request))
 
             output = result.data
             # Should still produce valid output
@@ -401,8 +401,8 @@ class TestOutputValidation:
         assert data["alignment_method"] == "attention"
 
     def test_align_output_validates_correctly(self):
-        """Test AlignOutput validates against the spec."""
-        output = AlignOutput(
+        """Test AlignmentResponse validates against the spec."""
+        output = AlignmentResponse(
             segments=[
                 Segment(
                     start=0.0,
@@ -434,8 +434,8 @@ class TestOutputValidation:
         assert data["granularity_achieved"] == "word"
 
     def test_diarize_output_validates_correctly(self):
-        """Test DiarizeOutput validates against the spec."""
-        output = DiarizeOutput(
+        """Test DiarizationResponse validates against the spec."""
+        output = DiarizationResponse(
             turns=[
                 SpeakerTurn(
                     speaker="SPEAKER_00",
@@ -464,8 +464,8 @@ class TestOutputValidation:
         assert data["turns"][1]["overlapping_speakers"] == ["SPEAKER_00"]
 
     def test_prepare_output_validates_correctly(self):
-        """Test PrepareOutput validates against the spec."""
-        output = PrepareOutput(
+        """Test PreparationResponse validates against the spec."""
+        output = PreparationResponse(
             channel_files=[
                 AudioMedia(
                     artifact_id="task-prepare:prepared_audio",

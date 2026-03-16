@@ -15,10 +15,10 @@ from dalston.common.models import (
     PIIRedactionMode,
 )
 from dalston.common.pipeline_types import (
-    AudioRedactOutput,
-    PIIDetectOutput,
+    PIIDetectionResponse,
     PIIEntity,
     PIIMetadata,
+    RedactionResponse,
 )
 from dalston.gateway.models.requests import TranscriptionCreateParams
 from dalston.gateway.models.responses import PIIEntityResponse, PIIInfo
@@ -103,7 +103,7 @@ class TestPIIPipelineTypes:
         assert entity.confidence == 0.95
 
     def test_pii_detect_output_creation(self):
-        """Test creating a PIIDetectOutput."""
+        """Test creating a PIIDetectionResponse."""
         entity = PIIEntity(
             entity_type="phone_number",
             category=PIIEntityCategory.PII,
@@ -117,7 +117,7 @@ class TestPIIPipelineTypes:
             original_text="+1-555-123-5678",
         )
 
-        output = PIIDetectOutput(
+        output = PIIDetectionResponse(
             entities=[entity],
             redacted_text="Call me at [PHONE_NUMBER]",
             entity_count_by_type={"phone_number": 1},
@@ -143,8 +143,8 @@ class TestPIIPipelineTypes:
         assert metadata.entity_count_by_type["credit_card_number"] == 2
 
     def test_audio_redact_output_creation(self):
-        """Test creating AudioRedactOutput."""
-        output = AudioRedactOutput(
+        """Test creating RedactionResponse."""
+        output = RedactionResponse(
             redacted_audio_artifact_id="s3://bucket/jobs/123/audio/redacted.wav",
             redaction_mode=PIIRedactionMode.SILENCE,
             buffer_ms=50,

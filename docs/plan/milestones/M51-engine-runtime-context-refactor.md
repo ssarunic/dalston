@@ -121,20 +121,20 @@ class Engine(Generic[I, O], ABC):
     @abstractmethod
     def process(
         self,
-        input: EngineInput[I],
+        input: EngineRequest[I],
         ctx: BatchTaskContext,
-    ) -> EngineOutput[O]: ...
+    ) -> EngineResponse[O]: ...
 ```
 
 Where:
 
-1. `EngineInput` includes:
+1. `EngineRequest` includes:
    - Task/job/stage metadata.
    - Typed previous stage outputs.
    - `materialized_artifacts`: local filesystem references prepared by runner.
    - Stage config.
 
-2. `EngineOutput` includes:
+2. `EngineResponse` includes:
    - Typed output data payload.
    - `produced_artifacts`: local files to persist (no URI fields).
    - Optional artifact descriptors (media type, role, channel, etc.).
@@ -153,14 +153,14 @@ Use stage contracts, not engine_id/vendor contracts.
 
 1. Required core models:
    - `PrepareInputPayload` / `PrepareOutputPayload`
-   - `TranscribeInputPayload` / `TranscribeOutputPayload`
+   - `TranscribeRequestPayload` / `TranscribeOutputPayload`
    - `AlignInputPayload` / `AlignOutputPayload`
    - `DiarizeInputPayload` / `DiarizeOutputPayload`
    - `PIIDetectInputPayload` / `PIIDetectOutputPayload`
    - `AudioRedactInputPayload` / `AudioRedactOutputPayload`
    - `MergeInputPayload` / `MergeOutputPayload`
 2. Per-engine_id extensions are allowed only for strictly engine_id-specific fields and must embed within the stage payload boundary.
-3. `EngineInput/EngineOutput` remain common envelopes; stage payloads carry domain semantics.
+3. `EngineRequest/EngineResponse` remain common envelopes; stage payloads carry domain semantics.
 
 ### Artifact model (new internal shape)
 
@@ -191,7 +191,7 @@ No Phase 1+ code starts until these decisions are written and approved in-repo.
 
 ### 2) Artifact publication model (engine side)
 
-1. Primary pattern is return-only publication via `EngineOutput.produced_artifacts`.
+1. Primary pattern is return-only publication via `EngineResponse.produced_artifacts`.
 2. `BatchTaskContext` does not perform publish/persist side effects.
 3. Optional helper methods may exist, but must only construct descriptors and remain side-effect-free.
 
@@ -219,12 +219,12 @@ class ArtifactSelector(BaseModel):
     role: str | None = None
     required: bool = True
 
-class InputBinding(BaseModel):
+class RequestBinding(BaseModel):
     slot: str
     selector: ArtifactSelector
 ```
 
-1. DAG nodes declare `input_bindings: list[InputBinding]`.
+1. DAG nodes declare `input_bindings: list[RequestBinding]`.
 2. Scheduler resolves bindings to concrete `artifact_id`s before queueing.
 3. Runner materializes artifacts from resolved IDs only.
 
@@ -266,7 +266,7 @@ class SessionStorage(ABC):
 **Actions**
 
 1. Freeze `AudioMedia`, stage payload, and artifact reference shapes (URI-free).
-2. Freeze `EngineInput`, `EngineOutput`, `BatchTaskContext`, and `SessionStorage` interfaces.
+2. Freeze `EngineRequest`, `EngineResponse`, `BatchTaskContext`, and `SessionStorage` interfaces.
 3. Freeze DAG input-binding API and Redis artifact metadata schema.
 4. Define invariants:
    - engines are URI-free
@@ -463,8 +463,8 @@ class SessionStorage(ABC):
 ## Detailed Work Breakdown (Specific Actions)
 
 1. Freeze URI-free `AudioMedia` and stage payload shapes (`artifact_id` fields).
-2. Freeze `EngineInput`, `EngineOutput`, `BatchTaskContext`, and `SessionStorage` interfaces.
-3. Define and freeze `ArtifactSelector` + `InputBinding` schema.
+2. Freeze `EngineRequest`, `EngineResponse`, `BatchTaskContext`, and `SessionStorage` interfaces.
+3. Define and freeze `ArtifactSelector` + `RequestBinding` schema.
 4. Define and freeze Redis artifact index and task metadata fields.
 5. Introduce artifact reference models and typed manifest schema.
 6. Introduce stage-specific payload contracts for all core stages.

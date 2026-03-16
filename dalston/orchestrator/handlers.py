@@ -62,7 +62,7 @@ from dalston.orchestrator.post_processor import (
     schedule_post_processing,
 )
 from dalston.orchestrator.scheduler import (
-    get_task_output,
+    get_task_response,
     queue_task,
 )
 from dalston.orchestrator.stats import extract_stats_from_transcript
@@ -257,7 +257,7 @@ async def handle_job_created(
         for task in tasks:
             task_config = dict(task.config)
             if task.input_bindings:
-                task_config["input_bindings"] = task.input_bindings
+                task_config["request_bindings"] = task.input_bindings
             log.info(
                 "creating_task",
                 task_id=str(task.id),
@@ -271,8 +271,8 @@ async def handle_job_created(
                 engine_id=task.engine_id,
                 status=task.status.value,
                 config=task_config,
-                input_uri=task.input_uri,
-                output_uri=task.output_uri,
+                request_uri=task.request_uri,
+                response_uri=task.response_uri,
                 retries=task.retries,
                 max_retries=task.max_retries,
                 required=task.required,
@@ -337,7 +337,7 @@ async def handle_job_created(
                     task=task,
                     settings=settings,
                     registry=registry,
-                    previous_outputs={},
+                    previous_responses={},
                     audio_metadata=audio_metadata if task.stage == "prepare" else None,
                 )
             except (
@@ -523,7 +523,7 @@ async def handle_task_completed(
     if task.stage == "prepare":
         job = await db.get(JobModel, job_id)
         if job and job.audio_duration is None:
-            output = await get_task_output(
+            output = await get_task_response(
                 job_id=job_id,
                 task_id=task_id,
                 settings=settings,
@@ -595,7 +595,7 @@ async def handle_task_completed(
             await db.refresh(dependent)
 
             # Gather outputs from dependencies
-            previous_outputs = await _gather_previous_outputs(
+            previous_responses = await _gather_previous_responses(
                 dependency_ids=dependent.dependencies,
                 task_by_id=task_by_id,
                 settings=settings,
@@ -612,7 +612,7 @@ async def handle_task_completed(
                     task=task_model,
                     settings=settings,
                     registry=registry,
-                    previous_outputs=previous_outputs,
+                    previous_responses=previous_responses,
                 )
             except (
                 EngineUnavailableError,
@@ -773,7 +773,7 @@ async def handle_task_failed(
         all_tasks = list(result.scalars().all())
         task_by_id = {t.id: t for t in all_tasks}
 
-        previous_outputs = await _gather_previous_outputs(
+        previous_responses = await _gather_previous_responses(
             dependency_ids=task.dependencies,
             task_by_id=task_by_id,
             settings=settings,
@@ -785,7 +785,7 @@ async def handle_task_failed(
                 task=task_model,
                 settings=settings,
                 registry=registry,
-                previous_outputs=previous_outputs,
+                previous_responses=previous_responses,
                 enqueue_idempotency_key=_retry_enqueue_dedupe_key(
                     task.id, task.retries
                 ),
@@ -981,7 +981,7 @@ async def _ensure_retry_enqueued(
     all_tasks = list(result.scalars().all())
     task_by_id = {t.id: t for t in all_tasks}
 
-    previous_outputs = await _gather_previous_outputs(
+    previous_responses = await _gather_previous_responses(
         dependency_ids=task.dependencies,
         task_by_id=task_by_id,
         settings=settings,
@@ -993,7 +993,7 @@ async def _ensure_retry_enqueued(
             task=task_model,
             settings=settings,
             registry=registry,
-            previous_outputs=previous_outputs,
+            previous_responses=previous_responses,
             enqueue_idempotency_key=_retry_enqueue_dedupe_key(task.id, task.retries),
         )
         log.info("retry_enqueued_on_replay", retry_count=task.retries)
@@ -1062,7 +1062,7 @@ async def _ensure_job_failed_side_effects(
     log.error("job_failed_side_effects_executed", reason=job.error or error)
 
 
-async def _gather_previous_outputs(
+async def _gather_previous_responses(
     dependency_ids: list[UUID],
     task_by_id: dict[UUID, TaskModel],
     settings: Settings,
@@ -1077,30 +1077,30 @@ async def _gather_previous_outputs(
     Returns:
         Dict mapping stage name to output data
     """
-    previous_outputs: dict[str, Any] = {}
+    previous_responses: dict[str, Any] = {}
 
     for dep_id in dependency_ids:
         dep_task = task_by_id.get(dep_id)
         if dep_task is None:
             continue
 
-        output = await get_task_output(
+        output = await get_task_response(
             job_id=dep_task.job_id,
             task_id=dep_task.id,
             settings=settings,
         )
 
         if output and "data" in output:
-            previous_outputs[dep_task.stage] = output["data"]
+            previous_responses[dep_task.stage] = output["data"]
 
             # For per-channel stages (e.g. transcribe_ch0), also add the
             # base stage key (e.g. "transcribe") so downstream engines that
-            # look up previous_outputs["transcribe"] can find the data.
+            # look up previous_responses["transcribe"] can find the data.
             base_stage = re.sub(r"_ch\d+$", "", dep_task.stage)
             if base_stage != dep_task.stage:
-                previous_outputs[base_stage] = output["data"]
+                previous_responses[base_stage] = output["data"]
 
-    return previous_outputs
+    return previous_responses
 
 
 async def _assemble_linear_transcript(
@@ -1129,7 +1129,7 @@ async def _assemble_linear_transcript(
     completed_stages: list[str] = []
     for task in all_tasks:
         if task.status == TaskStatus.COMPLETED.value:
-            output = await get_task_output(
+            output = await get_task_response(
                 job_id=task.job_id,
                 task_id=task.id,
                 settings=settings,

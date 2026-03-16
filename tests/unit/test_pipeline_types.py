@@ -9,15 +9,15 @@ from pydantic import ValidationError
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    AlignOutput,
+    AlignmentResponse,
     AudioMedia,
     Character,
-    DiarizeOutput,
+    DiarizationResponse,
     LanguageInfo,
     MergedSegment,
-    MergeOutput,
+    MergeResponse,
     Phoneme,
-    PrepareOutput,
+    PreparationResponse,
     Segment,
     Speaker,
     SpeakerDetectionMode,
@@ -336,8 +336,8 @@ class TestMergedSegmentModel:
         assert ms.emotion_confidence == 0.85
 
 
-class TestPrepareOutput:
-    """Tests for PrepareOutput stage model."""
+class TestPreparationResponse:
+    """Tests for PreparationResponse stage model."""
 
     def test_create_basic_prepare_output(self):
         """Test creating basic prepare output with single channel file."""
@@ -349,7 +349,7 @@ class TestPrepareOutput:
             channels=1,
             bit_depth=16,
         )
-        out = PrepareOutput(
+        out = PreparationResponse(
             channel_files=[prepared],
             split_channels=False,
             engine_id="audio-prepare",
@@ -379,7 +379,7 @@ class TestPrepareOutput:
             channels=1,
             bit_depth=16,
         )
-        out = PrepareOutput(
+        out = PreparationResponse(
             channel_files=[ch0, ch1],
             split_channels=True,
             engine_id="audio-prepare",
@@ -404,7 +404,7 @@ class TestPrepareOutput:
             SpeechRegion(start=1.0, end=5.0),
             SpeechRegion(start=10.0, end=25.0),
         ]
-        out = PrepareOutput(
+        out = PreparationResponse(
             channel_files=[prepared],
             split_channels=False,
             speech_regions=regions,
@@ -663,12 +663,12 @@ class TestCodeSwitching:
         assert restored.segments[1].words[0].language == "fr"
 
 
-class TestAlignOutput:
-    """Tests for AlignOutput stage model."""
+class TestAlignmentResponse:
+    """Tests for AlignmentResponse stage model."""
 
     def test_create_basic_align_output(self):
         """Test creating basic align output."""
-        out = AlignOutput(
+        out = AlignmentResponse(
             segments=[Segment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
@@ -680,7 +680,7 @@ class TestAlignOutput:
 
     def test_align_output_with_statistics(self):
         """Test align output with alignment statistics."""
-        out = AlignOutput(
+        out = AlignmentResponse(
             segments=[Segment(start=0.0, end=1.0, text="Hello world")],
             text="Hello world",
             language="en",
@@ -697,7 +697,7 @@ class TestAlignOutput:
 
     def test_align_output_skipped(self):
         """Test align output when skipped."""
-        out = AlignOutput(
+        out = AlignmentResponse(
             segments=[Segment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="xx",
@@ -712,12 +712,12 @@ class TestAlignOutput:
         assert len(out.warnings) == 1
 
 
-class TestDiarizeOutput:
-    """Tests for DiarizeOutput stage model."""
+class TestDiarizationResponse:
+    """Tests for DiarizationResponse stage model."""
 
     def test_create_basic_diarize_output(self):
         """Test creating basic diarize output."""
-        out = DiarizeOutput(
+        out = DiarizationResponse(
             turns=[
                 SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0),
                 SpeakerTurn(speaker="SPEAKER_01", start=5.0, end=10.0),
@@ -732,7 +732,7 @@ class TestDiarizeOutput:
 
     def test_diarize_output_with_overlap(self):
         """Test diarize output with overlap statistics."""
-        out = DiarizeOutput(
+        out = DiarizationResponse(
             turns=[
                 SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0),
                 SpeakerTurn(
@@ -752,8 +752,8 @@ class TestDiarizeOutput:
         assert out.overlap_ratio == 0.05
 
 
-class TestMergeOutput:
-    """Tests for MergeOutput stage model."""
+class TestMergeResponse:
+    """Tests for MergeResponse stage model."""
 
     def test_create_basic_merge_output(self):
         """Test creating basic merge output."""
@@ -765,7 +765,7 @@ class TestMergeOutput:
             created_at="2024-01-01T00:00:00Z",
             completed_at="2024-01-01T00:01:00Z",
         )
-        out = MergeOutput(
+        out = MergeResponse(
             job_id="job-123",
             metadata=metadata,
             text="Hello world",
@@ -789,7 +789,7 @@ class TestMergeOutput:
             created_at="2024-01-01T00:00:00Z",
             completed_at="2024-01-01T00:01:00Z",
         )
-        out = MergeOutput(
+        out = MergeResponse(
             job_id="job-123",
             metadata=metadata,
             text="Hello. Hi there.",
@@ -897,8 +897,8 @@ class TestModelSerialization:
         assert data["timestamp_granularity"] == "word"
 
     def test_diarize_output_to_json(self):
-        """Test DiarizeOutput serializes correctly."""
-        out = DiarizeOutput(
+        """Test DiarizationResponse serializes correctly."""
+        out = DiarizationResponse(
             turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0)],
             speakers=["SPEAKER_00"],
             num_speakers=1,
@@ -926,7 +926,7 @@ class TestModelValidation:
     def test_diarize_output_speaker_count_non_negative(self):
         """Test that speaker count must be non-negative."""
         with pytest.raises(ValidationError):
-            DiarizeOutput(
+            DiarizationResponse(
                 turns=[],
                 speakers=[],
                 num_speakers=-1,

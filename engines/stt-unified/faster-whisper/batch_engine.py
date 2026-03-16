@@ -30,7 +30,7 @@ from dalston.common.pipeline_types import (
     TranscriptSegment,
     TranscriptWord,
 )
-from dalston.engine_sdk import BatchTaskContext, EngineInput
+from dalston.engine_sdk import BatchTaskContext, TaskRequest
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.inference.faster_whisper_inference import (
     FasterWhisperConfig,
@@ -84,19 +84,19 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def transcribe_audio(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
+        self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
         """Transcribe audio using Faster-Whisper via shared FasterWhisperInference.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
             ctx: Batch task context for tracing/logging
 
         Returns:
             Transcript with text, segments, and language
         """
-        audio_path = engine_input.audio_path
-        params = engine_input.get_transcribe_params()
+        audio_path = task_request.audio_path
+        params = task_request.get_transcribe_params()
 
         # Parse config into FasterWhisperConfig
         channel = params.channel

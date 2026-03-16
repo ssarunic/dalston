@@ -130,8 +130,8 @@ async def get_task_artifacts(
         )
 
     # Fetch artifacts from the configured artifact backend
-    input_data = await storage.get_task_input(job_id, task_id)
-    output_data = await storage.get_task_output(job_id, task_id)
+    request_data = await storage.get_task_request(job_id, task_id)
+    response_data = await storage.get_task_response(job_id, task_id)
 
     return TaskArtifactResponse(
         task_id=task.id,
@@ -139,6 +139,6 @@ async def get_task_artifacts(
         stage=task.stage,
         engine_id=task.engine_id,
         status=task.status,
-        input=input_data,
-        output=output_data,
+        request=request_data,
+        response=response_data,
     )

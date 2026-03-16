@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from dalston.common.artifacts import ArtifactSelector, InputBinding, ProducedArtifact
-from dalston.common.pipeline_types import AudioMedia, AudioRedactOutput, PIIMetadata
+from dalston.common.artifacts import ArtifactSelector, ProducedArtifact, RequestBinding
+from dalston.common.pipeline_types import AudioMedia, PIIMetadata, RedactionResponse
 
 
 class TestUriFreeMediaContracts:
@@ -42,7 +42,7 @@ class TestUriFreeMediaContracts:
             redacted_audio_artifact_id="artf_audio_redacted",
             processing_time_ms=10,
         )
-        redact_output = AudioRedactOutput(
+        redact_response = RedactionResponse(
             redacted_audio_artifact_id="artf_audio_redacted",
             redaction_mode="silence",
             buffer_ms=50,
@@ -52,14 +52,14 @@ class TestUriFreeMediaContracts:
         )
 
         assert pii_metadata.redacted_audio_artifact_id == "artf_audio_redacted"
-        assert redact_output.redacted_audio_artifact_id == "artf_audio_redacted"
+        assert redact_response.redacted_audio_artifact_id == "artf_audio_redacted"
 
 
 class TestArtifactBindingContracts:
     """DAG binding contracts are explicit and selector-based."""
 
     def test_input_binding_selector_shape(self) -> None:
-        binding = InputBinding(
+        binding = RequestBinding(
             slot="audio",
             selector=ArtifactSelector(
                 producer_stage="prepare",

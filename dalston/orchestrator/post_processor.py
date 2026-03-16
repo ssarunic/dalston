@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy import select
 
-from dalston.common.artifacts import ArtifactSelector, InputBinding
+from dalston.common.artifacts import ArtifactSelector, RequestBinding
 from dalston.common.models import Task, TaskStatus
 from dalston.orchestrator.dag import DEFAULT_ENGINES
 from dalston.orchestrator.defaults import (
@@ -123,8 +123,8 @@ def build_post_processing_tasks(
         dependencies=[],  # No DAG dependencies; job is already complete
         input_bindings=[],
         config=pii_detect_config,
-        input_uri=None,
-        output_uri=None,
+        request_uri=None,
+        response_uri=None,
         retries=0,
         max_retries=POST_PROCESSOR_MAX_RETRIES,
         required=False,  # Post-processing failures don't fail the job
@@ -150,7 +150,7 @@ def build_post_processing_tasks(
             status=TaskStatus.PENDING,
             dependencies=[pii_detect_task.id],
             input_bindings=[
-                InputBinding(
+                RequestBinding(
                     slot="audio",
                     selector=ArtifactSelector(
                         producer_stage="prepare",
@@ -161,8 +161,8 @@ def build_post_processing_tasks(
                 ).model_dump(exclude_none=True),
             ],
             config=audio_redact_config,
-            input_uri=None,
-            output_uri=None,
+            request_uri=None,
+            response_uri=None,
             retries=0,
             max_retries=POST_PROCESSOR_MAX_RETRIES,
             required=False,
@@ -229,8 +229,8 @@ async def schedule_post_processing(
             engine_id=task.engine_id,
             status=task.status.value,
             config=task_config,
-            input_uri=task.input_uri,
-            output_uri=task.output_uri,
+            request_uri=task.request_uri,
+            response_uri=task.response_uri,
             retries=task.retries,
             max_retries=task.max_retries,
             required=task.required,
@@ -264,7 +264,7 @@ async def schedule_post_processing(
     # the post-processing pii_detect task.  We look for outputs from
     # transcribe, align, and diarize (same inputs the pipeline-mode
     # pii_detect would receive).
-    from dalston.orchestrator.handlers import _gather_previous_outputs
+    from dalston.orchestrator.handlers import _gather_previous_responses
 
     all_tasks_result = await db.execute(
         select(TaskModel).where(TaskModel.job_id == job.id)
@@ -279,7 +279,7 @@ async def schedule_post_processing(
         if _PII_INPUT_STAGE_RE.match(t.stage) and t.status == TaskStatus.COMPLETED.value
     ]
 
-    previous_outputs = await _gather_previous_outputs(
+    previous_responses = await _gather_previous_responses(
         dependency_ids=pipeline_dep_ids,
         task_by_id=task_by_id,
         settings=settings,
@@ -291,7 +291,7 @@ async def schedule_post_processing(
             task=first_task,
             settings=settings,
             registry=registry,
-            previous_outputs=previous_outputs,
+            previous_responses=previous_responses,
         )
     except Exception as e:
         log.error("post_processing_queue_failed", error=str(e))
@@ -389,7 +389,7 @@ async def update_transcript_with_pii(
     """
     from dalston.common.s3 import get_s3_client
     from dalston.db.models import TaskModel
-    from dalston.orchestrator.scheduler import get_task_output
+    from dalston.orchestrator.scheduler import get_task_response
 
     log = logger.bind(job_id=str(job_id))
 
@@ -413,7 +413,7 @@ async def update_transcript_with_pii(
         return
 
     # Load PII detect output
-    pii_output = await get_task_output(
+    pii_output = await get_task_response(
         job_id=job_id,
         task_id=pii_detect_task.id,
         settings=settings,
@@ -438,7 +438,7 @@ async def update_transcript_with_pii(
 
     redact_data: dict[str, Any] = {}
     if audio_redact_task is not None:
-        redact_output = await get_task_output(
+        redact_output = await get_task_response(
             job_id=job_id,
             task_id=audio_redact_task.id,
             settings=settings,

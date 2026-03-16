@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 from dalston.engine_sdk.inference.nemo_inference import (
     NemoInference,
     NeMoSegmentResult,
@@ -503,7 +503,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
+            TranscriptionRequest(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         assert result.text == "hello world"
@@ -516,7 +516,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-ctc-0.6b"),
+            TranscriptionRequest(language="en", loaded_model_id="parakeet-ctc-0.6b"),
         )
 
         assert result.text == "hello world"

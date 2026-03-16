@@ -10,18 +10,18 @@ import pytest
 from dalston.engine_sdk import local_runner
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class CliHappyEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         artifact_path = input.audio_path.parent / "happy.txt"
         artifact_path.write_text("ok", encoding="utf-8")
-        return EngineOutput(
+        return TaskResponse(
             data={"status": "ok", "stage": input.stage},
             produced_artifacts=[
                 ctx.describe_artifact(
@@ -37,14 +37,14 @@ class CliHappyEngine(Engine):
 class CliAdvancedEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         del ctx
-        return EngineOutput(
+        return TaskResponse(
             data={
                 "payload_flag": bool((input.payload or {}).get("flag")),
-                "has_prepare_output": "prepare" in input.previous_outputs,
+                "has_prepare_output": "prepare" in input.previous_responses,
                 "has_hint_artifact": "hint" in input.materialized_artifacts,
             }
         )
@@ -95,8 +95,8 @@ def test_cli_run_supports_advanced_json_inputs(tmp_path: Path) -> None:
     config.write_text('{"loaded_model_id": "aligner-v1"}', encoding="utf-8")
     payload = tmp_path / "payload.json"
     payload.write_text('{"flag": true}', encoding="utf-8")
-    previous_outputs = tmp_path / "previous_outputs.json"
-    previous_outputs.write_text('{"prepare": {"duration": 2.0}}', encoding="utf-8")
+    previous_responses = tmp_path / "previous_responses.json"
+    previous_responses.write_text('{"prepare": {"duration": 2.0}}', encoding="utf-8")
     hint = tmp_path / "hint.json"
     hint.write_text('{"notes": "align"}', encoding="utf-8")
     artifacts = tmp_path / "artifacts.json"
@@ -114,8 +114,8 @@ def test_cli_run_supports_advanced_json_inputs(tmp_path: Path) -> None:
             str(config),
             "--payload",
             str(payload),
-            "--previous-outputs",
-            str(previous_outputs),
+            "--previous-responses",
+            str(previous_responses),
             "--artifacts",
             str(artifacts),
             "--output",
@@ -193,14 +193,14 @@ def test_cli_run_loads_engine_from_filesystem_module_reference(
     engine_file.parent.mkdir(parents=True, exist_ok=True)
     engine_file.write_text(
         """
-from dalston.engine_sdk import BatchTaskContext, Engine, EngineInput, EngineOutput
+from dalston.engine_sdk import BatchTaskContext, Engine, TaskRequest, TaskResponse
 
 
 class FileRefEngine(Engine):
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, input: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={"loaded": True})
+        return TaskResponse(data={"loaded": True})
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -238,14 +238,14 @@ def test_cli_run_loads_engine_when_engine_id_id_contains_dot(
     engine_file.parent.mkdir(parents=True, exist_ok=True)
     engine_file.write_text(
         """
-from dalston.engine_sdk import BatchTaskContext, Engine, EngineInput, EngineOutput
+from dalston.engine_sdk import BatchTaskContext, Engine, TaskRequest, TaskResponse
 
 
 class DottedRuntimeEngine(Engine):
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, input: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={"engine_id": "dot-ok"})
+        return TaskResponse(data={"engine_id": "dot-ok"})
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -292,14 +292,14 @@ def test_cli_run_supports_sibling_module_imports(
     engine_file.write_text(
         """
 from align import helper_value
-from dalston.engine_sdk import BatchTaskContext, Engine, EngineInput, EngineOutput
+from dalston.engine_sdk import BatchTaskContext, Engine, TaskRequest, TaskResponse
 
 
 class SiblingImportEngine(Engine):
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, input: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={"helper": helper_value()})
+        return TaskResponse(data={"helper": helper_value()})
 """.strip()
         + "\n",
         encoding="utf-8",

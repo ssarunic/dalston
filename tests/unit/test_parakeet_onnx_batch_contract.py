@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.inference.onnx_inference import (
     OnnxInference,
@@ -99,7 +99,7 @@ class TestOnnxBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -128,7 +128,7 @@ class TestOnnxBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -150,7 +150,7 @@ class TestOnnxBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -173,7 +173,7 @@ class TestOnnxBatchAlignmentMethod:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -191,7 +191,7 @@ class TestOnnxBatchAlignmentMethod:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -209,7 +209,7 @@ class TestOnnxBatchAlignmentMethod:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -231,7 +231,7 @@ class TestOnnxBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -252,7 +252,7 @@ class TestOnnxBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         output = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),

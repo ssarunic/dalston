@@ -149,16 +149,16 @@ class UnifiedHfAsrRunner:
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
 
-        def admitted_process(engine_input, ctx):
+        def admitted_process(task_request, ctx):
             if not self._admission.admit_batch():
                 logger.info(
                     "batch_task_rejected_by_admission",
-                    task_id=engine_input.task_id,
+                    task_id=task_request.task_id,
                     status=self._admission.get_status(),
                 )
                 raise BatchRejectedError("Admission controller rejected batch task")
             try:
-                return original_process(engine_input, ctx)
+                return original_process(task_request, ctx)
             finally:
                 self._admission.release_batch()
 

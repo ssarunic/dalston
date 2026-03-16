@@ -157,20 +157,20 @@ class TestTaskArtifactResponse:
             stage="transcribe",
             engine_id="faster-whisper",
             status="completed",
-            input={
+            request={
                 "audio_uri": "s3://bucket/audio.wav",
                 "config": {"model": "large-v3"},
             },
-            output={
+            response={
                 "text": "Hello world",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "Hello world"}],
             },
         )
 
-        assert response.input is not None
-        assert response.output is not None
-        assert response.input["config"]["model"] == "large-v3"
-        assert response.output["text"] == "Hello world"
+        assert response.request is not None
+        assert response.response is not None
+        assert response.request["config"]["model"] == "large-v3"
+        assert response.response["text"] == "Hello world"
 
     def test_artifact_response_failed_task(self):
         """Test TaskArtifactResponse for a failed task (no output)."""
@@ -180,13 +180,13 @@ class TestTaskArtifactResponse:
             stage="diarize",
             engine_id="pyannote-4.0",
             status="failed",
-            input={"config": {"num_speakers": None}},
-            output=None,
+            request={"config": {"num_speakers": None}},
+            response=None,
         )
 
         assert response.status == "failed"
-        assert response.input is not None
-        assert response.output is None
+        assert response.request is not None
+        assert response.response is None
 
 
 class TestTopologicalSort:

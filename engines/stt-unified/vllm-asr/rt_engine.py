@@ -25,7 +25,7 @@ import numpy as np
 import structlog
 import torch
 
-from dalston.common.pipeline_types import TranscribeInput, Transcript
+from dalston.common.pipeline_types import Transcript, TranscriptionRequest
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 from dalston.vllm_asr.inference import transcribe_audio_array
@@ -125,7 +125,9 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
                 model_id=self._default_model_id,
             )
 
-    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+    def transcribe_v1(
+        self, audio: np.ndarray, params: TranscriptionRequest
+    ) -> Transcript:
         """Transcribe one audio window using vLLM."""
         model_id = params.loaded_model_id or self._default_model_id
         self._ensure_model_loaded(model_id)

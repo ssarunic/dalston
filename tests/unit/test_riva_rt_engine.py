@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 
 UNIFIED_RIVA_DIR = Path("engines/stt-unified/riva")
 
@@ -72,9 +72,9 @@ def _make_mock_response(
     return SimpleNamespace(results=results)
 
 
-def _make_params(language: str = "en") -> TranscribeInput:
+def _make_params(language: str = "en") -> TranscriptionRequest:
     """Build typed realtime transcribe params."""
-    return TranscribeInput(language=language)
+    return TranscriptionRequest(language=language)
 
 
 @pytest.fixture(autouse=True)

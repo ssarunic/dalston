@@ -323,7 +323,7 @@ async def queue_task(
     task: Task,
     settings: Settings,
     registry: BatchEngineRegistry,  # NEW parameter
-    previous_outputs: dict[str, Any] | None = None,
+    previous_responses: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Queue a task for execution by its engine."""
@@ -372,7 +372,7 @@ async def handle_job_created(
                     task=task,
                     settings=settings,
                     registry=registry,
-                    previous_outputs={},
+                    previous_responses={},
                     audio_metadata=audio_metadata if task.stage == "prepare" else None,
                 )
             except EngineUnavailableError as e:

@@ -61,7 +61,7 @@ def sample_task():
         stage="transcribe",
         engine_id="whisper-cpu",
         status=TaskStatus.READY,
-        input_uri="s3://bucket/audio.wav",
+        request_uri="s3://bucket/audio.wav",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         config={"language": "en"},
@@ -81,7 +81,7 @@ class TestQueueTaskWithStreams:
                 "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
             ) as mock_add_task,
             patch(
-                "dalston.orchestrator.scheduler.write_task_input",
+                "dalston.orchestrator.scheduler.write_task_request",
                 new_callable=AsyncMock,
             ),
         ):
@@ -115,7 +115,7 @@ class TestQueueTaskWithStreams:
                 "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
             ) as mock_add_task,
             patch(
-                "dalston.orchestrator.scheduler.write_task_input",
+                "dalston.orchestrator.scheduler.write_task_request",
                 new_callable=AsyncMock,
             ),
         ):
@@ -143,7 +143,7 @@ class TestQueueTaskWithStreams:
             stage="transcribe_ch1",
             engine_id="whisper-cpu",
             status=TaskStatus.READY,
-            input_uri="s3://bucket/audio.wav",
+            request_uri="s3://bucket/audio.wav",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             config={"language": "en", "channel": 1},
@@ -154,7 +154,7 @@ class TestQueueTaskWithStreams:
                 "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
             ) as mock_add_task,
             patch(
-                "dalston.orchestrator.scheduler.write_task_input",
+                "dalston.orchestrator.scheduler.write_task_request",
                 new_callable=AsyncMock,
             ),
         ):
@@ -183,7 +183,7 @@ class TestQueueTaskWithStreams:
             ) as mock_add_task_once,
             patch("dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock),
             patch(
-                "dalston.orchestrator.scheduler.write_task_input",
+                "dalston.orchestrator.scheduler.write_task_request",
                 new_callable=AsyncMock,
             ),
         ):
@@ -220,7 +220,7 @@ class TestQueueTaskWithStreams:
                 new_callable=AsyncMock,
             ) as mock_publish_engine_needed,
             patch(
-                "dalston.orchestrator.scheduler.write_task_input",
+                "dalston.orchestrator.scheduler.write_task_request",
                 new_callable=AsyncMock,
             ),
         ):

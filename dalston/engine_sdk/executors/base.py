@@ -21,7 +21,7 @@ class ExecutionRequest:
     engine_id: str
     instance: str
     config: dict[str, Any]
-    previous_outputs: dict[str, Any]
+    previous_responses: dict[str, Any]
     payload: dict[str, Any] | None
     artifacts: dict[str, Path]
     engine: Engine[Any, Any] | None = None

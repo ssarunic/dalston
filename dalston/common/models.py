@@ -234,8 +234,8 @@ class Task(BaseModel):
     dependencies: list[UUID] = Field(default_factory=list)
     input_bindings: list[dict[str, Any]] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
-    input_uri: str | None = None
-    output_uri: str | None = None
+    request_uri: str | None = None
+    response_uri: str | None = None
     retries: int = 0
     max_retries: int = 2
     required: bool = True

@@ -314,7 +314,7 @@ M64 + M69 ──► M78 (infrastructure topology view)
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M51**: Stateless engine contract + artifact materialization refactor (batch + realtime side-effect boundaries, local runner)
-- **M52**: Local runner DX clean-cut (`audio + config.json -> output.json`), then use that harness for diarize/align/PII refactor sweep and remove remaining compatibility bridges
+- **M52**: Local runner DX clean-cut (`audio + config.json -> response.json`), then use that harness for diarize/align/PII refactor sweep and remove remaining compatibility bridges
   - Readiness note: `docs/reports/M52-local-runner-readiness.md` (align + diarize local-run validated; pii-detect dependency gap captured)
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 - **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
@@ -362,7 +362,7 @@ Each milestone has a verification section. Key checkpoints:
 | M42 | Models page shows registry with download/remove actions; Add from HF dialog works |
 | M46 | Models auto-seeded on startup; PATCH updates metadata; user edits preserved across restarts |
 | M51 | Batch engines are URI-free/stateless (`process(input, ctx)`), orchestrator passes artifact refs, runner materializes/persists artifacts, and local runner works without Redis/S3 |
-| M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `output.json` without Redis/S3; legacy compatibility bridges removed |
+| M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `response.json` without Redis/S3; legacy compatibility bridges removed |
 | M54 | Poison or malformed durable events are quarantined in `dalston:events:dlq` after policy thresholds; main stream entries are ACKed and healthy events continue processing |
 | M55 | Diarize, align, and PII stages accept `loaded_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
 | M56 | `DALSTON_MODE`-driven mode binding with SQLite/in-memory/localfs backends and validated lite batch slice (`prepare -> transcribe -> merge`); `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO while distributed mode remains stable |

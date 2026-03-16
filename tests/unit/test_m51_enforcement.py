@@ -21,8 +21,8 @@ FORBIDDEN_IMPORT_PATTERNS = (
 )
 
 FORBIDDEN_CALL_PATTERNS = (
-    "build_task_input_uri(",
-    "build_task_output_uri(",
+    "build_task_request_uri(",
+    "build_task_response_uri(",
     "parse_s3_uri(",
 )
 
@@ -36,9 +36,9 @@ def test_engine_id_engines_have_new_process_signature() -> None:
         # transcribe_audio() via BaseBatchTranscribeEngine (V1 contract)
         has_m51_signature = (
             "def process(" in text
-            and "input: EngineInput" in text
+            and "task_request: TaskRequest" in text
             and "ctx: BatchTaskContext" in text
-            and "-> EngineOutput" in text
+            and "-> TaskResponse" in text
         )
         has_v1_signature = "def transcribe_audio(" in text and "-> Transcript" in text
         if not has_m51_signature and not has_v1_signature:

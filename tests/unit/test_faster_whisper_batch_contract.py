@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
 
@@ -110,7 +110,7 @@ class TestBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -139,7 +139,7 @@ class TestBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -164,7 +164,7 @@ class TestBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -191,7 +191,7 @@ class TestBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -217,7 +217,7 @@ class TestBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -243,7 +243,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -266,7 +266,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -288,7 +288,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -312,7 +312,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -331,7 +331,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -353,7 +353,7 @@ class TestBatchConfigPassthrough:
         task_id = str(uuid4())
         job_id = str(uuid4())
         engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -379,7 +379,7 @@ class TestBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -399,7 +399,7 @@ class TestBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),

@@ -11,11 +11,11 @@ from typing import Any
 
 from dalston.engine_sdk import (
     BatchTaskContext,
-    DiarizeOutput,
+    DiarizationResponse,
     Engine,
-    EngineInput,
-    EngineOutput,
     SpeakerTurn,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -157,22 +157,22 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return pipeline
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file.
 
         Args:
-            engine_input: Task input with audio path and config
+            task_request: Task input with audio path and config
 
         Returns:
-            EngineOutput with DiarizeOutput containing speakers and turns
+            TaskResponse with DiarizationResponse containing speakers and turns
         """
         # Check if diarization is disabled (for local dev/testing)
         if self._disabled:
             self.logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
 
@@ -228,7 +228,7 @@ class PyannoteEngine(Engine):
                 overlap_ratio=round(overlap_ratio, 3),
             )
 
-            output = DiarizeOutput(
+            output = DiarizationResponse(
                 speakers=speakers,
                 turns=turns,
                 num_speakers=len(speakers),
@@ -240,7 +240,7 @@ class PyannoteEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
         finally:
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
@@ -248,7 +248,7 @@ class PyannoteEngine(Engine):
         """Convert pyannote diarization output to speakers list and turns.
 
         Args:
-            diarization: pyannote Annotation or DiarizeOutput object
+            diarization: pyannote Annotation or DiarizationResponse object
 
         Returns:
             Tuple of (speakers list, speaker turns list)
@@ -256,7 +256,7 @@ class PyannoteEngine(Engine):
         speakers_set: set[str] = set()
         turns: list[SpeakerTurn] = []
 
-        # Pyannote 4.0 community pipeline returns DiarizeOutput with .speaker_diarization
+        # Pyannote 4.0 community pipeline returns DiarizationResponse with .speaker_diarization
         # Fall back to the object itself if it's already an Annotation (3.x compatibility)
         if hasattr(diarization, "speaker_diarization"):
             annotation = diarization.speaker_diarization
@@ -285,13 +285,13 @@ class PyannoteEngine(Engine):
         """Calculate overlap statistics using pyannote's native overlap detection.
 
         Args:
-            diarization: pyannote DiarizeOutput or Annotation object
+            diarization: pyannote DiarizationResponse or Annotation object
 
         Returns:
             Tuple of (overlap_duration, overlap_ratio)
         """
         try:
-            # Extract annotation from DiarizeOutput if needed (4.0 format)
+            # Extract annotation from DiarizationResponse if needed (4.0 format)
             if hasattr(diarization, "speaker_diarization"):
                 annotation = diarization.speaker_diarization
             else:
@@ -321,12 +321,12 @@ class PyannoteEngine(Engine):
             self.logger.warning("failed_to_calculate_overlap", error=str(e))
             return 0.0, 0.0
 
-    def _mock_output(self) -> EngineOutput:
+    def _mock_output(self) -> TaskResponse:
         """Return mock output when diarization is disabled.
 
         Useful for testing the pipeline without running actual diarization.
         """
-        output = DiarizeOutput(
+        output = DiarizationResponse(
             speakers=["SPEAKER_00"],
             turns=[SpeakerTurn(start=0.0, end=999999.0, speaker="SPEAKER_00")],
             num_speakers=1,
@@ -338,7 +338,7 @@ class PyannoteEngine(Engine):
             warnings=["Diarization disabled via environment variable"],
         )
 
-        return EngineOutput(data=output)
+        return TaskResponse(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including device and model info."""

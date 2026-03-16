@@ -5,7 +5,7 @@ for linear pipelines.
 """
 
 from dalston.common.pipeline_types import (
-    AlignOutput,
+    AlignmentResponse,
     Segment,
     SpeakerTurn,
     Transcript,
@@ -677,7 +677,7 @@ class TestSelectSegments:
             language="en",
             engine_id="faster-whisper",
         )
-        align = AlignOutput(
+        align = AlignmentResponse(
             segments=[Segment(start=0.1, end=0.9, text="aligned")],
             text="aligned",
             language="en",
@@ -689,7 +689,7 @@ class TestSelectSegments:
 
         segments, has_words, warnings = _select_segments(
             transcript=transcript,
-            align_output=align,
+            align_response=align,
         )
 
         assert len(segments) == 1
@@ -703,7 +703,7 @@ class TestSelectSegments:
             language="en",
             engine_id="faster-whisper",
         )
-        align = AlignOutput(
+        align = AlignmentResponse(
             segments=[],
             text="",
             language="en",
@@ -717,7 +717,7 @@ class TestSelectSegments:
 
         segments, has_words, warnings = _select_segments(
             transcript=transcript,
-            align_output=align,
+            align_response=align,
         )
 
         assert len(segments) == 1
@@ -734,7 +734,7 @@ class TestSelectSegments:
 
         segments, has_words, warnings = _select_segments(
             transcript=transcript,
-            align_output=None,
+            align_response=None,
         )
 
         assert len(segments) == 1

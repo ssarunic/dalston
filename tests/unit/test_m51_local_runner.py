@@ -7,18 +7,18 @@ from pathlib import Path
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.local_runner import LocalRunner
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class _LocalEchoEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         output_path = input.audio_path.parent / "echo.txt"
         output_path.write_text("local-runner-ok", encoding="utf-8")
-        return EngineOutput(
+        return TaskResponse(
             data={"status": "ok", "stage": input.stage},
             produced_artifacts=[
                 ctx.describe_artifact(
@@ -42,7 +42,7 @@ def test_local_runner_executes_engine_and_persists_artifacts(tmp_path: Path) -> 
         job_id="job-local",
         stage="merge",
         config={},
-        previous_outputs={},
+        previous_responses={},
         payload={},
         artifacts={"audio": source_audio},
     )

@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
 UNIFIED_RIVA_DIR = Path("engines/stt-unified/riva")
@@ -163,7 +163,7 @@ class TestRivaBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -200,7 +200,7 @@ class TestRivaBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -260,7 +260,7 @@ class TestRivaBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -294,7 +294,7 @@ class TestRivaBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -324,7 +324,7 @@ class TestRivaBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -352,7 +352,7 @@ class TestRivaBatchConfig:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -378,7 +378,7 @@ class TestRivaBatchConfig:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -401,7 +401,7 @@ class TestRivaBatchConfig:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -472,7 +472,7 @@ class TestRivaBatchWordConfidence:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,
@@ -501,7 +501,7 @@ class TestRivaBatchWordConfidence:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=audio_file,

@@ -121,11 +121,11 @@ class TestSpeakerProfileEndToEnd:
 
         job_id = result["job_id"]
         artifacts_root = tmp_path / "artifacts"
-        diarize_output = (
-            artifacts_root / "jobs" / job_id / "tasks" / "diarize" / "output.json"
+        diarize_response = (
+            artifacts_root / "jobs" / job_id / "tasks" / "diarize" / "response.json"
         )
-        assert diarize_output.exists(), "Diarize stage must write output.json"
-        data = json.loads(diarize_output.read_text())
+        assert diarize_response.exists(), "Diarize stage must write response.json"
+        data = json.loads(diarize_response.read_text())
         assert "turns" in data or "segments" in data
         assert "speakers" in data
 

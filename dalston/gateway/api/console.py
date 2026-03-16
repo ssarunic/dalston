@@ -294,8 +294,8 @@ class TaskArtifactResponse(BaseModel):
     max_retries: int = 2
     error: str | None = None
     dependencies: list[UUID] = []
-    input: dict | None = None
-    output: dict | None = None
+    request: dict | None = None
+    response: dict | None = None
 
 
 @router.get(
@@ -333,11 +333,11 @@ async def get_task_artifacts(
         duration_ms = int(delta.total_seconds() * 1000)
 
     # Fetch artifacts from S3 if task has started
-    input_data = None
-    output_data = None
+    request_data = None
+    response_data = None
     if task.status != "pending":
-        input_data = await storage.get_task_input(job_id, task_id)
-        output_data = await storage.get_task_output(job_id, task_id)
+        request_data = await storage.get_task_request(job_id, task_id)
+        response_data = await storage.get_task_response(job_id, task_id)
 
     return TaskArtifactResponse(
         task_id=task.id,
@@ -353,8 +353,8 @@ async def get_task_artifacts(
         max_retries=task.max_retries,
         error=task.error,
         dependencies=task.dependencies,
-        input=input_data,
-        output=output_data,
+        request=request_data,
+        response=response_data,
     )
 
 

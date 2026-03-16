@@ -35,7 +35,11 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
     RESAMPLE_QUALITY_PROFILES,
 )
-from dalston.common.pipeline_types import TranscribeInput, Transcript, VocabularySupport
+from dalston.common.pipeline_types import (
+    Transcript,
+    TranscriptionRequest,
+    VocabularySupport,
+)
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
 from dalston.common.timeouts import WS_PING_INTERVAL, WS_PING_TIMEOUT
 from dalston.common.ws_close_codes import (
@@ -81,7 +85,7 @@ class RealtimeEngine(ABC):
             def transcribe_v1(
                 self,
                 audio: np.ndarray,
-                params: TranscribeInput,
+                params: TranscriptionRequest,
             ) -> Transcript:
                 segments, info = self.model.transcribe(
                     audio,
@@ -165,7 +169,7 @@ class RealtimeEngine(ABC):
     def transcribe(
         self,
         audio: np.ndarray,
-        params: TranscribeInput,
+        params: TranscriptionRequest,
     ) -> Transcript:
         """Transcribe an audio segment.
 

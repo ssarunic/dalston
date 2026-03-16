@@ -74,8 +74,8 @@ CREATE TABLE tasks (
     status          VARCHAR(20) NOT NULL DEFAULT 'pending',
     dependencies    UUID[] NOT NULL DEFAULT '{}',
     config          JSONB NOT NULL DEFAULT '{}',
-    input_uri       TEXT,
-    output_uri      TEXT,
+    request_uri       TEXT,
+    response_uri      TEXT,
     retries         INTEGER NOT NULL DEFAULT 0,
     max_retries     INTEGER NOT NULL DEFAULT 2,
     required        BOOLEAN NOT NULL DEFAULT true,
@@ -98,8 +98,8 @@ CREATE INDEX idx_tasks_stage ON tasks(stage);
 | `status` | VARCHAR | pending, ready, running, completed, failed, skipped |
 | `dependencies` | UUID[] | Task IDs this task depends on |
 | `config` | JSONB | Engine-specific configuration |
-| `input_uri` | TEXT | S3 URI to input file |
-| `output_uri` | TEXT | S3 URI to output file |
+| `request_uri` | TEXT | S3 URI to input file |
+| `response_uri` | TEXT | S3 URI to output file |
 | `retries` | INTEGER | Current retry count |
 | `max_retries` | INTEGER | Maximum retries allowed |
 | `required` | BOOLEAN | If false, job continues on failure |
@@ -313,8 +313,8 @@ s3://{bucket}/
 │       │
 │       ├── tasks/
 │       │   └── {task_id}/
-│       │       ├── input.json         # Task input specification
-│       │       └── output.json        # Task output result
+│       │       ├── request.json         # Task input specification
+│       │       └── response.json        # Task output result
 │       │
 │       └── transcript.json            # Final merged result
 │
@@ -377,7 +377,7 @@ Workers download models to local cache on startup:
 
 ### Task Input
 
-**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/input.json`
+**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/request.json`
 
 ```json
 {
@@ -386,7 +386,7 @@ Workers download models to local cache on startup:
 
   "audio_uri": "s3://bucket/jobs/{job_id}/audio/prepared.wav",
 
-  "previous_outputs": {
+  "previous_responses": {
     "prepare": {
       "duration": 150.5,
       "channels": 1,
@@ -411,7 +411,7 @@ Workers download models to local cache on startup:
 
 ### Task Output
 
-**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/output.json`
+**S3 Path**: `s3://{bucket}/jobs/{job_id}/tasks/{task_id}/response.json`
 
 ```json
 {
@@ -633,7 +633,7 @@ Engines use local storage only for in-flight processing. Files are downloaded fr
 └── {task_id}/
     ├── input.wav      # Downloaded from S3
     ├── working/       # Intermediate files
-    └── output.json    # Uploaded to S3, then deleted
+    └── response.json    # Uploaded to S3, then deleted
 ```
 
 Local files are cleaned up immediately after task completion or failure.

@@ -19,11 +19,11 @@ from omegaconf import OmegaConf
 
 from dalston.engine_sdk import (
     BatchTaskContext,
-    DiarizeOutput,
+    DiarizationResponse,
     Engine,
-    EngineInput,
-    EngineOutput,
     SpeakerTurn,
+    TaskRequest,
+    TaskResponse,
 )
 
 # NeMo diarization config based on diar_infer_telephonic.yaml
@@ -333,19 +333,19 @@ class NemoMSDDEngine(Engine):
         info = sf.info(str(audio_path))
         return info.duration
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file."""
         if self._disabled:
             self.logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         # Get duration
         duration: float | None = None
         try:
-            prepare_output = engine_input.get_prepare_output()
+            prepare_output = task_request.get_prepare_response()
             if prepare_output and prepare_output.channel_files:
                 duration = prepare_output.channel_files[0].duration
         except Exception:
@@ -413,7 +413,7 @@ class NemoMSDDEngine(Engine):
                 overlap_ratio=overlap_ratio,
             )
 
-            output = DiarizeOutput(
+            output = DiarizationResponse(
                 speakers=speakers,
                 turns=turns,
                 num_speakers=len(speakers),
@@ -425,13 +425,13 @@ class NemoMSDDEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
         finally:
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
-    def _mock_output(self) -> EngineOutput:
+    def _mock_output(self) -> TaskResponse:
         """Return mock output when diarization is disabled."""
-        output = DiarizeOutput(
+        output = DiarizationResponse(
             speakers=["SPEAKER_00"],
             turns=[SpeakerTurn(start=0.0, end=999999.0, speaker="SPEAKER_00")],
             num_speakers=1,
@@ -442,7 +442,7 @@ class NemoMSDDEngine(Engine):
             skip_reason="DIARIZATION_DISABLED=true",
             warnings=["Diarization disabled via environment variable"],
         )
-        return EngineOutput(data=output)
+        return TaskResponse(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""

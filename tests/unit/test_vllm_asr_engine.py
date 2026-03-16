@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -397,14 +397,14 @@ class TestVLLMASREngine:
         engine._llm = mock_llm
         engine._loaded_model_id = "mistralai/Voxtral-Mini-3B-2507"
 
-        # Create mock EngineInput
+        # Create mock TaskRequest
         mock_input = MagicMock()
         mock_input.audio_path = audio_file
         mock_input.config = {
             "loaded_model_id": "mistralai/Voxtral-Mini-3B-2507",
             "language": "en",
         }
-        mock_input.get_transcribe_params.return_value = TranscribeInput(
+        mock_input.get_transcribe_params.return_value = TranscriptionRequest(
             loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
         )
@@ -442,7 +442,7 @@ class TestVLLMASREngine:
             "language": "en",
             "vocabulary": ["Dalston", "vLLM"],
         }
-        mock_input.get_transcribe_params.return_value = TranscribeInput(
+        mock_input.get_transcribe_params.return_value = TranscriptionRequest(
             loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
             vocabulary=["Dalston", "vLLM"],
@@ -483,7 +483,7 @@ class TestVLLMASREngine:
         engine._loaded_model_id = "mistralai/Voxtral-Mini-3B-2507"
 
         audio = np.zeros(320, dtype=np.float32)
-        params = TranscribeInput(
+        params = TranscriptionRequest(
             loaded_model_id="mistralai/Voxtral-Mini-3B-2507",
             language="en",
         )

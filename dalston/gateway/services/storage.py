@@ -267,19 +267,19 @@ class StorageService:
         uri = await self.artifact_store.uri_for_key(key)
         return await self.artifact_store.exists(uri)
 
-    async def get_task_input(
+    async def get_task_request(
         self, job_id: UUID, task_id: UUID
     ) -> dict[str, Any] | None:
-        """Fetch task input JSON.
+        """Fetch task request JSON.
 
         Args:
             job_id: Job UUID
             task_id: Task UUID
 
         Returns:
-            Parsed input dict or None if not found
+            Parsed request dict or None if not found
         """
-        key = f"jobs/{job_id}/tasks/{task_id}/input.json"
+        key = f"jobs/{job_id}/tasks/{task_id}/request.json"
         uri = await self.artifact_store.uri_for_key(key)
         try:
             body = await self.artifact_store.read_bytes(uri)
@@ -287,19 +287,19 @@ class StorageService:
             return None
         return json.loads(body.decode("utf-8"))
 
-    async def get_task_output(
+    async def get_task_response(
         self, job_id: UUID, task_id: UUID
     ) -> dict[str, Any] | None:
-        """Fetch task output JSON.
+        """Fetch task response JSON.
 
         Args:
             job_id: Job UUID
             task_id: Task UUID
 
         Returns:
-            Parsed output dict or None if not found
+            Parsed response dict or None if not found
         """
-        key = f"jobs/{job_id}/tasks/{task_id}/output.json"
+        key = f"jobs/{job_id}/tasks/{task_id}/response.json"
         uri = await self.artifact_store.uri_for_key(key)
         try:
             body = await self.artifact_store.read_bytes(uri)

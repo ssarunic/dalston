@@ -39,7 +39,7 @@ from dalston.engine_sdk import io
 from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 from dalston.orchestrator.catalog import get_catalog
 
 if TYPE_CHECKING:
@@ -603,20 +603,20 @@ class EngineRunner:
                 # Create temp directory for this task
                 temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
 
-                # Load task input from S3
+                # Load task request from S3
                 download_start = time.time()
                 with dalston.telemetry.create_span("engine.download_input"):
-                    task_input = self._load_task_input(task_id, temp_dir)
+                    task_request = self._load_task_request(task_id, temp_dir)
                 dalston.metrics.observe_engine_s3_download(
                     self.engine_id,
                     time.time() - download_start,
                     self._execution_profile,
                 )
-                job_id = task_input.job_id
+                job_id = task_request.job_id
 
-                # Resolve model from task input config if not in metadata
+                # Resolve model from task request config if not in metadata
                 if not task_model:
-                    task_model = task_input.config.get("loaded_model_id", "")
+                    task_model = task_request.config.get("loaded_model_id", "")
                     if task_model:
                         dalston.telemetry.set_span_attribute(
                             "dalston.model", task_model
@@ -647,7 +647,7 @@ class EngineRunner:
                     instance=self.instance,
                     task_id=task_id,
                     job_id=job_id,
-                    stage=task_input.stage,
+                    stage=task_request.stage,
                     metadata=task_metadata,
                     logger=self.engine.logger,
                 )
@@ -656,7 +656,7 @@ class EngineRunner:
                         max_workers=1
                     ) as executor:
                         future = executor.submit(
-                            self.engine.process, task_input, task_ctx
+                            self.engine.process, task_request, task_ctx
                         )
                         try:
                             output = future.result(timeout=task_timeout)
@@ -669,7 +669,7 @@ class EngineRunner:
                 # Boundary validation: validate transcribe outputs against
                 # Transcript. Covers both mono ("transcribe") and per-channel
                 # ("transcribe_ch0", "transcribe_ch1", ...) stages.
-                if task_input.stage.startswith("transcribe"):
+                if task_request.stage.startswith("transcribe"):
                     self._validate_transcript_output(output, task_id)
 
                 # Calculate total task time (for metrics)
@@ -724,9 +724,9 @@ class EngineRunner:
                     self._execution_profile,
                 )
 
-                # We need job_id for the event, try to extract from input
+                # We need job_id for the event, try to extract from request
                 try:
-                    job_id = task_input.job_id
+                    job_id = task_request.job_id
                 except NameError:
                     job_id = "unknown"
                 self._publish_task_failed(task_id, job_id, str(e))
@@ -746,19 +746,19 @@ class EngineRunner:
                     "request_id",
                 )
 
-    def _load_task_input(self, task_id: str, temp_dir: Path) -> EngineInput:
-        """Load task input from S3 and materialize required artifacts."""
+    def _load_task_request(self, task_id: str, temp_dir: Path) -> TaskRequest:
+        """Load task request from S3 and materialize required artifacts."""
         task_metadata = self._get_task_metadata(task_id)
         job_id = task_metadata["job_id"]
         stage = task_metadata.get("stage", "unknown")
 
-        input_uri = io.build_task_input_uri(self.s3_bucket, job_id, task_id)
-        input_data = io.download_json(input_uri)
+        request_uri = io.build_task_request_uri(self.s3_bucket, job_id, task_id)
+        request_data = io.download_json(request_uri)
 
         # Canonical M51 fields.
-        payload = input_data.get("payload")
-        resolved_artifact_ids = input_data.get("resolved_artifact_ids", {})
-        artifact_index_data = input_data.get("artifact_index", {})
+        payload = request_data.get("payload")
+        resolved_artifact_ids = request_data.get("resolved_artifact_ids", {})
+        artifact_index_data = request_data.get("artifact_index", {})
 
         # Read from task metadata when scheduler stores JSON there.
         resolved_from_metadata = task_metadata.get("resolved_artifact_ids_json")
@@ -778,13 +778,13 @@ class EngineRunner:
             target_dir=temp_dir / "materialized",
         )
 
-        return EngineInput(
+        return TaskRequest(
             task_id=task_id,
             job_id=job_id,
             stage=stage,
-            config=input_data.get("config", {}),
+            config=request_data.get("config", {}),
             payload=payload,
-            previous_outputs=input_data.get("previous_outputs", {}),
+            previous_responses=request_data.get("previous_responses", {}),
             materialized_artifacts=materialized_artifacts,
             metadata={"resolved_artifact_ids": resolved_artifact_ids},
         )
@@ -810,7 +810,7 @@ class EngineRunner:
 
     def _validate_transcript_output(
         self,
-        output: EngineOutput,
+        output: TaskResponse,
         task_id: str,
     ) -> None:
         """Validate transcribe-stage output against Transcript.
@@ -832,10 +832,10 @@ class EngineRunner:
         self,
         task_id: str,
         job_id: str,
-        output: EngineOutput,
+        output: TaskResponse,
         processing_time: float,
     ) -> None:
-        """Save task output to S3.
+        """Save task response to S3.
 
         Args:
             task_id: Task identifier
@@ -843,9 +843,9 @@ class EngineRunner:
             output: Task output from engine
             processing_time: Time taken to process in seconds
         """
-        output_uri = io.build_task_output_uri(self.s3_bucket, job_id, task_id)
+        response_uri = io.build_task_response_uri(self.s3_bucket, job_id, task_id)
 
-        output_data = {
+        response_data = {
             "task_id": task_id,
             "completed_at": datetime.now(UTC).isoformat(),
             "processing_time_seconds": round(processing_time, 2),
@@ -861,11 +861,11 @@ class EngineRunner:
             stage=task_stage,
             produced_artifacts=output.produced_artifacts,
         )
-        output_data["produced_artifacts"] = [
+        response_data["produced_artifacts"] = [
             artifact.model_dump(mode="json", exclude_none=True)
             for artifact in persisted_artifacts
         ]
-        output_data["produced_artifact_ids"] = [
+        response_data["produced_artifact_ids"] = [
             artifact.artifact_id for artifact in persisted_artifacts
         ]
         canonical_transcript = next(
@@ -877,12 +877,12 @@ class EngineRunner:
             None,
         )
         if canonical_transcript is not None:
-            output_data["canonical_transcript_uri"] = (
+            response_data["canonical_transcript_uri"] = (
                 canonical_transcript.storage_locator
             )
 
-        io.upload_json(output_data, output_uri)
-        logger.info("output_uploaded", output_uri=output_uri)
+        io.upload_json(response_data, response_uri)
+        logger.info("response_uploaded", response_uri=response_uri)
 
         if persisted_artifacts:
             metadata_key = f"dalston:task:{task_id}"
@@ -1013,12 +1013,12 @@ class EngineRunner:
 
         if not durable_success:
             # Log critical error - reconciliation sweeper will detect orphaned tasks
-            # For task.completed, reconciler checks output_uri and recovers as COMPLETED
+            # For task.completed, reconciler checks response_uri and recovers as COMPLETED
             logger.error(
                 "critical_event_may_be_lost",
                 event_type="task.completed",
                 task_id=task_id,
-                note="reconciliation_sweeper_will_recover_via_output_uri",
+                note="reconciliation_sweeper_will_recover_via_response_uri",
             )
 
         logger.debug("published_task_completed")
@@ -1069,7 +1069,7 @@ class EngineRunner:
 
         if not durable_success:
             # Log critical error - reconciliation sweeper will detect orphaned tasks
-            # For task.failed, reconciler marks as FAILED (no output_uri to recover)
+            # For task.failed, reconciler marks as FAILED (no response_uri to recover)
             logger.error(
                 "critical_event_may_be_lost",
                 event_type="task.failed",

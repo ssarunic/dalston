@@ -23,7 +23,7 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk import (
     BatchTaskContext,
     EngineCapabilities,
-    EngineInput,
+    TaskRequest,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 
@@ -50,11 +50,11 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def transcribe_audio(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
+        self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
         """Transcribe audio via Riva NIM streaming gRPC."""
-        audio_path = engine_input.audio_path
-        params = engine_input.get_transcribe_params()
+        audio_path = task_request.audio_path
+        params = task_request.get_transcribe_params()
         language = params.language or "en"
 
         self.logger.info("transcribing", audio_path=str(audio_path))

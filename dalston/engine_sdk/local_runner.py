@@ -29,7 +29,7 @@ class LocalRunner:
         job_id: str,
         stage: str,
         config: dict[str, Any],
-        previous_outputs: dict[str, Any],
+        previous_responses: dict[str, Any],
         payload: dict[str, Any] | None,
         artifacts: dict[str, Path],
     ) -> dict[str, Any]:
@@ -42,7 +42,7 @@ class LocalRunner:
                 engine_id="local",
                 instance="local-runner",
                 config=config,
-                previous_outputs=previous_outputs,
+                previous_responses=previous_responses,
                 payload=payload,
                 artifacts=artifacts,
                 metadata={"mode": "local"},
@@ -127,10 +127,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional payload JSON file.",
     )
     run_parser.add_argument(
-        "--previous-outputs",
+        "--previous-responses",
         type=Path,
-        dest="previous_outputs",
-        help="Optional previous outputs JSON file.",
+        dest="previous_responses",
+        help="Optional previous responses JSON file.",
     )
     run_parser.add_argument(
         "--artifacts",
@@ -160,9 +160,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_command(args: argparse.Namespace) -> int:
     config = _load_json_object(args.config, label="config")
     payload = _load_json_object(args.payload, label="payload") if args.payload else None
-    previous_outputs = (
-        _load_json_object(args.previous_outputs, label="previous_outputs")
-        if args.previous_outputs
+    previous_responses = (
+        _load_json_object(args.previous_responses, label="previous_responses")
+        if args.previous_responses
         else {}
     )
 
@@ -185,7 +185,7 @@ def _run_command(args: argparse.Namespace) -> int:
         job_id=args.job_id,
         stage=args.stage,
         config=config,
-        previous_outputs=previous_outputs,
+        previous_responses=previous_responses,
         payload=payload,
         artifacts=artifacts,
     )

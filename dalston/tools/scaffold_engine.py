@@ -274,8 +274,8 @@ from dalston.engine_sdk import (
     Engine,
     EngineCapabilities,
     BatchTaskContext,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -305,18 +305,18 @@ class {class_name}(Engine):
         self.logger.info("model_loaded")
 
     def process(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> EngineOutput:
+        self, task_request: TaskRequest, ctx: BatchTaskContext
+    ) -> TaskResponse:
         """Process audio input.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
 
         Returns:
-            EngineOutput with processing results
+            TaskResponse with processing results
         """
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         # Load model (lazy loading, cached)
         self._load_model(config)
@@ -329,7 +329,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return EngineOutput(data=result)
+        return TaskResponse(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
@@ -610,8 +610,8 @@ from typing import Any
 from dalston.engine_sdk import (
     Engine,
     BatchTaskContext,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -644,17 +644,17 @@ class {class_name}(Engine):
         self.logger.info("model_loaded", model_variant=self._model_variant)
 
     def process(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> EngineOutput:
+        self, task_request: TaskRequest, ctx: BatchTaskContext
+    ) -> TaskResponse:
         """Process audio input.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
 
         Returns:
-            EngineOutput with processing results
+            TaskResponse with processing results
         """
-        audio_path = engine_input.audio_path
+        audio_path = task_request.audio_path
 
         # Load model (lazy loading, cached)
         self._load_model()
@@ -667,7 +667,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return EngineOutput(data=result)
+        return TaskResponse(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""

@@ -30,8 +30,8 @@ import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
     TranscriptWord,
 )
 from dalston.engine_sdk.managers import HFTransformersModelManager
@@ -127,7 +127,9 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             shared_manager=is_shared,
         )
 
-    def transcribe_v1(self, audio: np.ndarray, params: TranscribeInput) -> Transcript:
+    def transcribe_v1(
+        self, audio: np.ndarray, params: TranscriptionRequest
+    ) -> Transcript:
         """Transcribe one VAD-segmented utterance using a HuggingFace ASR pipeline.
 
         Args:

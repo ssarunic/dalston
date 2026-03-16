@@ -77,7 +77,7 @@ Sortformer supports streaming inference natively, but this milestone implements 
 
 - Create `engines/stt-diarize/nemo-sortformer/engine.py`
 - Load `SortformerEncLabelModel.from_pretrained()` on first task (lazy init)
-- Accept audio file path from `EngineInput`
+- Accept audio file path from `EngineRequest`
 - Call `model.diarize(audio=[path], batch_size=1)` to get segment tuples
 - Map `(start, end, speaker_index)` tuples to `SpeakerTurn` objects
 - Compute overlap statistics from segments

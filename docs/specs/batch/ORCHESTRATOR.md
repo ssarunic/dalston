@@ -93,7 +93,7 @@ Selection rules:
 
 Non-container lite executors use the same task contract regardless of profile. The subprocess envelope is JSON and carries:
 
-- input: `task_id`, `job_id`, `stage`, `config`, `payload`, `previous_outputs`, `resolved_artifact_ids`, `artifact_index`
+- input: `task_id`, `job_id`, `stage`, `config`, `payload`, `previous_responses`, `resolved_artifact_ids`, `artifact_index`
 - output: `task_id`, `job_id`, `stage`, `data`, `produced_artifacts`, `produced_artifact_ids`
 
 Artifact bytes stay out-of-band via artifact references. Isolation for `venv` is subprocess-based only; Dalston does not use `sys.path` injection for profile isolation.

@@ -28,7 +28,7 @@ capabilities:
 
 input:
   # This engine doesn't process audio directly
-  # It reads from previous_outputs
+  # It reads from previous_responses
   audio_formats: []
   sample_rate: any
   channels: any

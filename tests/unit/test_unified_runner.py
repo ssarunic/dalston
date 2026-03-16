@@ -127,14 +127,14 @@ class TestTaskDeferredError:
         runner._running = True
         runner._redis = MagicMock()
 
-        # Mock _load_task_input to return a valid input, then engine.process raises
+        # Mock _load_task_request to return a valid request, then engine.process raises
         mock_input = MagicMock()
         mock_input.job_id = "job-001"
         mock_input.stage = "transcribe"
         mock_input.config = {}
 
         with (
-            patch.object(runner, "_load_task_input", return_value=mock_input),
+            patch.object(runner, "_load_task_request", return_value=mock_input),
             patch.object(runner, "_publish_task_started"),
             patch.object(runner, "_publish_task_failed") as mock_fail,
             patch.object(
@@ -193,11 +193,11 @@ class TestUnifiedRunnerWiring:
         # Simulate the admitted_process wrapper logic from runner.py
         original_process = MagicMock(return_value="result")
 
-        def admitted_process(engine_input, ctx):
+        def admitted_process(task_request, ctx):
             if not controller.admit_batch():
                 raise TaskDeferredError("Admission controller rejected batch task")
             try:
-                return original_process(engine_input, ctx)
+                return original_process(task_request, ctx)
             finally:
                 controller.release_batch()
 

@@ -11,7 +11,7 @@ import pytest
 
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput
+from dalston.engine_sdk.types import TaskRequest
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +75,7 @@ def test_prepare_engine_declares_prepared_audio_artifact(tmp_path: Path) -> None
         b"prepared"
     )
 
-    task_input = EngineInput(
+    task_request = TaskRequest(
         task_id="task-prepare",
         job_id="job-1",
         stage="prepare",
@@ -89,7 +89,7 @@ def test_prepare_engine_declares_prepared_audio_artifact(tmp_path: Path) -> None
         config={},
     )
 
-    output = engine.process(task_input, _ctx(task_id="task-prepare", job_id="job-1"))
+    output = engine.process(task_request, _ctx(task_id="task-prepare", job_id="job-1"))
 
     assert output.data.channel_files[0].artifact_id == "task-prepare:prepared_audio"
     assert output.produced_artifacts[0].logical_name == "prepared_audio"
@@ -107,7 +107,7 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
     source.write_bytes(b"mono-audio")
 
     engine = AudioRedactionEngine()
-    task_input = EngineInput(
+    task_request = TaskRequest(
         task_id="task-redact",
         job_id="job-2",
         stage="audio_redact",
@@ -118,7 +118,7 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
                 local_path=source,
             )
         },
-        previous_outputs={
+        previous_responses={
             "pii_detect": {
                 "entities": [],
                 "redacted_text": "",
@@ -131,7 +131,7 @@ def test_audio_redactor_declares_redacted_artifact_id(tmp_path: Path) -> None:
         config={"redaction_mode": "silence", "buffer_ms": 25},
     )
 
-    output = engine.process(task_input, _ctx(task_id="task-redact", job_id="job-2"))
+    output = engine.process(task_request, _ctx(task_id="task-redact", job_id="job-2"))
 
     assert output.data.redacted_audio_artifact_id == "task-redact:redacted_audio"
     assert output.produced_artifacts[0].logical_name == "redacted_audio"
@@ -149,7 +149,7 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
     input_audio.write_bytes(b"audio")
 
     engine = FinalMergerEngine()
-    task_input = EngineInput(
+    task_request = TaskRequest(
         task_id="task-merge",
         job_id="job-3",
         stage="merge",
@@ -160,7 +160,7 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
                 local_path=input_audio,
             )
         },
-        previous_outputs={
+        previous_responses={
             "prepare": {
                 "channel_files": [
                     {
@@ -185,7 +185,7 @@ def test_merge_engine_declares_transcript_artifact(tmp_path: Path) -> None:
         config={"speaker_detection": "none"},
     )
 
-    output = engine.process(task_input, _ctx(task_id="task-merge", job_id="job-3"))
+    output = engine.process(task_request, _ctx(task_id="task-merge", job_id="job-3"))
 
     assert output.produced_artifacts[-1].logical_name == "transcript"
     assert output.produced_artifacts[-1].local_path.exists()
@@ -203,7 +203,7 @@ def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
     input_audio.write_bytes(b"audio")
 
     engine = FinalMergerEngine()
-    task_input = EngineInput(
+    task_request = TaskRequest(
         task_id="task-merge",
         job_id="job-4",
         stage="merge",
@@ -214,7 +214,7 @@ def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
                 local_path=input_audio,
             )
         },
-        previous_outputs={
+        previous_responses={
             "prepare": {
                 "channel_files": [
                     {
@@ -252,7 +252,7 @@ def test_merge_engine_applies_known_speaker_names(tmp_path: Path) -> None:
         },
     )
 
-    output = engine.process(task_input, _ctx(task_id="task-merge", job_id="job-4"))
+    output = engine.process(task_request, _ctx(task_id="task-merge", job_id="job-4"))
 
     assert output.data.segments[0].speaker == "Alice"
     assert output.data.speakers[0].id == "Alice"
@@ -270,7 +270,7 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
     input_audio.write_bytes(b"audio")
 
     engine = FinalMergerEngine()
-    task_input = EngineInput(
+    task_request = TaskRequest(
         task_id="task-merge-quality",
         job_id="job-5",
         stage="merge",
@@ -281,7 +281,7 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
                 local_path=input_audio,
             )
         },
-        previous_outputs={
+        previous_responses={
             "prepare": {
                 "channel_files": [
                     {
@@ -320,7 +320,7 @@ def test_merge_engine_preserves_segment_quality_metadata(tmp_path: Path) -> None
     )
 
     output = engine.process(
-        task_input, _ctx(task_id="task-merge-quality", job_id="job-5")
+        task_request, _ctx(task_id="task-merge-quality", job_id="job-5")
     )
 
     segment = output.data.segments[0]

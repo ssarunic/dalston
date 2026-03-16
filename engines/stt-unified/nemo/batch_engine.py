@@ -43,7 +43,7 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk import (
     BatchTaskContext,
     EngineCapabilities,
-    EngineInput,
+    TaskRequest,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.inference.nemo_inference import NemoInference
@@ -252,19 +252,19 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             )
 
     def transcribe_audio(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
+        self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
         """Transcribe audio using Parakeet CTC or TDT via shared NemoInference.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
             ctx: Batch task context for tracing/logging
 
         Returns:
             Transcript with text, segments, and words
         """
-        audio_path = engine_input.audio_path
-        params = engine_input.get_transcribe_params()
+        audio_path = task_request.audio_path
+        params = task_request.get_transcribe_params()
         channel = params.channel
         vocabulary = params.vocabulary
 

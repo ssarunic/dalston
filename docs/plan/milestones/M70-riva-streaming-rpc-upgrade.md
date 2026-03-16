@@ -154,7 +154,7 @@ Gate: `engine.yaml` files parse correctly via `EngineCapabilities.from_yaml()`.
 import grpc
 import riva.client
 
-from dalston.engine_sdk import Engine, EngineInput, EngineOutput, BatchTaskContext
+from dalston.engine_sdk import Engine, EngineRequest, EngineResponse, BatchTaskContext
 from dalston.common.pipeline_types import TranscribeOutput, TranscribeSegment, WordTimestamp
 
 
@@ -165,7 +165,7 @@ class RivaBatchEngine(Engine):
         channel = grpc.insecure_channel(uri)
         self._asr = riva.client.ASRService(channel)
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineRequest, ctx: BatchTaskContext) -> EngineResponse:
         audio_bytes = engine_input.audio_path.read_bytes()
         language = engine_input.params.get("language", "en")
 
@@ -203,7 +203,7 @@ class RivaBatchEngine(Engine):
             language=language,
             duration=engine_input.audio_duration,
         )
-        return EngineOutput(data=output)
+        return EngineResponse(data=output)
 
     def health_check(self) -> dict:
         try:

@@ -10,7 +10,7 @@ from dalston.common.models import Task, TaskStatus
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.runner import EngineRunner
-from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
 from dalston.orchestrator.exceptions import CatalogValidationError
 from dalston.orchestrator.scheduler import queue_task
@@ -28,12 +28,12 @@ class MockSettings:
 class _NoopEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={})
+        return TaskResponse(data={})
 
     def get_capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
@@ -68,7 +68,7 @@ def sample_task():
         stage="transcribe",
         engine_id="container-engine_id",
         status=TaskStatus.READY,
-        input_uri="s3://bucket/audio.wav",
+        request_uri="s3://bucket/audio.wav",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         config={"language": "en"},
@@ -101,7 +101,7 @@ async def test_queue_task_records_container_execution_profile(
             "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
         ) as add_task,
         patch(
-            "dalston.orchestrator.scheduler.write_task_input",
+            "dalston.orchestrator.scheduler.write_task_request",
             new_callable=AsyncMock,
             return_value={},
         ),
@@ -133,7 +133,7 @@ async def test_queue_task_rejects_non_container_engine_id_on_distributed_path(
             "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
         ) as add_task,
         patch(
-            "dalston.orchestrator.scheduler.write_task_input",
+            "dalston.orchestrator.scheduler.write_task_request",
             new_callable=AsyncMock,
         ),
     ):

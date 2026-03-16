@@ -11,7 +11,7 @@ import structlog
 import yaml
 
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 
 # Paths for engine.yaml (container path first, local fallback second)
 ENGINE_YAML_PATHS = [
@@ -20,11 +20,11 @@ ENGINE_YAML_PATHS = [
 ]
 
 
-InputPayloadT = TypeVar("InputPayloadT")
-OutputPayloadT = TypeVar("OutputPayloadT")
+RequestPayloadT = TypeVar("RequestPayloadT")
+ResponsePayloadT = TypeVar("ResponsePayloadT")
 
 
-class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
+class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
     """Abstract base class for Dalston batch processing engines.
 
     Engines implement the `process` method to handle specific pipeline stages.
@@ -43,17 +43,17 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
 
             def process(
                 self,
-                engine_input: EngineInput,
+                task_request: TaskRequest,
                 ctx: BatchTaskContext,
-            ) -> EngineOutput:
+            ) -> TaskResponse:
                 # Load model lazily
                 if self.model is None:
                     self.model = load_model(
-                        engine_input.config.get("model", "large-v3")
+                        task_request.config.get("model", "large-v3")
                     )
 
-                result = self.model.transcribe(engine_input.audio_path)
-                return EngineOutput(data={"text": result.text, "segments": result.segments})
+                result = self.model.transcribe(task_request.audio_path)
+                return TaskResponse(data={"text": result.text, "segments": result.segments})
 
         if __name__ == "__main__":
             engine = MyTranscriptionEngine()
@@ -78,9 +78,9 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
     @abstractmethod
     def process(
         self,
-        engine_input: EngineInput[InputPayloadT],
+        task_request: TaskRequest[RequestPayloadT],
         ctx: BatchTaskContext,
-    ) -> EngineOutput[OutputPayloadT]:
+    ) -> TaskResponse[ResponsePayloadT]:
         """Process a single task.
 
         This method should be implemented by concrete engine classes.
@@ -88,11 +88,11 @@ class Engine(Generic[InputPayloadT, OutputPayloadT], ABC):
         and handles uploading results afterward.
 
         Args:
-            engine_input: Engine input containing typed payload and materialized artifacts
+            task_request: Engine request containing typed payload and materialized artifacts
             ctx: Runtime context for tracing/logging metadata helpers
 
         Returns:
-            EngineOutput containing typed payload and produced artifacts
+            TaskResponse containing typed payload and produced artifacts
 
         Raises:
             Exception: Any exception will be caught by the runner and reported

@@ -54,8 +54,8 @@ Key exports:
   `LitePrerequisiteMissingError` at pipeline construction time with
   deterministic pip install instructions.
 
-Both profiles write intermediate task artifacts (`diarize/output.json`,
-`pii_detect/output.json`) to the local filesystem consistent with the existing
+Both profiles write intermediate task artifacts (`diarize/response.json`,
+`pii_detect/response.json`) to the local filesystem consistent with the existing
 artifact store contract.
 
 ### Phase 3 — CLI/API Surface Alignment

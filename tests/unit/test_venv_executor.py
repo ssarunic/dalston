@@ -26,12 +26,12 @@ def _write_engine_module(tmp_path: Path) -> Path:
         """
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class VenvEchoEngine(Engine):
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
-        return EngineOutput(
+    def process(self, input: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
+        return TaskResponse(
             data={
                 "config_value": input.config["value"],
                 "payload_value": input.payload["value"],
@@ -80,7 +80,7 @@ def test_venv_executor_runs_serialized_request(tmp_path: Path) -> None:
             engine_id="stub-engine_id",
             instance="lite-test",
             config={"value": 7},
-            previous_outputs={},
+            previous_responses={},
             payload={"value": 9},
             artifacts={"audio": audio},
             engine_ref=f"{engine_path}:VenvEchoEngine",
@@ -115,7 +115,7 @@ def test_venv_executor_requires_engine_ref(tmp_path: Path) -> None:
                 engine_id="stub-engine_id",
                 instance="lite-test",
                 config={},
-                previous_outputs={},
+                previous_responses={},
                 payload=None,
                 artifacts={},
             )
@@ -176,7 +176,7 @@ def test_venv_executor_subprocess_timeout(
                 engine_id="stub-engine_id",
                 instance="lite-test",
                 config={},
-                previous_outputs={},
+                previous_responses={},
                 payload=None,
                 artifacts={},
                 engine_ref="engines.fake:FakeEngine",

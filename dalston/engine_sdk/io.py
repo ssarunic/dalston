@@ -149,8 +149,8 @@ def upload_json(data: dict[str, Any], s3_uri: str) -> str:
     return s3_uri
 
 
-def build_task_input_uri(bucket: str, job_id: str, task_id: str) -> str:
-    """Build the S3 URI for a task's input.json file.
+def build_task_request_uri(bucket: str, job_id: str, task_id: str) -> str:
+    """Build the S3 URI for a task's request.json file.
 
     Args:
         bucket: S3 bucket name
@@ -158,13 +158,13 @@ def build_task_input_uri(bucket: str, job_id: str, task_id: str) -> str:
         task_id: Task identifier
 
     Returns:
-        S3 URI in format s3://bucket/jobs/{job_id}/tasks/{task_id}/input.json
+        S3 URI in format s3://bucket/jobs/{job_id}/tasks/{task_id}/request.json
     """
-    return f"s3://{bucket}/jobs/{job_id}/tasks/{task_id}/input.json"
+    return f"s3://{bucket}/jobs/{job_id}/tasks/{task_id}/request.json"
 
 
-def build_task_output_uri(bucket: str, job_id: str, task_id: str) -> str:
-    """Build the S3 URI for a task's output.json file.
+def build_task_response_uri(bucket: str, job_id: str, task_id: str) -> str:
+    """Build the S3 URI for a task's response.json file.
 
     Args:
         bucket: S3 bucket name
@@ -172,6 +172,6 @@ def build_task_output_uri(bucket: str, job_id: str, task_id: str) -> str:
         task_id: Task identifier
 
     Returns:
-        S3 URI in format s3://bucket/jobs/{job_id}/tasks/{task_id}/output.json
+        S3 URI in format s3://bucket/jobs/{job_id}/tasks/{task_id}/response.json
     """
-    return f"s3://{bucket}/jobs/{job_id}/tasks/{task_id}/output.json"
+    return f"s3://{bucket}/jobs/{job_id}/tasks/{task_id}/response.json"

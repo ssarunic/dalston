@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 
 
 @pytest.fixture(autouse=True)
@@ -142,9 +142,9 @@ def _make_params(
     language: str = "auto",
     model_variant: str = "large-v3-turbo",
     vocabulary: list[str] | None = None,
-) -> TranscribeInput:
+) -> TranscriptionRequest:
     """Create typed transcribe params for RT calls."""
-    return TranscribeInput(
+    return TranscriptionRequest(
         language=language,
         loaded_model_id=model_variant,
         vocabulary=vocabulary,

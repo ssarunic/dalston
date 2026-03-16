@@ -25,7 +25,7 @@ from dalston.engine_sdk.executors import (
     VenvEnvironmentManager,
     VenvExecutor,
 )
-from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 from dalston.gateway.services.artifact_store import (
     ArtifactStore,
     InMemoryArtifactStoreAdapter,
@@ -98,11 +98,11 @@ class _LiteComputeEngine(Engine[Any, Any]):
 
     def process(
         self,
-        engine_input: EngineInput,
+        task_request: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         del ctx
-        return EngineOutput(data=self._compute(engine_input.config))
+        return TaskResponse(data=self._compute(task_request.config))
 
 
 @dataclass(frozen=True)
@@ -437,7 +437,7 @@ class LitePipeline:
             self._record_stage_output(job_id, stage, payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
-                    f"jobs/{job_id}/tasks/transcribe/output.json",
+                    f"jobs/{job_id}/tasks/transcribe/response.json",
                     json.dumps(payload).encode("utf-8"),
                     content_type="application/json",
                 )
@@ -466,7 +466,7 @@ class LitePipeline:
             self._record_stage_output(job_id, stage, diarize_payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
-                    f"jobs/{job_id}/tasks/diarize/output.json",
+                    f"jobs/{job_id}/tasks/diarize/response.json",
                     json.dumps(diarize_payload).encode("utf-8"),
                     content_type="application/json",
                 )
@@ -489,7 +489,7 @@ class LitePipeline:
             self._record_stage_output(job_id, stage, pii_payload)
             if self._persist_artifacts:
                 await self._artifacts.write_bytes(
-                    f"jobs/{job_id}/tasks/pii_detect/output.json",
+                    f"jobs/{job_id}/tasks/pii_detect/response.json",
                     json.dumps(pii_payload).encode("utf-8"),
                     content_type="application/json",
                 )
@@ -531,20 +531,20 @@ class LitePipeline:
             ):
                 stage_config["max_speakers"] = num_speakers
 
-        previous_outputs = dict(self._stage_outputs.get(envelope.job_id, {}))
+        previous_responses = dict(self._stage_outputs.get(envelope.job_id, {}))
         if (
             self._ephemeral_mode
             and binding.entry.execution_profile == "inproc"
             and binding.engine_factory is not None
         ):
             engine = binding.engine_factory()
-            engine_input = EngineInput(
+            task_request = TaskRequest(
                 task_id=envelope.task_id,
                 job_id=envelope.job_id,
                 stage=stage,
                 config=stage_config,
                 payload=audio_bytes,
-                previous_outputs=previous_outputs,
+                previous_responses=previous_responses,
                 audio_path=(
                     transcribe_audio_path
                     if stage in {"transcribe", "diarize"}
@@ -564,8 +564,8 @@ class LitePipeline:
                     "artifact_persistence": "ephemeral",
                 },
             )
-            output = await asyncio.to_thread(engine.process, engine_input, ctx)
-            return output.to_dict()
+            response = await asyncio.to_thread(engine.process, task_request, ctx)
+            return response.to_dict()
 
         executor = self._resolve_executor(binding.entry.execution_profile)
         if executor is None:
@@ -586,7 +586,7 @@ class LitePipeline:
             engine_id=binding.entry.engine_id,
             instance=f"lite-{self._profile.value}",
             config=stage_config,
-            previous_outputs=previous_outputs,
+            previous_responses=previous_responses,
             payload=None,
             artifacts=artifacts,
             engine=binding.engine_factory() if binding.engine_factory else None,
@@ -810,16 +810,16 @@ class LitePipeline:
                 "segments": segments,
             }
 
-        output_uri: str | None = None
+        transcript_uri: str | None = None
         if self._persist_artifacts:
-            output_uri = await self._artifacts.write_bytes(
+            transcript_uri = await self._artifacts.write_bytes(
                 f"jobs/{job_id}/transcript.json",
                 json.dumps(transcript).encode("utf-8"),
                 content_type="application/json",
             )
         return {
             "job_id": job_id,
-            "transcript_uri": output_uri,
+            "transcript_uri": transcript_uri,
             "transcript": transcript,
         }
 

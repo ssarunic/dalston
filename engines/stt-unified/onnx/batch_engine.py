@@ -43,7 +43,7 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk import (
     BatchTaskContext,
     EngineCapabilities,
-    EngineInput,
+    TaskRequest,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.inference.onnx_inference import OnnxInference
@@ -125,19 +125,19 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         return _MODEL_ID_ALIASES.get(loaded_model_id, loaded_model_id)
 
     def transcribe_audio(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
+        self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
         """Transcribe audio using Parakeet via ONNX Runtime and shared core.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
             ctx: Batch task context
 
         Returns:
             Transcript with text, segments, and words
         """
-        audio_path = engine_input.audio_path
-        params = engine_input.get_transcribe_params()
+        audio_path = task_request.audio_path
+        params = task_request.get_transcribe_params()
         channel = params.channel
 
         loaded_model_id = params.loaded_model_id or self._default_model_id

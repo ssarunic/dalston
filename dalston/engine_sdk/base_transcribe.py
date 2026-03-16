@@ -20,7 +20,7 @@ from dalston.common.pipeline_types import (
 )
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class BaseBatchTranscribeEngine(Engine):
@@ -28,7 +28,7 @@ class BaseBatchTranscribeEngine(Engine):
 
     Subclasses implement ``transcribe_audio()`` which returns a
     ``Transcript``. The ``process()`` method wraps it in an
-    ``EngineOutput`` envelope.
+    ``TaskResponse`` envelope.
 
     Helper methods are provided for building the canonical types from
     common data shapes.
@@ -36,20 +36,20 @@ class BaseBatchTranscribeEngine(Engine):
 
     def process(
         self,
-        engine_input: EngineInput,
+        task_request: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         """Process a task by delegating to ``transcribe_audio``.
 
         Subclasses should not override this. Override ``transcribe_audio``
         instead.
         """
-        transcript = self.transcribe_audio(engine_input, ctx)
-        return EngineOutput(data=transcript)
+        transcript = self.transcribe_audio(task_request, ctx)
+        return TaskResponse(data=transcript)
 
     def transcribe_audio(
         self,
-        engine_input: EngineInput,
+        task_request: TaskRequest,
         ctx: BatchTaskContext,
     ) -> Transcript:
         """Transcribe audio and return a Transcript.
@@ -57,7 +57,7 @@ class BaseBatchTranscribeEngine(Engine):
         Must be implemented by subclasses.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
             ctx: Batch task context for tracing/logging
 
         Returns:

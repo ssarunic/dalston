@@ -470,7 +470,7 @@ class Segment(BaseModel):
 
 **Saves:** 1141 LOC (the entire final-merger engine), one Docker
 service, one engine directory. Also reduces artifact fan-in complexity in
-the materializer. `input_bindings` / `previous_outputs` remain useful for
+the materializer. `input_bindings` / `previous_responses` remain useful for
 stage-to-stage handoff during migration and should not be removed as part of
 merge elimination alone.
 
@@ -542,7 +542,7 @@ def build_pipeline(job_params, capabilities):
 - The merge engine and its Docker service
 - A large portion of dependency-resolution complexity in handlers/scheduler
 
-`previous_outputs` / stage handoff remains during migration and can be
+`previous_responses` / stage handoff remains during migration and can be
 simplified incrementally rather than removed wholesale.
 
 ### 6a. Future Stages Keep It Linear
@@ -767,7 +767,7 @@ With a linear pipeline:
 - This table becomes unnecessary (next task = next in ordered list)
 - Requires a DB migration to drop the table
 - `TaskModel.dependency_links` relationship can be removed
-- The `_gather_previous_outputs()` function (handlers.py:1023-1061)
+- The `_gather_previous_responses()` function (handlers.py:1023-1061)
   simplifies: instead of querying dependencies, just read the
   previous task's output
 - The handler's dependency resolution loop (handlers.py:534-590)
@@ -806,7 +806,7 @@ proposed `RealtimeProxy` core on.
 Not called out explicitly in the review. `handlers.py` (1,301 LOC)
 contains:
 
-- `_gather_previous_outputs()` -- reads S3 outputs from completed
+- `_gather_previous_responses()` -- reads S3 outputs from completed
   dependency tasks, with per_channel `_chN` suffix normalization
 - `_check_task_completed()` -- dependency resolution loop that checks
   if all deps are met, then queues dependents
@@ -815,7 +815,7 @@ contains:
 
 With a linear pipeline, ~200 LOC of dependency resolution in handlers.py
 simplifies to "start next stage in list". The
-`_gather_previous_outputs()` function (which reads from S3 per
+`_gather_previous_responses()` function (which reads from S3 per
 dependency) becomes "read the single previous stage's output" -- or
 with a shared Transcript document, just "pass the Transcript forward".
 
@@ -838,7 +838,7 @@ resolved:
 
 1. Transcribe produces `Transcript` with segments (start, end, text)
 2. Diarize runs pyannote on the audio to get speaker turns
-3. Diarize **also** reads `previous_outputs["transcribe"]` to get
+3. Diarize **also** reads `previous_responses["transcribe"]` to get
    segments, applies overlap matching (~20 LOC), and writes enriched
    `Transcript` with `segments[].speaker` populated
 
@@ -861,8 +861,8 @@ def assign_speakers(segments, speaker_turns):
 remapping (~40 LOC total). The diarize engine would output an enriched
 `Transcript` instead of raw `DiarizeOutput`.
 
-**Data flow validated:** Each stage currently reads `previous_outputs`
-from S3 via `_gather_previous_outputs()` (handlers.py:1023). With a
+**Data flow validated:** Each stage currently reads `previous_responses`
+from S3 via `_gather_previous_responses()` (handlers.py:1023). With a
 linear pipeline, diarize reads transcribe's Transcript from S3, runs
 pyannote on the audio artifact (also in S3), then writes enriched
 Transcript back. No mechanism changes needed.

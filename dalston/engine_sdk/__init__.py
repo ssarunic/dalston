@@ -4,22 +4,22 @@ This SDK provides the foundation for building batch processing engines
 that integrate with the Dalston transcription pipeline.
 
 Example usage:
-    from dalston.engine_sdk import Engine, EngineInput, EngineOutput
-    from dalston.engine_sdk import PrepareOutput, Transcript, TranscriptSegment
+    from dalston.engine_sdk import Engine, TaskRequest, TaskResponse
+    from dalston.engine_sdk import PreparationResponse, Transcript, TranscriptSegment
 
     class MyTranscriptionEngine(Engine):
         def process(
-            self, engine_input: EngineInput, ctx: BatchTaskContext
-        ) -> EngineOutput:
-            # Get typed input from previous stage
-            prepare = engine_input.get_prepare_output()
+            self, engine_request: TaskRequest, ctx: BatchTaskContext
+        ) -> TaskResponse:
+            # Get typed response from previous stage
+            prepare = engine_request.get_prepare_response()
             audio_duration = prepare.duration if prepare else 0.0
 
             # Process the audio file
-            result = transcribe(engine_input.audio_path)
+            result = transcribe(engine_request.audio_path)
 
-            # Return typed output
-            return EngineOutput(data=Transcript(
+            # Return typed response
+            return TaskResponse(data=Transcript(
                 text=result.text,
                 segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
@@ -43,26 +43,26 @@ Environment variables:
 # Re-export pipeline types for convenience
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    AlignOutput,
+    AlignmentResponse,
     AudioMedia,
-    AudioRedactOutput,
-    DiarizeOutput,
+    DiarizationResponse,
     MergedSegment,
-    MergeOutput,
+    MergeResponse,
     Phoneme,
-    PIIDetectOutput,
+    PIIDetectionResponse,
     PIIEntity,
     PIIEntityCategory,
     PIIMetadata,
     PIIRedactionMode,
-    PrepareOutput,
+    PreparationResponse,
+    RedactionResponse,
     Segment,
     SegmentMetaKeys,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
     SpeechRegion,
-    TaskInputData,
+    TaskRequestData,
     TimestampGranularity,
     Transcript,
     TranscriptMetadata,
@@ -79,8 +79,8 @@ from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
 from dalston.engine_sdk.types import (
     EngineCapabilities,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
 
 __all__ = [
@@ -89,8 +89,8 @@ __all__ = [
     "Engine",
     "EngineCapabilities",
     "LocalRunner",
-    "EngineInput",
-    "EngineOutput",
+    "TaskRequest",
+    "TaskResponse",
     "BatchTaskContext",
     # Model management (M39.2)
     "LoadedModel",
@@ -111,7 +111,7 @@ __all__ = [
     "Speaker",
     "SpeakerTurn",
     "SpeechRegion",
-    "TaskInputData",
+    "TaskRequestData",
     "TranscriptMetadata",
     "TranscriptSegment",
     "TranscriptWord",
@@ -120,11 +120,11 @@ __all__ = [
     "Word",
     "WordMetaKeys",
     # Stage outputs
-    "AlignOutput",
-    "AudioRedactOutput",
+    "AlignmentResponse",
+    "RedactionResponse",
     "Transcript",
-    "DiarizeOutput",
-    "MergeOutput",
-    "PIIDetectOutput",
-    "PrepareOutput",
+    "DiarizationResponse",
+    "MergeResponse",
+    "PIIDetectionResponse",
+    "PreparationResponse",
 ]
