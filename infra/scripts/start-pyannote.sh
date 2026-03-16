@@ -14,8 +14,8 @@ KEY_NAME="dalston-dev"
 INSTANCE_TYPE="g4dn.xlarge"
 SSH_KEY_PATH="$HOME/.ssh/dalston-dev-london.pem"
 REPO="dalston/stt-diarize-pyannote"
-INSTANCE_TAG="dalston-stt-batch-diarize-pyannote-4.0"
-CONTAINER_NAME="stt-batch-diarize-pyannote-4.0"
+INSTANCE_TAG="dalston-stt-batch-diarize-pyannote-4-0"
+CONTAINER_NAME="stt-batch-diarize-pyannote-4-0"
 
 # --- Subcommand routing ---
 COMMAND="${1:-start}"
