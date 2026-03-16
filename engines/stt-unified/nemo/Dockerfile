@@ -52,6 +52,11 @@ ENV TORCH_HOME=/models/torch
 ENV NEMO_CACHE=/models/nemo
 RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Engine code (all adapters colocated in stt-unified/nemo/)
 WORKDIR /app
 COPY engines/stt-unified/nemo/ engines/stt-unified/nemo/

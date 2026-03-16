@@ -50,6 +50,11 @@ ENV TORCH_HOME=/models/torch
 ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
 RUN mkdir -p /models/huggingface /models/torch /models/ctranslate2/faster-whisper
 
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Engine code (all adapters colocated in stt-unified/faster-whisper/)
 WORKDIR /app
 COPY engines/stt-unified/faster-whisper/ engines/stt-unified/faster-whisper/

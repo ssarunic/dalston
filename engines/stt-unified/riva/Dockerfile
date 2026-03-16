@@ -25,6 +25,11 @@ WORKDIR /engine
 COPY engines/stt-unified/riva/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Engine code
 WORKDIR /app
 COPY engines/stt-unified/riva/ engines/stt-unified/riva/

@@ -50,6 +50,11 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
 ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface
 
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Engine code (all ONNX engine files in a single directory)
 WORKDIR /app
 COPY engines/stt-unified/onnx/ engines/stt-unified/onnx/

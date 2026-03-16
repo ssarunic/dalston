@@ -34,6 +34,11 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 ENV HF_HOME=/models/huggingface
 RUN mkdir -p /models/huggingface
 
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Engine code (all adapters colocated in stt-unified/vllm-asr/)
 WORKDIR /app
 COPY engines/stt-unified/vllm-asr/ engines/stt-unified/vllm-asr/
