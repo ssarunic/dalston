@@ -164,8 +164,8 @@ export interface TaskArtifact {
   max_retries: number
   error?: string
   dependencies: string[]
-  input?: Record<string, unknown>
-  output?: Record<string, unknown>
+  request?: Record<string, unknown>
+  response?: Record<string, unknown>
 }
 
 // Vocabulary boosting capability

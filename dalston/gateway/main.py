@@ -186,11 +186,11 @@ async def lifespan(app: FastAPI):
             async with async_session() as db:
                 from sqlalchemy import update
 
-                from dalston.db.models import ModelRecord
+                from dalston.db.models import ModelRegistryModel
 
                 result = await db.execute(
-                    update(ModelRecord)
-                    .where(ModelRecord.status == "downloading")
+                    update(ModelRegistryModel)
+                    .where(ModelRegistryModel.status == "downloading")
                     .values(
                         status="not_downloaded",
                         downloaded_bytes=None,

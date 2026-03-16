@@ -475,6 +475,12 @@ async def get_engines(
 
                 if age <= HEARTBEAT_STALE_THRESHOLD:
                     instance_status = heartbeat.get("status", "idle")
+                    # Unified engines may report realtime statuses —
+                    # normalise to batch-compatible values.
+                    if instance_status in ("ready", "busy"):
+                        instance_status = (
+                            "idle" if instance_status == "ready" else "processing"
+                        )
                     if instance_status == "processing":
                         best_status = "processing"
                     elif best_status != "processing":
