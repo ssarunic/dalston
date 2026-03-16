@@ -61,6 +61,10 @@ class ArtifactReference(BaseModel):
     role: str | None = None
     producer_task_id: str | None = None
     producer_stage: str | None = None
+    download_url: str | None = Field(
+        default=None,
+        description="Presigned GET URL for engine to fetch artifact bytes (M77)",
+    )
 
 
 class MaterializedArtifact(BaseModel):

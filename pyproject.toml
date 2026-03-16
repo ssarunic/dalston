@@ -58,11 +58,11 @@ orchestrator = [
 ]
 engine-sdk = [
     "redis>=7.0.0",
-    "boto3==1.40.61",
+    "httpx>=0.26.0",  # HTTP transport for presigned URL I/O (M77)
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
     "opentelemetry-instrumentation-redis==0.60b0",
-    "opentelemetry-instrumentation-boto3sqs==0.60b0",
+    "opentelemetry-instrumentation-httpx==0.60b0",
 ]
 realtime-sdk = [
     "websockets>=12.0",

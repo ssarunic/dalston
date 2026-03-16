@@ -12,8 +12,8 @@ class _MemoryStore(ArtifactStore):
     def __init__(self) -> None:
         self.remote_files: dict[str, bytes] = {}
 
-    def download(self, locator: str, destination: Path) -> None:
-        payload = self.remote_files[locator]
+    def download(self, ref: ArtifactReference, destination: Path) -> None:
+        payload = self.remote_files[ref.storage_locator]
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(payload)
 

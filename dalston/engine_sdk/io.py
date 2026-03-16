@@ -11,12 +11,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import boto3
-from botocore.config import Config
-
 
 def get_s3_client():
     """Create a boto3 S3 client using environment variables.
+
+    boto3 is imported lazily so this module can be imported safely in engine
+    containers where boto3 is not installed (M77). The import fails loudly at
+    call time rather than at module import time.
 
     Environment variables:
         DALSTON_S3_ENDPOINT_URL: Custom endpoint (e.g., MinIO for local dev)
@@ -24,6 +25,9 @@ def get_s3_client():
         AWS_ACCESS_KEY_ID: AWS access key
         AWS_SECRET_ACCESS_KEY: AWS secret key
     """
+    import boto3  # noqa: PLC0415
+    from botocore.config import Config  # noqa: PLC0415
+
     endpoint_url = os.environ.get("DALSTON_S3_ENDPOINT_URL")
     region = os.environ.get("DALSTON_S3_REGION", "eu-west-2")
 

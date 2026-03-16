@@ -7,9 +7,10 @@ Handles:
 - Validating engine capabilities against job requirements (M29)
 """
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
@@ -21,12 +22,16 @@ from dalston.common.artifacts import ArtifactReference, ArtifactSelector, InputB
 from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
 from dalston.common.pipeline_types import AudioMedia, TaskInputData
+from dalston.common.presigned import generate_get_url, generate_put_url
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
     EngineInfo,
@@ -227,6 +232,59 @@ def _resolve_input_bindings(
     return resolved
 
 
+def _predict_artifact_upload_locators(
+    task: Task,
+    task_id: str,
+    job_id: str,
+    bucket: str,
+) -> list[str]:
+    """Pre-compute expected produced artifact S3 locators for a task.
+
+    Returns a list of s3:// URIs that the task is expected to upload so the
+    orchestrator can generate presigned PUT URLs before dispatch (M77).
+
+    Mirrors the path formula in ArtifactMaterializer._default_locator_builder.
+    """
+    locators: list[str] = []
+    stage = task.stage
+
+    if stage == "prepare":
+        split_channels = task.config.get("split_channels", False)
+        if split_channels:
+            for ch in [0, 1]:
+                ln = f"prepared_audio_ch{ch}"
+                artifact_id = f"{task_id}:{ln}"
+                locators.append(
+                    f"s3://{bucket}/jobs/{job_id}/artifacts/{artifact_id}/{ln}.wav"
+                )
+        else:
+            ln = "prepared_audio"
+            artifact_id = f"{task_id}:{ln}"
+            locators.append(
+                f"s3://{bucket}/jobs/{job_id}/artifacts/{artifact_id}/{ln}.wav"
+            )
+
+    elif stage in ("merge", "merge_ch0", "merge_ch1"):
+        # Final transcript always produced (kind=transcript, role=final → canonical path)
+        locators.append(f"s3://{bucket}/jobs/{job_id}/transcript.json")
+        # Optionally redacted stereo audio (per-channel PII redaction mode)
+        if task.config.get("redact_pii_audio", False):
+            ln = "redacted_stereo_audio"
+            artifact_id = f"{task_id}:{ln}"
+            locators.append(
+                f"s3://{bucket}/jobs/{job_id}/artifacts/{artifact_id}/{ln}.wav"
+            )
+
+    elif stage == "audio_redact":
+        # Produces per-channel redacted audio
+        channel = task.config.get("channel", 0)
+        ln = f"redacted_audio_ch{channel}"
+        artifact_id = f"{task_id}:{ln}"
+        locators.append(f"s3://{bucket}/jobs/{job_id}/artifacts/{artifact_id}/{ln}.wav")
+
+    return locators
+
+
 async def queue_task(
     redis: Redis,
     task: Task,
@@ -236,6 +294,7 @@ async def queue_task(
     audio_metadata: dict[str, Any] | None = None,
     catalog: EngineCatalog | None = None,
     enqueue_idempotency_key: str | None = None,
+    db: "AsyncSession | None" = None,
 ) -> None:
     """Queue a task for execution by its engine.
 
@@ -419,13 +478,20 @@ async def queue_task(
         audio_duration=audio_duration,
     )
 
-    # 2. Write task input.json to S3
+    # 2a. Pre-generate presigned PUT URL for output.json (M77)
+    # Generated before writing input.json so it can be embedded in the payload.
+    output_s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/output.json"
+    output_s3_uri = f"s3://{settings.s3_bucket}/{output_s3_key}"
+    output_url = await asyncio.to_thread(generate_put_url, output_s3_uri)
+
+    # 2. Write task input.json to S3 (output_url is embedded in the payload)
     input_doc = await write_task_input(
         redis=redis,
         task=task,
         settings=settings,
         previous_outputs=previous_outputs or {},
         audio_metadata=audio_metadata,
+        output_url=output_url,
     )
     if isinstance(input_doc, dict):
         input_bindings_json = json.dumps(input_doc.get("input_bindings", []))
@@ -436,13 +502,31 @@ async def queue_task(
         input_bindings_json = "[]"
         resolved_artifact_ids_json = "{}"
 
+    # 2b. Generate presigned GET URL for the input.json we just wrote (M77)
+    input_s3_uri = (
+        f"s3://{settings.s3_bucket}/jobs/{job_id_str}/tasks/{task_id_str}/input.json"
+    )
+    input_json_url = await asyncio.to_thread(generate_get_url, input_s3_uri)
+
     await redis.hset(
         metadata_key,
         mapping={
             "input_bindings_json": input_bindings_json,
             "resolved_artifact_ids_json": resolved_artifact_ids_json,
+            "input_json_url": input_json_url,
+            "output_url": output_url,
         },
     )
+
+    # 2d. Persist presigned URLs to DB task record for auditability (M77)
+    if db is not None:
+        from dalston.db.models import TaskModel  # noqa: PLC0415
+
+        task_model = await db.get(TaskModel, task.id)
+        if task_model is not None:
+            task_model.input_json_url = input_json_url
+            task_model.output_url = output_url
+            await db.commit()
 
     # 3. Add task to stream (replaces lpush to queue)
     if enqueue_idempotency_key:
@@ -480,6 +564,7 @@ async def write_task_input(
     task: Task,
     settings: Settings,
     previous_outputs: dict[str, Any],
+    output_url: str,
     audio_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write task input.json to S3.
@@ -527,6 +612,27 @@ async def write_task_input(
         key: value for key, value in task.config.items() if key != "input_bindings"
     }
 
+    # Generate presigned GET URLs for all artifacts in the index so engines can
+    # download them via HTTP without S3 credentials (M77).
+    for artifact_id, ref in artifact_index.items():
+        if not ref.download_url:
+            download_url = await asyncio.to_thread(
+                generate_get_url, ref.storage_locator
+            )
+            artifact_index[artifact_id] = ref.model_copy(
+                update={"download_url": download_url}
+            )
+
+    # Generate presigned PUT URLs for artifacts this task is expected to produce (M77).
+    expected_locators = _predict_artifact_upload_locators(
+        task, task_id_str, job_id_str, settings.s3_bucket
+    )
+    artifact_upload_urls: dict[str, str] = {}
+    for locator in expected_locators:
+        artifact_upload_urls[locator] = await asyncio.to_thread(
+            generate_put_url, locator
+        )
+
     input_data = TaskInputData(
         task_id=task_id_str,
         job_id=job_id_str,
@@ -536,6 +642,8 @@ async def write_task_input(
         input_bindings=bindings,
         resolved_artifact_ids=resolved_artifact_ids,
         artifact_index=artifact_index,
+        output_url=output_url,
+        artifact_upload_urls=artifact_upload_urls,
     )
 
     # S3 path: jobs/{job_id}/tasks/{task_id}/input.json

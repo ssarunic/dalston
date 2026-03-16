@@ -269,6 +269,8 @@ class TaskModel(Base):
     config: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     input_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_json_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     retries: Mapped[int] = mapped_column(nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(nullable=False, default=2)
     required: Mapped[bool] = mapped_column(nullable=False, default=True)

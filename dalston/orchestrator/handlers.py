@@ -339,6 +339,7 @@ async def handle_job_created(
                     registry=registry,
                     previous_outputs={},
                     audio_metadata=audio_metadata if task.stage == "prepare" else None,
+                    db=db,
                 )
             except (
                 EngineUnavailableError,
@@ -613,6 +614,7 @@ async def handle_task_completed(
                     settings=settings,
                     registry=registry,
                     previous_outputs=previous_outputs,
+                    db=db,
                 )
             except (
                 EngineUnavailableError,
@@ -789,6 +791,7 @@ async def handle_task_failed(
                 enqueue_idempotency_key=_retry_enqueue_dedupe_key(
                     task.id, task.retries
                 ),
+                db=db,
             )
         except (
             EngineUnavailableError,
@@ -995,6 +998,7 @@ async def _ensure_retry_enqueued(
             registry=registry,
             previous_outputs=previous_outputs,
             enqueue_idempotency_key=_retry_enqueue_dedupe_key(task.id, task.retries),
+            db=db,
         )
         log.info("retry_enqueued_on_replay", retry_count=task.retries)
     except (

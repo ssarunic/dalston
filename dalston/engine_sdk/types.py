@@ -64,6 +64,7 @@ class EngineInput(Generic[PayloadT]):
         default_factory=dict
     )
     metadata: dict[str, Any] = field(default_factory=dict)
+    artifact_upload_urls: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.audio_path is None:

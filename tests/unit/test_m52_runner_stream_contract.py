@@ -84,26 +84,43 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
     transcript_path = tmp_path / "transcript.json"
     transcript_path.write_text('{"job_id": "job-1"}', encoding="utf-8")
 
-    upload_json_calls: list[tuple[dict, str]] = []
-    upload_file_calls: list[tuple[Path, str]] = []
+    put_json_calls: list[tuple[str, dict]] = []
+    stream_from_file_calls: list[tuple[str, Path, str]] = []
 
+    import dalston.engine_sdk.http as http_module
+
+    # Artifact files are now streamed to presigned PUT URL (M77)
     monkeypatch.setattr(
-        runner_module.io,
-        "upload_json",
-        lambda payload, locator: upload_json_calls.append((payload, locator)),
+        http_module,
+        "stream_from_file",
+        lambda url,
+        source,
+        content_type="application/octet-stream": stream_from_file_calls.append(
+            (url, source, content_type)
+        ),
     )
+    # Task output.json goes via presigned PUT URL (M77)
     monkeypatch.setattr(
-        runner_module.io,
-        "upload_file",
-        lambda source, locator: upload_file_calls.append((source, locator)),
+        runner_module.http,
+        "put_json",
+        lambda url, payload: put_json_calls.append((url, payload)),
     )
+
+    _presigned_output_url = "https://minio:9000/test-bucket/jobs/job-1/tasks/task-1/output.json?sig=presigned"
+    _presigned_transcript_url = (
+        "https://minio:9000/test-bucket/jobs/job-1/transcript.json?sig=artifact"
+    )
+    _transcript_locator = "s3://test-bucket/jobs/job-1/transcript.json"
     monkeypatch.setattr(
         runner,
         "_get_task_metadata",
-        lambda _task_id: {"job_id": "job-1", "stage": "merge"},
+        lambda _task_id: {
+            "job_id": "job-1",
+            "stage": "merge",
+            "output_url": _presigned_output_url,
+        },
     )
     runner._redis = MagicMock()
-    runner.s3_bucket = "test-bucket"
 
     output = EngineOutput(
         data={"job_id": "job-1"},
@@ -123,15 +140,16 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
         job_id="job-1",
         output=output,
         processing_time=1.23,
+        artifact_upload_urls={_transcript_locator: _presigned_transcript_url},
     )
 
-    assert upload_file_calls == [
-        (transcript_path, "s3://test-bucket/jobs/job-1/transcript.json")
-    ]
-    assert len(upload_json_calls) == 1
-    output_payload, output_locator = upload_json_calls[0]
-    assert output_locator == "s3://test-bucket/jobs/job-1/tasks/task-1/output.json"
-    assert (
-        output_payload["canonical_transcript_uri"]
-        == "s3://test-bucket/jobs/job-1/transcript.json"
-    )
+    # Artifact streamed to presigned PUT URL (not loaded into memory)
+    assert len(stream_from_file_calls) == 1
+    upload_url_used, upload_source, upload_content_type = stream_from_file_calls[0]
+    assert upload_url_used == _presigned_transcript_url
+    assert upload_source == transcript_path
+
+    assert len(put_json_calls) == 1
+    output_url_used, output_payload = put_json_calls[0]
+    assert output_url_used == _presigned_output_url
+    assert output_payload["canonical_transcript_uri"] == _transcript_locator

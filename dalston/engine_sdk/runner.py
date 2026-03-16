@@ -35,7 +35,7 @@ from dalston.common.streams_sync import (
     read_task,
 )
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
-from dalston.engine_sdk import io
+from dalston.engine_sdk import http
 from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
@@ -142,7 +142,6 @@ class EngineRunner:
         else:
             self.instance = f"{self.engine_id}-{uuid4().hex[:12]}"
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        self.s3_bucket = os.environ.get("DALSTON_S3_BUCKET", "dalston-artifacts")
         self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
 
         # Configure structured logging (use logical engine_id for aggregation)
@@ -678,7 +677,13 @@ class EngineRunner:
                 # Upload output to S3
                 upload_start = time.time()
                 with dalston.telemetry.create_span("engine.upload_output"):
-                    self._save_task_output(task_id, job_id, output, total_task_time)
+                    self._save_task_output(
+                        task_id,
+                        job_id,
+                        output,
+                        total_task_time,
+                        artifact_upload_urls=task_input.artifact_upload_urls,
+                    )
                 dalston.metrics.observe_engine_s3_upload(
                     self.engine_id,
                     time.time() - upload_start,
@@ -747,13 +752,13 @@ class EngineRunner:
                 )
 
     def _load_task_input(self, task_id: str, temp_dir: Path) -> EngineInput:
-        """Load task input from S3 and materialize required artifacts."""
+        """Load task input via presigned URL and materialize required artifacts."""
         task_metadata = self._get_task_metadata(task_id)
         job_id = task_metadata["job_id"]
         stage = task_metadata.get("stage", "unknown")
 
-        input_uri = io.build_task_input_uri(self.s3_bucket, job_id, task_id)
-        input_data = io.download_json(input_uri)
+        input_json_url = task_metadata["input_json_url"]
+        input_data = http.fetch_json(input_json_url)
 
         # Canonical M51 fields.
         payload = input_data.get("payload")
@@ -787,6 +792,7 @@ class EngineRunner:
             previous_outputs=input_data.get("previous_outputs", {}),
             materialized_artifacts=materialized_artifacts,
             metadata={"resolved_artifact_ids": resolved_artifact_ids},
+            artifact_upload_urls=input_data.get("artifact_upload_urls", {}),
         )
 
     def _get_task_metadata(self, task_id: str) -> dict[str, Any]:
@@ -834,17 +840,17 @@ class EngineRunner:
         job_id: str,
         output: EngineOutput,
         processing_time: float,
+        artifact_upload_urls: dict[str, str] | None = None,
     ) -> None:
-        """Save task output to S3.
+        """Save task output via presigned PUT URL.
 
         Args:
             task_id: Task identifier
             job_id: Job identifier
             output: Task output from engine
             processing_time: Time taken to process in seconds
+            artifact_upload_urls: Presigned PUT URLs keyed by storage locator (M77)
         """
-        output_uri = io.build_task_output_uri(self.s3_bucket, job_id, task_id)
-
         output_data = {
             "task_id": task_id,
             "completed_at": datetime.now(UTC).isoformat(),
@@ -854,8 +860,12 @@ class EngineRunner:
 
         task_metadata = self._get_task_metadata(task_id)
         task_stage = task_metadata.get("stage")
+        output_url = task_metadata["output_url"]
 
-        persisted_artifacts = self._materializer.persist_produced(
+        upload_materializer = ArtifactMaterializer(
+            store=S3ArtifactStore(upload_url_map=artifact_upload_urls or {})
+        )
+        persisted_artifacts = upload_materializer.persist_produced(
             job_id=job_id,
             task_id=task_id,
             stage=task_stage,
@@ -881,8 +891,8 @@ class EngineRunner:
                 canonical_transcript.storage_locator
             )
 
-        io.upload_json(output_data, output_uri)
-        logger.info("output_uploaded", output_uri=output_uri)
+        http.put_json(output_url, output_data)
+        logger.info("output_uploaded", output_url=output_url)
 
         if persisted_artifacts:
             metadata_key = f"dalston:task:{task_id}"
