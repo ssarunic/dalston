@@ -59,13 +59,14 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (3)
+### Not Started (4)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
+| [M78](milestones/M78-infrastructure-topology-view.md) | Infrastructure Topology View | Node-level view showing engine co-location, instance counts, and local vs AWS environment |
 
 ---
 
@@ -106,6 +107,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M17](milestones/M17-api-key-management.md) | API Key Management | Web UI for creating/revoking API keys | 2-3 | Completed |
 | [M27](milestones/M27-console-ux-improvements.md) | Console UX Improvements | Slide-over panels, audio player, search, responsive design | 8-10 | Not Started |
 | [M35](milestones/M35-settings-page.md) | Settings Page | Admin console for viewing/editing system config without redeploying | 4-5 | Not Started |
+| [M78](milestones/M78-infrastructure-topology-view.md) | Infrastructure Topology View | Node cards showing engine co-location, GPU usage, instance counts, and local vs AWS environment | 3-5 | Not Started |
 
 ## Observability Milestones
 
@@ -285,6 +287,8 @@ M57.1 + M58 + M36 + M40 ──► M59 (runtime isolation profiles)
 M57 + M59 ──► M60 (one-line distribution + packaging)
 
 M10 + M11 + M15 ──► M35
+
+M64 + M69 ──► M78 (infrastructure topology view)
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -366,3 +370,4 @@ Each milestone has a verification section. Key checkpoints:
 | M58 | Lite mode supports explicit profiles/capability matrix and fails unsupported combinations deterministically with actionable guidance |
 | M59 | Runtimes execute through declared isolation profiles (`inproc`/`venv`/`container`) while preserving shared task/output contracts |
 | M60 | Documented one-line install channels pass cross-platform install + first-run smoke gates before release publication |
+| M78 | Infrastructure page shows node cards; engines grouped by host; AWS nodes show EC2 instance ID, AZ, and instance type; local nodes show "Local dev" badge |
