@@ -16,6 +16,8 @@ import pytest
 
 httpx = pytest.importorskip("httpx")
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(
     params=[
