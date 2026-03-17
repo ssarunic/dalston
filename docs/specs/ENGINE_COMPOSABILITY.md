@@ -587,160 +587,170 @@ batch mode with a clear indication to the client.
 
 ## 10. Implementation Roadmap
 
-The implementation follows vertical slices, with each milestone delivering
-working end-to-end functionality. Each step is independently deployable.
+The implementation builds bottom-up: start with individual engine containers,
+prove the interface contract works in practice, then expand horizontally to
+other engine types, and only then vertically into composability and
+orchestration. Each layer is validated before the next one begins. This
+matters not just for risk management but because hands-on experience with
+each component informs whether the interface needs tweaking before it
+becomes load-bearing for the layers above.
 
-### Step 1: Stage-Keyed Result Envelope
+### Layer 1: Transcription Engine APIs (onnx-asr, faster-whisper)
 
-Introduce the `results: dict[str, StageResult]` pattern alongside the
-existing fixed-field output.
+Start with the two transcription runners Dalston already has. Give each
+container a proper HTTP control plane: health, capability introspection,
+and structured result output. This is where the engine interface contract
+(§3) gets tested against reality.
 
-**Files modified:**
+**Step 1a: `onnx-asr` engine API**
 
-- `dalston/common/pipeline_types.py` — Add `StageResultEnvelope` model with
-  stage-keyed results dict
-- `dalston/common/transcript.py` — Update `assemble_transcript()` to also
-  produce the stage-keyed envelope internally (dual-write)
-- `dalston/engine_sdk/types.py` — Add `stages_completed` field to
-  `TaskResponse`
+Add HTTP endpoints to the existing Parakeet ONNX engine container:
 
-**Deliverables:**
+- `GET /health` — readiness, loaded model, available resources
+- `GET /v1/capabilities` — runtime capability introspection (stages,
+  languages, streaming support). Returns actual capabilities, not just
+  what the engine card declares.
+- `POST /v1/transcribe` — accepts audio + config, returns structured
+  result with the stage-keyed envelope format from §3.3
+- Engine card (`engine.yaml`) updated to declare `stages: [transcription,
+  alignment]` and `languages: [en]`
 
-```python
-class StageResultEnvelope(BaseModel):
-    """Internal result envelope between engines and orchestrator."""
-    job_id: str
-    status: str  # "completed", "partial", "failed"
-    stages_completed: list[str]
-    results: dict[str, BaseModel]  # stage name → typed stage output
-    engine: str
-    duration_ms: int
-```
+**Step 1b: `faster-whisper` engine API**
 
-The existing `MergeResponse` continues to be the API-facing output. The
-envelope is an internal contract.
+Same contract, different runner. The faster-whisper engine gets the
+identical HTTP surface:
 
----
+- Same endpoints: `/health`, `/v1/capabilities`, `/v1/transcribe`
+- Engine card declares `stages: [transcription]` (or
+  `[transcription, alignment]` if word timestamps are enabled)
+- The result format is identical to 1a — the orchestrator cannot tell
+  which runner produced the output
 
-### Step 2: Multi-Stage Capability Declaration
+**Why these two first:** They are the simplest engines (single-stage,
+in-process Python, no gRPC). They exercise the full interface contract
+without the complexity of multi-stage coverage or vendor protocol
+translation. If the contract needs adjustment, it's cheap to change now.
 
-Extend `EngineCapabilities` and the engine card schema to support engines that
-cover multiple stages.
-
-**Files modified:**
-
-- `dalston/engine_sdk/types.py` — `EngineCapabilities` already has `stages:
-  list[str]`; add `languages` field
-- `dalston/engine_sdk/base.py` — `get_capabilities()` parses the extended
-  card fields
-- `dalston/orchestrator/engine_selector.py` — Selection considers multi-stage
-  engines as covering all declared stages
-- `dalston/orchestrator/dag.py` — DAG builder elides stages covered by a
-  multi-stage engine (generalise the current `skip_alignment` /
-  `skip_diarization` pattern)
-
-**Deliverables:**
-
-The DAG builder uses `capabilities.stages` instead of checking individual
-boolean flags. A transcriber declaring `stages: [transcription, alignment,
-diarisation]` causes all three downstream stages to be elided, replacing
-the current `supports_word_timestamps` / `includes_diarization` special
-cases with a single generalised rule.
+**Validation gate:** Both engines pass the same integration test suite —
+submit audio, get back a stage-keyed result, verify capability
+introspection matches actual behaviour. The test suite becomes the
+executable specification for all future engines.
 
 ---
 
-### Step 3: `nim-riva` Engine Driver (Multi-Stage)
+### Layer 2: Horizontal Expansion to Other Engine Types
 
-Formalise the existing Riva engine as a multi-stage `nim-riva` driver with
-full parameter mapping and result translation.
+With the interface contract proven on two transcription engines, replicate
+the pattern to other engine types. Each engine gets the same HTTP surface.
 
-**Files modified:**
+**Step 2a: Diarisation engine (`diarize-pyannote`)**
 
-- `engines/stt-unified/riva/engine.yaml` — Declare multi-stage capabilities
-- `engines/stt-unified/riva/batch_engine.py` — Return results covering all
-  stages the NIM container handled (transcription + alignment + diarisation)
-- `engines/stt-unified/riva/riva_client.py` — Add parameter mapping for
-  diarisation, punctuation, word boosting
+- Same HTTP endpoints as Layer 1
+- Engine card: `stages: [diarisation]`, `languages: [en, multilingual]`
+- First non-transcription engine — validates that the stage-keyed result
+  format works for diarisation output (speaker segments, not text)
 
-**Deliverables:**
+**Step 2b: Multi-stage engines (`nim-riva`)**
 
-- NIM containers register with their actual multi-stage capabilities
-- The driver populates the stage-keyed result envelope with all stages it
-  handled
-- Health check integration via NIM's `/v1/health/ready`
-- Runtime capability introspection detects whether diarisation is available
-  (Sortformer profile loaded or not)
+- The NIM/Riva driver already exists. Formalise its HTTP surface to match
+  the contract from Layer 1.
+- Engine card declares multiple stages:
+  `stages: [transcription, alignment, diarisation, punctuation]`
+- The driver's `/v1/capabilities` endpoint returns only the stages
+  actually available at runtime (depends on NIM deployment profile)
+- gRPC translation happens inside the driver — the external HTTP surface
+  is identical to any other engine
+- This is where the multi-stage capability declaration (§3.1 reconciliation
+  rule) gets tested in practice
+
+**Step 2c: Remaining engines (PII, alignment, merge)**
+
+- Each gets the same HTTP surface
+- By this point the pattern is mechanical — the interface contract is
+  stable and proven across transcription, diarisation, and multi-stage
+  engines
+
+**Validation gate:** Every engine in the fleet passes the same integration
+test suite. The orchestrator can query any engine's capabilities and
+receive results in the same format. The engine card schema and the runtime
+introspection endpoint are stable.
 
 ---
 
-### Step 4: Composite Engine Type
+### Layer 3: Composability
 
-Implement the composite engine type with sequential and parallel-after-gate
-execution.
+Only after individual engines have stable, proven APIs do we introduce
+composition. Composites are built from engines whose interfaces are already
+working and tested.
 
-**Files modified:**
+**Step 3a: Composite engine card and validation**
 
-- `dalston/orchestrator/composite.py` *(new)* — Composite resolution, tree
-  flattening, resource aggregation
-- `dalston/orchestrator/dag.py` — DAG builder resolves composites into
-  concrete task sub-graphs
-- `dalston/orchestrator/scheduler.py` — All-or-nothing resource reservation
-  for composite children
-- `dalston/common/pipeline_types.py` — Composite engine card schema
+- Define the composite engine card schema (`type: composite`, `compose`
+  block listing children and their stages)
+- Validate: no stage duplication, capability union matches children,
+  all referenced engines exist
+- No execution yet — just the declaration and validation layer
 
-**Deliverables:**
+**Step 3b: Sequential composite execution**
 
-- Composite engine cards parsed and validated (no stage duplication, capability
-  union correctness)
-- Composite resolved to concrete task DAG at scheduling time
-- Sequential and `parallelise_after` execution modes
-- Result merging: accumulate stage-keyed results across children
+- The orchestrator resolves a composite into a concrete task sub-graph
+- Children execute sequentially, each receiving the accumulated result
+  from prior children
+- Result merging: accumulate stage-keyed results across children into
+  a single envelope
+
+**Step 3c: Parallel fan-out composites**
+
+- `parallelise_after` execution mode: independent stages that share
+  the same dependency run concurrently
+- Resource scheduling: all-or-nothing reservation for parallel children,
+  sequential acquire-release for sequential children
 - Partial result handling on non-critical child failure
-- All-or-nothing resource reservation (or sequential acquire-release for
-  sequential composites)
+
+**Validation gate:** A composite like `meeting-english` (Parakeet +
+pyannote + presidio) produces the same result format as a monolithic
+NIM container that covers the same stages. The orchestrator cannot
+distinguish a leaf from a composite.
 
 ---
 
-### Step 5: Capability Profiles
+### Layer 4: Orchestration Integration
 
-Profile definition, resolution, and API integration.
+The orchestrator is the last component to change. By this point, every
+engine has a stable API, composites work, and the interface contract is
+proven across all engine types.
 
-**Files modified:**
+**Step 4a: Generalised DAG building**
 
-- `dalston/orchestrator/profiles.py` *(new)* — Profile loading and resolution
-- `dalston/gateway/api/v1/transcription.py` — Accept `profile` parameter on
-  job submission
-- `dalston/orchestrator/engine_selector.py` — Profile resolution feeds into
-  engine selection
+- Replace the current `skip_alignment` / `skip_diarization` boolean
+  checks with a single rule: if the selected engine's `stages` list
+  covers a downstream stage, elide it
+- The DAG builder uses `capabilities.stages` instead of individual flags
+- This is a simplification of existing code, not new complexity
 
-**Deliverables:**
+**Step 4b: Capability Profiles**
 
 - Profile YAML schema and loader
 - `profile` parameter on `POST /v1/audio/transcriptions` and
   `POST /v1/jobs`
 - Built-in profiles: `fast-english`, `meeting`, `multilingual`
 - Client parameter overrides (shallow merge, client wins)
-- Console UI: profile selector on job submission page
 
----
+**Step 4c: Stage-keyed result envelope in the API**
 
-### Step 6: Riva gRPC Compatibility Shim (Optional, Future)
+- The internal stage-keyed envelope (used between engines and
+  orchestrator since Layer 1) is optionally exposed in the API
+  via a `response_format=detailed` parameter
+- The existing `MergeResponse` remains the default API output —
+  nothing changes for current consumers
 
-A thin gRPC server that accepts Riva protocol calls and translates them to
-Dalston native jobs.
+**Step 4d: Riva gRPC compatibility shim (optional, future)**
 
-**Files modified:**
-
-- `dalston/gateway/riva_shim/` *(new)* — gRPC server, request/response
-  translation
-- Proto files for `RivaSpeechRecognition` service
-
-**Deliverables:**
-
-- `Recognize` and `StreamingRecognize` RPCs
-- Translation from `RecognitionConfig` to Dalston native job parameters
-- Response translation back to Riva's response protos
-- Port 50051 alongside the existing HTTP gateway on 8000
+- Thin gRPC server accepting Riva protocol calls, translating to
+  Dalston native jobs
+- `Recognize` and `StreamingRecognize` RPCs on port 50051
+- Only worth building when there is concrete demand from NIM migration
+  users
 
 ---
 
