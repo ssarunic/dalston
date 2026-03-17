@@ -66,6 +66,7 @@ engine-sdk = [
     # HTTP server for engine interface contract (M79)
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
+    "python-multipart>=0.0.20",
 ]
 realtime-sdk = [
     "websockets>=12.0",
