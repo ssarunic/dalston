@@ -1,14 +1,13 @@
-"""HTTP server subclass for combined (composite) engines.
+"""HTTP server subclass for composite engines.
 
-Adds ``POST /v1/transcribe_and_diarize`` to the base ``EngineHTTPServer``
-endpoints.  Also exposes the individual ``/v1/transcribe`` and ``/v1/diarize``
-endpoints so that the combined engine satisfies the interface contract for
-both stages independently.
+Registers ``POST /v1/{stage}`` endpoints for every stage the composite
+covers, plus a combined ``POST /v1/transcribe_and_diarize`` when the
+engine covers both transcription and diarization.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -20,24 +19,34 @@ from dalston.engine_sdk.http_server import (
 )
 from dalston.engine_sdk.types import TaskRequest
 
-if TYPE_CHECKING:
-    from dalston.engine_sdk.base import Engine
-
 
 class CombinedHTTPServer(EngineHTTPServer):
-    """HTTP server for combined transcription + diarization engines.
+    """HTTP server for composite engines covering multiple stages.
 
-    Extends the base server with:
-
-    - ``POST /v1/transcribe`` — transcription only
-    - ``POST /v1/diarize`` — diarization only
-    - ``POST /v1/transcribe_and_diarize`` — both in parallel, merged result
+    Dynamically registers endpoints based on the engine's declared stages.
     """
 
     def _register_stage_endpoints(self, app: FastAPI) -> None:
         engine = self._engine
         engine_id = self._engine_id
+        caps = engine.get_capabilities()
+        stages = set(caps.stages)
 
+        if "transcribe" in stages:
+            self._register_transcribe(app, engine, engine_id)
+
+        if "diarize" in stages:
+            self._register_diarize(app, engine, engine_id)
+
+        if "transcribe" in stages and "diarize" in stages:
+            self._register_combined(app, engine, engine_id)
+
+    # ------------------------------------------------------------------
+    # Individual stage endpoints
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _register_transcribe(app: FastAPI, engine, engine_id: str) -> None:
         @app.post("/v1/transcribe")
         async def transcribe(
             file: Annotated[
@@ -91,6 +100,8 @@ class CombinedHTTPServer(EngineHTTPServer):
                 stage="transcribe",
             )
 
+    @staticmethod
+    def _register_diarize(app: FastAPI, engine, engine_id: str) -> None:
         @app.post("/v1/diarize")
         async def diarize(
             file: Annotated[
@@ -141,6 +152,8 @@ class CombinedHTTPServer(EngineHTTPServer):
                 stage="diarize",
             )
 
+    @staticmethod
+    def _register_combined(app: FastAPI, engine, engine_id: str) -> None:
         @app.post("/v1/transcribe_and_diarize")
         async def transcribe_and_diarize(
             file: Annotated[

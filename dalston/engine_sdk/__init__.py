@@ -98,6 +98,14 @@ def __getattr__(name: str):
         from dalston.engine_sdk.http_diarize import DiarizeHTTPServer
 
         return DiarizeHTTPServer
+    if name == "CombinedHTTPServer":
+        from dalston.engine_sdk.http_combined import CombinedHTTPServer
+
+        return CombinedHTTPServer
+    if name == "CompositeEngine":
+        from dalston.engine_sdk.base_composite import CompositeEngine
+
+        return CompositeEngine
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -110,7 +118,10 @@ __all__ = [
     "TaskRequest",
     "TaskResponse",
     "BatchTaskContext",
+    # Composite engine
+    "CompositeEngine",
     # HTTP servers (M79)
+    "CombinedHTTPServer",
     "DiarizeHTTPServer",
     "EngineHTTPServer",
     "TranscribeHTTPServer",
