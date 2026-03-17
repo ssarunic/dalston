@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from dalston.engine_sdk.context import BatchTaskContext
@@ -113,6 +113,8 @@ class EngineHTTPServer:
 # Shared helpers for stage-specific HTTP servers
 # ---------------------------------------------------------------------------
 
+_UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
 
 async def resolve_audio(
     file: UploadFile | None,
@@ -125,12 +127,8 @@ async def resolve_audio(
     clean up via ``cleanup_audio(path)``.
     """
     if file and audio_url:
-        from fastapi import HTTPException
-
         raise HTTPException(400, "Provide either 'file' or 'audio_url', not both")
     if not file and not audio_url:
-        from fastapi import HTTPException
-
         raise HTTPException(400, "Provide 'file' or 'audio_url'")
 
     if file:
@@ -140,12 +138,17 @@ async def resolve_audio(
 
 
 async def _save_upload(file: UploadFile) -> Path:
-    """Save an uploaded file to a temp directory."""
+    """Save an uploaded file to a temp directory (streaming, not buffered)."""
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
     temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
     dest = temp_dir / f"audio{suffix}"
-    content = await file.read()
-    dest.write_bytes(content)
+    try:
+        with dest.open("wb") as f:
+            while chunk := await file.read(_UPLOAD_CHUNK_SIZE):
+                f.write(chunk)
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
     return dest
 
 
@@ -154,13 +157,17 @@ def _download_url(url: str) -> Path:
     temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
     dest = temp_dir / "audio.wav"
 
-    if url.startswith("s3://"):
-        from dalston.engine_sdk import io
+    try:
+        if url.startswith("s3://"):
+            from dalston.engine_sdk import io
 
-        return io.download_file(url, dest)
+            return io.download_file(url, dest)
 
-    # HTTPS / HTTP URL
-    urllib.request.urlretrieve(url, dest)
+        # HTTPS / HTTP URL
+        urllib.request.urlretrieve(url, dest)
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
     return dest
 
 
