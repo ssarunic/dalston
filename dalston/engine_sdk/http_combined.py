@@ -257,6 +257,10 @@ class CombinedHTTPServer(EngineHTTPServer):
             max_speakers: Annotated[
                 int | None, Form(description="Maximum speakers")
             ] = None,
+            model_align: Annotated[
+                str | None,
+                Form(description="Alignment model to use"),
+            ] = None,
         ) -> dict:
             audio_path = await resolve_audio(file, audio_url)
 
@@ -278,6 +282,8 @@ class CombinedHTTPServer(EngineHTTPServer):
                 config["min_speakers"] = min_speakers
             if max_speakers is not None:
                 config["max_speakers"] = max_speakers
+            if model_align:
+                config["align_model_id"] = model_align
 
             task_request = TaskRequest(
                 task_id=str(uuid4()),

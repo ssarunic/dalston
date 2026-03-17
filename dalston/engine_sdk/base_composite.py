@@ -277,7 +277,13 @@ class CompositeEngine(Engine):
     ) -> TaskResponse:
         """Run a single child engine for one stage."""
         config = {k: v for k, v in task_request.config.items() if k != "_stage"}
-        result = self._call_child(child, stage, task_request.audio_path, config)
+        result = self._call_child(
+            child,
+            stage,
+            task_request.audio_path,
+            config,
+            previous_results=task_request.previous_responses,
+        )
         return TaskResponse(data=result)
 
     def _run_all(
