@@ -241,8 +241,26 @@ class EngineRunner:
         stage-specific POST endpoints.  Same port (9100 default), same
         paths — existing healthchecks and Prometheus scrape configs are
         unaffected.
+
+        In unified engines the realtime runner already binds this port
+        (aiohttp with ``/health``, ``/metrics``, ``/v1/capabilities``),
+        so we probe first and skip if the port is occupied.
         """
+        import socket
+
         try:
+            # Probe whether the port is already bound (e.g. by the
+            # realtime runner in a unified engine).  If so, skip — the
+            # realtime server already serves the M79 endpoints.
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                if s.connect_ex(("127.0.0.1", self.metrics_port)) == 0:
+                    logger.info(
+                        "http_server_skipped_port_in_use",
+                        port=self.metrics_port,
+                    )
+                    return
+
             http_server = self.engine.create_http_server(port=self.metrics_port)
             self._http_thread = threading.Thread(
                 target=lambda: asyncio.run(http_server.serve()),

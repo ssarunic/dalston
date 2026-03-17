@@ -58,7 +58,14 @@ _is_sqlite = "sqlite" in _configured_url
 
 def _make_context_kwargs() -> dict:
     """Return context.configure() kwargs appropriate for the active dialect."""
-    kwargs: dict = {"target_metadata": target_metadata}
+    import sqlalchemy as sa
+
+    kwargs: dict = {
+        "target_metadata": target_metadata,
+        # Revision IDs are descriptive slugs (e.g. "0002_drop_realtime_enhance_on_end")
+        # which exceed Alembic's default VARCHAR(32).
+        "version_num_type": sa.String(128),
+    }
     if _is_sqlite:
         # SQLite requires batch mode to emulate ALTER TABLE operations.
         kwargs["render_as_batch"] = True
