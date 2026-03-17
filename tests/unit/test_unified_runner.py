@@ -149,7 +149,10 @@ class TestTaskDeferredError:
             mock_engine.process.side_effect = TaskDeferredError("rejected")
 
             with pytest.raises(TaskDeferredError):
-                runner._process_task("task-001")
+                runner._process_task(
+                    "task-001",
+                    {"job_id": "job-001", "stage": "transcribe"},
+                )
 
             # Failure event should NOT have been published
             mock_fail.assert_not_called()

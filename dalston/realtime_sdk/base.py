@@ -554,7 +554,7 @@ class RealtimeEngine(ABC):
             await asyncio.sleep(10)
 
     async def _start_metrics_server(self) -> None:
-        """Start metrics HTTP server for Prometheus scraping (M20)."""
+        """Start HTTP server for metrics, health, and engine interface (M20, M79)."""
         if not dalston.metrics.is_metrics_enabled():
             logger.debug("metrics_disabled_skipping_server")
             return
@@ -563,6 +563,7 @@ class RealtimeEngine(ABC):
             app = web.Application()
             app.router.add_get("/metrics", self._handle_metrics)
             app.router.add_get("/health", self._handle_health_http)
+            app.router.add_get("/v1/capabilities", self._handle_capabilities)
 
             self._metrics_runner = web.AppRunner(app)
             await self._metrics_runner.setup()
@@ -593,6 +594,11 @@ class RealtimeEngine(ABC):
     async def _handle_health_http(self, request: web.Request) -> web.Response:
         """Handle /health endpoint via HTTP."""
         return web.json_response(self.health_check())
+
+    async def _handle_capabilities(self, request: web.Request) -> web.Response:
+        """Handle /v1/capabilities endpoint (M79)."""
+        caps = self.get_capabilities()
+        return web.json_response(caps.model_dump(mode="json"))
 
     async def _handle_connection(
         self,

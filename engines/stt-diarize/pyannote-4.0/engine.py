@@ -157,6 +157,12 @@ class PyannoteEngine(Engine):
         self.logger.info("pyannote_4_0_pipeline_loaded_successfully")
         return pipeline
 
+    def create_http_server(self, port: int = 9100):  # type: ignore[override]  # covariant return
+        """Return a ``DiarizeHTTPServer`` with ``POST /v1/diarize``."""
+        from dalston.engine_sdk.http_diarize import DiarizeHTTPServer
+
+        return DiarizeHTTPServer(engine=self, port=port)
+
     def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file.
 

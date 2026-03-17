@@ -83,6 +83,24 @@ from dalston.engine_sdk.types import (
     TaskResponse,
 )
 
+
+def __getattr__(name: str):
+    """Lazy imports for HTTP server classes that depend on FastAPI."""
+    if name == "EngineHTTPServer":
+        from dalston.engine_sdk.http_server import EngineHTTPServer
+
+        return EngineHTTPServer
+    if name == "TranscribeHTTPServer":
+        from dalston.engine_sdk.http_transcribe import TranscribeHTTPServer
+
+        return TranscribeHTTPServer
+    if name == "DiarizeHTTPServer":
+        from dalston.engine_sdk.http_diarize import DiarizeHTTPServer
+
+        return DiarizeHTTPServer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     # Core SDK
     "BaseBatchTranscribeEngine",
@@ -92,6 +110,10 @@ __all__ = [
     "TaskRequest",
     "TaskResponse",
     "BatchTaskContext",
+    # HTTP servers (M79)
+    "DiarizeHTTPServer",
+    "EngineHTTPServer",
+    "TranscribeHTTPServer",
     # Model management (M39.2)
     "LoadedModel",
     "ModelManager",

@@ -5,13 +5,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 from threading import Lock
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 import structlog
 import yaml
 
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
+
+if TYPE_CHECKING:
+    from dalston.engine_sdk.http_server import EngineHTTPServer
 
 # Paths for engine.yaml (container path first, local fallback second)
 ENGINE_YAML_PATHS = [
@@ -163,6 +166,18 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
             Expected format: {"models": ["model-a", "model-b"], "total_size_mb": 3500, "model_count": 2}
         """
         return None
+
+    def create_http_server(self, port: int = 9100) -> EngineHTTPServer:
+        """Create the HTTP server for this engine.
+
+        Override in subclasses to return a stage-specific server (e.g.
+        ``TranscribeHTTPServer``, ``DiarizeHTTPServer``).  The default
+        returns the base ``EngineHTTPServer`` which serves ``/health``,
+        ``/metrics``, and ``/v1/capabilities`` only.
+        """
+        from dalston.engine_sdk.http_server import EngineHTTPServer
+
+        return EngineHTTPServer(engine=self, port=port)
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return engine capabilities for registration and validation.
