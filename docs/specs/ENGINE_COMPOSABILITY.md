@@ -357,8 +357,9 @@ compose:
     stages: [pii_detection]
 
 pipeline:
-  mode: sequential
-  parallelise_after: [transcription, alignment]
+  mode: parallel
+  parallel: [transcription, diarisation]
+  sequential_after: [pii_detection]
   error_strategy: partial_result
 ```
 
@@ -368,16 +369,18 @@ pipeline:
 receives the accumulated result from prior stages. This is the simplest mode
 and matches the current DAG execution model.
 
-**Parallel fan-out after a gate stage.** Independent stages that share the same
-dependency can run concurrently. In the example above,
-`parallelise_after: [transcription, alignment]` means diarisation and PII
-detection both depend on transcription + alignment output, but not on each
-other, so they run in parallel.
+**Parallel with sequential tail.** Independent stages that don't depend on
+each other's output run concurrently. In the example above, transcription
+(with alignment) and diarisation both take audio as input and don't depend
+on each other, so they run in parallel. PII detection needs both
+transcription text and speaker labels, so it waits for both to complete.
 
 ```
-parakeet-tdt ──────┬──▶ pyannote-4.0  ──┐
-(transcription,    │                      ├──▶ merge
- alignment)        └──▶ pii-presidio ────┘
+              ┌──▶ parakeet-tdt ──────┐
+audio ────────┤    (transcription,    ├──▶ pii-presidio ──▶ merge
+              │     alignment)        │    (pii_detection)
+              └──▶ pyannote-4.0 ─────┘
+                   (diarisation)
 ```
 
 This is a meaningful optimisation without the complexity of full DAG execution
@@ -564,24 +567,32 @@ NIM/Riva deployments: swap the endpoint URL, everything else works.
 Streaming adds significant complexity to composability. The initial approach is
 pragmatic:
 
-- **Leaf engines can stream natively.** If a NIM container or a faster-whisper
-  engine supports streaming, the Dalston driver exposes it directly. The
-  session router connects the client's stream to the engine's stream (via the
-  existing `realtime_sdk` infrastructure).
+- **Native streaming.** Some engines support streaming natively (NIM,
+  faster-whisper in streaming mode). The Dalston driver exposes the engine's
+  stream directly. The session router connects the client's WebSocket to the
+  engine's stream via the existing `realtime_sdk` infrastructure.
+
+- **VAD-wrapped streaming.** Engines that don't support native streaming can
+  still participate in real-time pipelines via Dalston's VAD-based streaming
+  wrapper. The wrapper segments incoming audio by silence detection (VAD) and
+  maximum chunk duration, transcribes each utterance as a batch call to the
+  engine, and streams partial results back to the client. This is not an
+  afterthought — it is a first-class streaming mode that makes any batch
+  transcription engine usable in real-time contexts, at the cost of
+  utterance-boundary latency.
+
+- **Engine card declaration.** An engine declares `streaming: native` if it
+  handles streaming internally, or `streaming: vad-wrapped` if it relies on
+  the Dalston wrapper. Engines that support neither declare `streaming: false`.
+  The session router uses this to determine connection strategy.
 
 - **Composites are batch-only initially.** Coordinating chunk-level handoffs
   between sub-engines in a composite (e.g. feeding partial transcription
   results to a diariser in real time) is a hard problem. The first version of
-  composites operates in batch mode only.
-
-- **Streaming composites are a future milestone.** When required, streaming
-  composites will need a chunked coordination protocol. This is explicitly
-  deferred.
-
-A streaming-capable leaf engine declares `streaming: true` in its engine card.
-The orchestrator uses this to determine whether a given job can be served in
-streaming mode. If the selected engine is a composite, the job falls back to
-batch mode with a clear indication to the client.
+  composites operates in batch mode only. A composite that receives a
+  streaming request falls back to batch mode with a clear indication to the
+  client. Streaming composites are a future milestone requiring a chunked
+  coordination protocol.
 
 ---
 
@@ -595,12 +606,12 @@ matters not just for risk management but because hands-on experience with
 each component informs whether the interface needs tweaking before it
 becomes load-bearing for the layers above.
 
-### Layer 1: Transcription Engine APIs (onnx-asr, faster-whisper)
+### Layer 1: Core Engine APIs (transcription + diarisation)
 
-Start with the two transcription runners Dalston already has. Give each
-container a proper HTTP control plane: health, capability introspection,
-and structured result output. This is where the engine interface contract
-(§3) gets tested against reality.
+Start with the minimum set of engines needed to prove the interface contract
+*and* to attempt composition: two transcription runners and one diarisation
+engine. Three engines is enough to validate the contract across different
+stage types and to have real inputs for Layer 2.
 
 **Step 1a: `onnx-asr` engine API**
 
@@ -626,31 +637,80 @@ identical HTTP surface:
 - The result format is identical to 1a — the orchestrator cannot tell
   which runner produced the output
 
-**Why these two first:** They are the simplest engines (single-stage,
-in-process Python, no gRPC). They exercise the full interface contract
-without the complexity of multi-stage coverage or vendor protocol
-translation. If the contract needs adjustment, it's cheap to change now.
+**Step 1c: `diarize-pyannote` engine API**
 
-**Validation gate:** Both engines pass the same integration test suite —
-submit audio, get back a stage-keyed result, verify capability
+First non-transcription engine. Validates that the interface contract and
+stage-keyed result format work for a fundamentally different output type
+(speaker segments, not text).
+
+- Same HTTP endpoints as 1a/1b
+- Engine card: `stages: [diarisation]`
+- The result envelope contains a `diarisation` key with speaker segments,
+  not a `transcription` key — this is where the stage-keyed design proves
+  its worth
+
+**Why these three:** They are the minimum set that exercises the contract
+across different stage types (transcription vs. diarisation) and different
+runners (ONNX vs. CTranslate2 vs. pyannote). More importantly, they are
+the exact engines needed to build the first composite in Layer 2. We don't
+need to API-ify the entire fleet before testing composition — we just need
+enough working pieces to snap together.
+
+**Validation gate:** All three engines pass the same integration test
+suite — submit audio, get back a stage-keyed result, verify capability
 introspection matches actual behaviour. The test suite becomes the
 executable specification for all future engines.
 
 ---
 
-### Layer 2: Horizontal Expansion to Other Engine Types
+### Layer 2: First Composite
 
-With the interface contract proven on two transcription engines, replicate
-the pattern to other engine types. Each engine gets the same HTTP surface.
+With transcription and diarisation engines working, compose them into a
+single logical unit. This is where we find out whether the interface
+contract actually composes — before committing to API-ifying every
+remaining engine.
 
-**Step 2a: Diarisation engine (`diarize-pyannote`)**
+**Step 2a: Composite engine card and validation**
 
-- Same HTTP endpoints as Layer 1
-- Engine card: `stages: [diarisation]`, `languages: [en, multilingual]`
-- First non-transcription engine — validates that the stage-keyed result
-  format works for diarisation output (speaker segments, not text)
+- Define the composite engine card schema (`type: composite`, `compose`
+  block listing children and their stages)
+- Validate: no stage duplication, capability union matches children,
+  all referenced engines exist
+- No execution yet — just the declaration and validation layer
 
-**Step 2b: Multi-stage engines (`nim-riva`)**
+**Step 2b: Parallel composite execution**
+
+- The first composite is `meeting-english`: Parakeet (transcription +
+  alignment) and pyannote (diarisation) running in parallel, since
+  neither depends on the other's output
+- The orchestrator resolves the composite into a concrete task sub-graph
+- Result merging: accumulate stage-keyed results across children into
+  a single envelope
+- Resource scheduling: all-or-nothing reservation for parallel children
+
+**Step 2c: Sequential tail after parallel fan-out**
+
+- Add PII detection as a sequential stage that waits for both
+  transcription and diarisation to complete
+- This validates the full execution model: parallel fan-out followed
+  by a sequential dependency
+- Partial result handling on non-critical child failure
+
+**Validation gate:** The composite `meeting-english` (Parakeet + pyannote)
+produces the same result format as a hypothetical monolithic engine that
+covers the same stages. The orchestrator cannot distinguish a leaf from
+a composite. The lessons learned here — what worked, what needed tweaking
+in the contract — feed back into the remaining engine APIs.
+
+---
+
+### Layer 3: Horizontal Expansion
+
+With the contract proven end-to-end (individual engines → composite), now
+expand to the remaining engine types. The interface is stable; this is
+mechanical replication.
+
+**Step 3a: Multi-stage engines (`nim-riva`)**
 
 - The NIM/Riva driver already exists. Formalise its HTTP surface to match
   the contract from Layer 1.
@@ -663,54 +723,16 @@ the pattern to other engine types. Each engine gets the same HTTP surface.
 - This is where the multi-stage capability declaration (§3.1 reconciliation
   rule) gets tested in practice
 
-**Step 2c: Remaining engines (PII, alignment, merge)**
+**Step 3b: Remaining engines (PII, alignment, merge)**
 
 - Each gets the same HTTP surface
 - By this point the pattern is mechanical — the interface contract is
-  stable and proven across transcription, diarisation, and multi-stage
-  engines
+  stable and proven across transcription, diarisation, composites, and
+  multi-stage engines
 
 **Validation gate:** Every engine in the fleet passes the same integration
 test suite. The orchestrator can query any engine's capabilities and
-receive results in the same format. The engine card schema and the runtime
-introspection endpoint are stable.
-
----
-
-### Layer 3: Composability
-
-Only after individual engines have stable, proven APIs do we introduce
-composition. Composites are built from engines whose interfaces are already
-working and tested.
-
-**Step 3a: Composite engine card and validation**
-
-- Define the composite engine card schema (`type: composite`, `compose`
-  block listing children and their stages)
-- Validate: no stage duplication, capability union matches children,
-  all referenced engines exist
-- No execution yet — just the declaration and validation layer
-
-**Step 3b: Sequential composite execution**
-
-- The orchestrator resolves a composite into a concrete task sub-graph
-- Children execute sequentially, each receiving the accumulated result
-  from prior children
-- Result merging: accumulate stage-keyed results across children into
-  a single envelope
-
-**Step 3c: Parallel fan-out composites**
-
-- `parallelise_after` execution mode: independent stages that share
-  the same dependency run concurrently
-- Resource scheduling: all-or-nothing reservation for parallel children,
-  sequential acquire-release for sequential children
-- Partial result handling on non-critical child failure
-
-**Validation gate:** A composite like `meeting-english` (Parakeet +
-pyannote + presidio) produces the same result format as a monolithic
-NIM container that covers the same stages. The orchestrator cannot
-distinguish a leaf from a composite.
+receive results in the same format.
 
 ---
 
