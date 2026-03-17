@@ -103,7 +103,7 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment]
   languages: [en]
-  streaming: false
+  streaming: vad-wrapped
   max_audio_duration: 7200
 
 hardware:
@@ -269,7 +269,7 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment, diarisation, punctuation]
   languages: [en]
-  streaming: true
+  streaming: native
 
 hardware:
   gpu_required: true
@@ -346,7 +346,7 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment, diarisation, pii_detection]
   languages: [en]
-  streaming: false
+  streaming: false              # composites are batch-only in v1
 
 compose:
   - engine: parakeet-tdt-0.6b-v3
@@ -572,19 +572,19 @@ pragmatic:
   stream directly. The session router connects the client's WebSocket to the
   engine's stream via the existing `realtime_sdk` infrastructure.
 
-- **VAD-wrapped streaming.** Engines that don't support native streaming can
-  still participate in real-time pipelines via Dalston's VAD-based streaming
-  wrapper. The wrapper segments incoming audio by silence detection (VAD) and
-  maximum chunk duration, transcribes each utterance as a batch call to the
-  engine, and streams partial results back to the client. This is not an
-  afterthought — it is a first-class streaming mode that makes any batch
-  transcription engine usable in real-time contexts, at the cost of
-  utterance-boundary latency.
+- **VAD-wrapped streaming.** Engines that don't support native streaming get
+  real-time capability via Dalston's VAD-based streaming wrapper. The wrapper
+  segments incoming audio by silence detection (VAD) and maximum chunk
+  duration, transcribes each utterance as a batch call to the engine, and
+  streams partial results back to the client. This is a first-class streaming
+  mode — every engine supports real-time, the question is only whether the
+  engine handles the stream itself or Dalston handles it.
 
 - **Engine card declaration.** An engine declares `streaming: native` if it
   handles streaming internally, or `streaming: vad-wrapped` if it relies on
-  the Dalston wrapper. Engines that support neither declare `streaming: false`.
-  The session router uses this to determine connection strategy.
+  the Dalston wrapper. Every engine is one or the other — there is no
+  non-streaming case. The session router uses this to determine connection
+  strategy (direct passthrough vs. VAD segmentation).
 
 - **Composites are batch-only initially.** Coordinating chunk-level handoffs
   between sub-engines in a composite (e.g. feeding partial transcription
