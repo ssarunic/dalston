@@ -6,6 +6,9 @@ Adds ``POST /v1/diarize`` to the base ``EngineHTTPServer`` endpoints.
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -45,22 +48,34 @@ class DiarizeHTTPServer(EngineHTTPServer):
 
         @app.post("/v1/diarize")
         async def diarize(request: DiarizeHTTPRequest) -> dict:
-            task_request = _to_task_request(request)
+            task_request = await asyncio.to_thread(_to_task_request, request)
             ctx = BatchTaskContext.for_http(
                 task_id=request.task_id or str(uuid4()),
                 job_id=request.job_id or "http",
                 engine_id=getattr(engine, "_engine_id", "unknown"),
             )
 
-            result: TaskResponse = await asyncio.to_thread(
-                engine.process, task_request, ctx
-            )
-
-            return _to_http_response(result, engine)
+            try:
+                result: TaskResponse = await asyncio.to_thread(
+                    engine.process, task_request, ctx
+                )
+                return _to_http_response(result, engine)
+            finally:
+                # Clean up downloaded audio
+                if (
+                    task_request.audio_path
+                    and task_request.audio_path.parent.name.startswith("dalston_http_")
+                ):
+                    shutil.rmtree(task_request.audio_path.parent, ignore_errors=True)
 
 
 def _to_task_request(request: DiarizeHTTPRequest) -> TaskRequest:
-    """Convert an HTTP request into a ``TaskRequest``."""
+    """Convert an HTTP request into a ``TaskRequest``.
+
+    Downloads the audio from S3 so ``task_request.audio_path`` is set.
+    """
+    from dalston.engine_sdk import io
+
     config: dict = {}
     if request.loaded_model_id:
         config["loaded_model_id"] = request.loaded_model_id
@@ -71,12 +86,17 @@ def _to_task_request(request: DiarizeHTTPRequest) -> TaskRequest:
     if request.max_speakers is not None:
         config["max_speakers"] = request.max_speakers
 
+    # Download audio from S3 to a temp directory
+    temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
+    audio_path = io.download_file(request.audio_uri, temp_dir / "audio.wav")
+
     return TaskRequest(
         task_id=request.task_id or str(uuid4()),
         job_id=request.job_id or "http",
         stage="diarize",
         config=config,
         payload={"audio_uri": request.audio_uri},
+        audio_path=audio_path,
     )
 
 
