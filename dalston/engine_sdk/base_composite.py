@@ -12,6 +12,7 @@ This implements Layer 2 of the ENGINE_COMPOSABILITY spec (§5).
 
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -173,11 +174,15 @@ class CompositeEngine(Engine):
         stage: str,
         audio_path: Path,
         config: dict[str, Any],
+        previous_results: dict[str, dict[str, Any]] | None = None,
         timeout: float = 600.0,
     ) -> dict[str, Any]:
         """Call a child engine's HTTP endpoint and return the JSON response.
 
         Sends audio as a file upload (multipart) with config as form fields.
+        For stages that depend on prior output (e.g. align needs transcribe),
+        ``previous_results`` is serialised into form fields that the child's
+        HTTP endpoint expects.
         """
         httpx = self._http_client()
         endpoint = child.submit_endpoints.get(stage, f"/v1/{stage}")
@@ -194,6 +199,11 @@ class CompositeEngine(Engine):
                 form_data[key] = ",".join(str(v) for v in value)
             elif value is not None:
                 form_data[key] = str(value)
+
+        # Inject previous stage outputs as form fields.
+        # The align endpoint expects a "transcript" JSON string.
+        if previous_results and stage == "align" and "transcribe" in previous_results:
+            form_data["transcript"] = json.dumps(previous_results["transcribe"])
 
         self.logger.info(
             "calling_child_engine",
@@ -302,6 +312,8 @@ class CompositeEngine(Engine):
                 )
 
             # Phase 2: sequential tail (after parallel completes)
+            # Sequential stages may depend on prior results (e.g. align
+            # needs the transcribe output).
             for stage in sequential_after:
                 child = self._stage_to_child.get(stage)
                 if child is None:
@@ -309,7 +321,11 @@ class CompositeEngine(Engine):
                 config = self._extract_stage_config(stage, task_request.config)
                 try:
                     result = self._call_child(
-                        child, stage, task_request.audio_path, config
+                        child,
+                        stage,
+                        task_request.audio_path,
+                        config,
+                        previous_results=results,
                     )
                     results[stage] = result
                     self.logger.info("child_stage_completed", stage=stage)
@@ -377,6 +393,10 @@ class CompositeEngine(Engine):
         "exclusive",
         "diarize_model_id",
     }
+    _ALIGN_KEYS = {
+        "return_char_alignments",
+        "align_model_id",
+    }
 
     def _extract_stage_config(
         self, stage: str, config: dict[str, Any]
@@ -395,6 +415,13 @@ class CompositeEngine(Engine):
             # Map diarize_model_id → loaded_model_id for the child
             if "diarize_model_id" in out:
                 out["loaded_model_id"] = out.pop("diarize_model_id")
+        elif stage == "align":
+            for key in self._ALIGN_KEYS:
+                if key in config:
+                    out[key] = config[key]
+            # Map align_model_id → loaded_model_id for the child
+            if "align_model_id" in out:
+                out["loaded_model_id"] = out.pop("align_model_id")
         else:
             # Unknown stage: pass everything (minus internal keys)
             out = {k: v for k, v in config.items() if not k.startswith("_")}

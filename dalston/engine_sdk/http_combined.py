@@ -7,10 +7,11 @@ engine covers both transcription and diarization.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 from dalston.engine_sdk.http_server import (
     EngineHTTPServer,
@@ -37,6 +38,9 @@ class CombinedHTTPServer(EngineHTTPServer):
 
         if "diarize" in stages:
             self._register_diarize(app, engine, engine_id)
+
+        if "align" in stages:
+            self._register_align(app, engine, engine_id)
 
         if "transcribe" in stages and "diarize" in stages:
             self._register_combined(app, engine, engine_id)
@@ -150,6 +154,71 @@ class CombinedHTTPServer(EngineHTTPServer):
                 engine_id=engine_id,
                 task_request=task_request,
                 stage="diarize",
+            )
+
+    @staticmethod
+    def _register_align(app: FastAPI, engine, engine_id: str) -> None:
+        @app.post("/v1/align")
+        async def align(
+            file: Annotated[
+                UploadFile | None,
+                File(description="Audio file to align"),
+            ] = None,
+            audio_url: Annotated[
+                str | None,
+                Form(description="URL to audio file (S3 URI or HTTPS)"),
+            ] = None,
+            loaded_model_id: Annotated[
+                str | None, Form(description="Alignment model to use")
+            ] = None,
+            transcript: Annotated[
+                str | None,
+                Form(
+                    description=(
+                        "Transcript JSON from prior transcription stage. "
+                        "Must contain 'text', 'segments', and 'language'."
+                    )
+                ),
+            ] = None,
+            return_char_alignments: Annotated[
+                bool,
+                Form(description="Return character-level alignments"),
+            ] = False,
+        ) -> dict:
+            if not transcript:
+                raise HTTPException(
+                    400,
+                    "The 'transcript' field is required — pass the JSON "
+                    "output from the transcription stage.",
+                )
+            try:
+                transcript_data = json.loads(transcript)
+            except json.JSONDecodeError as e:
+                raise HTTPException(
+                    400, f"Invalid JSON in 'transcript' field: {e}"
+                ) from None
+
+            audio_path = await resolve_audio(file, audio_url)
+
+            config: dict = {"_stage": "align"}
+            if loaded_model_id:
+                config["loaded_model_id"] = loaded_model_id
+            config["return_char_alignments"] = return_char_alignments
+
+            task_request = TaskRequest(
+                task_id=str(uuid4()),
+                job_id="http",
+                stage="align",
+                config=config,
+                payload={},
+                audio_path=audio_path,
+                previous_responses={"transcribe": transcript_data},
+            )
+            return await run_engine_http(
+                engine=engine,
+                engine_id=engine_id,
+                task_request=task_request,
+                stage="align",
             )
 
     @staticmethod

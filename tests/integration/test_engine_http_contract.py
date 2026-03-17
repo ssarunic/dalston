@@ -25,6 +25,7 @@ pytestmark = pytest.mark.e2e
         ("faster-whisper", "http://localhost:9101"),
         ("pyannote-4.0", "http://localhost:9102"),
         ("whisper-pyannote", "http://localhost:9103"),
+        ("phoneme-align", "http://localhost:9104"),
     ]
 )
 def engine_endpoint(request: pytest.FixtureRequest) -> tuple[str, str]:
@@ -86,6 +87,22 @@ class TestEngineHTTPContract:
             endpoint = "/v1/diarize"
             form_data = {
                 "audio_url": "s3://dalston-artifacts/test/test-audio.wav",
+            }
+        elif "alignment" in stages or "align" in stages:
+            import json
+
+            endpoint = "/v1/align"
+            form_data = {
+                "audio_url": "s3://dalston-artifacts/test/test-audio.wav",
+                "transcript": json.dumps(
+                    {
+                        "text": "Hello world",
+                        "segments": [
+                            {"start": 0.0, "end": 1.0, "text": "Hello world"}
+                        ],
+                        "language": "en",
+                    }
+                ),
             }
         else:
             pytest.skip(f"No test for stages: {stages}")

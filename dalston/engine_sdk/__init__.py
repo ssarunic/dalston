@@ -98,6 +98,10 @@ def __getattr__(name: str):
         from dalston.engine_sdk.http_diarize import DiarizeHTTPServer
 
         return DiarizeHTTPServer
+    if name == "AlignHTTPServer":
+        from dalston.engine_sdk.http_align import AlignHTTPServer
+
+        return AlignHTTPServer
     if name == "CombinedHTTPServer":
         from dalston.engine_sdk.http_combined import CombinedHTTPServer
 
@@ -121,6 +125,7 @@ __all__ = [
     # Composite engine
     "CompositeEngine",
     # HTTP servers (M79)
+    "AlignHTTPServer",
     "CombinedHTTPServer",
     "DiarizeHTTPServer",
     "EngineHTTPServer",
