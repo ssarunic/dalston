@@ -16,11 +16,13 @@
 
 ## Motivation
 
-Today, engines have no HTTP surface. They expose `health_check()`,
-`get_capabilities()`, and `process()` as Python methods called by the
-`EngineRunner` via Redis queue polling. There is no way to reach an engine
-from outside its process — no health probe, no capability query, no direct
-job submission.
+Today, engines have a minimal HTTP surface: the `EngineRunner` starts a
+bare `http.server.HTTPServer` (`_MetricsHandler`) on port 9100 that serves
+only `GET /metrics` (Prometheus) and `GET /health` (static
+`{"status": "healthy"}`). The actual `engine.health_check()`,
+`engine.get_capabilities()`, and `engine.process()` methods are only
+called in-process by the runner — there is no way to query capabilities
+or submit work to an engine over HTTP.
 
 This matters for three reasons:
 
@@ -45,10 +47,11 @@ prove the interface contract on a minimum set of engines, then expand.
 
 | Concern | Today | After M79 |
 |---------|-------|-----------|
-| Health check | Python method, reported via Redis heartbeat | `GET /health` — HTTP probe, k8s/compose native |
-| Capabilities | Python method, read at startup by runner | `GET /v1/capabilities` — runtime introspection over HTTP |
+| Health check | Static `{"status": "healthy"}` via `_MetricsHandler` | `GET /health` calls `engine.health_check()` — real engine state |
+| Capabilities | Python method, not HTTP-exposed | `GET /v1/capabilities` — runtime introspection over HTTP |
 | Job submission | Redis Stream → runner polls → `process()` | `POST /v1/transcribe` — synchronous HTTP (Redis dispatch stays, HTTP is additive) |
-| Addressability | None — engines are queue consumers | `http://engine-host:9100` — individually addressable |
+| Metrics | `GET /metrics` via `_MetricsHandler` on :9100 | Preserved — same port, same path |
+| Addressability | Port 9100 exists but monitoring-only | `http://engine-host:9100` — full API (health, capabilities, submit) |
 
 **Redis dispatch is not removed.** The existing queue-based dispatch continues
 to work. The HTTP API is additive — it gives each engine a network identity
@@ -60,35 +63,39 @@ The runner can optionally start the HTTP server alongside its queue poll loop.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                Engine Container                       │
-│                                                       │
-│  ┌─────────────────────────────────────────────────┐ │
-│  │  EngineHTTPServer (engine SDK base class)        │ │
-│  │                                                   │ │
-│  │  GET  /health          → engine.health_check()   │ │
-│  │  GET  /v1/capabilities → engine.get_capabilities()│ │
-│  │  POST /v1/transcribe   → engine.process(...)     │ │
-│  │                                                   │ │
-│  │  Port: 9100 (configurable via DALSTON_HTTP_PORT) │ │
-│  └──────────────────────┬──────────────────────────┘ │
-│                          │                            │
-│  ┌──────────────────────▼──────────────────────────┐ │
-│  │  Engine instance (existing)                      │ │
-│  │  health_check(), get_capabilities(), process()   │ │
-│  └──────────────────────────────────────────────────┘ │
-│                                                       │
-│  ┌──────────────────────────────────────────────────┐ │
-│  │  EngineRunner (existing, unchanged)              │ │
-│  │  Redis Stream polling, heartbeats                │ │
-│  └──────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                Engine Container                            │
+│                                                            │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │  EngineHTTPServer (replaces _MetricsHandler)        │   │
+│  │                                                      │   │
+│  │  GET  /health          → engine.health_check()      │   │
+│  │  GET  /metrics         → prometheus_client           │   │
+│  │  GET  /v1/capabilities → engine.get_capabilities()  │   │
+│  │  POST /v1/transcribe   → engine.process(...)   NEW  │   │
+│  │                                                      │   │
+│  │  Port: 9100 (same as existing _MetricsHandler)      │   │
+│  └──────────────────────┬─────────────────────────────┘   │
+│                          │                                  │
+│  ┌──────────────────────▼─────────────────────────────┐   │
+│  │  Engine instance (existing)                         │   │
+│  │  health_check(), get_capabilities(), process()      │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                            │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  EngineRunner (existing, queue dispatch unchanged)   │   │
+│  │  Redis Stream polling, heartbeats                    │   │
+│  └─────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
 ```
 
-The HTTP server and the queue runner coexist in the same process. They share
-the same `Engine` instance. The HTTP server is optional — engines that don't
-need it (e.g., simple batch-only workers) can skip it. When enabled, the
-runner starts the HTTP server in a background task.
+The new HTTP server replaces the existing `_MetricsHandler` (bare
+`http.server.HTTPServer`) with a FastAPI app that serves the same
+`/metrics` and `/health` endpoints plus the new `/v1/capabilities` and
+stage-specific POST endpoints. The HTTP server and the queue runner coexist
+in the same process, sharing the same `Engine` instance. The upgrade is
+transparent — existing `/metrics` scraping and `/health` probes continue
+to work.
 
 ---
 
@@ -99,11 +106,15 @@ runner starts the HTTP server in a background task.
 **Files modified:**
 
 - `dalston/engine_sdk/http_server.py` *(new)* — `EngineHTTPServer` using FastAPI
-- `dalston/engine_sdk/runner.py` — optionally start HTTP server in runner lifespan
+- `dalston/engine_sdk/runner.py` — replace `_MetricsHandler` / `_start_metrics_server()` with `EngineHTTPServer`
 
 **Deliverables:**
 
-A reusable HTTP server that wraps any `Engine` instance:
+Replace the bare `_MetricsHandler` (`http.server.HTTPServer` serving only
+`/metrics` and static `/health`) with a FastAPI-based server that serves
+the full engine interface contract. The `/metrics` endpoint is preserved
+for Prometheus compatibility. A reusable HTTP server that wraps any
+`Engine` instance:
 
 ```python
 # dalston/engine_sdk/http_server.py
@@ -140,6 +151,12 @@ class EngineHTTPServer:
         @app.get("/health")
         async def health():
             return await asyncio.to_thread(self._engine.health_check)
+
+        @app.get("/metrics")
+        async def metrics():
+            from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+            content = generate_latest()
+            return Response(content=content, media_type=CONTENT_TYPE_LATEST)
 
         @app.get("/v1/capabilities")
         async def capabilities():
@@ -181,20 +198,30 @@ Key decisions:
   doesn't conflict with the gateway (8000), Prometheus (9090), or inference
   servers (50052+).
 
-- **Optional startup.** The runner only starts the HTTP server if
-  `DALSTON_HTTP_PORT` is set or `DALSTON_ENABLE_HTTP=true`. Existing
-  deployments are unaffected.
+- **Always-on replacement.** The new FastAPI server replaces the existing
+  `_MetricsHandler` on the same port (9100). Since engines already run an
+  HTTP server for `/metrics` and `/health`, the upgrade is transparent —
+  same port, same paths, plus new endpoints.
 
 **Runner integration:**
 
 ```python
-# In EngineRunner.run() — add alongside existing Redis poll loop
+# In EngineRunner — replace _start_metrics_server() with:
 
-if os.environ.get("DALSTON_HTTP_PORT") or os.environ.get("DALSTON_ENABLE_HTTP"):
-    port = int(os.environ.get("DALSTON_HTTP_PORT", "9100"))
-    http_server = self._engine.create_http_server(port=port)
-    asyncio.create_task(http_server.serve())
+def _start_http_server(self) -> None:
+    """Start the engine HTTP server (replaces _MetricsHandler)."""
+    http_server = self.engine.create_http_server(port=self.metrics_port)
+    # Run in background thread (same pattern as old _MetricsHandler)
+    self._http_thread = Thread(
+        target=lambda: asyncio.run(http_server.serve()),
+        daemon=True,
+    )
+    self._http_thread.start()
 ```
+
+This is a drop-in replacement. Same port (9100), same `/metrics` and
+`/health` paths. Existing Docker healthchecks and Prometheus scrape
+configs continue to work.
 
 Gate: HTTP server starts, `/health` and `/v1/capabilities` return correct
 JSON for any engine.
@@ -287,13 +314,9 @@ interface:
   port: 9100
 ```
 
-```yaml
-# docker-compose.yml — add to existing onnx-asr service
-environment:
-  DALSTON_HTTP_PORT: 9100
-ports:
-  - "9100:9100"   # Only for dev; production uses internal network
-```
+No docker-compose changes needed — the existing `DALSTON_METRICS_PORT: 9100`
+and port mapping are reused. The FastAPI server replaces `_MetricsHandler`
+on the same port.
 
 The engine's `create_http_server()` is trivial — it instantiates
 `TranscribeHTTPServer` with `self`:
@@ -315,13 +338,11 @@ audio, verify response matches queue-based output.
 
 - `engines/stt-unified/faster-whisper/batch_engine.py` — add `create_http_server()`
 - `engines/stt-unified/faster-whisper/engine.yaml` — add `interface` block
-- `docker-compose.yml` — expose port 9101 on faster-whisper service
 
 **Deliverables:**
 
 Same pattern as 79.3. The faster-whisper engine gets the identical HTTP
-surface. The only difference is the port (9101 to avoid conflicts when
-both run on the same host).
+surface on its existing metrics port.
 
 Gate: Same integration test suite passes for faster-whisper. The test
 cannot distinguish which engine produced the output — this validates
@@ -336,7 +357,6 @@ the interface contract.
 - `dalston/engine_sdk/http_diarize.py` *(new)* — `DiarizeHTTPServer` subclass
 - `engines/stt-diarize/pyannote/engine.py` — add `create_http_server()`
 - `engines/stt-diarize/pyannote/engine.yaml` — add `interface` block
-- `docker-compose.yml` — expose port 9102
 
 **Deliverables:**
 
@@ -478,15 +498,17 @@ pointed at any future engine with zero changes.
 
 ## Deployment
 
-All changes are additive. Engines that don't set `DALSTON_HTTP_PORT` are
-completely unaffected — the HTTP server simply doesn't start.
+The new HTTP server replaces the existing `_MetricsHandler` on the same
+port (9100). Existing `/metrics` and `/health` paths continue to work, so
+Docker healthchecks and Prometheus scrape configs are unaffected. The new
+endpoints (`/v1/capabilities`, `POST /v1/transcribe`) are purely additive.
 
 Recommended rollout:
 
-1. Deploy 79.1 (SDK base class) — no behavior change, just new code
-2. Deploy 79.2 (transcribe endpoint) — still no change unless env var set
-3. Enable HTTP on one engine at a time (79.3 → 79.4 → 79.5)
-4. Run contract tests (79.6) against each engine as it's enabled
+1. Deploy 79.1 (SDK base class) — replaces `_MetricsHandler` with FastAPI; same port, same paths
+2. Deploy 79.2 (transcribe endpoint) — adds `/v1/transcribe`, no change to existing behavior
+3. Apply to engines one at a time (79.3 → 79.4 → 79.5)
+4. Run contract tests (79.6) against each engine
 
 ---
 
@@ -529,7 +551,7 @@ pytest tests/integration/test_engine_http_contract.py -v
 - [ ] `EngineHTTPServer` base class in engine SDK
 - [ ] `TranscribeHTTPServer` with `POST /v1/transcribe`
 - [ ] `DiarizeHTTPServer` with `POST /v1/diarize`
-- [ ] Runner optionally starts HTTP server when `DALSTON_HTTP_PORT` set
+- [ ] Runner starts `EngineHTTPServer` instead of `_MetricsHandler`
 - [ ] `onnx-asr` engine serves `/health`, `/v1/capabilities`, `/v1/transcribe`
 - [ ] `faster-whisper` engine serves the same endpoints
 - [ ] `diarize-pyannote` engine serves `/health`, `/v1/capabilities`, `/v1/diarize`
@@ -537,4 +559,4 @@ pytest tests/integration/test_engine_http_contract.py -v
 - [ ] `engine.yaml` updated with `interface` block for all three engines
 - [ ] Contract test suite passes for all three engines
 - [ ] Existing queue-based dispatch unaffected (`make test` passes)
-- [ ] Docker compose services expose HTTP ports in dev profile
+- [ ] Existing `/metrics` and `/health` paths still work (no Prometheus/healthcheck breakage)
