@@ -69,8 +69,9 @@ skipped. This works well for simple cases but has limitations:
 3. NIM, Riva, and future vendor runtimes slot in as engine types without
    requiring Dalston to adopt their API surface as its own.
 4. Capability Profiles (e.g. "Fast English," "Multilingual," "Meeting,"
-   "Compliance") become named composite configurations, not orchestrator-level
-   logic.
+   "Compliance") become named composite configurations defined by the
+   operator, not orchestrator-level logic. Dalston provides the mechanism;
+   the operator defines which profiles exist for their deployment.
 5. The architecture supports both batch and streaming modes, with composites
    initially targeting batch only.
 6. The result envelope is extensible by design — adding a new stage type does
@@ -500,7 +501,14 @@ this: the composite returns what it has so far.
 Capability Profiles are named, user-facing composite configurations. They
 abstract engine selection into intent-driven choices.
 
-| Profile       | Intent                             | Resolved Engine(s)              | Key Characteristics                          |
+**Dalston ships no built-in profiles.** Profiles are entirely defined by the
+operator running the infrastructure — the list of profiles, the engines they
+map to, and the default parameters are all deployment-specific choices. This
+is a convenience mechanism, not a curated catalog. The examples below
+illustrate what profiles *could* look like, not what Dalston provides
+out of the box.
+
+| Profile (example)  | Intent                             | Resolved Engine(s)              | Key Characteristics                          |
 |---------------|------------------------------------|---------------------------------|----------------------------------------------|
 | `fast-english` | Low-latency English transcription | `parakeet-tdt-0.6b-v3` (leaf) | ONNX, sub-second RTF, no diarisation         |
 | `meeting`      | Multi-speaker meeting transcription | `meeting-english` (composite) | Transcription + diarisation + PII            |
@@ -772,7 +780,8 @@ proven across all engine types.
 - Profile YAML schema and loader
 - `profile` parameter on `POST /v1/audio/transcriptions` and
   `POST /v1/jobs`
-- Built-in profiles: `fast-english`, `meeting`, `multilingual`
+- No built-in profiles shipped — operators define profiles for their
+  deployment (e.g. `fast-english`, `meeting`, `multilingual`)
 - Client parameter overrides (shallow merge, client wins)
 
 **Step 4c: Stage-keyed result envelope in the API**
