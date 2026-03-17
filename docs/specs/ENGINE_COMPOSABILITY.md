@@ -92,8 +92,7 @@ routing and scheduling, reconciled at runtime with the capability introspection
 endpoint.
 
 Dalston's current engine.yaml schema (v1.1) already covers most of this. The
-additions are `stages` (plural, for multi-stage engines), `quality_tier`, and
-`languages`:
+additions are `stages` (plural, for multi-stage engines) and `languages`:
 
 ```yaml
 # Leaf engine — single-stage
@@ -104,7 +103,6 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment]
   languages: [en]
-  quality_tier: high           # draft | standard | high
   streaming: false
   max_audio_duration: 7200
 
@@ -271,7 +269,6 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment, diarisation, punctuation]
   languages: [en]
-  quality_tier: high
   streaming: true
 
 hardware:
@@ -349,7 +346,6 @@ version: 1.0.0
 capabilities:
   stages: [transcription, alignment, diarisation, pii_detection]
   languages: [en]
-  quality_tier: high
   streaming: false
 
 compose:
@@ -422,8 +418,8 @@ declare the same capabilities:
 
 The orchestrator treats all three identically. It sees engines that can handle
 a set of stages. Selection is based on capability match, language support,
-quality tier, latency requirements, and resource availability — not on whether
-the engine is a leaf or a composite.
+latency requirements, and resource availability — not on whether the engine is
+a leaf or a composite.
 
 ### The Tree Analogy
 
@@ -497,14 +493,12 @@ Profiles are defined as simple mappings, not new engine types:
 profiles:
   fast-english:
     engine: parakeet-tdt-0.6b-v3
-    quality_tier: standard
     defaults:
       enable_timestamps: true
       enable_punctuation: true
 
   meeting:
     engine: meeting-english
-    quality_tier: high
     defaults:
       enable_diarisation: true
       enable_timestamps: true
@@ -636,7 +630,7 @@ cover multiple stages.
 **Files modified:**
 
 - `dalston/engine_sdk/types.py` — `EngineCapabilities` already has `stages:
-  list[str]`; add `quality_tier` and `languages` fields
+  list[str]`; add `languages` field
 - `dalston/engine_sdk/base.py` — `get_capabilities()` parses the extended
   card fields
 - `dalston/orchestrator/engine_selector.py` — Selection considers multi-stage
@@ -750,38 +744,7 @@ Dalston native jobs.
 
 ---
 
-## 11. Quality Signals for Engine Selection
-
-The current engine selector (`engine_selector.py`) routes based on capability
-match, language support, and engine availability. Missing: a quality signal
-that lets the orchestrator prefer a better engine when multiple candidates
-match.
-
-### 11.1 Quality Tiers
-
-Each engine card declares a `quality_tier`:
-
-| Tier       | Meaning                                    | Example                        |
-|------------|--------------------------------------------|--------------------------------|
-| `draft`    | Fastest, lowest resource, acceptable quality | faster-whisper tiny/base      |
-| `standard` | Good balance of speed and accuracy          | faster-whisper medium/large-v3 |
-| `high`     | Best accuracy, higher resource cost         | Parakeet TDT 1.1b, NIM        |
-
-The API accepts a `quality` parameter (or inherits it from a profile). The
-engine selector filters and ranks candidates by tier. If no tier is specified,
-`standard` is the default.
-
-### 11.2 Why Not Benchmark Scores?
-
-WER scores are dataset-dependent, language-dependent, and change with model
-versions. A static WER number in the engine card would be perpetually stale.
-Quality tiers are coarse but honest — they reflect the engine author's
-judgment about where the engine sits in the speed/quality tradeoff, and they're
-easy to maintain.
-
----
-
-## 12. Non-Goals
+## 11. Non-Goals
 
 - **Streaming composites.** Chunk-level coordination between streaming
   sub-engines is out of scope for the initial implementation. Streaming
@@ -806,7 +769,7 @@ easy to maintain.
 
 ---
 
-## 13. Open Questions
+## 12. Open Questions
 
 1. **Versioning composites.** When a child engine is updated (e.g. pyannote
    4.0 → 5.0), does the composite's version change? Current thinking:
@@ -832,7 +795,7 @@ easy to maintain.
 
 ---
 
-## 14. Relationship to Other Milestones
+## 13. Relationship to Other Milestones
 
 - **M80 (Engine Control Plane):** M80 replaces pull-based dispatch with
   push-based typed APIs. The composability work builds on M80's typed
