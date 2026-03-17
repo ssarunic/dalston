@@ -144,8 +144,10 @@ Regardless of engine type, every engine must support these operations:
 
 These map directly to Dalston's existing engine SDK operations:
 `Engine.process()` (submit), `Engine.health_check()` (health),
-`Engine.get_capabilities()` (introspection). The control plane API from M80
-will formalise these as HTTP endpoints.
+`Engine.get_capabilities()` (introspection). M79 exposes these as HTTP
+endpoints on leaf engines (`/health`, `/v1/capabilities`,
+`/v1/transcribe`). M80 builds on this by having the orchestrator push
+work to engines via those endpoints.
 
 ### 3.3 Structured Result Format
 

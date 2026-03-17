@@ -4,7 +4,7 @@
 | ------------------ | ------------------------------------------------------------ |
 | **Goal**           | Replace the dual dispatch model (pull-from-stream for batch, push-via-WS for realtime) with a single push-based control plane where the orchestrator places all work on engine instances via typed, stage-specific HTTP APIs |
 | **Duration**       | 3–4 weeks                                                    |
-| **Dependencies**   | M63 (Engine Unification), M64 (Registry Unification), M66 (Session Router Consolidation) |
+| **Dependencies**   | M79 (Leaf Engine HTTP API), M63 (Engine Unification), M64 (Registry Unification), M66 (Session Router Consolidation) |
 | **Deliverable**    | Stage-specific engine APIs, orchestrator-driven placement for both modes, fleet status API, deprecation of stream-pull dispatch |
 | **Status**         | Not Started                                                  |
 
@@ -35,7 +35,7 @@ This split causes real problems:
 
 5. **The generic `TaskRequest` envelope is untyped.** Every engine receives the same `{"task_id", "config": dict, "stage": str}` blob regardless of what it does. The engine has to deserialize, validate, and type-check internally. The orchestrator constructs the right config dict without compile-time guarantees. A transcription engine is a transcription service — it should accept `TranscribeRequest` and return `Transcript`, not parse a generic bag of keys.
 
-6. **The "fleet scheduler" problem (M79) is a symptom.** M79 proposed adding queue depth tracking, admission status in heartbeats, and instance hints — all to compensate for the orchestrator's blindness. A push model eliminates the need for most of that machinery because the orchestrator *is* the scheduler.
+6. **M79 gives engines HTTP APIs; M80 uses them.** M79 added `/health`, `/v1/capabilities`, and stage-specific POST endpoints to leaf engines. M80 builds on that foundation — the orchestrator places work directly on engines via those typed HTTP APIs instead of relying on Redis Stream pull-based dispatch.
 
 ### How Parakeet NIM does it
 
