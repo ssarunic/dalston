@@ -225,7 +225,7 @@ contract.
 | `onnx-asr`       | ONNX Runtime             | In-process Python  | Parakeet/Conformer CTC, TDT       |
 | `faster-whisper`  | CTranslate2              | In-process Python  | Whisper family                     |
 | `hf-asr`          | HuggingFace transformers | In-process Python  | Any HF ASR model                   |
-| `vllm-asr`        | vLLM                     | HTTP (OpenAI-compat)| Audio LLMs (Qwen2-Audio, etc.)    |
+| `vllm-asr`        | vLLM                     | In-process Python  | Audio LLMs (Qwen2-Audio, etc.)    |
 | `diarize-pyannote` | pyannote.audio          | In-process Python  | Speaker diarisation                |
 | `nim-riva`        | NVIDIA NIM container     | gRPC (Riva protos) | NIM-packaged models                |
 | `composite`       | Dalston orchestration    | Internal dispatch  | Multi-engine composition           |
@@ -233,9 +233,9 @@ contract.
 ### Key Design Decision: Protocol Translation, Not Protocol Adoption
 
 Each engine type has a driver that speaks the engine's native protocol (gRPC
-for NIM, Python for ONNX, HTTP for vLLM) and translates to/from Dalston's
-structured result format. Dalston does not adopt any vendor's protocol as its
-own API surface.
+for NIM, in-process Python for ONNX/vLLM/pyannote) and translates to/from
+Dalston's structured result format. Dalston does not adopt any vendor's
+protocol as its own API surface.
 
 This is already the pattern in the codebase. The Riva engine driver
 (`engines/stt-unified/riva/riva_client.py`) speaks gRPC to the NIM container
@@ -252,14 +252,44 @@ worlds. Vendor protocols are consumed downstream (engine drivers) and
 optionally offered upstream (compatibility shims), but the Dalston Native API
 remains the primary interface.
 
-### 4.1 The `nim-riva` Engine Driver
+### 4.1 The `nim-riva` Sidecar
 
-The `nim-riva` driver communicates with NVIDIA NIM containers using their
-native Riva gRPC protocol. It handles the translation between Riva's
-`RecognitionConfig` and Dalston's structured format.
+A NIM container is an opaque GPU workload with its own constraints (25 MB
+upload limit, synchronous-only processing, minimal HTTP API, gRPC required
+for full feature access). Rather than encoding these constraints in the
+orchestrator, Dalston wraps each NIM container in a thin **sidecar** — a
+CPU-only container that exposes the standard Dalston engine interface and
+handles all NIM-specific concerns internally.
 
-A NIM container may natively cover multiple stages. The driver reflects this
-accurately in the engine card:
+This follows the same topology established in M72 for faster-whisper and
+parakeet: the GPU model server is a black box, and a lightweight adapter
+speaks its native protocol while presenting a uniform Dalston API externally.
+
+```
+┌─────────────────────────────────────────────────┐
+│  nim-riva sidecar (CPU, Dalston interface)       │
+│                                                   │
+│  GET  /health          ─── health ──▶ NIM :9000  │
+│  GET  /v1/capabilities ─── introspect ──▶ NIM    │
+│  POST /v1/transcribe   ─── gRPC ──▶ NIM :50051  │
+│                                                   │
+│  Handles internally:                              │
+│  • S3/MinIO download (NIM needs audio bytes)      │
+│  • Large file chunking (NIM's 25 MB limit)        │
+│  • Sync-to-async bridging                         │
+│  • gRPC parameter mapping                         │
+│  • Result translation to Dalston envelope         │
+└──────────────────────────┬────────────────────────┘
+                           │ gRPC (Riva protos)
+                    ┌──────▼──────┐
+                    │ NIM container│
+                    │ (GPU)        │
+                    │ :50051 gRPC  │
+                    │ :9000  HTTP  │
+                    └─────────────┘
+```
+
+The sidecar's engine card declares the NIM container's capabilities:
 
 ```yaml
 name: nim-parakeet-ctc-1.1b-sortformer
@@ -282,30 +312,17 @@ runtime:
   nim_profile: "parakeet-1-1b-ctc-en-us-ofl-true"
 
 interface:
-  protocol: nim-riva
-  health: http://localhost:9000/v1/health/ready
+  protocol: dalston-native
+  health: /health
+  submit: /v1/transcribe
+  capabilities: /v1/capabilities
 ```
 
-**NIM-specific constraints the driver handles:**
+Note that `interface.protocol` is `dalston-native`, not `nim-riva`. The
+sidecar absorbs the protocol translation — the orchestrator sees a standard
+Dalston engine, not a NIM container.
 
-- **25 MB upload limit.** NIM's HTTP API rejects files exceeding 25 MB. The
-  driver must chunk large files or rely on Dalston's `prepare` stage to
-  pre-chunk audio. This is transparent to the orchestrator.
-
-- **No URL input.** NIM requires audio bytes in the request body. The driver
-  downloads from S3/MinIO before forwarding — same pattern as all other
-  Dalston engines.
-
-- **Synchronous processing.** NIM has no async/webhook support. The driver
-  blocks during inference, which is fine for Dalston's queue-based
-  architecture where each engine worker processes one task at a time.
-
-- **HTTP API is minimal.** NIM's HTTP endpoint only accepts `file` and
-  `language` — no `response_format`, no `timestamp_granularities`, no
-  `temperature`. Word timestamps, diarisation, and vocabulary boosting require
-  the gRPC interface. The driver uses gRPC for all batch processing.
-
-**Parameter mapping:**
+**Parameter mapping (internal to sidecar):**
 
 | Dalston Parameter        | Riva Mapping                           | Notes                               |
 |--------------------------|----------------------------------------|--------------------------------------|
@@ -319,10 +336,10 @@ interface:
 
 **Dynamic capability detection:** A NIM container's actual capabilities depend
 on which deployment profile was loaded at startup (e.g., `parakeet-ctc-en-us`
-with `--speaker-diarization` vs. without). The engine card declares the
-superset of possible capabilities; the capability introspection endpoint
-returns what's actually available. The reconciliation rule from §3.1 applies:
-runtime introspection is authoritative.
+with `--speaker-diarization` vs. without). The sidecar's `/v1/capabilities`
+endpoint queries the NIM container at runtime and returns only what's actually
+available. The engine card declares the superset; runtime introspection is
+authoritative (reconciliation rule from §3.1).
 
 ---
 
