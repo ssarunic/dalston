@@ -163,8 +163,10 @@ def _download_url(url: str) -> Path:
 
             return io.download_file(url, dest)
 
-        # HTTPS / HTTP URL
-        urllib.request.urlretrieve(url, dest)
+        # HTTPS / HTTP URL — stream to disk with timeout
+        resp = urllib.request.urlopen(url, timeout=60)  # noqa: S310
+        with dest.open("wb") as f:
+            shutil.copyfileobj(resp, f)
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
