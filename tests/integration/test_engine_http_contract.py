@@ -60,9 +60,7 @@ class TestEngineHTTPContract:
         assert "engine_id" in data
         assert data["engine_id"] == name
 
-    def test_metrics_endpoint_exists(
-        self, engine_endpoint: tuple[str, str]
-    ) -> None:
+    def test_metrics_endpoint_exists(self, engine_endpoint: tuple[str, str]) -> None:
         _name, url = engine_endpoint
         resp = httpx.get(f"{url}/metrics", timeout=10)
         assert resp.status_code == 200
@@ -77,19 +75,19 @@ class TestEngineHTTPContract:
 
         if "transcription" in stages or "transcribe" in stages:
             endpoint = "/v1/transcribe"
-            request = {
-                "audio_uri": "s3://dalston-artifacts/test/test-audio.wav",
+            form_data = {
+                "audio_url": "s3://dalston-artifacts/test/test-audio.wav",
                 "language": "en",
             }
         elif "diarisation" in stages or "diarize" in stages:
             endpoint = "/v1/diarize"
-            request = {
-                "audio_uri": "s3://dalston-artifacts/test/test-audio.wav",
+            form_data = {
+                "audio_url": "s3://dalston-artifacts/test/test-audio.wav",
             }
         else:
             pytest.skip(f"No test for stages: {stages}")
 
-        resp = httpx.post(f"{url}{endpoint}", json=request, timeout=60)
+        resp = httpx.post(f"{url}{endpoint}", data=form_data, timeout=60)
         assert resp.status_code == 200
         data = resp.json()
         assert "engine_id" in data

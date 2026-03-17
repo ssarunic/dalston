@@ -14,11 +14,12 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from fastapi.responses import Response
 
 from dalston.engine_sdk.context import BatchTaskContext
@@ -113,20 +114,58 @@ class EngineHTTPServer:
 # ---------------------------------------------------------------------------
 
 
-def download_audio(audio_uri: str) -> Path:
-    """Download audio from S3 to a temporary directory.
+async def resolve_audio(
+    file: UploadFile | None,
+    audio_url: str | None,
+) -> Path:
+    """Resolve audio input to a local file path.
 
-    Returns the local path.  Caller must clean up via
-    ``cleanup_audio(path)`` (typically in a ``finally`` block).
+    Accepts either a multipart file upload or a URL (S3 URI or HTTPS).
+    Exactly one must be provided.  Returns the local path; caller must
+    clean up via ``cleanup_audio(path)``.
     """
-    from dalston.engine_sdk import io
+    if file and audio_url:
+        from fastapi import HTTPException
 
+        raise HTTPException(400, "Provide either 'file' or 'audio_url', not both")
+    if not file and not audio_url:
+        from fastapi import HTTPException
+
+        raise HTTPException(400, "Provide 'file' or 'audio_url'")
+
+    if file:
+        return await _save_upload(file)
+    assert audio_url is not None
+    return await asyncio.to_thread(_download_url, audio_url)
+
+
+async def _save_upload(file: UploadFile) -> Path:
+    """Save an uploaded file to a temp directory."""
+    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
     temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
-    return io.download_file(audio_uri, temp_dir / "audio.wav")
+    dest = temp_dir / f"audio{suffix}"
+    content = await file.read()
+    dest.write_bytes(content)
+    return dest
+
+
+def _download_url(url: str) -> Path:
+    """Download audio from an S3 URI or HTTPS URL to a temp directory."""
+    temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
+    dest = temp_dir / "audio.wav"
+
+    if url.startswith("s3://"):
+        from dalston.engine_sdk import io
+
+        return io.download_file(url, dest)
+
+    # HTTPS / HTTP URL
+    urllib.request.urlretrieve(url, dest)
+    return dest
 
 
 def cleanup_audio(audio_path: Path | None) -> None:
-    """Remove the temp directory created by ``download_audio``."""
+    """Remove the temp directory created by ``resolve_audio``."""
     if audio_path and audio_path.parent.name.startswith("dalston_http_"):
         shutil.rmtree(audio_path.parent, ignore_errors=True)
 
@@ -148,8 +187,8 @@ async def run_engine_http(
 ) -> dict:
     """Shared handler body: process a task request and return a response dict.
 
-    Downloads audio, calls ``engine.process()`` in a thread, cleans up
-    the temp directory, and formats the response.
+    Calls ``engine.process()`` in a thread, cleans up the temp directory,
+    and formats the response.
     """
     ctx = BatchTaskContext.for_http(
         task_id=task_request.task_id,
