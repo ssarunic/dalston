@@ -123,6 +123,7 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
         job_id="job-1",
         output=output,
         processing_time=1.23,
+        stage="transcribe",
     )
 
     assert upload_file_calls == [

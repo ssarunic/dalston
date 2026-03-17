@@ -475,7 +475,7 @@ class EngineRunner:
         self._clear_waiting_engine_marker(message.task_id)
 
         try:
-            self._process_task(message.task_id)
+            self._process_task(message.task_id, task_metadata)
         except TaskDeferredError:
             # Task was deferred (e.g. admission control rejection).
             # Skip ACK so the message stays in the PEL for redelivery.
@@ -524,11 +524,16 @@ class EngineRunner:
                 pass
         return float(self.DEFAULT_TASK_TIMEOUT)
 
-    def _process_task(self, task_id: str) -> None:
+    def _process_task(
+        self,
+        task_id: str,
+        task_metadata: dict[str, Any],
+    ) -> None:
         """Process a single task.
 
         Args:
             task_id: ID of the task to process
+            task_metadata: Pre-fetched task metadata from Redis
         """
         temp_dir = None
         start_time = time.time()
@@ -536,9 +541,6 @@ class EngineRunner:
         # Track current task for heartbeat status (thread-safe)
         with self._task_lock:
             self._current_task_id = task_id
-
-        # Extract trace context from task metadata (M19)
-        task_metadata = self._get_task_metadata(task_id)
 
         # Extract model from task config (set by orchestrator's engine selector)
         task_model = task_metadata.get("loaded_model_id", "")
@@ -655,7 +657,9 @@ class EngineRunner:
                 # Upload output to S3
                 upload_start = time.time()
                 with dalston.telemetry.create_span("engine.upload_output"):
-                    self._save_task_output(task_id, job_id, output, total_task_time)
+                    self._save_task_output(
+                        task_id, job_id, output, total_task_time, task_request.stage
+                    )
                 dalston.metrics.observe_engine_s3_upload(
                     self.engine_id,
                     time.time() - upload_start,
@@ -811,6 +815,7 @@ class EngineRunner:
         job_id: str,
         output: TaskResponse,
         processing_time: float,
+        stage: str,
     ) -> None:
         """Save task response to S3.
 
@@ -819,6 +824,7 @@ class EngineRunner:
             job_id: Job identifier
             output: Task output from engine
             processing_time: Time taken to process in seconds
+            stage: Pipeline stage name
         """
         response_uri = io.build_task_response_uri(self.s3_bucket, job_id, task_id)
 
@@ -829,8 +835,7 @@ class EngineRunner:
             "data": output.to_dict(),
         }
 
-        task_metadata = self._get_task_metadata(task_id)
-        task_stage = task_metadata.get("stage")
+        task_stage = stage
 
         persisted_artifacts = self._materializer.persist_produced(
             job_id=job_id,

@@ -12,11 +12,17 @@ Started by the ``EngineRunner`` in a background thread on port 9100
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import Response
+
+from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.base import Engine
@@ -44,6 +50,7 @@ class EngineHTTPServer:
         self._engine = engine
         self._port = port
         self._host = host
+        self._engine_id = engine.get_capabilities().engine_id
         self._app = self._build_app()
 
     @property
@@ -53,7 +60,7 @@ class EngineHTTPServer:
 
     def _build_app(self) -> FastAPI:
         app = FastAPI(
-            title=f"Dalston Engine: {getattr(self._engine, '_engine_id', 'unknown')}",
+            title=f"Dalston Engine: {self._engine_id}",
             docs_url=None,
             redoc_url=None,
         )
@@ -99,3 +106,61 @@ class EngineHTTPServer:
         )
         server = uvicorn.Server(config)
         await server.serve()
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for stage-specific HTTP servers
+# ---------------------------------------------------------------------------
+
+
+def download_audio(audio_uri: str) -> Path:
+    """Download audio from S3 to a temporary directory.
+
+    Returns the local path.  Caller must clean up via
+    ``cleanup_audio(path)`` (typically in a ``finally`` block).
+    """
+    from dalston.engine_sdk import io
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
+    return io.download_file(audio_uri, temp_dir / "audio.wav")
+
+
+def cleanup_audio(audio_path: Path | None) -> None:
+    """Remove the temp directory created by ``download_audio``."""
+    if audio_path and audio_path.parent.name.startswith("dalston_http_"):
+        shutil.rmtree(audio_path.parent, ignore_errors=True)
+
+
+def to_http_response(result: TaskResponse, engine_id: str) -> dict:
+    """Convert a ``TaskResponse`` into an HTTP-friendly dict."""
+    data = result.to_dict()
+    if "engine_id" not in data:
+        data["engine_id"] = engine_id
+    return data
+
+
+async def run_engine_http(
+    *,
+    engine: Engine,
+    engine_id: str,
+    task_request: TaskRequest,
+    stage: str,
+) -> dict:
+    """Shared handler body: process a task request and return a response dict.
+
+    Downloads audio, calls ``engine.process()`` in a thread, cleans up
+    the temp directory, and formats the response.
+    """
+    ctx = BatchTaskContext.for_http(
+        task_id=task_request.task_id,
+        job_id=task_request.job_id,
+        engine_id=engine_id,
+        stage=stage,
+    )
+    try:
+        result: TaskResponse = await asyncio.to_thread(
+            engine.process, task_request, ctx
+        )
+        return to_http_response(result, engine_id)
+    finally:
+        cleanup_audio(task_request.audio_path)

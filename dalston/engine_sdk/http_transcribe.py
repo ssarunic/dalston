@@ -5,22 +5,17 @@ Adds ``POST /v1/transcribe`` to the base ``EngineHTTPServer`` endpoints.
 
 from __future__ import annotations
 
-import asyncio
-import shutil
-import tempfile
-from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.http_server import EngineHTTPServer
-from dalston.engine_sdk.types import TaskRequest, TaskResponse
-
-if TYPE_CHECKING:
-    from dalston.engine_sdk.base import Engine
+from dalston.engine_sdk.http_server import (
+    EngineHTTPServer,
+    download_audio,
+    run_engine_http,
+)
+from dalston.engine_sdk.types import TaskRequest
 
 
 class TranscribeHTTPRequest(BaseModel):
@@ -46,37 +41,39 @@ class TranscribeHTTPServer(EngineHTTPServer):
 
     def _register_stage_endpoints(self, app: FastAPI) -> None:
         engine = self._engine
+        engine_id = self._engine_id
 
         @app.post("/v1/transcribe")
         async def transcribe(request: TranscribeHTTPRequest) -> dict:
-            task_request = await asyncio.to_thread(_to_task_request, request)
-            ctx = BatchTaskContext.for_http(
-                task_id=request.task_id or str(uuid4()),
-                job_id=request.job_id or "http",
-                engine_id=getattr(engine, "_engine_id", "unknown"),
+            task_id = request.task_id or str(uuid4())
+            job_id = request.job_id or "http"
+            audio_path = await _download(request.audio_uri)
+
+            task_request = TaskRequest(
+                task_id=task_id,
+                job_id=job_id,
+                stage="transcribe",
+                config=_build_config(request),
+                payload={"audio_uri": request.audio_uri},
+                audio_path=audio_path,
+            )
+            return await run_engine_http(
+                engine=engine,
+                engine_id=engine_id,
+                task_request=task_request,
+                stage="transcribe",
             )
 
-            try:
-                result: TaskResponse = await asyncio.to_thread(
-                    engine.process, task_request, ctx
-                )
-                return _to_http_response(result, engine)
-            finally:
-                # Clean up downloaded audio
-                if (
-                    task_request.audio_path
-                    and task_request.audio_path.parent.name.startswith("dalston_http_")
-                ):
-                    shutil.rmtree(task_request.audio_path.parent, ignore_errors=True)
+
+async def _download(audio_uri: str) -> Path:  # noqa: F821
+    """Download audio in a thread (blocking S3 I/O)."""
+    import asyncio
+
+    return await asyncio.to_thread(download_audio, audio_uri)
 
 
-def _to_task_request(request: TranscribeHTTPRequest) -> TaskRequest:
-    """Convert an HTTP request into a ``TaskRequest``.
-
-    Downloads the audio from S3 so ``task_request.audio_path`` is set.
-    """
-    from dalston.engine_sdk import io
-
+def _build_config(request: TranscribeHTTPRequest) -> dict:
+    """Extract engine config from the HTTP request."""
     config: dict = {}
     if request.loaded_model_id:
         config["loaded_model_id"] = request.loaded_model_id
@@ -87,24 +84,4 @@ def _to_task_request(request: TranscribeHTTPRequest) -> TaskRequest:
         config["vocabulary"] = request.vocabulary
     if request.channel is not None:
         config["channel"] = request.channel
-
-    # Download audio from S3 to a temp directory
-    temp_dir = Path(tempfile.mkdtemp(prefix="dalston_http_"))
-    audio_path = io.download_file(request.audio_uri, temp_dir / "audio.wav")
-
-    return TaskRequest(
-        task_id=request.task_id or str(uuid4()),
-        job_id=request.job_id or "http",
-        stage="transcribe",
-        config=config,
-        payload={"audio_uri": request.audio_uri},
-        audio_path=audio_path,
-    )
-
-
-def _to_http_response(result: TaskResponse, engine: Engine) -> dict:
-    """Convert a ``TaskResponse`` into an HTTP-friendly dict."""
-    data = result.to_dict()
-    if "engine_id" not in data:
-        data["engine_id"] = getattr(engine, "_engine_id", "unknown")
-    return data
+    return config
