@@ -117,6 +117,13 @@ hf_compat:
   library_name: pyannote
   license: cc-by-4.0
 
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/diarize
+  port: 9100
+
 hardware:
   min_vram_gb: 2
   recommended_gpu:

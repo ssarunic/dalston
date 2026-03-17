@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import json
 import os
@@ -11,7 +12,6 @@ import tempfile
 import threading
 import time
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -47,39 +47,6 @@ if TYPE_CHECKING:
 
 
 logger = structlog.get_logger()
-
-
-class _MetricsHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for /metrics endpoint."""
-
-    def log_message(self, format: str, *args: Any) -> None:
-        """Suppress default logging."""
-        pass
-
-    def do_GET(self) -> None:
-        """Handle GET requests."""
-        if self.path == "/metrics":
-            try:
-                from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-
-                content = generate_latest()
-                self.send_response(200)
-                self.send_header("Content-Type", CONTENT_TYPE_LATEST)
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(f"Error: {e}".encode())
-        elif self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"status": "healthy"}')
-        else:
-            self.send_response(404)
-            self.end_headers()
 
 
 class EngineRunner:
@@ -118,8 +85,7 @@ class EngineRunner:
         self._redis: redis.Redis | None = None
         self._unified_writer: UnifiedRegistryWriter | None = None
         self._running = False
-        self._metrics_server: HTTPServer | None = None
-        self._metrics_thread: threading.Thread | None = None
+        self._http_thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
         self._current_message_id: str | None = None  # Stream message ID for ack
@@ -183,8 +149,8 @@ class EngineRunner:
         self._running = True
         self._setup_signal_handlers()
 
-        # Start metrics HTTP server in background thread (M20)
-        self._start_metrics_server()
+        # Start engine HTTP server in background thread (replaces _MetricsHandler — M79)
+        self._start_http_server()
 
         # Initialize registry and register engine with capabilities
         capabilities = self.engine.get_capabilities()
@@ -248,7 +214,6 @@ class EngineRunner:
         finally:
             # Cleanup - ensure resources are released even on unexpected exit
             self._stop_heartbeat_thread()
-            self._stop_metrics_server()
             # Call engine shutdown hook for resource cleanup (M39.2)
             try:
                 self.engine.shutdown()
@@ -268,31 +233,25 @@ class EngineRunner:
                 pass  # Best effort cleanup
             self._unified_writer = None
 
-    def _start_metrics_server(self) -> None:
-        """Start metrics HTTP server in a background thread."""
-        if not dalston.metrics.is_metrics_enabled():
-            logger.debug("metrics_disabled_skipping_server")
-            return
+    def _start_http_server(self) -> None:
+        """Start the engine HTTP server in a background thread.
 
+        Replaces the old ``_MetricsHandler`` with a FastAPI-based server
+        that serves ``/health``, ``/metrics``, ``/v1/capabilities``, and
+        stage-specific POST endpoints.  Same port (9100 default), same
+        paths — existing healthchecks and Prometheus scrape configs are
+        unaffected.
+        """
         try:
-            self._metrics_server = HTTPServer(
-                ("0.0.0.0", self.metrics_port), _MetricsHandler
-            )
-            self._metrics_thread = threading.Thread(
-                target=self._metrics_server.serve_forever,
+            http_server = self.engine.create_http_server(port=self.metrics_port)
+            self._http_thread = threading.Thread(
+                target=lambda: asyncio.run(http_server.serve()),
                 daemon=True,
             )
-            self._metrics_thread.start()
-            logger.info("metrics_server_started", port=self.metrics_port)
+            self._http_thread.start()
+            logger.info("http_server_started", port=self.metrics_port)
         except Exception as e:
-            logger.warning("metrics_server_failed", error=str(e))
-
-    def _stop_metrics_server(self) -> None:
-        """Stop the metrics HTTP server."""
-        if self._metrics_server:
-            self._metrics_server.shutdown()
-            self._metrics_server = None
-            logger.debug("metrics_server_stopped")
+            logger.warning("http_server_failed", error=str(e))
 
     def _start_heartbeat_thread(self) -> None:
         """Start heartbeat thread to advertise engine status."""

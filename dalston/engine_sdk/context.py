@@ -28,6 +28,24 @@ class BatchTaskContext:
         default_factory=structlog.get_logger  # type: ignore[arg-type]
     )
 
+    @classmethod
+    def for_http(
+        cls,
+        *,
+        task_id: str,
+        job_id: str,
+        engine_id: str = "unknown",
+        stage: str = "http",
+    ) -> BatchTaskContext:
+        """Create a lightweight context for HTTP-dispatched tasks."""
+        return cls(
+            engine_id=engine_id,
+            instance="http",
+            task_id=task_id,
+            job_id=job_id,
+            stage=stage,
+        )
+
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Return engine_id metadata value."""
         return self.metadata.get(key, default)

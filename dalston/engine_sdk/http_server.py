@@ -1,0 +1,101 @@
+"""Base HTTP server exposing the engine interface contract.
+
+Replaces the bare ``_MetricsHandler`` (``http.server.HTTPServer`` serving only
+``/metrics`` and static ``/health``) with a FastAPI-based server that serves
+the full engine interface contract.  The ``/metrics`` endpoint is preserved
+for Prometheus compatibility.
+
+Started by the ``EngineRunner`` in a background thread on port 9100
+(configurable via ``DALSTON_HTTP_PORT`` / ``DALSTON_METRICS_PORT``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING, Any
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import Response
+
+if TYPE_CHECKING:
+    from dalston.engine_sdk.base import Engine
+
+
+class EngineHTTPServer:
+    """Lightweight HTTP server exposing the engine interface contract.
+
+    Wraps an Engine instance and serves:
+
+    - ``GET  /health``          → ``engine.health_check()``
+    - ``GET  /metrics``         → ``prometheus_client``
+    - ``GET  /v1/capabilities`` → ``engine.get_capabilities()``
+
+    Subclasses register stage-specific POST endpoints (e.g.
+    ``/v1/transcribe``, ``/v1/diarize``) via ``_register_stage_endpoints``.
+    """
+
+    def __init__(
+        self,
+        engine: Engine,
+        port: int = 9100,
+        host: str = "0.0.0.0",
+    ) -> None:
+        self._engine = engine
+        self._port = port
+        self._host = host
+        self._app = self._build_app()
+
+    @property
+    def app(self) -> FastAPI:
+        """Expose the FastAPI app (useful for testing)."""
+        return self._app
+
+    def _build_app(self) -> FastAPI:
+        app = FastAPI(
+            title=f"Dalston Engine: {getattr(self._engine, '_engine_id', 'unknown')}",
+            docs_url=None,
+            redoc_url=None,
+        )
+
+        engine = self._engine
+
+        @app.get("/health")
+        async def health() -> dict[str, Any]:
+            return await asyncio.to_thread(engine.health_check)
+
+        @app.get("/metrics")
+        async def metrics() -> Response:
+            from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+            content = generate_latest()
+            return Response(content=content, media_type=CONTENT_TYPE_LATEST)
+
+        @app.get("/v1/capabilities")
+        async def capabilities() -> dict[str, Any]:
+            caps = engine.get_capabilities()
+            return caps.model_dump(mode="json")
+
+        self._register_stage_endpoints(app)
+
+        return app
+
+    def _register_stage_endpoints(self, app: FastAPI) -> None:
+        """Register stage-specific POST endpoints.
+
+        Override in subclasses to add ``/v1/transcribe``, ``/v1/diarize``,
+        etc.  The default implementation is a no-op so that engines without
+        a stage-specific HTTP endpoint still get ``/health``, ``/metrics``,
+        and ``/v1/capabilities``.
+        """
+
+    async def serve(self) -> None:
+        """Run the HTTP server (called as asyncio task by runner)."""
+        config = uvicorn.Config(
+            self._app,
+            host=self._host,
+            port=self._port,
+            log_level="warning",
+        )
+        server = uvicorn.Server(config)
+        await server.serve()

@@ -7,7 +7,10 @@ the canonical type directly.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from dalston.engine_sdk.http_server import EngineHTTPServer
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
@@ -33,6 +36,12 @@ class BaseBatchTranscribeEngine(Engine):
     Helper methods are provided for building the canonical types from
     common data shapes.
     """
+
+    def create_http_server(self, port: int = 9100) -> EngineHTTPServer:
+        """Return a ``TranscribeHTTPServer`` with ``POST /v1/transcribe``."""
+        from dalston.engine_sdk.http_transcribe import TranscribeHTTPServer
+
+        return TranscribeHTTPServer(engine=self, port=port)
 
     def process(
         self,
