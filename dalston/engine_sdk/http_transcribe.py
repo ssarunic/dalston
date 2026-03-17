@@ -40,9 +40,7 @@ class TranscribeHTTPServer(EngineHTTPServer):
                 str | None,
                 Form(description="URL to audio file (S3 URI or HTTPS)"),
             ] = None,
-            loaded_model_id: Annotated[
-                str | None, Form(description="Model to use")
-            ] = None,
+            model: Annotated[str | None, Form(description="Model to use")] = None,
             language: Annotated[str | None, Form(description="Language code")] = None,
             word_timestamps: Annotated[
                 bool, Form(description="Include word-level timestamps")
@@ -58,8 +56,8 @@ class TranscribeHTTPServer(EngineHTTPServer):
             audio_path = await resolve_audio(file, audio_url)
 
             config: dict = {}
-            if loaded_model_id:
-                config["loaded_model_id"] = loaded_model_id
+            if model:
+                config["loaded_model_id"] = model
             if language:
                 config["language"] = language
             config["word_timestamps"] = word_timestamps

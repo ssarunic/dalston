@@ -188,17 +188,21 @@ class CompositeEngine(Engine):
         endpoint = child.submit_endpoints.get(stage, f"/v1/{stage}")
         url = f"{child.url}{endpoint}"
 
-        # Build form data from config
+        # Build form data from config.
+        # Internal config keys use loaded_model_id; the HTTP API uses "model".
+        _KEY_REMAP = {"loaded_model_id": "model"}
+
         form_data: dict[str, Any] = {}
         for key, value in config.items():
             if key.startswith("_"):
                 continue
+            form_key = _KEY_REMAP.get(key, key)
             if isinstance(value, bool):
-                form_data[key] = str(value).lower()
+                form_data[form_key] = str(value).lower()
             elif isinstance(value, list):
-                form_data[key] = ",".join(str(v) for v in value)
+                form_data[form_key] = ",".join(str(v) for v in value)
             elif value is not None:
-                form_data[key] = str(value)
+                form_data[form_key] = str(value)
 
         # Inject previous stage outputs as form fields.
         # The align endpoint expects a "transcript" JSON string.

@@ -46,7 +46,7 @@ class AlignHTTPServer(EngineHTTPServer):
                 str | None,
                 Form(description="URL to audio file (S3 URI or HTTPS)"),
             ] = None,
-            loaded_model_id: Annotated[
+            model: Annotated[
                 str | None, Form(description="Alignment model to use")
             ] = None,
             transcript: Annotated[
@@ -81,8 +81,8 @@ class AlignHTTPServer(EngineHTTPServer):
             audio_path = await resolve_audio(file, audio_url)
 
             config: dict = {}
-            if loaded_model_id:
-                config["loaded_model_id"] = loaded_model_id
+            if model:
+                config["loaded_model_id"] = model
             config["return_char_alignments"] = return_char_alignments
 
             task_id = str(uuid4())
