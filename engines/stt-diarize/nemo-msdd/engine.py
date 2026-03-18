@@ -272,7 +272,7 @@ class NemoMSDDEngine(Engine):
     def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file."""
         audio_path = task_request.audio_path
-        config = task_request.config
+        params = task_request.get_diarize_params()
 
         # Get duration
         duration: float | None = None
@@ -286,8 +286,8 @@ class NemoMSDDEngine(Engine):
         if duration is None:
             duration = self._get_audio_duration(audio_path)
 
-        max_speakers = config.get("max_speakers")
-        loaded_model_id = config.get("loaded_model_id")
+        max_speakers = params.max_speakers
+        loaded_model_id = params.loaded_model_id
         if not loaded_model_id:
             raise ValueError(
                 "Missing required config field 'loaded_model_id' for diarize stage."

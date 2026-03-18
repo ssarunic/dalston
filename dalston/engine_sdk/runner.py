@@ -24,6 +24,7 @@ import dalston.metrics
 import dalston.telemetry
 from dalston.common.artifacts import ArtifactReference
 from dalston.common.durable_events import add_durable_event_sync
+from dalston.common.pipeline_types import PIPELINE_SCHEMA_VERSION
 from dalston.common.registry import EngineRecord, UnifiedRegistryWriter
 from dalston.common.streams_sync import (
     STALE_THRESHOLD_MS,
@@ -124,6 +125,7 @@ class EngineRunner:
             "engine_runner_initialized",
             engine_id=self.engine_id,
             instance=self.instance,
+            pipeline_schema_version=PIPELINE_SCHEMA_VERSION,
         )
 
     @property
@@ -186,6 +188,7 @@ class EngineRunner:
                 includes_diarization=(
                     capabilities.includes_diarization if capabilities else False
                 ),
+                schema_version=PIPELINE_SCHEMA_VERSION,
             )
         )
         logger.info("engine_registered", instance=self.instance)

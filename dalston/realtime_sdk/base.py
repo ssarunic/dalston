@@ -559,6 +559,20 @@ class RealtimeEngine(ABC):
             logger.debug("metrics_disabled_skipping_server")
             return
 
+        # In unified engines the batch runner's FastAPI HTTP server may
+        # already occupy this port (it starts before the RT engine).
+        # Probe first and skip to avoid a bind error.
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            if s.connect_ex(("127.0.0.1", self.metrics_port)) == 0:
+                logger.info(
+                    "metrics_server_skipped_port_in_use",
+                    port=self.metrics_port,
+                )
+                return
+
         try:
             app = web.Application()
             app.router.add_get("/metrics", self._handle_metrics)

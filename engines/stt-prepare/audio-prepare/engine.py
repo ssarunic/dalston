@@ -71,11 +71,11 @@ class AudioPrepareEngine(Engine):
             TaskResponse with PreparationResponse containing artifact IDs and metadata
         """
         audio_path = task_request.audio_path
-        config = task_request.config
+        params = task_request.get_prepare_params()
 
-        # Get config options with defaults
-        target_sample_rate = config.get("target_sample_rate", self.DEFAULT_SAMPLE_RATE)
-        split_channels = config.get("split_channels", False)
+        # Get config options from typed params
+        target_sample_rate = params.target_sample_rate
+        split_channels = params.split_channels
 
         self.logger.info("processing_audio", audio_path=str(audio_path))
 
@@ -101,7 +101,7 @@ class AudioPrepareEngine(Engine):
             )
 
         # Standard processing: convert to mono
-        target_channels = config.get("target_channels", self.DEFAULT_CHANNELS)
+        target_channels = params.target_channels
 
         # Step 2: Convert to standardized format
         prepared_path = audio_path.parent / "prepared.wav"

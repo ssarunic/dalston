@@ -144,6 +144,7 @@ class UnifiedOnnxRunner:
         metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
         self._http_server = self._batch_engine.create_http_server(port=metrics_port)
         self._http_task = asyncio.create_task(self._http_server.serve())
+        await asyncio.sleep(0.5)  # Let uvicorn bind before RT engine probes
         logger.info("http_server_started", port=metrics_port)
 
         # Start batch adapter in background thread

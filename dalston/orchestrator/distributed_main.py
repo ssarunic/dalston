@@ -164,10 +164,13 @@ async def orchestrator_loop() -> None:
 
     settings = get_settings()
 
+    from dalston.common.pipeline_types import PIPELINE_SCHEMA_VERSION
+
     logger.info(
         "orchestrator_starting",
         redis_url=settings.redis_url,
         events_stream="dalston:events:stream",
+        pipeline_schema_version=PIPELINE_SCHEMA_VERSION,
     )
 
     # Initialize database

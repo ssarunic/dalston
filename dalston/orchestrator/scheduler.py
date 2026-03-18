@@ -20,7 +20,7 @@ import dalston.telemetry
 from dalston.common.artifacts import ArtifactReference, ArtifactSelector, RequestBinding
 from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
-from dalston.common.pipeline_types import AudioMedia, TaskRequestData
+from dalston.common.pipeline_types import STAGE_CONFIG_MAP, AudioMedia, TaskRequestData
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
@@ -528,6 +528,23 @@ async def write_task_request(
     effective_config = {
         key: value for key, value in task.config.items() if key != "request_bindings"
     }
+
+    # Validate config against typed StageInput model if one exists.
+    # Strip channel suffix for per-channel stages (e.g. "transcribe_ch0" → "transcribe").
+    base_stage = task.stage.rsplit("_ch", 1)[0] if "_ch" in task.stage else task.stage
+    config_model = STAGE_CONFIG_MAP.get(base_stage)
+    if config_model is not None:
+        try:
+            config_model.model_validate(effective_config)
+        except Exception as e:
+            logger.error(
+                "task_config_validation_failed",
+                task_id=str(task.id),
+                stage=task.stage,
+                model=config_model.__name__,
+                error=str(e),
+            )
+            raise
 
     request_data = TaskRequestData(
         task_id=task_id_str,

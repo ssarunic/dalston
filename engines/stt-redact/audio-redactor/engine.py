@@ -39,11 +39,11 @@ class AudioRedactionEngine(Engine):
         Returns:
             TaskResponse with RedactionResponse containing redacted audio artifact ID
         """
-        config = task_request.config
+        params = task_request.get_audio_redact_params()
         audio_path = task_request.audio_path
 
-        # Get channel from config (set by DAG builder for per-channel mode)
-        channel: int | None = config.get("channel")
+        # Get channel from typed params (set by DAG builder for per-channel mode)
+        channel: int | None = params.channel
 
         # Determine output filename and PII key based on channel
         if channel is not None:
@@ -56,10 +56,9 @@ class AudioRedactionEngine(Engine):
         logical_name = f"redacted_audio{channel_suffix}"
         artifact_id = build_task_artifact_id(task_request.task_id, logical_name)
 
-        # Get config
-        mode_str = config.get("redaction_mode", "silence")
-        mode = PIIRedactionMode(mode_str)
-        buffer_ms = config.get("buffer_ms", 50)
+        # Get config from typed params
+        mode = PIIRedactionMode(params.redaction_mode)
+        buffer_ms = params.buffer_ms
 
         self.logger.info(
             "audio_redaction_starting",

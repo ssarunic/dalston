@@ -98,6 +98,7 @@ class EngineRecord:
     loaded_model: str | None = None
     execution_profile: str = "container"
     vocabulary_support: VocabularySupport | None = None
+    schema_version: str | None = None
 
     @property
     def available_capacity(self) -> int:
@@ -175,6 +176,8 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
         mapping["loaded_model"] = record.loaded_model
     if record.vocabulary_support is not None:
         mapping["vocabulary_support"] = record.vocabulary_support.model_dump_json()
+    if record.schema_version is not None:
+        mapping["schema_version"] = record.schema_version
 
     return mapping
 
@@ -268,6 +271,7 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
         loaded_model=data.get("loaded_model") or None,
         execution_profile=data.get("execution_profile", "container"),
         vocabulary_support=vocabulary_support,
+        schema_version=data.get("schema_version"),
     )
 
 

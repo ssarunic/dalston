@@ -115,11 +115,11 @@ class PyannoteEngine(Engine):
             TaskResponse with DiarizationResponse containing speakers and turns
         """
         audio_path = task_request.audio_path
-        config = task_request.config
+        params = task_request.get_diarize_params()
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
 
-        loaded_model_id = config.get("loaded_model_id")
+        loaded_model_id = params.loaded_model_id
         if not loaded_model_id:
             loaded_model_id = os.environ.get(
                 "DALSTON_DEFAULT_MODEL_ID",
@@ -127,9 +127,9 @@ class PyannoteEngine(Engine):
             )
 
         # Get speaker count hints
-        min_speakers = config.get("min_speakers")
-        max_speakers = config.get("max_speakers")
-        exclusive = config.get("exclusive", False)
+        min_speakers = params.min_speakers
+        max_speakers = params.max_speakers
+        exclusive = params.exclusive
 
         if min_speakers:
             self.logger.info("min_speakers_hint", min_speakers=min_speakers)
@@ -139,7 +139,7 @@ class PyannoteEngine(Engine):
             self.logger.info("exclusive_mode_enabled")
 
         # Load pipeline (lazy)
-        hf_token = self._get_hf_token(config)
+        hf_token = self._get_hf_token(task_request.config)
         pipeline = self._load_pipeline(loaded_model_id, hf_token)
         self._active_model_id = loaded_model_id
         self._set_runtime_state(loaded_model=loaded_model_id, status="processing")

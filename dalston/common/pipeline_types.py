@@ -22,6 +22,11 @@ from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
 
+# Schema version for pipeline types.  Bump this when you change any model in
+# this file.  Engines and orchestrator log it at startup, and engines include
+# it in their heartbeat so stale containers are caught immediately.
+PIPELINE_SCHEMA_VERSION = "2"
+
 # =============================================================================
 # Enums
 # =============================================================================
@@ -478,6 +483,9 @@ class TranscriptionRequest(StageInput):
 class AlignmentRequest(StageInput):
     """Input for alignment stage."""
 
+    loaded_model_id: str | None = Field(
+        default=None, description="Alignment model ID to load"
+    )
     target_granularity: TimestampGranularity = Field(
         default=TimestampGranularity.WORD, description="Target timestamp precision"
     )
@@ -495,6 +503,9 @@ class AlignmentRequest(StageInput):
 class DiarizationRequest(StageInput):
     """Input for diarization stage."""
 
+    loaded_model_id: str | None = Field(
+        default=None, description="Diarization model ID to load"
+    )
     num_speakers: int | None = Field(
         default=None, ge=1, description="Exact speaker count, None=auto"
     )
@@ -505,6 +516,10 @@ class DiarizationRequest(StageInput):
         default=None, ge=1, description="Maximum for auto-detect"
     )
     detect_overlap: bool = Field(default=True, description="Detect overlapping speech")
+    exclusive: bool = Field(
+        default=False,
+        description="Single-speaker output per segment (pyannote 4.0)",
+    )
 
 
 class MergeRequest(StageInput):
@@ -519,6 +534,32 @@ class MergeRequest(StageInput):
     known_speaker_names: list[str] | None = Field(
         default=None,
         description="Optional ordered speaker names to apply to final transcript",
+    )
+
+
+class PIIDetectionRequest(StageInput):
+    """Input for PII detection stage."""
+
+    loaded_model_id: str | None = Field(
+        default=None, description="GLiNER model ID for NER detection"
+    )
+    entity_types: list[str] | None = Field(
+        default=None, description="Entity types to detect (None=defaults)"
+    )
+    confidence_threshold: float = Field(
+        default=0.5, ge=0, le=1, description="Minimum confidence threshold"
+    )
+
+
+class AudioRedactRequest(StageInput):
+    """Input for audio redaction stage."""
+
+    redaction_mode: str = Field(default="silence", description="'silence' or 'beep'")
+    buffer_ms: int = Field(
+        default=50, ge=0, description="Buffer padding in milliseconds"
+    )
+    channel: int | None = Field(
+        default=None, ge=0, description="Audio channel index for per-channel redaction"
     )
 
 
@@ -944,6 +985,25 @@ class RedactionResponse(BaseModel):
     skipped: bool = Field(default=False, description="Whether redaction was skipped")
     skip_reason: str | None = Field(default=None, description="Reason if skipped")
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
+
+
+# =============================================================================
+# Stage → Config Model Map
+# =============================================================================
+
+# Maps pipeline stage names to their typed config models.  Used by:
+# - Orchestrator: validates task config before writing to S3
+# - Engine SDK: TaskRequest.get_stage_config() deserializes config into typed model
+# - Engine authors: reference for what fields each stage accepts
+STAGE_CONFIG_MAP: dict[str, type[StageInput]] = {
+    "prepare": PreparationRequest,
+    "transcribe": TranscriptionRequest,
+    "align": AlignmentRequest,
+    "diarize": DiarizationRequest,
+    "pii_detect": PIIDetectionRequest,
+    "audio_redact": AudioRedactRequest,
+    "merge": MergeRequest,
+}
 
 
 # =============================================================================

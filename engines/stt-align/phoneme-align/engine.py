@@ -96,6 +96,7 @@ class PhonemeAlignEngine(Engine):
     def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Align transcription segments to produce word-level timestamps."""
         audio_path = task_request.audio_path
+        params = task_request.get_align_params()
 
         # Get transcription output from previous stage
         transcribe_output = task_request.get_transcript()
@@ -134,7 +135,7 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
-        loaded_model_id = task_request.config.get("loaded_model_id") or None
+        loaded_model_id = params.loaded_model_id
 
         # Load alignment model
         model_result = self._get_align_model(language, loaded_model_id)
@@ -161,9 +162,7 @@ class PhonemeAlignEngine(Engine):
                 metadata=metadata,
                 audio=audio,
                 device=self._device,
-                return_char_alignments=task_request.config.get(
-                    "return_char_alignments", False
-                ),
+                return_char_alignments=params.return_char_alignments,
             )
 
             output_segments, stats = self._to_sdk_segments(

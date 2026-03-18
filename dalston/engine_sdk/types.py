@@ -10,11 +10,19 @@ from pydantic import BaseModel
 
 from dalston.common.artifacts import MaterializedArtifact, ProducedArtifact
 from dalston.common.pipeline_types import (
+    STAGE_CONFIG_MAP,
+    AlignmentRequest,
     AlignmentResponse,
+    AudioRedactRequest,
+    DiarizationRequest,
     DiarizationResponse,
+    MergeRequest,
+    PIIDetectionRequest,
     PIIDetectionResponse,
+    PreparationRequest,
     PreparationResponse,
     RedactionResponse,
+    StageInput,
     Transcript,
     TranscriptionRequest,
     VocabularySupport,
@@ -95,9 +103,56 @@ class TaskRequest(Generic[PayloadT]):
         """Get transcribe output as Transcript."""
         return self._get_typed_response(key, Transcript)
 
+    def get_stage_config(self) -> StageInput:
+        """Validate and return typed config for this task's stage.
+
+        Uses STAGE_CONFIG_MAP to find the right model for self.stage.
+        For per-channel stages (e.g. "transcribe_ch0"), strips the
+        channel suffix to find the base stage.
+
+        Raises:
+            KeyError: If stage has no typed config model in STAGE_CONFIG_MAP
+            pydantic.ValidationError: If config doesn't match the model
+        """
+        # Strip channel suffix for per-channel stages
+        base_stage = (
+            self.stage.rsplit("_ch", 1)[0] if "_ch" in self.stage else self.stage
+        )
+        model = STAGE_CONFIG_MAP.get(base_stage)
+        if model is None:
+            raise KeyError(
+                f"No typed config model for stage '{self.stage}' "
+                f"(known stages: {sorted(STAGE_CONFIG_MAP.keys())})"
+            )
+        return model.model_validate(self.config)
+
+    def get_prepare_params(self) -> PreparationRequest:
+        """Validate and return typed prepare parameters from config."""
+        return PreparationRequest.model_validate(self.config)
+
     def get_transcribe_params(self) -> TranscriptionRequest:
         """Validate and return typed transcribe parameters from config."""
         return TranscriptionRequest.model_validate(self.config)
+
+    def get_align_params(self) -> AlignmentRequest:
+        """Validate and return typed align parameters from config."""
+        return AlignmentRequest.model_validate(self.config)
+
+    def get_diarize_params(self) -> DiarizationRequest:
+        """Validate and return typed diarize parameters from config."""
+        return DiarizationRequest.model_validate(self.config)
+
+    def get_merge_params(self) -> MergeRequest:
+        """Validate and return typed merge parameters from config."""
+        return MergeRequest.model_validate(self.config)
+
+    def get_pii_detect_params(self) -> PIIDetectionRequest:
+        """Validate and return typed PII detection parameters from config."""
+        return PIIDetectionRequest.model_validate(self.config)
+
+    def get_audio_redact_params(self) -> AudioRedactRequest:
+        """Validate and return typed audio redaction parameters from config."""
+        return AudioRedactRequest.model_validate(self.config)
 
     def get_align_response(self, key: str = "align") -> AlignmentResponse | None:
         return self._get_typed_response(key, AlignmentResponse)

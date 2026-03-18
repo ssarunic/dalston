@@ -260,13 +260,13 @@ class PIIDetectionEngine(Engine):
             TaskResponse with PIIDetectionResponse containing detected entities
         """
         start_time = time.time()
-        config = task_request.config
+        params = task_request.get_pii_detect_params()
         job_id = task_request.job_id
 
         # Get entity types to detect
-        entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
-        confidence_threshold = config.get("confidence_threshold", 0.5)
-        loaded_model_id = config.get("loaded_model_id")
+        entity_types = params.entity_types or DEFAULT_ENTITY_TYPES
+        confidence_threshold = params.confidence_threshold
+        loaded_model_id = params.loaded_model_id
         if not loaded_model_id:
             raise ValueError(
                 "Missing required config field 'loaded_model_id' for pii_detect stage."
