@@ -30,6 +30,13 @@ hf_compat:
   pipeline_tag: automatic-speech-recognition
   library_name: transformers
 
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
 hardware:
   min_vram_gb: 4
   recommended_gpu:
