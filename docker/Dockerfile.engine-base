@@ -10,8 +10,9 @@ FROM python:3.13-slim
 
 WORKDIR /opt/dalston
 
-# Install system dependencies
+# Install system dependencies (ffmpeg required by engine_sdk.audio for format conversion)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the dalston package source

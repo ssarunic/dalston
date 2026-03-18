@@ -48,6 +48,8 @@ class FinalMergerEngine(Engine):
     - Speaker assignments based on diarization overlap
     """
 
+    audio_format = None  # Merge does not consume audio files
+
     def process(
         self,
         task_request: TaskRequest,

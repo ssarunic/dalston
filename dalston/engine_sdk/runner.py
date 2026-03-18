@@ -739,6 +739,18 @@ class EngineRunner:
                     logger=self.engine.logger,
                     temp_dir=temp_dir,
                 )
+                # M81: Ensure audio matches engine's declared format
+                if self.engine.audio_format is not None and isinstance(
+                    task_request.audio_path, Path
+                ):
+                    from dalston.engine_sdk.audio import ensure_audio_format
+
+                    task_request.audio_path = ensure_audio_format(
+                        task_request.audio_path,
+                        target=self.engine.audio_format,
+                        work_dir=temp_dir,
+                    )
+
                 with dalston.telemetry.create_span("engine.process"):
                     # M76: Propagate OTel context into the worker thread
                     # so that sub-spans (model_acquire, recognize, etc.)
