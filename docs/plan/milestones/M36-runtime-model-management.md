@@ -81,26 +81,26 @@ Collapsed variant-specific Docker images into engine_id-based ones.
 **Before**: 20+ images (one per model variant)
 
 ```
-stt-batch-transcribe-faster-whisper-base
-stt-batch-transcribe-faster-whisper-small
-stt-batch-transcribe-faster-whisper-medium
-stt-batch-transcribe-faster-whisper-large-v3
-stt-batch-transcribe-faster-whisper-large-v3-turbo
-stt-batch-transcribe-parakeet-ctc-0.6b
-stt-batch-transcribe-parakeet-ctc-1.1b
-stt-batch-transcribe-parakeet-tdt-0.6b-v3
-stt-batch-transcribe-parakeet-tdt-1.1b
+stt-transcribe-faster-whisper-base
+stt-transcribe-faster-whisper-small
+stt-transcribe-faster-whisper-medium
+stt-transcribe-faster-whisper-large-v3
+stt-transcribe-faster-whisper-large-v3-turbo
+stt-transcribe-parakeet-ctc-0.6b
+stt-transcribe-parakeet-ctc-1.1b
+stt-transcribe-parakeet-tdt-0.6b-v3
+stt-transcribe-parakeet-tdt-1.1b
 ...
 ```
 
 **After**: 5 engine_id images
 
 ```
-stt-batch-transcribe-faster-whisper    # All Whisper variants
-stt-batch-transcribe-nemo              # All Parakeet NeMo variants
-stt-batch-transcribe-parakeet-onnx     # All Parakeet ONNX variants
-stt-batch-transcribe-hf-asr            # Any HuggingFace ASR model
-stt-batch-transcribe-vllm-asr          # Voxtral, Qwen2-Audio
+stt-transcribe-faster-whisper    # All Whisper variants
+stt-transcribe-nemo              # All Parakeet NeMo variants
+stt-transcribe-parakeet-onnx     # All Parakeet ONNX variants
+stt-transcribe-hf-asr            # Any HuggingFace ASR model
+stt-transcribe-vllm-asr          # Voxtral, Qwen2-Audio
 ```
 
 ---

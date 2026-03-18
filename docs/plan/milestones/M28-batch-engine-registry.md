@@ -323,7 +323,7 @@ async def queue_task(
     task: Task,
     settings: Settings,
     registry: BatchEngineRegistry,  # NEW parameter
-    previous_outputs: dict[str, Any] | None = None,
+    previous_responses: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Queue a task for execution by its engine."""
@@ -372,7 +372,7 @@ async def handle_job_created(
                     task=task,
                     settings=settings,
                     registry=registry,
-                    previous_outputs={},
+                    previous_responses={},
                     audio_metadata=audio_metadata if task.stage == "prepare" else None,
                 )
             except EngineUnavailableError as e:
@@ -470,7 +470,7 @@ curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID \
 # {"status": "failed", "error": "Engine 'audio-prepare' is not available..."}
 
 # 4. Start the engines
-docker compose up -d stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+docker compose up -d stt-prepare stt-transcribe-whisper-cpu stt-merge
 
 # 5. Wait for registration (10s for first heartbeat)
 sleep 12
@@ -492,7 +492,7 @@ curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID \
 # "completed"
 
 # 9. Stop an engine mid-flight and verify graceful handling
-docker compose stop stt-batch-transcribe-whisper-cpu
+docker compose stop stt-transcribe-whisper-cpu
 # Submit job, wait for it to reach transcribe stage
 # Should fail with "Engine 'faster-whisper' is not available"
 ```

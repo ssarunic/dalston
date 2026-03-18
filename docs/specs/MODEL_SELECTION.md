@@ -447,7 +447,7 @@ The Models page (`/models`) provides:
 {
   "error": {
     "type": "service_unavailable",
-    "message": "No engine available for engine_id 'nemo'. Start an engine with: docker compose up -d stt-batch-transcribe-nemo"
+    "message": "No engine available for engine_id 'nemo'. Start an engine with: docker compose up -d stt-transcribe-nemo"
   }
 }
 ```

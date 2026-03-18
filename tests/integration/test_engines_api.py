@@ -28,7 +28,7 @@ def mock_catalog() -> EngineCatalog:
     entries = {
         "faster-whisper": CatalogEntry(
             engine_id="faster-whisper",
-            image="dalston/stt-batch-transcribe-whisper:1.0.0",
+            image="dalston/stt-transcribe-whisper:1.0.0",
             execution_profile="container",
             capabilities=EngineCapabilities(
                 engine_id="faster-whisper",
@@ -47,7 +47,7 @@ def mock_catalog() -> EngineCatalog:
         ),
         "parakeet": CatalogEntry(
             engine_id="parakeet",
-            image="dalston/stt-batch-transcribe-parakeet:1.0.0",
+            image="dalston/stt-transcribe-parakeet:1.0.0",
             execution_profile="venv",
             capabilities=EngineCapabilities(
                 engine_id="parakeet",
@@ -64,7 +64,7 @@ def mock_catalog() -> EngineCatalog:
         ),
         "pyannote-4.0": CatalogEntry(
             engine_id="pyannote-4.0",
-            image="dalston/stt-batch-diarize-pyannote-4.0:1.0.0",
+            image="dalston/stt-diarize-pyannote-4.0:1.0.0",
             execution_profile="inproc",
             capabilities=EngineCapabilities(
                 engine_id="pyannote-4.0",

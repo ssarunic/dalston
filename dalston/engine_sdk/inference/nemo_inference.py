@@ -12,6 +12,7 @@ responsible for formatting the raw results into its own output contract.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,8 @@ from typing import Any
 import numpy as np
 import structlog
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.engine_sdk.managers import NeMoModelManager
 
 logger = structlog.get_logger()
@@ -91,6 +94,7 @@ class NemoInference:
             max_loaded=max_loaded,
             preload=preload,
         )
+        self._current_model_id: str | None = None
 
         logger.info(
             "nemo_inference_init",
@@ -128,11 +132,13 @@ class NemoInference:
         Returns:
             NeMoTranscriptionResult with text, segments, and words.
         """
+        self._current_model_id = model_id
         model = self._manager.acquire(model_id)
         try:
             return self.transcribe_with_model(model, audio)
         finally:
             self._manager.release(model_id)
+            self._current_model_id = None
 
     def transcribe_with_model(
         self,
@@ -169,19 +175,35 @@ class NemoInference:
                     item = item.squeeze()
             prepared.append(item)
 
+        engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
+        model_id = self._current_model_id or ""
+
         # Run inference with appropriate context manager
         autocast_ctx = (
             torch.amp.autocast("cuda")
             if self.device == "cuda"
             else torch.inference_mode()
         )
-        with autocast_ctx:
-            transcriptions = model.transcribe(
-                prepared,
-                batch_size=1,
-                return_hypotheses=True,
-                timestamps=True,
-            )
+        start = time.monotonic()
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.device": self.device,
+                "dalston.model_id": model_id,
+            },
+        ):
+            with autocast_ctx:
+                transcriptions = model.transcribe(
+                    prepared,
+                    batch_size=1,
+                    return_hypotheses=True,
+                    timestamps=True,
+                )
+        recognize_time = time.monotonic() - start
+
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self.device, recognize_time
+        )
 
         if not transcriptions:
             return NeMoTranscriptionResult()
@@ -196,7 +218,30 @@ class NemoInference:
         full_text = hypothesis.text if hasattr(hypothesis, "text") else str(hypothesis)
 
         # Parse timestamps from hypothesis
-        segments, all_words = self._parse_hypothesis(hypothesis, full_text)
+        with dalston.telemetry.create_span("engine.parse_result") as span:
+            segments, all_words = self._parse_hypothesis(hypothesis, full_text)
+            if hasattr(span, "set_attributes"):
+                span.set_attributes(
+                    {
+                        "dalston.word_count": len(all_words),
+                        "dalston.segment_count": len(segments),
+                        "dalston.char_count": len(full_text),
+                    }
+                )
+
+        # Compute RTF from audio duration if available
+        audio_duration_s = 0.0
+        if segments:
+            audio_duration_s = max(s.end for s in segments) if segments else 0.0
+        if audio_duration_s > 0:
+            rtf = recognize_time / audio_duration_s
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self.device, rtf
+            )
+            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+            dalston.telemetry.set_span_attribute(
+                "dalston.audio_duration_s", round(audio_duration_s, 3)
+            )
 
         return NeMoTranscriptionResult(
             text=full_text.strip(),
@@ -651,15 +696,9 @@ class NemoInference:
             DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
             DALSTON_MODEL_PRELOAD: Model to preload (optional)
         """
-        # Auto-detect device
-        device = os.environ.get("DALSTON_DEVICE", "").lower()
-        if not device or device == "auto":
-            try:
-                import torch
+        from dalston.engine_sdk.device import detect_device
 
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                device = "cpu"
+        device = detect_device(include_mps=False)
 
         return cls(
             device=device,

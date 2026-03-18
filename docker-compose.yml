@@ -255,6 +255,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   orchestrator:
@@ -275,8 +276,8 @@ services:
   # ============================================================
 
   # --- PREPARE STAGE ---
-  stt-batch-prepare:
-    image: dalston/stt-batch-prepare:latest
+  stt-prepare:
+    image: dalston/stt-prepare:latest
     build:
       context: .
       dockerfile: engines/stt-prepare/audio-prepare/Dockerfile
@@ -295,11 +296,11 @@ services:
   # M63: Unified NeMo Parakeet (GPU) — one process, one model, batch + realtime.
   # Supports: nvidia/parakeet-ctc-0.6b, nvidia/parakeet-ctc-1.1b,
   #           nvidia/parakeet-tdt-0.6b-v3, nvidia/parakeet-tdt-1.1b
-  stt-unified-nemo:
-    image: dalston/stt-unified-nemo:1.0.0
+  stt-transcribe-nemo:
+    image: dalston/stt-transcribe-nemo:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/nemo/Dockerfile
+      dockerfile: engines/stt-transcribe/nemo/Dockerfile
       args:
         DEVICE: cuda
     environment:
@@ -307,7 +308,7 @@ services:
 
       DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
-      DALSTON_INSTANCE: stt-unified-nemo
+      DALSTON_INSTANCE: stt-transcribe-nemo
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_MODEL_PRELOAD: parakeet-rnnt-1.1b
@@ -323,11 +324,11 @@ services:
     restart: unless-stopped
 
   # M63: Unified NeMo Parakeet (CPU) — for local development without GPU
-  stt-unified-nemo-cpu:
-    image: dalston/stt-unified-nemo-cpu:1.0.0
+  stt-transcribe-nemo-cpu:
+    image: dalston/stt-transcribe-nemo-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/nemo/Dockerfile
+      dockerfile: engines/stt-transcribe/nemo/Dockerfile
       args:
         DEVICE: cpu
     environment:
@@ -335,7 +336,7 @@ services:
 
       DALSTON_ENGINE_ID: nemo
       DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
-      DALSTON_INSTANCE: stt-unified-nemo-cpu
+      DALSTON_INSTANCE: stt-transcribe-nemo-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_DEVICE: cpu
@@ -352,11 +353,11 @@ services:
   # M63: Unified Faster Whisper (CPU) — multilingual batch + realtime.
   # Uses CTranslate2 for efficient CPU inference. Supports 99 languages.
   # Supports: tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
-  stt-unified-faster-whisper-cpu:
-    image: dalston/stt-unified-faster-whisper-cpu:1.0.0
+  stt-transcribe-faster-whisper-cpu:
+    image: dalston/stt-transcribe-faster-whisper-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/faster-whisper/Dockerfile
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
         DEVICE: cpu
     environment:
@@ -364,7 +365,7 @@ services:
 
       DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
-      DALSTON_INSTANCE: stt-unified-faster-whisper-cpu
+      DALSTON_INSTANCE: stt-transcribe-faster-whisper-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_DEVICE: cpu
@@ -378,11 +379,11 @@ services:
     restart: unless-stopped
 
   # M63: Unified Faster Whisper (GPU) — multilingual batch + realtime.
-  stt-unified-faster-whisper:
-    image: dalston/stt-unified-faster-whisper:1.0.0
+  stt-transcribe-faster-whisper:
+    image: dalston/stt-transcribe-faster-whisper:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/faster-whisper/Dockerfile
+      dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
       args:
         DEVICE: cuda
     environment:
@@ -390,7 +391,7 @@ services:
 
       DALSTON_ENGINE_ID: faster-whisper
       DALSTON_DEFAULT_MODEL_ID: "large-v3-turbo"
-      DALSTON_INSTANCE: stt-unified-faster-whisper
+      DALSTON_INSTANCE: stt-transcribe-faster-whisper
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cuda
@@ -409,11 +410,11 @@ services:
   # M63: Unified Parakeet ONNX (CPU) — lightweight English, batch + realtime.
   # Uses ONNX Runtime instead of NeMo for ~12x smaller container image.
   # Supports: nvidia/parakeet-ctc-{0.6b,1.1b}, nvidia/parakeet-tdt-0.6b-{v2,v3}, nvidia/parakeet-rnnt-0.6b
-  stt-unified-onnx-cpu:
-    image: dalston/stt-unified-onnx-cpu:1.0.0
+  stt-transcribe-onnx-cpu:
+    image: dalston/stt-transcribe-onnx-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/onnx/Dockerfile
+      dockerfile: engines/stt-transcribe/onnx/Dockerfile
       args:
         DEVICE: cpu
     environment:
@@ -421,7 +422,7 @@ services:
 
       DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
-      DALSTON_INSTANCE: stt-unified-onnx-cpu
+      DALSTON_INSTANCE: stt-transcribe-onnx-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cpu
@@ -436,11 +437,11 @@ services:
     restart: unless-stopped
 
   # M63: Unified Parakeet ONNX (GPU) — faster English, batch + realtime.
-  stt-unified-onnx:
-    image: dalston/stt-unified-onnx:1.0.0
+  stt-transcribe-onnx:
+    image: dalston/stt-transcribe-onnx:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/onnx/Dockerfile
+      dockerfile: engines/stt-transcribe/onnx/Dockerfile
       args:
         DEVICE: cuda
     environment:
@@ -448,7 +449,7 @@ services:
 
       DALSTON_ENGINE_ID: onnx
       DALSTON_DEFAULT_MODEL_ID: "parakeet-onnx-ctc-0.6b"
-      DALSTON_INSTANCE: stt-unified-onnx
+      DALSTON_INSTANCE: stt-transcribe-onnx
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cuda
@@ -467,11 +468,11 @@ services:
   # vLLM Audio ASR (GPU - audio LLMs via vLLM)
   # Supports Voxtral and Qwen2-Audio model families
   # Models are downloaded from S3 at runtime via S3ModelStorage
-  stt-batch-transcribe-vllm-asr:
-    image: dalston/stt-batch-transcribe-vllm-asr:1.0.0
+  stt-transcribe-vllm-asr:
+    image: dalston/stt-transcribe-vllm-asr:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/vllm-asr/Dockerfile
+      dockerfile: engines/stt-transcribe/vllm-asr/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: vllm-asr
@@ -490,18 +491,18 @@ services:
 
   # M63: Unified HF-ASR (CPU) — any HuggingFace ASR model, batch + realtime.
   # Supports: Whisper, Wav2Vec2, HuBERT, MMS, and 10,000+ HF ASR models
-  stt-unified-hf-asr-cpu:
-    image: dalston/stt-unified-hf-asr-cpu:1.0.0
+  stt-transcribe-hf-asr-cpu:
+    image: dalston/stt-transcribe-hf-asr-cpu:1.0.0
     build:
       context: .
-      dockerfile: engines/stt-unified/hf-asr/Dockerfile
+      dockerfile: engines/stt-transcribe/hf-asr/Dockerfile
       args:
         DEVICE: cpu
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: hf-asr
       DALSTON_DEFAULT_MODEL_ID: "openai/whisper-large-v3"
-      DALSTON_INSTANCE: stt-unified-hf-asr-cpu
+      DALSTON_INSTANCE: stt-transcribe-hf-asr-cpu
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_DEVICE: cpu
@@ -517,8 +518,8 @@ services:
   # --- ALIGN STAGE ---
 
   # Phoneme forced alignment (CPU - default for local dev)
-  stt-batch-align-phoneme-cpu:
-    image: dalston/stt-batch-align-phoneme:latest
+  stt-align-phoneme-cpu:
+    image: dalston/stt-align-phoneme:latest
     build:
       context: .
       dockerfile: engines/stt-align/phoneme-align/Dockerfile
@@ -532,8 +533,8 @@ services:
     restart: unless-stopped
 
   # Phoneme forced alignment (GPU)
-  stt-batch-align-phoneme:
-    image: dalston/stt-batch-align-phoneme:latest
+  stt-align-phoneme:
+    image: dalston/stt-align-phoneme:latest
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: phoneme-align
@@ -548,8 +549,8 @@ services:
   # --- DIARIZE STAGE ---
 
   # Pyannote 4.0 (CPU - default for local dev)
-  stt-batch-diarize-pyannote-4.0-cpu:
-    image: dalston/stt-batch-diarize-pyannote-4.0:latest
+  stt-diarize-pyannote-4.0-cpu:
+    image: dalston/stt-diarize-pyannote-4.0:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/pyannote-4.0/Dockerfile
@@ -558,15 +559,14 @@ services:
       DALSTON_ENGINE_ID: pyannote-4.0
       DALSTON_WORKER_ID: pyannote-cpu-1
       HF_TOKEN: ${HF_TOKEN:-}
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
     restart: unless-stopped
 
   # Pyannote 4.0 (GPU)
-  stt-batch-diarize-pyannote-4.0:
-    image: dalston/stt-batch-diarize-pyannote-4.0:latest
+  stt-diarize-pyannote-4.0:
+    image: dalston/stt-diarize-pyannote-4.0:latest
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: pyannote-4.0
@@ -579,9 +579,9 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # NeMo MSDD (GPU preferred, CPU allowed with NEMO_ALLOW_CPU=true)
-  stt-batch-diarize-nemo-msdd:
-    image: dalston/stt-batch-diarize-nemo-msdd:latest
+  # NeMo MSDD (GPU preferred)
+  stt-diarize-nemo-msdd:
+    image: dalston/stt-diarize-nemo-msdd:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/nemo-msdd/Dockerfile
@@ -591,8 +591,6 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-gpu1
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
-      DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -600,8 +598,8 @@ services:
     restart: unless-stopped
 
   # NeMo MSDD Speaker Diarization - CPU variant (slow but works)
-  stt-batch-diarize-nemo-msdd-cpu:
-    image: dalston/stt-batch-diarize-nemo-msdd-cpu:latest
+  stt-diarize-nemo-msdd-cpu:
+    image: dalston/stt-diarize-nemo-msdd-cpu:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/nemo-msdd/Dockerfile
@@ -611,8 +609,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-cpu1
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
-      DALSTON_NEMO_ALLOW_CPU: "true"
+      DALSTON_DEVICE: cpu
     volumes:
       - model-cache:/models
     shm_size: '2gb'
@@ -660,8 +657,8 @@ services:
     restart: unless-stopped
 
   # --- PII DETECT STAGE ---
-  stt-batch-pii-detect-presidio:
-    image: dalston/stt-batch-pii-detect-presidio:latest
+  stt-pii-detect-presidio:
+    image: dalston/stt-pii-detect-presidio:latest
     build:
       context: .
       dockerfile: engines/stt-detect/pii-presidio/Dockerfile
@@ -677,8 +674,8 @@ services:
     depends_on: *batch-depends
     restart: unless-stopped
 
-  stt-batch-pii-detect-presidio-gpu:
-    image: dalston/stt-batch-pii-detect-presidio-gpu:latest
+  stt-pii-detect-presidio-gpu:
+    image: dalston/stt-pii-detect-presidio-gpu:latest
     build:
       context: .
       dockerfile: engines/stt-detect/pii-presidio/Dockerfile
@@ -697,8 +694,8 @@ services:
     restart: unless-stopped
 
   # --- AUDIO REDACT STAGE ---
-  stt-batch-audio-redact-audio:
-    image: dalston/stt-batch-audio-redact-audio:latest
+  stt-audio-redact-audio:
+    image: dalston/stt-audio-redact-audio:latest
     build:
       context: .
       dockerfile: engines/stt-redact/audio-redactor/Dockerfile
@@ -743,16 +740,16 @@ services:
     restart: unless-stopped
 
   # Unified Riva engine — batch + realtime in one process, gRPC to NIM sidecar
-  stt-unified-riva:
+  stt-transcribe-riva:
     image: dalston/stt-riva:1.1.0
     build:
       context: .
-      dockerfile: engines/stt-unified/riva/Dockerfile
+      dockerfile: engines/stt-transcribe/riva/Dockerfile
     environment:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: riva
       DALSTON_WORKER_ID: riva-unified-1
-      DALSTON_INSTANCE: stt-unified-riva
+      DALSTON_INSTANCE: stt-transcribe-riva
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 8
       DALSTON_RIVA_URI: riva-nim:50051

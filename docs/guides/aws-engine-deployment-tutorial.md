@@ -153,16 +153,16 @@ EOF
 │  │ Orchestrator │                           │
 │  └──────────────┘                           │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-unified-onnx-cpu                │   │
+│  │ stt-transcribe-onnx-cpu                │   │
 │  │   Model: parakeet-onnx-tdt-0.6b-v3  │   │
 │  │   Batch + Realtime transcription     │   │
 │  └──────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-batch-diarize-pyannote-4.0-cpu  │   │
+│  │ stt-diarize-pyannote-4.0-cpu  │   │
 │  │   Speaker diarization               │   │
 │  └──────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-batch-prepare                   │   │
+│  │ stt-prepare                   │   │
 │  │   Audio prep (normalize, resample)   │   │
 │  └──────────────────────────────────────┘   │
 └─────────────────────────────────────────────┘
@@ -189,10 +189,10 @@ EOF
 cd /data/dalston
 
 # Build the ONNX engine image (lightweight — takes ~2 minutes)
-docker compose build stt-unified-onnx-cpu
+docker compose build stt-transcribe-onnx-cpu
 
 # Build the Pyannote engine image (~5 minutes)
-docker compose build stt-batch-diarize-pyannote-4.0-cpu
+docker compose build stt-diarize-pyannote-4.0-cpu
 
 # Start everything: infra + orchestrator + your engines
 docker compose \
@@ -202,9 +202,9 @@ docker compose \
   --profile local-infra \
   up -d \
   gateway orchestrator \
-  stt-batch-prepare \
-  stt-unified-onnx-cpu \
-  stt-batch-diarize-pyannote-4.0-cpu
+  stt-prepare \
+  stt-transcribe-onnx-cpu \
+  stt-diarize-pyannote-4.0-cpu
 ```
 
 ### Step A3: Verify It's Running
@@ -217,8 +217,8 @@ docker compose ps
 curl http://localhost:8000/health
 
 # Check engine logs (first run downloads the model — may take a few minutes)
-docker compose logs -f stt-unified-onnx-cpu
-docker compose logs -f stt-batch-diarize-pyannote-4.0-cpu
+docker compose logs -f stt-transcribe-onnx-cpu
+docker compose logs -f stt-diarize-pyannote-4.0-cpu
 ```
 
 Wait until you see log lines like:
@@ -262,9 +262,9 @@ docker compose \
   --profile local-infra --profile gpu \
   up -d \
   gateway orchestrator \
-  stt-batch-prepare \
-  stt-unified-onnx \
-  stt-batch-diarize-pyannote-4.0
+  stt-prepare \
+  stt-transcribe-onnx \
+  stt-diarize-pyannote-4.0
 ```
 
 ---
@@ -285,17 +285,17 @@ docker compose \
 │  │ Orchestrator │                           │
 │  └──────────────┘                           │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-unified-nemo            [GPU]   │   │
+│  │ stt-transcribe-nemo            [GPU]   │   │
 │  │   Model: nvidia/parakeet-tdt-0.6b-v3│   │
 │  │   Batch + Realtime transcription     │   │
 │  └──────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-batch-diarize-nemo-msdd [GPU]   │   │
+│  │ stt-diarize-nemo-msdd [GPU]   │   │
 │  │   VAD + TitaNet + MSDD              │   │
 │  │   No HF token needed!               │   │
 │  └──────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────┐   │
-│  │ stt-batch-prepare                   │   │
+│  │ stt-prepare                   │   │
 │  │   Audio prep (normalize, resample)   │   │
 │  └──────────────────────────────────────┘   │
 └─────────────────────────────────────────────┘
@@ -332,10 +332,10 @@ EOF
 cd /data/dalston
 
 # Build NeMo unified engine (WARNING: ~15 minutes, ~12GB image)
-docker compose build stt-unified-nemo
+docker compose build stt-transcribe-nemo
 
 # Build NeMo MSDD diarization (~10 minutes, downloads VAD + TitaNet + MSDD models)
-docker compose build stt-batch-diarize-nemo-msdd
+docker compose build stt-diarize-nemo-msdd
 ```
 
 > **Tip:** The g5.xlarge has 24GB GPU VRAM. The NeMo 0.6B model uses ~2GB and MSDD
@@ -352,9 +352,9 @@ docker compose \
   --profile local-infra --profile gpu \
   up -d \
   gateway orchestrator \
-  stt-batch-prepare \
-  stt-unified-nemo \
-  stt-batch-diarize-nemo-msdd
+  stt-prepare \
+  stt-transcribe-nemo \
+  stt-diarize-nemo-msdd
 ```
 
 ### Step B4: Verify
@@ -364,13 +364,13 @@ docker compose \
 docker compose ps
 
 # Watch NeMo engine startup (first run downloads model — can take 5+ minutes)
-docker compose logs -f stt-unified-nemo
+docker compose logs -f stt-transcribe-nemo
 
 # Watch MSDD engine
-docker compose logs -f stt-batch-diarize-nemo-msdd
+docker compose logs -f stt-diarize-nemo-msdd
 
 # Verify GPU is visible to containers
-docker compose exec stt-unified-nemo nvidia-smi
+docker compose exec stt-transcribe-nemo nvidia-smi
 ```
 
 ### Step B5: Test It
@@ -392,8 +392,8 @@ curl -X POST http://100.100.1.5:8000/v1/audio/transcriptions \
 ```bash
 # On the instance:
 docker compose logs -f gateway          # API logs
-docker compose logs -f stt-unified-onnx-cpu  # Engine logs (Path A)
-docker compose logs -f stt-unified-nemo      # Engine logs (Path B)
+docker compose logs -f stt-transcribe-onnx-cpu  # Engine logs (Path A)
+docker compose logs -f stt-transcribe-nemo      # Engine logs (Path B)
 ```
 
 ### Stop to save money
@@ -500,7 +500,7 @@ writes results to S3. No ports need to be exposed.
 
 ```bash
 cd /data/dalston
-docker compose build stt-batch-diarize-pyannote-4.0
+docker compose build stt-diarize-pyannote-4.0
 ```
 
 **Run:**
@@ -521,7 +521,7 @@ docker run -d --name pyannote \
   -e HF_TOKEN=hf_your_token_here \
   -e DALSTON_LOG_LEVEL=INFO \
   -e DALSTON_LOG_FORMAT=json \
-  dalston/stt-batch-diarize-pyannote-4.0:latest
+  dalston/stt-diarize-pyannote-4.0:latest
 ```
 
 **Verify:**
@@ -549,7 +549,7 @@ able to reach it. Set `DALSTON_WORKER_ENDPOINT` to the instance's Tailscale IP.
 
 ```bash
 cd /data/dalston
-docker compose build stt-unified-onnx   # GPU variant
+docker compose build stt-transcribe-onnx   # GPU variant
 ```
 
 **Run:**
@@ -573,7 +573,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
-  -e DALSTON_INSTANCE=stt-unified-onnx-aws \
+  -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \
   -e DALSTON_WORKER_ENDPOINT="ws://${INSTANCE_TS_IP}:9000" \
   -e DALSTON_MAX_SESSIONS=4 \
@@ -583,7 +583,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_TOTAL_CAPACITY=6 \
   -e DALSTON_LOG_LEVEL=INFO \
   -e DALSTON_LOG_FORMAT=json \
-  dalston/stt-unified-onnx:1.0.0
+  dalston/stt-transcribe-onnx:1.0.0
 ```
 
 > **Why `-p 9000:9000`?** The gateway proxies realtime WebSocket sessions to the
@@ -631,7 +631,7 @@ docker run -d --name pyannote \
   -e HF_TOKEN=hf_your_token_here \
   -e DALSTON_LOG_LEVEL=INFO \
   -e DALSTON_LOG_FORMAT=json \
-  dalston/stt-batch-diarize-pyannote-4.0:latest
+  dalston/stt-diarize-pyannote-4.0:latest
 
 # 2. Start ONNX Parakeet (transcription + realtime)
 docker run -d --name onnx-parakeet \
@@ -649,7 +649,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
-  -e DALSTON_INSTANCE=stt-unified-onnx-aws \
+  -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \
   -e DALSTON_WORKER_ENDPOINT="ws://${INSTANCE_TS_IP}:9000" \
   -e DALSTON_MAX_SESSIONS=4 \
@@ -659,7 +659,7 @@ docker run -d --name onnx-parakeet \
   -e DALSTON_TOTAL_CAPACITY=6 \
   -e DALSTON_LOG_LEVEL=INFO \
   -e DALSTON_LOG_FORMAT=json \
-  dalston/stt-unified-onnx:1.0.0
+  dalston/stt-transcribe-onnx:1.0.0
 ```
 
 **Verify both are running:**
@@ -722,7 +722,7 @@ docker run -d --name pyannote --gpus all --restart unless-stopped \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-aws-gpu1 \
   -e HF_TOKEN="${HF_TOKEN}" \
-  dalston/stt-batch-diarize-pyannote-4.0:latest
+  dalston/stt-diarize-pyannote-4.0:latest
 
 echo "Starting ONNX Parakeet TDT 0.6B v3..."
 docker run -d --name onnx-parakeet --gpus all --restart unless-stopped \
@@ -732,7 +732,7 @@ docker run -d --name onnx-parakeet --gpus all --restart unless-stopped \
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
-  -e DALSTON_INSTANCE=stt-unified-onnx-aws \
+  -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \
   -e DALSTON_WORKER_ENDPOINT="ws://${INSTANCE_TS_IP}:9000" \
   -e DALSTON_MAX_SESSIONS=4 \
@@ -740,7 +740,7 @@ docker run -d --name onnx-parakeet --gpus all --restart unless-stopped \
   -e DALSTON_RT_RESERVATION=2 \
   -e DALSTON_BATCH_MAX_INFLIGHT=4 \
   -e DALSTON_TOTAL_CAPACITY=6 \
-  dalston/stt-unified-onnx:1.0.0
+  dalston/stt-transcribe-onnx:1.0.0
 
 echo "Done. Both engines running."
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
@@ -795,7 +795,7 @@ The first startup downloads models from HuggingFace/NGC. If it fails:
 
 ```bash
 # Restart the engine to retry
-docker compose restart stt-unified-onnx-cpu  # or stt-unified-nemo
+docker compose restart stt-transcribe-onnx-cpu  # or stt-transcribe-nemo
 
 # Check if disk is full (models are stored on EBS)
 df -h /data
@@ -832,10 +832,10 @@ curl -H "Authorization: Bearer hf_your_token" \
 You need to build the images on the instance first:
 
 ```bash
-docker compose build stt-unified-onnx-cpu    # Path A
-docker compose build stt-batch-diarize-pyannote-4.0-cpu  # Path A
-docker compose build stt-unified-nemo         # Path B
-docker compose build stt-batch-diarize-nemo-msdd  # Path B
+docker compose build stt-transcribe-onnx-cpu    # Path A
+docker compose build stt-diarize-pyannote-4.0-cpu  # Path A
+docker compose build stt-transcribe-nemo         # Path B
+docker compose build stt-diarize-nemo-msdd  # Path B
 ```
 
 ### Logs say "Engine ready" but API returns 503

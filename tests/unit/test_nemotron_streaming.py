@@ -38,7 +38,7 @@ def _cleanup_injected_modules():
 
 
 def _load_rt_engine_module():
-    engine_path = Path("engines/stt-unified/nemo/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/rt_engine.py")
     if not engine_path.exists():
         pytest.skip("NeMo RT engine not found")
     spec = importlib.util.spec_from_file_location(_INJECTED_MODULE_NAME, engine_path)

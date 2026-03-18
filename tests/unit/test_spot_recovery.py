@@ -745,10 +745,10 @@ class TestHandleTaskCompletedReplaySafety:
         mock_dependent.stage = "merge"
         mock_dependent.status = TaskStatus.PENDING.value
         mock_dependent.dependencies = [task_id]
-        mock_dependent.input_uri = None
+        mock_dependent.request_uri = None
         mock_dependent.engine_id = "final-merger"
         mock_dependent.config = {}
-        mock_dependent.output_uri = "s3://bucket/output.json"
+        mock_dependent.response_uri = "s3://bucket/output.json"
         mock_dependent.required = True
         mock_dependent.retries = 0
         mock_dependent.max_retries = 3
@@ -785,7 +785,7 @@ class TestHandleTaskCompletedReplaySafety:
                 new_callable=AsyncMock,
             ) as mock_check_completion,
             patch(
-                "dalston.orchestrator.handlers._gather_previous_outputs",
+                "dalston.orchestrator.handlers._gather_previous_responses",
                 new_callable=AsyncMock,
                 return_value={"transcribe": {"segments": []}},
             ),
@@ -905,8 +905,8 @@ class TestHandleTaskFailedIdempotency:
         mock_task.dependencies = []
         mock_task.engine_id = "faster-whisper"
         mock_task.config = {}
-        mock_task.input_uri = "s3://bucket/input.wav"
-        mock_task.output_uri = "s3://bucket/output.json"
+        mock_task.request_uri = "s3://bucket/input.wav"
+        mock_task.response_uri = "s3://bucket/output.json"
         mock_task.required = True
         mock_task.error = "Previous error"
 
@@ -1172,8 +1172,8 @@ class TestHandleTaskFailedIdempotency:
         # Additional fields needed for Pydantic Task validation
         mock_task.engine_id = "faster-whisper"
         mock_task.config = {}
-        mock_task.input_uri = "s3://bucket/input.wav"
-        mock_task.output_uri = "s3://bucket/output.json"
+        mock_task.request_uri = "s3://bucket/input.wav"
+        mock_task.response_uri = "s3://bucket/output.json"
         mock_task.required = True
         mock_task.error = None
 

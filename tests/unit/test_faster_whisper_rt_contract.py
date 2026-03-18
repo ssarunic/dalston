@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def _cleanup_injected_modules():
 
 def _load_rt_engine():
     """Load FasterWhisperRealtimeEngine from file to avoid import path issues."""
-    engine_path = Path("engines/stt-unified/faster-whisper/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/faster-whisper/rt_engine.py")
     spec = importlib.util.spec_from_file_location("m63_whisper_rt_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -142,9 +142,9 @@ def _make_params(
     language: str = "auto",
     model_variant: str = "large-v3-turbo",
     vocabulary: list[str] | None = None,
-) -> TranscribeInput:
+) -> TranscriptionRequest:
     """Create typed transcribe params for RT calls."""
-    return TranscribeInput(
+    return TranscriptionRequest(
         language=language,
         loaded_model_id=model_variant,
         vocabulary=vocabulary,

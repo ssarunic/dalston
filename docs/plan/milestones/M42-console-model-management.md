@@ -1063,7 +1063,7 @@ Ensure `/v1/engines` returns `loaded_model` and `available_models`:
 # This should already be returned by the engines endpoint per M40
 # Verify the response includes:
 {
-  "engine_id": "stt-batch-transcribe-faster-whisper",
+  "engine_id": "stt-transcribe-faster-whisper",
   "stage": "transcribe",
   "status": "running",
   "queue_depth": 0,

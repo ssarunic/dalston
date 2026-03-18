@@ -1,6 +1,6 @@
 """Tests for Riva unified engine YAML definition.
 
-Verifies that rt_engine.yaml for the unified Riva engine
+Verifies that engine.yaml for the unified Riva engine
 parses correctly and contains the expected capabilities.
 """
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-UNIFIED_YAML = Path("engines/stt-unified/riva/rt_engine.yaml")
+UNIFIED_YAML = Path("engines/stt-transcribe/riva/engine.yaml")
 
 
 class TestUnifiedEngineYaml:

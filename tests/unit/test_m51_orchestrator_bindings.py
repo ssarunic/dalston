@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from dalston.common.artifacts import ArtifactReference, InputBinding
+from dalston.common.artifacts import ArtifactReference, RequestBinding
 from dalston.orchestrator.scheduler import _resolve_input_bindings
 from tests.dag_test_helpers import build_task_dag_for_test
 
@@ -63,7 +63,7 @@ def test_binding_resolution_prefers_selector_channel_role() -> None:
 
     resolved = _resolve_input_bindings(
         bindings=[
-            InputBinding.model_validate(
+            RequestBinding.model_validate(
                 {
                     "slot": "audio",
                     "selector": {

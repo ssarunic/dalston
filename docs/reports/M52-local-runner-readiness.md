@@ -14,7 +14,7 @@ python -m dalston.engine_sdk.local_runner run \
   --engine <engine-ref> \
   --stage <stage> \
   --config <config.json> \
-  --output <output.json>
+  --output <response.json>
 ```
 
 ## Stage Dry Runs
@@ -22,7 +22,7 @@ python -m dalston.engine_sdk.local_runner run \
 1. `align` (`engines.stt-align.phoneme-align.engine:PhonemeAlignEngine`)
 
 - Result: Passed.
-- Notes: Command completed, produced canonical `output.json`, and emitted aligned segment/word data.
+- Notes: Command completed, produced canonical `response.json`, and emitted aligned segment/word data.
 
 2. `diarize` (`engines.stt-diarize.pyannote-4.0.engine:PyannoteEngine`)
 

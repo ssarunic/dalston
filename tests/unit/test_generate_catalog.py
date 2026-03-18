@@ -74,14 +74,14 @@ class TestDeriveImageName:
     """Tests for derive_image_name function."""
 
     def test_batch_engine_image(self) -> None:
-        """Batch engine should have stt-batch prefix."""
+        """Batch engine should have stt-{stage} prefix."""
         result = derive_image_name("faster-whisper", "transcribe", "1.0.0")
-        assert result == "dalston/stt-batch-transcribe-faster-whisper:1.0.0"
+        assert result == "dalston/stt-transcribe-faster-whisper:1.0.0"
 
     def test_diarize_stage(self) -> None:
         """Other stages should work correctly."""
         result = derive_image_name("pyannote-4.0", "diarize", "1.0.0")
-        assert result == "dalston/stt-batch-diarize-pyannote-4.0:1.0.0"
+        assert result == "dalston/stt-diarize-pyannote-4.0:1.0.0"
 
 
 class TestTransformRuntimeToEntry:
@@ -144,8 +144,8 @@ class TestFindRuntimeYamls:
             files = find_engine_id_yamls(engines_dir)
             # Should find engine.yaml files
             assert len(files) >= 5
-            # All files should be engine.yaml or rt_engine.yaml
-            assert all(f.name in ("engine.yaml", "rt_engine.yaml") for f in files)
+            # All files should be engine.yaml
+            assert all(f.name == "engine.yaml" for f in files)
 
     def test_empty_for_nonexistent_dir(self) -> None:
         """Should return empty list for non-existent directory."""

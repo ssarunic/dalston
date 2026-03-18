@@ -19,14 +19,15 @@ from model_loader import AlignModelMetadata, load_align_model
 
 from dalston.engine_sdk import (
     AlignmentMethod,
-    AlignOutput,
+    AlignmentResponse,
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
     Segment,
+    TaskRequest,
+    TaskResponse,
     TimestampGranularity,
     Word,
+    detect_device,
 )
 
 
@@ -41,22 +42,11 @@ class PhonemeAlignEngine(Engine):
     def __init__(self) -> None:
         super().__init__()
         self._align_models: dict[str, tuple[Any, AlignModelMetadata]] = {}
-        self._device, self._compute_type = self._detect_device()
+        self._device = detect_device()
+        self._compute_type = "float16" if self._device == "cuda" else "float32"
         self.logger.info(
             "detected_device", device=self._device, compute_type=self._compute_type
         )
-
-    def _detect_device(self) -> tuple[str, str]:
-        """Detect the best available compute device.
-
-        Preference order: CUDA → MPS (Apple Silicon) → CPU.
-        """
-        if torch.cuda.is_available():
-            return "cuda", "float16"
-        if torch.backends.mps.is_available():
-            # MPS supports float32 reliably; float16 has limited op coverage.
-            return "mps", "float32"
-        return "cpu", "float32"
 
     def _get_align_model(
         self, language: str, loaded_model_id: str
@@ -98,12 +88,12 @@ class PhonemeAlignEngine(Engine):
             )
             return None
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Align transcription segments to produce word-level timestamps."""
-        audio_path = engine_input.audio_path
+        audio_path = task_request.audio_path
 
         # Get transcription output from previous stage
-        transcribe_output = engine_input.get_transcript()
+        transcribe_output = task_request.get_transcript()
         segment_languages: list[str | None] = []
         if transcribe_output:
             text = transcribe_output.text
@@ -116,9 +106,9 @@ class PhonemeAlignEngine(Engine):
             ]
             language = transcribe_output.language
         else:
-            raw_output = engine_input.get_raw_output("transcribe")
+            raw_output = task_request.get_raw_response("transcribe")
             if not raw_output:
-                raise ValueError("Missing 'transcribe' in previous_outputs")
+                raise ValueError("Missing 'transcribe' in previous_responses")
             text = raw_output.get("text", "")
             raw_segments = [
                 InputSegment(
@@ -139,7 +129,7 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
-        loaded_model_id = engine_input.config.get("loaded_model_id")
+        loaded_model_id = task_request.config.get("loaded_model_id")
         if not loaded_model_id:
             raise ValueError(
                 "Missing required config field 'loaded_model_id' for align stage."
@@ -170,7 +160,7 @@ class PhonemeAlignEngine(Engine):
                 metadata=metadata,
                 audio=audio,
                 device=self._device,
-                return_char_alignments=engine_input.config.get(
+                return_char_alignments=task_request.config.get(
                     "return_char_alignments", False
                 ),
             )
@@ -202,7 +192,7 @@ class PhonemeAlignEngine(Engine):
                 unaligned_words=unaligned_count,
             )
 
-            output = AlignOutput(
+            output = AlignmentResponse(
                 text=text,
                 segments=output_segments,
                 language=language,
@@ -221,7 +211,7 @@ class PhonemeAlignEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
 
         except Exception as e:
             self.logger.error("alignment_failed", error=str(e), exc_info=True)
@@ -311,7 +301,7 @@ class PhonemeAlignEngine(Engine):
         segments: list[InputSegment],
         language: str,
         reason: str,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         """Return original timestamps when alignment is not possible."""
         self.logger.warning(
             "alignment_fallback", reason=reason, segment_count=len(segments)
@@ -324,7 +314,7 @@ class PhonemeAlignEngine(Engine):
             )
             for s in segments
         ]
-        output = AlignOutput(
+        output = AlignmentResponse(
             text=text,
             segments=typed_segments,
             language=language,
@@ -338,7 +328,13 @@ class PhonemeAlignEngine(Engine):
             skip_reason=reason,
             warnings=[reason],
         )
-        return EngineOutput(data=output)
+        return TaskResponse(data=output)
+
+    def create_http_server(self, port: int = 9100):  # type: ignore[override]  # covariant return
+        """Return an ``AlignHTTPServer`` with ``POST /v1/align``."""
+        from dalston.engine_sdk.http_align import AlignHTTPServer
+
+        return AlignHTTPServer(engine=self, port=port)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including device info."""

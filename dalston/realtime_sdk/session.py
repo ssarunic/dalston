@@ -33,8 +33,8 @@ from dalston.common.audio_defaults import (
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     TimestampGranularity,
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -318,7 +318,7 @@ class AudioBuffer:
 
 # Type alias for transcribe callback
 TranscribeCallback = Callable[
-    [np.ndarray, TranscribeInput],  # audio, typed params
+    [np.ndarray, TranscriptionRequest],  # audio, typed params
     Transcript,
 ]
 
@@ -941,9 +941,9 @@ class SessionHandler:
                 self._speech_audio_buffer = []
                 self._chunks_since_partial = 0
 
-    def _build_transcribe_params(self) -> TranscribeInput:
+    def _build_transcribe_params(self) -> TranscriptionRequest:
         """Build typed transcriber params from current session state."""
-        return TranscribeInput(
+        return TranscriptionRequest(
             loaded_model_id=self.config.model,
             language=self.config.language,
             vocabulary=self.config.vocabulary,

@@ -5,7 +5,7 @@
 | **Goal** | Standardize transcriber input typing and engine/core naming across batch + realtime |
 | **Duration** | 1-2 weeks (incremental, test-gated) |
 | **Dependencies** | M43, M44, M52, M63 |
-| **Primary Deliverable** | Runtime-based class names and shared typed transcriber params (`TranscribeInput`) |
+| **Primary Deliverable** | Runtime-based class names and shared typed transcriber params (`TranscribeRequest`) |
 | **Status** | Complete |
 
 ## Background
@@ -19,12 +19,12 @@ Current transcription adapters diverged in two ways:
 
 M73 standardizes both:
 
-- one canonical typed transcribe input (`TranscribeInput`) across batch + RT;
+- one canonical typed transcribe input (`TranscribeRequest`) across batch + RT;
 - class names by engine_id + mode (`Batch`/`Realtime`) with no compatibility aliases.
 
 ## Outcomes
 
-1. Transcribe engines consume one typed params model (`TranscribeInput`) instead of ad-hoc config parsing.
+1. Transcribe engines consume one typed params model (`TranscribeRequest`) instead of ad-hoc config parsing.
 2. Engine and core class names are consistent by engine_id and mode (`Batch`/`Realtime`).
 3. No behavior regressions in batch/realtime API contracts.
 4. Runtime identifiers in `engine.yaml` remain unchanged.
@@ -34,8 +34,8 @@ M73 standardizes both:
 Delivered:
 
 - Runtime-based class naming refactor across batch + realtime transcribe engines.
-- Canonical typed transcribe params wiring via `TranscribeInput`.
-- Batch engines migrated to `EngineInput.get_transcribe_params()`.
+- Canonical typed transcribe params wiring via `TranscribeRequest`.
+- Batch engines migrated to `EngineRequest.get_transcribe_params()`.
 - Realtime engine signatures migrated to typed params model.
 - Unit/integration coverage updated for renamed classes and typed params flow.
 
@@ -51,7 +51,7 @@ In scope:
 
 - Rename core + engine classes to engine_id-based naming.
 - Update all internal references (imports, runners, tests, defaults) in the same rollout.
-- Extend `TranscribeInput` with fields required by current transcribe engines.
+- Extend `TranscribeRequest` with fields required by current transcribe engines.
 - Wire typed params through batch and realtime SDKs.
 
 Out of scope for this milestone:
@@ -100,7 +100,7 @@ Gate:
 
 ### T2. Canonical Typed Transcriber Params
 
-Use `dalston.common.pipeline_types.TranscribeInput` as canonical params model.
+Use `dalston.common.pipeline_types.TranscribeRequest` as canonical params model.
 
 Add fields required by current transcribe paths:
 
@@ -116,7 +116,7 @@ Gate:
 
 ### T3. Batch SDK + Engine Migration
 
-- Add typed transcribe params accessor on `EngineInput`.
+- Add typed transcribe params accessor on `EngineRequest`.
 - Migrate transcribe batch engines to typed params:
   - faster-whisper
   - nemo
@@ -133,7 +133,7 @@ Gate:
 ### T4. Realtime SDK + Engine Migration
 
 - Change realtime transcribe callback/engine signatures to:
-  - `(audio: np.ndarray, params: TranscribeInput) -> Transcript`
+  - `(audio: np.ndarray, params: TranscribeRequest) -> Transcript`
 - Build params from live session config at call time.
 - Migrate realtime transcribe engines:
   - faster-whisper
@@ -156,8 +156,8 @@ Gate:
 
 ### Phase 2: Typed Params Model + SDK Wiring
 
-1. Extend `TranscribeInput`.
-2. Add typed accessor on `EngineInput`.
+1. Extend `TranscribeRequest`.
+2. Add typed accessor on `EngineRequest`.
 3. Wire batch and realtime SDK plumbing.
 
 ### Phase 3: Engine Migrations
@@ -205,4 +205,4 @@ pytest tests/unit/test_faster_whisper_rt_contract.py
 - `dalston/realtime_sdk/session.py`
 - `engines/stt-transcribe/*/engine.py`
 - `engines/stt-rt/*/engine.py`
-- `engines/stt-unified/*/runner.py`
+- `engines/stt-transcribe/*/runner.py`

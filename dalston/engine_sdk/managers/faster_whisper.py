@@ -220,17 +220,9 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
         Returns:
             Configured FasterWhisperModelManager instance
         """
-        # Auto-detect device
-        device = os.environ.get("DALSTON_DEVICE", "").lower()
-        if not device or device == "auto":
-            try:
-                import torch
+        from dalston.engine_sdk.device import detect_device
 
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                device = "cpu"
-
-        # Compute type based on device
+        device = detect_device(include_mps=False)
         compute_type = "float16" if device == "cuda" else "int8"
 
         # Configure S3 storage if bucket is set

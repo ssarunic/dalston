@@ -10,18 +10,18 @@ from dalston.engine_sdk import local_runner
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.local_runner import LocalRunner
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class ContractEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={"ok": True})
+        return TaskResponse(data={"ok": True})
 
 
 def test_local_runner_no_longer_writes_merge_transcript_sidecar(tmp_path: Path) -> None:
@@ -35,7 +35,7 @@ def test_local_runner_no_longer_writes_merge_transcript_sidecar(tmp_path: Path) 
         job_id="job-local",
         stage="merge",
         config={},
-        previous_outputs={},
+        previous_responses={},
         payload={},
         artifacts={"audio": audio},
     )
@@ -55,7 +55,7 @@ def test_local_runner_output_envelope_is_deterministic(tmp_path: Path) -> None:
         job_id="job-local",
         stage="transcribe",
         config={"model": "tiny"},
-        previous_outputs={},
+        previous_responses={},
         payload={},
         artifacts={"audio": audio},
     )
@@ -65,7 +65,7 @@ def test_local_runner_output_envelope_is_deterministic(tmp_path: Path) -> None:
         job_id="job-local",
         stage="transcribe",
         config={"model": "tiny"},
-        previous_outputs={},
+        previous_responses={},
         payload={},
         artifacts={"audio": audio},
     )

@@ -7,13 +7,13 @@ from the same input.
 Usage:
     from tests.helpers.output_snapshot import assert_outputs_equivalent
 
-    batch_output = batch_engine.process(input, ctx)
-    rt_output = rt_engine.transcribe(audio, language, model)
+    batch_response = batch_engine.process(task_request, ctx)
+    rt_response = rt_engine.transcribe(audio, language, model)
 
     # Compare the text and segments from both outputs
     assert_outputs_equivalent(
-        normalize_batch_output(batch_output.data),
-        normalize_rt_output(rt_output),
+        normalize_batch_output(batch_response.data),
+        normalize_rt_output(rt_response),
     )
 """
 

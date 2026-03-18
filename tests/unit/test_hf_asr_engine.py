@@ -13,24 +13,24 @@ import pytest
 
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.managers.hf_transformers import HFTransformersModelManager
-from dalston.engine_sdk.types import EngineInput
+from dalston.engine_sdk.types import TaskRequest
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-def _ctx(task_input: EngineInput) -> BatchTaskContext:
+def _ctx(task_request: TaskRequest) -> BatchTaskContext:
     return BatchTaskContext(
         engine_id="hf-asr",
         instance="test-instance",
-        task_id=task_input.task_id,
-        job_id=task_input.job_id,
-        stage=task_input.stage,
+        task_id=task_request.task_id,
+        job_id=task_request.job_id,
+        stage=task_request.stage,
     )
 
 
 def load_hf_asr_engine():
     """Load HfAsrBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-unified/hf-asr/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/hf-asr/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("HF-ASR engine not found")
 
@@ -270,14 +270,14 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
             config={"loaded_model_id": "facebook/wav2vec2-large-960h"},
         )
 
-        engine.process(task_input, _ctx(task_input))
+        engine.process(task_request, _ctx(task_request))
 
         engine._manager.acquire.assert_called_once_with("facebook/wav2vec2-large-960h")
         engine._manager.release.assert_called_once_with("facebook/wav2vec2-large-960h")
@@ -292,14 +292,14 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
             config={},
         )
 
-        engine.process(task_input, _ctx(task_input))
+        engine.process(task_request, _ctx(task_request))
 
         engine._manager.acquire.assert_called_once_with("openai/whisper-large-v3")
 
@@ -313,14 +313,14 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
             config={"language": "fr"},
         )
 
-        engine.process(task_input, _ctx(task_input))
+        engine.process(task_request, _ctx(task_request))
 
         # Verify pipeline was called with language
         call_kwargs = mock_pipe.call_args[1]
@@ -336,20 +336,20 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
             config={"language": "auto"},
         )
 
-        engine.process(task_input, _ctx(task_input))
+        engine.process(task_request, _ctx(task_request))
 
         call_kwargs = mock_pipe.call_args[1]
         assert "generate_kwargs" not in call_kwargs
 
     def test_process_returns_task_output(self, engine, tmp_path):
-        """Process should return valid EngineOutput."""
+        """Process should return valid TaskResponse."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -364,14 +364,14 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
             config={},
         )
 
-        result = engine.process(task_input, _ctx(task_input))
+        result = engine.process(task_request, _ctx(task_request))
 
         assert result.data is not None
         output_dict = result.to_dict()
@@ -389,7 +389,7 @@ class TestHFASREngineProcess:
         engine._manager.acquire = MagicMock(return_value=mock_pipe)
         engine._manager.release = MagicMock()
 
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="test-task",
             job_id="test-job",
             audio_path=audio_file,
@@ -397,7 +397,7 @@ class TestHFASREngineProcess:
         )
 
         with pytest.raises(RuntimeError, match="inference failed"):
-            engine.process(task_input, _ctx(task_input))
+            engine.process(task_request, _ctx(task_request))
 
         engine._manager.release.assert_called_once_with("openai/whisper-large-v3")
 

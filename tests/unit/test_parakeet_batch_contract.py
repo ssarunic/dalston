@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from dalston.engine_sdk import EngineInput
+from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
 
@@ -34,7 +34,7 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 def _load_parakeet_engine_class():
     """Load NemoBatchEngine class from file to avoid import path issues."""
-    engine_path = Path("engines/stt-unified/nemo/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/batch_engine.py")
     spec = importlib.util.spec_from_file_location("m63_parakeet_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -121,7 +121,7 @@ class TestParakeetBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -150,7 +150,7 @@ class TestParakeetBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -176,7 +176,7 @@ class TestParakeetBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -199,7 +199,7 @@ class TestParakeetBatchOutputShape:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -226,7 +226,7 @@ class TestParakeetBatchAlignmentMethod:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -244,7 +244,7 @@ class TestParakeetBatchAlignmentMethod:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -266,7 +266,7 @@ class TestParakeetBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),
@@ -284,7 +284,7 @@ class TestParakeetBatchTimestampGranularity:
         task_id = str(uuid4())
         job_id = str(uuid4())
         result = engine.process(
-            EngineInput(
+            TaskRequest(
                 task_id=task_id,
                 job_id=job_id,
                 audio_path=Path("/tmp/test.wav"),

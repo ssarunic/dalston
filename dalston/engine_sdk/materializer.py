@@ -107,7 +107,7 @@ class ArtifactMaterializer:
         persisted: list[ArtifactReference] = []
         for produced in produced_artifacts:
             artifact_id = build_task_artifact_id(task_id, produced.logical_name)
-            storage_locator = self._locator_builder(job_id, artifact_id, produced)
+            storage_locator = self._locator_builder(job_id, task_id, produced)
             self.store.upload(produced.local_path, storage_locator)
 
             persisted.append(
@@ -148,7 +148,7 @@ class ArtifactMaterializer:
     def _default_locator_builder(
         cls,
         job_id: str,
-        artifact_id: str,
+        task_id: str,
         produced: ProducedArtifact,
     ) -> str:
         if produced.kind == "transcript" and produced.role == "final":
@@ -156,4 +156,4 @@ class ArtifactMaterializer:
 
         suffix = produced.local_path.suffix or ".bin"
         filename = f"{produced.logical_name}{suffix}"
-        return f"s3://{cls._bucket()}/jobs/{job_id}/artifacts/{artifact_id}/{filename}"
+        return f"s3://{cls._bucket()}/jobs/{job_id}/tasks/{task_id}/{filename}"

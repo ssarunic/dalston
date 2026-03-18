@@ -21,8 +21,8 @@ FORBIDDEN_IMPORT_PATTERNS = (
 )
 
 FORBIDDEN_CALL_PATTERNS = (
-    "build_task_input_uri(",
-    "build_task_output_uri(",
+    "build_task_request_uri(",
+    "build_task_response_uri(",
     "parse_s3_uri(",
 )
 
@@ -32,16 +32,19 @@ def test_engine_id_engines_have_new_process_signature() -> None:
     optional_ctx = []
     for file_path in ENGINE_RUNTIME_FILES:
         text = file_path.read_text(encoding="utf-8")
+        # Composite engines inherit process() from CompositeEngine base class —
+        # no need to re-declare the signature in the leaf file.
+        is_composite = "CompositeEngine" in text
         # Accept either direct process() override (M51) or
         # transcribe_audio() via BaseBatchTranscribeEngine (V1 contract)
         has_m51_signature = (
             "def process(" in text
-            and "input: EngineInput" in text
+            and "task_request: TaskRequest" in text
             and "ctx: BatchTaskContext" in text
-            and "-> EngineOutput" in text
+            and "-> TaskResponse" in text
         )
         has_v1_signature = "def transcribe_audio(" in text and "-> Transcript" in text
-        if not has_m51_signature and not has_v1_signature:
+        if not is_composite and not has_m51_signature and not has_v1_signature:
             missing.append(str(file_path))
         if "BatchTaskContext | None" in text:
             optional_ctx.append(str(file_path))

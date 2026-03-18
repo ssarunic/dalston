@@ -59,13 +59,14 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (3)
+### Not Started (4)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
+| [M78](milestones/M78-infrastructure-topology-view.md) | Infrastructure Topology View | Node-level view showing engine co-location, instance counts, and local vs AWS environment |
 
 ---
 
@@ -106,6 +107,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M17](milestones/M17-api-key-management.md) | API Key Management | Web UI for creating/revoking API keys | 2-3 | Completed |
 | [M27](milestones/M27-console-ux-improvements.md) | Console UX Improvements | Slide-over panels, audio player, search, responsive design | 8-10 | Not Started |
 | [M35](milestones/M35-settings-page.md) | Settings Page | Admin console for viewing/editing system config without redeploying | 4-5 | Not Started |
+| [M78](milestones/M78-infrastructure-topology-view.md) | Infrastructure Topology View | Node cards showing engine co-location, GPU usage, instance counts, and local vs AWS environment | 3-5 | Not Started |
 
 ## Observability Milestones
 
@@ -285,6 +287,8 @@ M57.1 + M58 + M36 + M40 ──► M59 (runtime isolation profiles)
 M57 + M59 ──► M60 (one-line distribution + packaging)
 
 M10 + M11 + M15 ──► M35
+
+M64 + M69 ──► M78 (infrastructure topology view)
 ```
 
 - **M1-M5**: Core batch pipeline (sequential)
@@ -310,7 +314,7 @@ M10 + M11 + M15 ──► M35
 - **M26**: PII Detection & Audio Redaction (needs M3 word timestamps, M4 diarization, M25 retention)
 - **M28-M32**: Engine infrastructure (M28 registry → M29 capabilities → M30 metadata → M31 routing → M32 variants)
 - **M51**: Stateless engine contract + artifact materialization refactor (batch + realtime side-effect boundaries, local runner)
-- **M52**: Local runner DX clean-cut (`audio + config.json -> output.json`), then use that harness for diarize/align/PII refactor sweep and remove remaining compatibility bridges
+- **M52**: Local runner DX clean-cut (`audio + config.json -> response.json`), then use that harness for diarize/align/PII refactor sweep and remove remaining compatibility bridges
   - Readiness note: `docs/reports/M52-local-runner-readiness.md` (align + diarize local-run validated; pii-detect dependency gap captured)
 - **M35**: Settings Page (needs M10 console, M11 auth, M15 console auth)
 - **M36**: Runtime Model Management (needs M31 routing; enables dynamic model loading)
@@ -358,7 +362,7 @@ Each milestone has a verification section. Key checkpoints:
 | M42 | Models page shows registry with download/remove actions; Add from HF dialog works |
 | M46 | Models auto-seeded on startup; PATCH updates metadata; user edits preserved across restarts |
 | M51 | Batch engines are URI-free/stateless (`process(input, ctx)`), orchestrator passes artifact refs, runner materializes/persists artifacts, and local runner works without Redis/S3 |
-| M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `output.json` without Redis/S3; legacy compatibility bridges removed |
+| M52 | Developer can run `python -m dalston.engine_sdk.local_runner run` with local `audio + config.json` and get canonical `response.json` without Redis/S3; legacy compatibility bridges removed |
 | M54 | Poison or malformed durable events are quarantined in `dalston:events:dlq` after policy thresholds; main stream entries are ACKed and healthy events continue processing |
 | M55 | Diarize, align, and PII stages accept `loaded_model_id`; models registered in registry with explicit stage; per-stage model selection works in standard and per-channel DAGs |
 | M56 | `DALSTON_MODE`-driven mode binding with SQLite/in-memory/localfs backends and validated lite batch slice (`prepare -> transcribe -> merge`); `DALSTON_MODE=lite` runs scoped batch transcription without Postgres/Redis/MinIO while distributed mode remains stable |
@@ -366,3 +370,4 @@ Each milestone has a verification section. Key checkpoints:
 | M58 | Lite mode supports explicit profiles/capability matrix and fails unsupported combinations deterministically with actionable guidance |
 | M59 | Runtimes execute through declared isolation profiles (`inproc`/`venv`/`container`) while preserving shared task/output contracts |
 | M60 | Documented one-line install channels pass cross-platform install + first-run smoke gates before release publication |
+| M78 | Infrastructure page shows node cards; engines grouped by host; AWS nodes show EC2 instance ID, AZ, and instance type; local nodes show "Local dev" badge |

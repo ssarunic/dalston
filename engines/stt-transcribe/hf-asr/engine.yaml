@@ -1,0 +1,51 @@
+schema_version: "1.1"
+id: stt-rt-hf-asr
+engine_id: hf-asr
+stage: transcribe
+mode: realtime
+name: HuggingFace ASR Realtime
+version: 1.0.0
+description: |
+  Real-time VAD-chunked transcription via HuggingFace Transformers ASR pipelines.
+  Supports any model with pipeline_tag=automatic-speech-recognition on HuggingFace Hub
+  (Whisper, Wav2Vec2, HuBERT, MMS, community fine-tunes).
+
+container:
+  gpu: optional
+  memory: 8G
+  model_cache: /models/huggingface
+
+capabilities:
+  native_streaming: true
+  word_timestamps: true  # Model-dependent; Whisper provides timestamps
+  max_concurrency: 4
+
+input:
+  audio_formats:
+    - pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+hf_compat:
+  pipeline_tag: automatic-speech-recognition
+  library_name: transformers
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  rtf_gpu: 0.1  # Model-dependent
+  rtf_cpu: 1.0
+  warm_start_latency_ms: 500

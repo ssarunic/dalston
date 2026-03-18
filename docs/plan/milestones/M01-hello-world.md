@@ -79,7 +79,7 @@ dalston/engine_sdk/
 
 - `Engine` abstract base class with `process(input: TaskInput) -> TaskOutput`
 - `EngineRunner` that polls Redis queue and calls `process()`
-- `TaskInput` dataclass: task_id, job_id, audio_path, previous_outputs, config
+- `TaskInput` dataclass: task_id, job_id, audio_path, previous_responses, config
 - `TaskOutput` dataclass: data dict with structured result
 
 ---

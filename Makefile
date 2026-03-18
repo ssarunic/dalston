@@ -8,7 +8,8 @@
         aws-start aws-stop aws-logs \
         health clean clean-local validate test lint test-openai-sdk-live \
         test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
-        sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
+        sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto \
+        install-hooks
 
 # Python interpreter used for pytest-driven targets.
 # Prefer local virtualenv when present for consistent dependency resolution.
@@ -54,6 +55,7 @@ help:
 	@echo "  make health          - Check service health"
 	@echo ""
 	@echo "Utilities:"
+	@echo "  make install-hooks   - Install git hooks (pre-push checks)"
 	@echo "  make clean           - Remove stopped containers and unused images"
 	@echo "  make clean-local     - Kill local Python processes (orchestrator, gateway)"
 
@@ -70,6 +72,13 @@ clean-local:
 	@pkill -f "dalston\.session_router" 2>/dev/null || true
 	@echo "Done."
 
+install-hooks:
+	@echo "Installing git hooks..."
+	@cp hooks/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@pre-commit install
+	@echo "✓ Git hooks installed."
+
 # Start full local stack with all CPU engines
 dev: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
@@ -80,7 +89,7 @@ dev-minimal: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-batch-prepare stt-unified-faster-whisper-cpu stt-batch-align-phoneme-cpu
+		stt-prepare stt-transcribe-faster-whisper-cpu stt-align-phoneme-cpu
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu: clean-local
@@ -120,23 +129,23 @@ ps:
 # Build CPU engine variants (for Mac development)
 build-cpu:
 	docker compose build \
-		stt-batch-prepare \
-		stt-batch-transcribe-faster-whisper \
-		stt-unified-nemo-cpu \
-		stt-unified-onnx-cpu \
-		stt-unified-faster-whisper-cpu \
-		stt-batch-align-phoneme-cpu \
-		stt-batch-diarize-pyannote-4.0-cpu \
-		stt-batch-diarize-nemo-msdd-cpu \
-		stt-batch-diarize-nemo-sortformer-cpu \
-		stt-batch-pii-detect-presidio
+		stt-prepare \
+		stt-transcribe-faster-whisper \
+		stt-transcribe-nemo-cpu \
+		stt-transcribe-onnx-cpu \
+		stt-transcribe-faster-whisper-cpu \
+		stt-align-phoneme-cpu \
+		stt-diarize-pyannote-4.0-cpu \
+		stt-diarize-nemo-msdd-cpu \
+		stt-diarize-nemo-sortformer-cpu \
+		stt-pii-detect-presidio
 
 # Build GPU engine variants
 build-gpu:
 	docker compose --profile gpu build
 
 # Build a specific engine
-# Usage: make build-engine ENGINE=stt-batch-transcribe-faster-whisper
+# Usage: make build-engine ENGINE=stt-transcribe-faster-whisper
 build-engine:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make build-engine ENGINE=<service-name>)
@@ -144,7 +153,7 @@ endif
 	docker compose build $(ENGINE)
 
 # Rebuild and restart a specific engine
-# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper
+# Usage: make rebuild ENGINE=stt-transcribe-faster-whisper
 rebuild:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)

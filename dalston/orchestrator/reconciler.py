@@ -265,8 +265,8 @@ class ReconciliationSweeper:
     ) -> bool | None:
         """Check if task output exists in S3.
 
-        Engine uploads output to a predictable path:
-        s3://{bucket}/jobs/{job_id}/tasks/{task_id}/output.json
+        Engine uploads response to a predictable path:
+        s3://{bucket}/jobs/{job_id}/tasks/{task_id}/response.json
 
         Args:
             job_id: Job UUID as string
@@ -277,7 +277,7 @@ class ReconciliationSweeper:
             False if output file definitely does not exist (404/NoSuchKey)
             None if there was a transient error (network, auth, etc.)
         """
-        key = f"jobs/{job_id}/tasks/{task_id}/output.json"
+        key = f"jobs/{job_id}/tasks/{task_id}/response.json"
 
         try:
             async with get_s3_client(self._settings) as s3:
@@ -341,9 +341,9 @@ class ReconciliationSweeper:
                 # 2. Task completed but task.completed event was lost
                 # 3. PEL entry was lost (Redis crash)
 
-                # Check if output exists in S3 - if so, task completed successfully
+                # Check if response exists in S3 - if so, task completed successfully
                 # but the task.completed event was lost
-                # Note: output_uri is not set in DB, so we must check S3 directly
+                # Note: response_uri is not set in DB, so we must check S3 directly
                 # Returns: True (exists), False (not found), None (transient error)
                 output_exists = await self._check_output_exists_in_s3(
                     job_id_str, task_id_str

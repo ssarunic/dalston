@@ -10,7 +10,6 @@ The engine maps detected entities to word timestamps from the transcript
 to enable audio redaction in the subsequent stage.
 """
 
-import os
 import re
 import time
 from collections import defaultdict
@@ -19,12 +18,13 @@ from typing import Any
 from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
-    PIIDetectOutput,
+    PIIDetectionResponse,
     PIIEntity,
     PIIEntityCategory,
     Segment,
+    TaskRequest,
+    TaskResponse,
+    detect_device,
 )
 
 # Entity type to category mapping
@@ -122,34 +122,9 @@ class PIIDetectionEngine(Engine):
         self._gliner_model = None
         self._gliner_models: dict[str, Any] = {}
         self._active_gliner_model_id: str | None = None
-        self._device = self._resolve_device()
+        # GLiNER doesn't support MPS well
+        self._device = detect_device(include_mps=False)
         self.logger.info("pii_detection_engine_initialized", device=self._device)
-
-    def _resolve_device(self) -> str:
-        """Resolve inference device from DEVICE env with auto-detect fallback."""
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-        except ImportError:
-            cuda_available = False
-
-        if requested_device == "cpu":
-            return "cpu"
-
-        if requested_device == "cuda":
-            if not cuda_available:
-                raise RuntimeError(
-                    "DEVICE=cuda but CUDA is not available for pii-presidio."
-                )
-            return "cuda"
-
-        if requested_device in ("", "auto"):
-            return "cuda" if cuda_available else "cpu"
-
-        raise ValueError(f"Unknown DEVICE value: {requested_device}. Use cuda or cpu.")
 
     def _load_presidio(self) -> None:
         """Load Presidio analyzer and anonymizer."""
@@ -275,18 +250,18 @@ class PIIDetectionEngine(Engine):
                 error=str(e),
             )
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Detect PII entities in transcript.
 
         Args:
-            engine_input: Task input containing transcript from transcribe/align stages
+            task_request: Task input containing transcript from transcribe/align stages
 
         Returns:
-            EngineOutput with PIIDetectOutput containing detected entities
+            TaskResponse with PIIDetectionResponse containing detected entities
         """
         start_time = time.time()
-        config = engine_input.config
-        job_id = engine_input.job_id
+        config = task_request.config
+        job_id = task_request.job_id
 
         # Get entity types to detect
         entity_types = config.get("entity_types") or DEFAULT_ENTITY_TYPES
@@ -310,8 +285,8 @@ class PIIDetectionEngine(Engine):
         self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             # Get transcript data from previous stages
-            align_output = engine_input.get_align_output()
-            transcribe_output = engine_input.get_transcript()
+            align_output = task_request.get_align_response()
+            transcribe_output = task_request.get_transcript()
 
             # Extract language from transcription
             language = "en"  # Default fallback
@@ -332,7 +307,7 @@ class PIIDetectionEngine(Engine):
                 text = transcribe_output.text
             else:
                 # Fallback to raw output
-                raw_transcribe = engine_input.get_raw_output("transcribe") or {}
+                raw_transcribe = task_request.get_raw_response("transcribe") or {}
                 text = raw_transcribe.get("text", "")
                 language = raw_transcribe.get("language", "en")
                 segments = []
@@ -340,7 +315,7 @@ class PIIDetectionEngine(Engine):
             self.logger.info("detected_language_for_pii", language=language)
 
             # Get diarization for speaker assignment
-            diarize_output = engine_input.get_diarize_output()
+            diarize_output = task_request.get_diarize_response()
             speaker_turns = diarize_output.turns if diarize_output else []
 
             # Detect entities
@@ -372,7 +347,7 @@ class PIIDetectionEngine(Engine):
                 processing_time_ms=processing_time_ms,
             )
 
-            output = PIIDetectOutput(
+            output = PIIDetectionResponse(
                 entities=entities,
                 redacted_text=redacted_text,
                 entity_count_by_type=dict(entity_count_by_type),
@@ -384,7 +359,7 @@ class PIIDetectionEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
         finally:
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 

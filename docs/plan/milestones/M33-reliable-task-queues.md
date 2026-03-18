@@ -1023,7 +1023,7 @@ volumes:
 ```bash
 # 1. Start services
 docker compose up -d gateway orchestrator redis \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+  stt-prepare stt-transcribe-whisper-cpu stt-merge
 
 # 2. Submit a job
 JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \
@@ -1039,7 +1039,7 @@ docker compose exec redis redis-cli XPENDING dalston:stream:transcribe engines
 # Should show 1 pending
 
 # 5. Kill the engine mid-task
-docker compose stop stt-batch-transcribe-whisper-cpu
+docker compose stop stt-transcribe-whisper-cpu
 
 # 6. Wait and check pending (task stays, idle time grows)
 sleep 60
@@ -1047,7 +1047,7 @@ docker compose exec redis redis-cli XPENDING dalston:stream:transcribe engines -
 # Should show idle time > 60000ms
 
 # 7. Restart engine - it should claim stale task
-docker compose start stt-batch-transcribe-whisper-cpu
+docker compose start stt-transcribe-whisper-cpu
 
 # 8. Job should complete
 sleep 30
@@ -1055,7 +1055,7 @@ curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID | jq '.status'
 # "completed"
 
 # 9. Check delivery count was incremented
-docker compose logs stt-batch-transcribe-whisper-cpu | grep claimed_stale
+docker compose logs stt-transcribe-whisper-cpu | grep claimed_stale
 
 # 10. Test multi-orchestrator safety
 # Scale to 2 orchestrators

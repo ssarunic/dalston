@@ -11,7 +11,6 @@ References:
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +18,12 @@ from omegaconf import OmegaConf
 
 from dalston.engine_sdk import (
     BatchTaskContext,
-    DiarizeOutput,
+    DiarizationResponse,
     Engine,
-    EngineInput,
-    EngineOutput,
     SpeakerTurn,
+    TaskRequest,
+    TaskResponse,
+    detect_device,
 )
 
 # NeMo diarization config based on diar_infer_telephonic.yaml
@@ -111,80 +111,16 @@ class NemoMSDDEngine(Engine):
     with built-in overlap detection.
 
     Environment Variables:
-        DIARIZATION_DISABLED: Set to "true" to skip diarization (returns mock output)
-        DEVICE: Device to use ("cuda", "cpu", or unset for auto-detect)
-        NEMO_ALLOW_CPU: Set to "true" to allow slow CPU inference
+        DALSTON_DEVICE: Device to use ("cuda", "cpu", or unset for auto-detect)
     """
 
     def __init__(self) -> None:
         super().__init__()
         self._diarizer = None
         self._active_loaded_model_id: str | None = None
-        self._device = self._detect_device()
-        self._disabled = (
-            os.environ.get("DALSTON_DIARIZATION_DISABLED", "").lower() == "true"
-        )
-
-        if self._disabled:
-            self.logger.warning("diarization_disabled")
-        else:
-            self.logger.info("nemo_msdd_engine_initialized", device=self._device)
-
-    def _detect_device(self) -> str:
-        """Resolve inference device from DEVICE env with NeMo CPU guardrails."""
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-        allow_cpu = os.environ.get("DALSTON_NEMO_ALLOW_CPU", "").lower() == "true"
-
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-            cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        except ImportError:
-            cuda_available = False
-            cuda_device_count = 0
-
-        if requested_device == "cpu":
-            self.logger.warning(
-                "device_forced_cpu",
-                message=(
-                    "DEVICE=cpu set. NeMo MSDD on CPU is very slow "
-                    "(recommended only for development/testing)."
-                ),
-            )
-            return "cpu"
-
-        if requested_device == "cuda":
-            if not cuda_available:
-                raise RuntimeError("DEVICE=cuda but CUDA is not available.")
-            self.logger.info("cuda_available", device_count=cuda_device_count)
-            return "cuda"
-
-        if requested_device not in ("", "auto"):
-            raise ValueError(
-                f"Unknown DEVICE value: {requested_device}. Use cuda or cpu."
-            )
-
-        if cuda_available:
-            self.logger.info(
-                "cuda_available",
-                device_count=cuda_device_count,
-            )
-            return "cuda"
-        if allow_cpu:
-            self.logger.warning(
-                "cuda_not_available_using_cpu",
-                message="CPU mode enabled via NEMO_ALLOW_CPU=true. "
-                "Performance will be 10-50x slower than GPU.",
-            )
-            return "cpu"
-
-        self.logger.error("cuda_not_available")
-        raise RuntimeError(
-            "NeMo MSDD requires GPU. CUDA is not available. "
-            "Set DEVICE=cpu or NEMO_ALLOW_CPU=true to allow slow CPU inference, "
-            "or use pyannote-4.0 for CPU-based diarization."
-        )
+        # NeMo doesn't support MPS
+        self._device = detect_device(include_mps=False)
+        self.logger.info("nemo_msdd_engine_initialized", device=self._device)
 
     def _create_diarizer(
         self,
@@ -333,19 +269,15 @@ class NemoMSDDEngine(Engine):
         info = sf.info(str(audio_path))
         return info.duration
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file."""
-        if self._disabled:
-            self.logger.info("diarization_disabled_returning_mock_output")
-            return self._mock_output()
-
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         # Get duration
         duration: float | None = None
         try:
-            prepare_output = engine_input.get_prepare_output()
+            prepare_output = task_request.get_prepare_response()
             if prepare_output and prepare_output.channel_files:
                 duration = prepare_output.channel_files[0].duration
         except Exception:
@@ -413,7 +345,7 @@ class NemoMSDDEngine(Engine):
                 overlap_ratio=overlap_ratio,
             )
 
-            output = DiarizeOutput(
+            output = DiarizationResponse(
                 speakers=speakers,
                 turns=turns,
                 num_speakers=len(speakers),
@@ -425,40 +357,15 @@ class NemoMSDDEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
         finally:
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
-    def _mock_output(self) -> EngineOutput:
-        """Return mock output when diarization is disabled."""
-        output = DiarizeOutput(
-            speakers=["SPEAKER_00"],
-            turns=[SpeakerTurn(start=0.0, end=999999.0, speaker="SPEAKER_00")],
-            num_speakers=1,
-            overlap_duration=0.0,
-            overlap_ratio=0.0,
-            engine_id="nemo-msdd",
-            skipped=True,
-            skip_reason="DIARIZATION_DISABLED=true",
-            warnings=["Diarization disabled via environment variable"],
-        )
-        return EngineOutput(data=output)
-
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
-        cuda_available = False
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-        except ImportError:
-            pass
-
         return {
-            "status": "healthy" if cuda_available or self._disabled else "unhealthy",
-            "device": getattr(self, "_device", "unknown"),
-            "cuda_available": cuda_available,
-            "diarization_disabled": self._disabled,
+            "status": "healthy",
+            "device": self._device,
             "active_model_id": self._active_loaded_model_id,
             "available_loaded_models": sorted(MODEL_COMPONENTS.keys()),
         }

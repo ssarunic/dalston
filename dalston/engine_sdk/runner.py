@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import os
 import shutil
@@ -10,7 +12,6 @@ import tempfile
 import threading
 import time
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -38,7 +39,7 @@ from dalston.engine_sdk import io
 from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.materializer import ArtifactMaterializer, S3ArtifactStore
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 from dalston.orchestrator.catalog import get_catalog
 
 if TYPE_CHECKING:
@@ -46,39 +47,6 @@ if TYPE_CHECKING:
 
 
 logger = structlog.get_logger()
-
-
-class _MetricsHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for /metrics endpoint."""
-
-    def log_message(self, format: str, *args: Any) -> None:
-        """Suppress default logging."""
-        pass
-
-    def do_GET(self) -> None:
-        """Handle GET requests."""
-        if self.path == "/metrics":
-            try:
-                from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-
-                content = generate_latest()
-                self.send_response(200)
-                self.send_header("Content-Type", CONTENT_TYPE_LATEST)
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(f"Error: {e}".encode())
-        elif self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"status": "healthy"}')
-        else:
-            self.send_response(404)
-            self.end_headers()
 
 
 class EngineRunner:
@@ -105,6 +73,7 @@ class EngineRunner:
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
     DURABLE_EVENT_MAX_RETRIES = 5
     DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
+    DEFAULT_TASK_TIMEOUT = 600  # seconds — fallback if no timeout_at in task
 
     def __init__(self, engine: Engine) -> None:
         """Initialize the runner.
@@ -116,8 +85,7 @@ class EngineRunner:
         self._redis: redis.Redis | None = None
         self._unified_writer: UnifiedRegistryWriter | None = None
         self._running = False
-        self._metrics_server: HTTPServer | None = None
-        self._metrics_thread: threading.Thread | None = None
+        self._http_thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._current_task_id: str | None = None
         self._current_message_id: str | None = None  # Stream message ID for ack
@@ -181,8 +149,8 @@ class EngineRunner:
         self._running = True
         self._setup_signal_handlers()
 
-        # Start metrics HTTP server in background thread (M20)
-        self._start_metrics_server()
+        # Start engine HTTP server in background thread (replaces _MetricsHandler — M79)
+        self._start_http_server()
 
         # Initialize registry and register engine with capabilities
         capabilities = self.engine.get_capabilities()
@@ -246,7 +214,6 @@ class EngineRunner:
         finally:
             # Cleanup - ensure resources are released even on unexpected exit
             self._stop_heartbeat_thread()
-            self._stop_metrics_server()
             # Call engine shutdown hook for resource cleanup (M39.2)
             try:
                 self.engine.shutdown()
@@ -266,31 +233,43 @@ class EngineRunner:
                 pass  # Best effort cleanup
             self._unified_writer = None
 
-    def _start_metrics_server(self) -> None:
-        """Start metrics HTTP server in a background thread."""
-        if not dalston.metrics.is_metrics_enabled():
-            logger.debug("metrics_disabled_skipping_server")
-            return
+    def _start_http_server(self) -> None:
+        """Start the engine HTTP server in a background thread.
+
+        Replaces the old ``_MetricsHandler`` with a FastAPI-based server
+        that serves ``/health``, ``/metrics``, ``/v1/capabilities``, and
+        stage-specific POST endpoints.  Same port (9100 default), same
+        paths — existing healthchecks and Prometheus scrape configs are
+        unaffected.
+
+        In unified engines the realtime runner already binds this port
+        (aiohttp with ``/health``, ``/metrics``, ``/v1/capabilities``),
+        so we probe first and skip if the port is occupied.
+        """
+        import socket
 
         try:
-            self._metrics_server = HTTPServer(
-                ("0.0.0.0", self.metrics_port), _MetricsHandler
-            )
-            self._metrics_thread = threading.Thread(
-                target=self._metrics_server.serve_forever,
+            # Probe whether the port is already bound (e.g. by the
+            # realtime runner in a unified engine).  If so, skip — the
+            # realtime server already serves the M79 endpoints.
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                if s.connect_ex(("127.0.0.1", self.metrics_port)) == 0:
+                    logger.info(
+                        "http_server_skipped_port_in_use",
+                        port=self.metrics_port,
+                    )
+                    return
+
+            http_server = self.engine.create_http_server(port=self.metrics_port)
+            self._http_thread = threading.Thread(
+                target=lambda: asyncio.run(http_server.serve()),
                 daemon=True,
             )
-            self._metrics_thread.start()
-            logger.info("metrics_server_started", port=self.metrics_port)
+            self._http_thread.start()
+            logger.info("http_server_started", port=self.metrics_port)
         except Exception as e:
-            logger.warning("metrics_server_failed", error=str(e))
-
-    def _stop_metrics_server(self) -> None:
-        """Stop the metrics HTTP server."""
-        if self._metrics_server:
-            self._metrics_server.shutdown()
-            self._metrics_server = None
-            logger.debug("metrics_server_stopped")
+            logger.warning("http_server_failed", error=str(e))
 
     def _start_heartbeat_thread(self) -> None:
         """Start heartbeat thread to advertise engine status."""
@@ -496,7 +475,7 @@ class EngineRunner:
         self._clear_waiting_engine_marker(message.task_id)
 
         try:
-            self._process_task(message.task_id)
+            self._process_task(message.task_id, task_metadata)
         except TaskDeferredError:
             # Task was deferred (e.g. admission control rejection).
             # Skip ACK so the message stays in the PEL for redelivery.
@@ -533,11 +512,28 @@ class EngineRunner:
         except Exception:
             logger.debug("clear_waiting_engine_marker_failed", task_id=task_id)
 
-    def _process_task(self, task_id: str) -> None:
+    def _get_task_timeout(self, task_metadata: dict[str, Any]) -> float:
+        """Get remaining seconds until task timeout from metadata."""
+        timeout_str = task_metadata.get("timeout_at", "")
+        if timeout_str:
+            try:
+                timeout_at = datetime.fromisoformat(timeout_str)
+                remaining = (timeout_at - datetime.now(UTC)).total_seconds()
+                return max(remaining, 10.0)  # At least 10s to avoid instant timeout
+            except (ValueError, TypeError):
+                pass
+        return float(self.DEFAULT_TASK_TIMEOUT)
+
+    def _process_task(
+        self,
+        task_id: str,
+        task_metadata: dict[str, Any],
+    ) -> None:
         """Process a single task.
 
         Args:
             task_id: ID of the task to process
+            task_metadata: Pre-fetched task metadata from Redis
         """
         temp_dir = None
         start_time = time.time()
@@ -545,9 +541,6 @@ class EngineRunner:
         # Track current task for heartbeat status (thread-safe)
         with self._task_lock:
             self._current_task_id = task_id
-
-        # Extract trace context from task metadata (M19)
-        task_metadata = self._get_task_metadata(task_id)
 
         # Extract model from task config (set by orchestrator's engine selector)
         task_model = task_metadata.get("loaded_model_id", "")
@@ -589,20 +582,20 @@ class EngineRunner:
                 # Create temp directory for this task
                 temp_dir = Path(tempfile.mkdtemp(prefix=self.TEMP_DIR_PREFIX))
 
-                # Load task input from S3
+                # Load task request from S3
                 download_start = time.time()
                 with dalston.telemetry.create_span("engine.download_input"):
-                    task_input = self._load_task_input(task_id, temp_dir)
+                    task_request = self._load_task_request(task_id, temp_dir)
                 dalston.metrics.observe_engine_s3_download(
                     self.engine_id,
                     time.time() - download_start,
                     self._execution_profile,
                 )
-                job_id = task_input.job_id
+                job_id = task_request.job_id
 
-                # Resolve model from task input config if not in metadata
+                # Resolve model from task request config if not in metadata
                 if not task_model:
-                    task_model = task_input.config.get("loaded_model_id", "")
+                    task_model = task_request.config.get("loaded_model_id", "")
                     if task_model:
                         dalston.telemetry.set_span_attribute(
                             "dalston.model", task_model
@@ -624,26 +617,38 @@ class EngineRunner:
                 # Notify orchestrator that processing has started
                 self._publish_task_started(task_id, job_id)
 
-                # Process the task
-                logger.info("task_processing")
+                # Process the task with timeout guard
+                task_timeout = self._get_task_timeout(task_metadata)
+                logger.info("task_processing", timeout_s=round(task_timeout, 1))
                 process_start = time.time()
                 task_ctx = BatchTaskContext(
                     engine_id=self.engine_id,
                     instance=self.instance,
                     task_id=task_id,
                     job_id=job_id,
-                    stage=task_input.stage,
+                    stage=task_request.stage,
                     metadata=task_metadata,
                     logger=self.engine.logger,
                 )
                 with dalston.telemetry.create_span("engine.process"):
-                    output = self.engine.process(task_input, task_ctx)
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=1
+                    ) as executor:
+                        future = executor.submit(
+                            self.engine.process, task_request, task_ctx
+                        )
+                        try:
+                            output = future.result(timeout=task_timeout)
+                        except concurrent.futures.TimeoutError as exc:
+                            raise TimeoutError(
+                                f"Task processing exceeded {task_timeout:.0f}s timeout"
+                            ) from exc
                 process_time = time.time() - process_start
 
                 # Boundary validation: validate transcribe outputs against
                 # Transcript. Covers both mono ("transcribe") and per-channel
                 # ("transcribe_ch0", "transcribe_ch1", ...) stages.
-                if task_input.stage.startswith("transcribe"):
+                if task_request.stage.startswith("transcribe"):
                     self._validate_transcript_output(output, task_id)
 
                 # Calculate total task time (for metrics)
@@ -652,7 +657,9 @@ class EngineRunner:
                 # Upload output to S3
                 upload_start = time.time()
                 with dalston.telemetry.create_span("engine.upload_output"):
-                    self._save_task_output(task_id, job_id, output, total_task_time)
+                    self._save_task_output(
+                        task_id, job_id, output, total_task_time, task_request.stage
+                    )
                 dalston.metrics.observe_engine_s3_upload(
                     self.engine_id,
                     time.time() - upload_start,
@@ -698,9 +705,9 @@ class EngineRunner:
                     self._execution_profile,
                 )
 
-                # We need job_id for the event, try to extract from input
+                # We need job_id for the event, try to extract from request
                 try:
-                    job_id = task_input.job_id
+                    job_id = task_request.job_id
                 except NameError:
                     job_id = "unknown"
                 self._publish_task_failed(task_id, job_id, str(e))
@@ -720,19 +727,19 @@ class EngineRunner:
                     "request_id",
                 )
 
-    def _load_task_input(self, task_id: str, temp_dir: Path) -> EngineInput:
-        """Load task input from S3 and materialize required artifacts."""
+    def _load_task_request(self, task_id: str, temp_dir: Path) -> TaskRequest:
+        """Load task request from S3 and materialize required artifacts."""
         task_metadata = self._get_task_metadata(task_id)
         job_id = task_metadata["job_id"]
         stage = task_metadata.get("stage", "unknown")
 
-        input_uri = io.build_task_input_uri(self.s3_bucket, job_id, task_id)
-        input_data = io.download_json(input_uri)
+        request_uri = io.build_task_request_uri(self.s3_bucket, job_id, task_id)
+        request_data = io.download_json(request_uri)
 
         # Canonical M51 fields.
-        payload = input_data.get("payload")
-        resolved_artifact_ids = input_data.get("resolved_artifact_ids", {})
-        artifact_index_data = input_data.get("artifact_index", {})
+        payload = request_data.get("payload")
+        resolved_artifact_ids = request_data.get("resolved_artifact_ids", {})
+        artifact_index_data = request_data.get("artifact_index", {})
 
         # Read from task metadata when scheduler stores JSON there.
         resolved_from_metadata = task_metadata.get("resolved_artifact_ids_json")
@@ -752,13 +759,13 @@ class EngineRunner:
             target_dir=temp_dir / "materialized",
         )
 
-        return EngineInput(
+        return TaskRequest(
             task_id=task_id,
             job_id=job_id,
             stage=stage,
-            config=input_data.get("config", {}),
+            config=request_data.get("config", {}),
             payload=payload,
-            previous_outputs=input_data.get("previous_outputs", {}),
+            previous_responses=request_data.get("previous_responses", {}),
             materialized_artifacts=materialized_artifacts,
             metadata={"resolved_artifact_ids": resolved_artifact_ids},
         )
@@ -784,7 +791,7 @@ class EngineRunner:
 
     def _validate_transcript_output(
         self,
-        output: EngineOutput,
+        output: TaskResponse,
         task_id: str,
     ) -> None:
         """Validate transcribe-stage output against Transcript.
@@ -806,28 +813,29 @@ class EngineRunner:
         self,
         task_id: str,
         job_id: str,
-        output: EngineOutput,
+        output: TaskResponse,
         processing_time: float,
+        stage: str,
     ) -> None:
-        """Save task output to S3.
+        """Save task response to S3.
 
         Args:
             task_id: Task identifier
             job_id: Job identifier
             output: Task output from engine
             processing_time: Time taken to process in seconds
+            stage: Pipeline stage name
         """
-        output_uri = io.build_task_output_uri(self.s3_bucket, job_id, task_id)
+        response_uri = io.build_task_response_uri(self.s3_bucket, job_id, task_id)
 
-        output_data = {
+        response_data = {
             "task_id": task_id,
             "completed_at": datetime.now(UTC).isoformat(),
             "processing_time_seconds": round(processing_time, 2),
             "data": output.to_dict(),
         }
 
-        task_metadata = self._get_task_metadata(task_id)
-        task_stage = task_metadata.get("stage")
+        task_stage = stage
 
         persisted_artifacts = self._materializer.persist_produced(
             job_id=job_id,
@@ -835,11 +843,11 @@ class EngineRunner:
             stage=task_stage,
             produced_artifacts=output.produced_artifacts,
         )
-        output_data["produced_artifacts"] = [
+        response_data["produced_artifacts"] = [
             artifact.model_dump(mode="json", exclude_none=True)
             for artifact in persisted_artifacts
         ]
-        output_data["produced_artifact_ids"] = [
+        response_data["produced_artifact_ids"] = [
             artifact.artifact_id for artifact in persisted_artifacts
         ]
         canonical_transcript = next(
@@ -851,12 +859,12 @@ class EngineRunner:
             None,
         )
         if canonical_transcript is not None:
-            output_data["canonical_transcript_uri"] = (
+            response_data["canonical_transcript_uri"] = (
                 canonical_transcript.storage_locator
             )
 
-        io.upload_json(output_data, output_uri)
-        logger.info("output_uploaded", output_uri=output_uri)
+        io.upload_json(response_data, response_uri)
+        logger.info("response_uploaded", response_uri=response_uri)
 
         if persisted_artifacts:
             metadata_key = f"dalston:task:{task_id}"
@@ -987,12 +995,12 @@ class EngineRunner:
 
         if not durable_success:
             # Log critical error - reconciliation sweeper will detect orphaned tasks
-            # For task.completed, reconciler checks output_uri and recovers as COMPLETED
+            # For task.completed, reconciler checks response_uri and recovers as COMPLETED
             logger.error(
                 "critical_event_may_be_lost",
                 event_type="task.completed",
                 task_id=task_id,
-                note="reconciliation_sweeper_will_recover_via_output_uri",
+                note="reconciliation_sweeper_will_recover_via_response_uri",
             )
 
         logger.debug("published_task_completed")
@@ -1043,7 +1051,7 @@ class EngineRunner:
 
         if not durable_success:
             # Log critical error - reconciliation sweeper will detect orphaned tasks
-            # For task.failed, reconciler marks as FAILED (no output_uri to recover)
+            # For task.failed, reconciler marks as FAILED (no response_uri to recover)
             logger.error(
                 "critical_event_may_be_lost",
                 event_type="task.failed",

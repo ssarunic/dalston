@@ -323,14 +323,14 @@ engines/realtime/{engine-id}/
 
 | Service | Stage |
 |---------|-------|
-| `stt-batch-prepare` | prepare |
-| `stt-batch-transcribe-whisper-cpu` | transcribe |
-| `stt-batch-transcribe-parakeet` | transcribe |
-| `stt-batch-align-phoneme-cpu` | align |
-| `stt-batch-diarize-pyannote-v40-cpu` | diarize |
-| `stt-batch-pii-detect-presidio` | pii_detect |
-| `stt-batch-audio-redact-audio` | audio_redact |
-| `stt-batch-merge` | merge |
+| `stt-prepare` | prepare |
+| `stt-transcribe-whisper-cpu` | transcribe |
+| `stt-transcribe-parakeet` | transcribe |
+| `stt-align-phoneme-cpu` | align |
+| `stt-diarize-pyannote-v40-cpu` | diarize |
+| `stt-pii-detect-presidio` | pii_detect |
+| `stt-audio-redact-audio` | audio_redact |
+| `stt-merge` | merge |
 
 ### Realtime Engines
 
@@ -447,10 +447,10 @@ pytest --cov=dalston --cov-report=html
 docker compose build
 
 # Build specific
-docker compose build gateway stt-batch-transcribe-whisper-cpu stt-rt-transcribe-whisper-1
+docker compose build gateway stt-transcribe-whisper-cpu stt-rt-transcribe-whisper-1
 
 # Start batch + realtime
 docker compose up -d gateway orchestrator redis \
-  stt-batch-transcribe-whisper-cpu stt-batch-merge \
+  stt-transcribe-whisper-cpu stt-merge \
   stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
 ```

@@ -618,19 +618,19 @@ export function TaskDetail() {
         </Card>
       )}
 
-      {/* Input */}
+      {/* Request */}
       <CollapsibleSection title={S.taskDetail.input} defaultOpen={artifact.status === 'failed'}>
-        {artifact.input ? (
-          <JsonViewer data={artifact.input} />
+        {artifact.request ? (
+          <JsonViewer data={artifact.request} />
         ) : (
           <p className="text-sm text-muted-foreground">{S.taskDetail.noInputData}</p>
         )}
       </CollapsibleSection>
 
-      {/* Output */}
+      {/* Response */}
       <CollapsibleSection title={S.taskDetail.output} defaultOpen={artifact.status === 'completed'}>
-        {artifact.output ? (
-          <OutputViewer stage={artifact.stage} output={artifact.output} />
+        {artifact.response ? (
+          <OutputViewer stage={artifact.stage} output={artifact.response} />
         ) : artifact.status === 'pending' ? (
           <p className="text-sm text-muted-foreground">{S.taskDetail.taskNotStarted}</p>
         ) : artifact.status === 'running' ? (

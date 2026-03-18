@@ -563,7 +563,7 @@ export function RealtimeSessionDetail() {
 ```bash
 # 1. Start services
 docker compose up -d gateway orchestrator redis postgres minio \
-  stt-batch-prepare stt-batch-transcribe-whisper-cpu stt-batch-merge
+  stt-prepare stt-transcribe-whisper-cpu stt-merge
 
 # 2. Submit a job and wait for completion
 JOB_ID=$(curl -s -X POST http://localhost:8000/v1/audio/transcriptions \

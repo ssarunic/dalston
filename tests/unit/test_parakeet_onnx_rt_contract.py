@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 from dalston.engine_sdk.inference.onnx_inference import (
     OnnxInference,
     OnnxSegmentResult,
@@ -49,7 +49,7 @@ def _make_core_result(
 
 
 def _build_rt_engine(core_result: OnnxTranscriptionResult):
-    engine_path = Path("engines/stt-unified/onnx/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/onnx/rt_engine.py")
     spec = importlib.util.spec_from_file_location("m63_parakeet_onnx_rt", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -76,7 +76,9 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscriptionRequest(
+                language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"
+            ),
         )
 
         assert output.text == "hello world"
@@ -96,7 +98,9 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscriptionRequest(
+                language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"
+            ),
         )
 
         words = [w for seg in output.segments for w in (seg.words or [])]
@@ -112,7 +116,9 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         output = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"),
+            TranscriptionRequest(
+                language="en", loaded_model_id="parakeet-onnx-ctc-0.6b"
+            ),
         )
 
         assert output.text == ""
@@ -125,7 +131,9 @@ class TestOnnxRTOutputShape:
         audio = np.zeros(16000, dtype=np.float32)
         engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-onnx-tdt-0.6b-v3"),
+            TranscriptionRequest(
+                language="en", loaded_model_id="parakeet-onnx-tdt-0.6b-v3"
+            ),
         )
 
         call_args = engine._core.transcribe.call_args

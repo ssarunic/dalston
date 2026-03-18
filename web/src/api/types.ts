@@ -164,8 +164,8 @@ export interface TaskArtifact {
   max_retries: number
   error?: string
   dependencies: string[]
-  input?: Record<string, unknown>
-  output?: Record<string, unknown>
+  request?: Record<string, unknown>
+  response?: Record<string, unknown>
 }
 
 // Vocabulary boosting capability
@@ -181,12 +181,13 @@ export interface VocabularySupportInfo {
 export interface WorkerStatus {
   instance: string
   endpoint: string
-  status: 'ready' | 'unhealthy'
+  status: 'ready' | 'busy' | 'draining' | 'offline' | 'unhealthy'
   capacity: number
   active_sessions: number
   models: string[]  // M43: Currently loaded models (dynamic)
   engine_id?: string | null  // M43: Model engine_id (e.g., "faster-whisper")
   vocabulary_support?: VocabularySupportInfo | null
+  interfaces: string[]
 }
 
 export interface CapacityInfo {
@@ -295,6 +296,7 @@ export interface BatchEngine {
   status: EngineStatus
   queue_depth: number
   processing: number
+  interfaces: string[]
 }
 
 export interface EnginesResponse {

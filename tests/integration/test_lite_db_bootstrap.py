@@ -114,4 +114,4 @@ async def test_lite_db_bootstrap_applies_latest_revision(monkeypatch, tmp_path) 
         result = await session.execute(text("SELECT version_num FROM alembic_version"))
         revisions = {row[0] for row in result.fetchall()}
 
-    assert revisions == {"0006_rename_streaming_to_native_streaming"}
+    assert revisions == {"0007_rename_task_input_output_uri"}

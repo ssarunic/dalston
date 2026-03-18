@@ -131,7 +131,7 @@ def backtrack(
             stay_score = trellis[t - 1, j]
             change_score = trellis[t - 1, j - 1] if j > 0 else float("-inf")
 
-            if not torch.isinf(torch.tensor(stay_score)):
+            if not torch.isinf(stay_score):
                 new_path = beam.path.copy()
                 new_path.append(_Point(j, t - 1, p_stay.exp().item()))
                 next_beams.append(
@@ -143,7 +143,7 @@ def backtrack(
                     )
                 )
 
-            if j > 0 and not torch.isinf(torch.tensor(change_score)):
+            if j > 0 and not torch.isinf(change_score):
                 new_path = beam.path.copy()
                 new_path.append(_Point(j - 1, t - 1, p_change.exp().item()))
                 next_beams.append(

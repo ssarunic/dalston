@@ -47,7 +47,7 @@ class VenvExecutor(RuntimeExecutor):
         with tempfile.TemporaryDirectory(prefix="dalston-venv-executor-") as tmp:
             temp_dir = Path(tmp)
             request_path = temp_dir / "request.json"
-            output_path = temp_dir / "output.json"
+            output_path = temp_dir / "response.json"
             request_path.write_text(
                 json.dumps(self._serialize_request(request), indent=2) + "\n",
                 encoding="utf-8",
@@ -92,7 +92,7 @@ class VenvExecutor(RuntimeExecutor):
             "engine_id": request.engine_id,
             "instance": request.instance,
             "config": request.config,
-            "previous_outputs": request.previous_outputs,
+            "previous_responses": request.previous_responses,
             "payload": request.payload,
             "artifacts": {slot: str(path) for slot, path in request.artifacts.items()},
             "metadata": request.metadata,
@@ -120,7 +120,7 @@ def _worker_execute(request_path: Path, output_path: Path) -> int:
             engine_id=request_data["engine_id"],
             instance=request_data["instance"],
             config=request_data["config"],
-            previous_outputs=request_data["previous_outputs"],
+            previous_responses=request_data["previous_responses"],
             payload=request_data.get("payload"),
             artifacts={
                 slot: Path(locator)

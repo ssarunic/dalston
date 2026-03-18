@@ -5,11 +5,27 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from dalston.gateway.services.artifact_store import StorageFullError
+
 logger = structlog.get_logger()
 
 
 def setup_exception_handlers(app: FastAPI) -> None:
     """Configure exception handlers for the FastAPI app."""
+
+    @app.exception_handler(StorageFullError)
+    async def storage_full_handler(request: Request, exc: StorageFullError):
+        """Handle storage-full errors with a clear message."""
+        logger.error("storage_full", path=str(request.url.path))
+        return JSONResponse(
+            status_code=507,
+            content={
+                "error": {
+                    "code": "storage_full",
+                    "message": "Storage backend is full. Please free up space and try again.",
+                }
+            },
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):

@@ -36,22 +36,22 @@ async def test_lite_storage_service_prefix_and_task_helpers(
 
     root = Path(settings.lite_artifacts_dir)
     audio = root / f"jobs/{job_id}/audio/original.wav"
-    task_input = root / f"jobs/{job_id}/tasks/{task_id}/input.json"
-    task_output = root / f"jobs/{job_id}/tasks/{task_id}/output.json"
+    task_request = root / f"jobs/{job_id}/tasks/{task_id}/request.json"
+    task_response = root / f"jobs/{job_id}/tasks/{task_id}/response.json"
     transcript = root / f"jobs/{job_id}/transcript.json"
-    for path in (audio, task_input, task_output, transcript):
+    for path in (audio, task_request, task_response, transcript):
         path.parent.mkdir(parents=True, exist_ok=True)
 
     audio.write_bytes(b"audio")
-    task_input.write_text(json.dumps({"in": True}))
-    task_output.write_text(json.dumps({"out": True}))
+    task_request.write_text(json.dumps({"in": True}))
+    task_response.write_text(json.dumps({"out": True}))
     transcript.write_text(json.dumps({"final": True}))
 
     assert await service.has_audio(job_id)  # type: ignore[arg-type]
-    assert await service.get_task_input(  # type: ignore[arg-type]
+    assert await service.get_task_request(  # type: ignore[arg-type]
         job_id, task_id
     ) == {"in": True}
-    assert await service.get_task_output(  # type: ignore[arg-type]
+    assert await service.get_task_response(  # type: ignore[arg-type]
         job_id, task_id
     ) == {"out": True}
     assert await service.object_exists(  # type: ignore[arg-type]

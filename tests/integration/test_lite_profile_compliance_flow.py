@@ -179,11 +179,11 @@ class TestComplianceEndToEnd:
 
         job_id = result["job_id"]
         artifacts_root = tmp_path / "artifacts"
-        pii_output = (
-            artifacts_root / "jobs" / job_id / "tasks" / "pii_detect" / "output.json"
+        pii_response = (
+            artifacts_root / "jobs" / job_id / "tasks" / "pii_detect" / "response.json"
         )
-        assert pii_output.exists(), "pii_detect stage must write output.json"
-        data = json.loads(pii_output.read_text())
+        assert pii_response.exists(), "pii_detect stage must write response.json"
+        data = json.loads(pii_response.read_text())
         assert "entities" in data
 
     @pytest.mark.asyncio

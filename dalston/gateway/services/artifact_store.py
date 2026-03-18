@@ -13,6 +13,10 @@ from dalston.common.s3 import get_s3_client
 from dalston.config import Settings
 
 
+class StorageFullError(Exception):
+    """Raised when the storage backend has no space left."""
+
+
 class ArtifactStore(Protocol):
     async def uri_for_key(self, key: str) -> str: ...
 
@@ -54,7 +58,13 @@ class S3ArtifactStoreAdapter:
             kwargs = {"Bucket": self._bucket, "Key": key, "Body": payload}
             if content_type:
                 kwargs["ContentType"] = content_type
-            await s3.put_object(**kwargs)
+            try:
+                await s3.put_object(**kwargs)
+            except ClientError as exc:
+                code = exc.response["Error"]["Code"]
+                if code in ("XMinioStorageFull", "StorageFull"):
+                    raise StorageFullError from exc
+                raise
         return await self.uri_for_key(key)
 
     async def read_bytes(self, uri: str) -> bytes:

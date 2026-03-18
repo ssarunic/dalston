@@ -68,7 +68,7 @@ After M70, M71, and M72, every engine_id follows the same sidecar topology:
 3. Batch and RT engines for both engine_ids are refactored to thin gRPC clients —
    no `torch`, no `faster-whisper`, no `nemo` dependencies, CPU-only images.
 4. Admission control moves into the inference server (it owns the GPU resource).
-5. Unified runners (`engines/stt-unified/`) deprecated and removed.
+5. Unified runners (`engines/stt-transcribe/`) deprecated and removed.
 6. A single AWS instance naturally hosts one inference server + both adapters
    without the coupling problems of the unified runner.
 
@@ -484,8 +484,8 @@ parakeet-server:
   restart: unless-stopped
 
 # Thin adapters (CPU, lightweight)
-stt-batch-transcribe-faster-whisper:
-  image: dalston/stt-batch-transcribe-faster-whisper:2.0.0
+stt-transcribe-faster-whisper:
+  image: dalston/stt-transcribe-faster-whisper:2.0.0
   build:
     context: .
     dockerfile: engines/stt-transcribe/faster-whisper/Dockerfile
@@ -531,10 +531,10 @@ engines register.
 
 Once sidecar mode is validated:
 
-1. Remove unified runner compose services (`stt-unified-faster-whisper`,
-   `stt-unified-nemo`).
-3. Delete `engines/stt-unified/faster-whisper/runner.py` and
-   `engines/stt-unified/nemo/runner.py`.
+1. Remove unified runner compose services (`stt-transcribe-faster-whisper`,
+   `stt-transcribe-nemo`).
+3. Delete `engines/stt-transcribe/faster-whisper/runner.py` and
+   `engines/stt-transcribe/nemo/runner.py`.
 4. Remove `AdmissionController` and `AdmissionConfig` from engine SDK
    (admission is now a semaphore in the inference server).
 5. Remove `_register_engine_modules()` import hacks.
@@ -645,8 +645,8 @@ match the GPU's ability to batch requests. For a single consumer GPU:
 
 ## References
 
-- `engines/stt-unified/faster-whisper/runner.py` — current unified runner (to be replaced)
-- `engines/stt-unified/nemo/runner.py` — current unified runner (to be replaced)
+- `engines/stt-transcribe/faster-whisper/runner.py` — current unified runner (to be replaced)
+- `engines/stt-transcribe/nemo/runner.py` — current unified runner (to be replaced)
 - `dalston/engine_sdk/cores/faster_whisper_inference.py` — `TranscribeCore` (wrapped by server)
 - `dalston/engine_sdk/cores/parakeet_core.py` — `ParakeetCore` (wrapped by server)
 - `dalston/engine_sdk/admission.py` — `AdmissionController` (replaced by server semaphore)

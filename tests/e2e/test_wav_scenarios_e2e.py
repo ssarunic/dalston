@@ -7,23 +7,23 @@ default pytest run.  Execute with:
 
 Required stack (minimal for basic tests):
     docker compose up -d gateway orchestrator redis postgres minio minio-init \
-        stt-batch-prepare stt-batch-transcribe-parakeet-tdt-0.6b-v3-cpu stt-batch-merge
+        stt-prepare stt-transcribe-parakeet-tdt-0.6b-v3-cpu stt-merge
 
 For diarization tests, also start:
-    stt-batch-diarize-nemo-msdd-cpu
+    stt-diarize-nemo-msdd-cpu
 
 For alignment tests (word-level timestamps with Parakeet):
     Note: Parakeet has native word timestamps, alignment stage is skipped.
     For explicit alignment testing, use Faster-Whisper + WhisperX alignment.
 
 For multi-stage per-channel tests with Faster-Whisper + alignment:
-    stt-batch-transcribe-whisper-cpu stt-batch-align-whisperx-cpu
+    stt-transcribe-whisper-cpu stt-align-whisperx-cpu
 
 For PII detection tests:
-    stt-batch-pii-detect-presidio
+    stt-pii-detect-presidio
 
 For audio redaction tests (requires PII detection):
-    stt-batch-audio-redact-audio
+    stt-audio-redact-audio
 """
 
 import pytest
@@ -192,7 +192,7 @@ class TestWavSuccessStereoFile:
         This tests that per-channel stages (transcribe_ch*, align_ch*)
         correctly route to their base streams.
 
-        Requires: stt-batch-transcribe-whisper-cpu, stt-batch-align-whisperx-cpu
+        Requires: stt-transcribe-whisper-cpu, stt-align-whisperx-cpu
         """
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",
@@ -399,7 +399,7 @@ class TestWavSuccessPiiDetection:
         respective base streams. Alignment stages only added for transcribers
         without native word timestamps.
 
-        Requires: stt-batch-pii-detect-presidio
+        Requires: stt-pii-detect-presidio
         """
         result = transcribe_json(
             audio_dir / "test_stereo_speakers.wav",

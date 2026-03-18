@@ -4,22 +4,22 @@ This SDK provides the foundation for building batch processing engines
 that integrate with the Dalston transcription pipeline.
 
 Example usage:
-    from dalston.engine_sdk import Engine, EngineInput, EngineOutput
-    from dalston.engine_sdk import PrepareOutput, Transcript, TranscriptSegment
+    from dalston.engine_sdk import Engine, TaskRequest, TaskResponse
+    from dalston.engine_sdk import PreparationResponse, Transcript, TranscriptSegment
 
     class MyTranscriptionEngine(Engine):
         def process(
-            self, engine_input: EngineInput, ctx: BatchTaskContext
-        ) -> EngineOutput:
-            # Get typed input from previous stage
-            prepare = engine_input.get_prepare_output()
+            self, engine_request: TaskRequest, ctx: BatchTaskContext
+        ) -> TaskResponse:
+            # Get typed response from previous stage
+            prepare = engine_request.get_prepare_response()
             audio_duration = prepare.duration if prepare else 0.0
 
             # Process the audio file
-            result = transcribe(engine_input.audio_path)
+            result = transcribe(engine_request.audio_path)
 
-            # Return typed output
-            return EngineOutput(data=Transcript(
+            # Return typed response
+            return TaskResponse(data=Transcript(
                 text=result.text,
                 segments=[TranscriptSegment(start=0.0, end=1.0, text="hello")],
                 language="en",
@@ -43,26 +43,26 @@ Environment variables:
 # Re-export pipeline types for convenience
 from dalston.common.pipeline_types import (
     AlignmentMethod,
-    AlignOutput,
+    AlignmentResponse,
     AudioMedia,
-    AudioRedactOutput,
-    DiarizeOutput,
+    DiarizationResponse,
     MergedSegment,
-    MergeOutput,
+    MergeResponse,
     Phoneme,
-    PIIDetectOutput,
+    PIIDetectionResponse,
     PIIEntity,
     PIIEntityCategory,
     PIIMetadata,
     PIIRedactionMode,
-    PrepareOutput,
+    PreparationResponse,
+    RedactionResponse,
     Segment,
     SegmentMetaKeys,
     Speaker,
     SpeakerDetectionMode,
     SpeakerTurn,
     SpeechRegion,
-    TaskInputData,
+    TaskRequestData,
     TimestampGranularity,
     Transcript,
     TranscriptMetadata,
@@ -75,23 +75,63 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.device import detect_device
 from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
 from dalston.engine_sdk.types import (
     EngineCapabilities,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
+
+
+def __getattr__(name: str):
+    """Lazy imports for HTTP server classes that depend on FastAPI."""
+    if name == "EngineHTTPServer":
+        from dalston.engine_sdk.http_server import EngineHTTPServer
+
+        return EngineHTTPServer
+    if name == "TranscribeHTTPServer":
+        from dalston.engine_sdk.http_transcribe import TranscribeHTTPServer
+
+        return TranscribeHTTPServer
+    if name == "DiarizeHTTPServer":
+        from dalston.engine_sdk.http_diarize import DiarizeHTTPServer
+
+        return DiarizeHTTPServer
+    if name == "AlignHTTPServer":
+        from dalston.engine_sdk.http_align import AlignHTTPServer
+
+        return AlignHTTPServer
+    if name == "CombinedHTTPServer":
+        from dalston.engine_sdk.http_combined import CombinedHTTPServer
+
+        return CombinedHTTPServer
+    if name == "CompositeEngine":
+        from dalston.engine_sdk.base_composite import CompositeEngine
+
+        return CompositeEngine
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Core SDK
     "BaseBatchTranscribeEngine",
     "Engine",
+    "detect_device",
     "EngineCapabilities",
     "LocalRunner",
-    "EngineInput",
-    "EngineOutput",
+    "TaskRequest",
+    "TaskResponse",
     "BatchTaskContext",
+    # Composite engine
+    "CompositeEngine",
+    # HTTP servers (M79)
+    "AlignHTTPServer",
+    "CombinedHTTPServer",
+    "DiarizeHTTPServer",
+    "EngineHTTPServer",
+    "TranscribeHTTPServer",
     # Model management (M39.2)
     "LoadedModel",
     "ModelManager",
@@ -111,7 +151,7 @@ __all__ = [
     "Speaker",
     "SpeakerTurn",
     "SpeechRegion",
-    "TaskInputData",
+    "TaskRequestData",
     "TranscriptMetadata",
     "TranscriptSegment",
     "TranscriptWord",
@@ -120,11 +160,11 @@ __all__ = [
     "Word",
     "WordMetaKeys",
     # Stage outputs
-    "AlignOutput",
-    "AudioRedactOutput",
+    "AlignmentResponse",
+    "RedactionResponse",
     "Transcript",
-    "DiarizeOutput",
-    "MergeOutput",
-    "PIIDetectOutput",
-    "PrepareOutput",
+    "DiarizationResponse",
+    "MergeResponse",
+    "PIIDetectionResponse",
+    "PreparationResponse",
 ]

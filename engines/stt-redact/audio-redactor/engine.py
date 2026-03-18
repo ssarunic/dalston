@@ -12,12 +12,12 @@ from typing import Any
 
 from dalston.common.artifacts import build_task_artifact_id
 from dalston.engine_sdk import (
-    AudioRedactOutput,
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
     PIIRedactionMode,
+    RedactionResponse,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -28,19 +28,19 @@ class AudioRedactionEngine(Engine):
 
     def process(
         self,
-        engine_input: EngineInput,
+        task_request: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         """Redact PII from audio file.
 
         Args:
-            engine_input: Task input with PII detection output
+            task_request: Task input with PII detection output
 
         Returns:
-            EngineOutput with AudioRedactOutput containing redacted audio artifact ID
+            TaskResponse with RedactionResponse containing redacted audio artifact ID
         """
-        config = engine_input.config
-        audio_path = engine_input.audio_path
+        config = task_request.config
+        audio_path = task_request.audio_path
 
         # Get channel from config (set by DAG builder for per-channel mode)
         channel: int | None = config.get("channel")
@@ -54,7 +54,7 @@ class AudioRedactionEngine(Engine):
             pii_key = "pii_detect"
 
         logical_name = f"redacted_audio{channel_suffix}"
-        artifact_id = build_task_artifact_id(engine_input.task_id, logical_name)
+        artifact_id = build_task_artifact_id(task_request.task_id, logical_name)
 
         # Get config
         mode_str = config.get("redaction_mode", "silence")
@@ -63,16 +63,16 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "audio_redaction_starting",
-            job_id=engine_input.job_id,
+            job_id=task_request.job_id,
             mode=mode.value,
             buffer_ms=buffer_ms,
             channel=channel,
         )
 
-        pii_output = engine_input.get_pii_detect_output(pii_key)
+        pii_output = task_request.get_pii_detect_response(pii_key)
         if not pii_output:
             # Try raw output with channel-specific key
-            raw_pii = engine_input.get_raw_output(pii_key) or {}
+            raw_pii = task_request.get_raw_response(pii_key) or {}
             entities = raw_pii.get("entities", [])
         else:
             entities = [e.model_dump() for e in pii_output.entities]
@@ -81,7 +81,7 @@ class AudioRedactionEngine(Engine):
             output_path = Path(tmp.name)
 
         if not entities:
-            self.logger.info("no_entities_to_redact", job_id=engine_input.job_id)
+            self.logger.info("no_entities_to_redact", job_id=task_request.job_id)
             shutil.copy2(audio_path, output_path)
             produced = ctx.describe_artifact(
                 logical_name=logical_name,
@@ -91,7 +91,7 @@ class AudioRedactionEngine(Engine):
                 channel=channel,
                 media_type="audio/wav",
             )
-            output = AudioRedactOutput(
+            output = RedactionResponse(
                 redacted_audio_artifact_id=artifact_id,
                 redaction_mode=mode,
                 buffer_ms=buffer_ms,
@@ -102,7 +102,7 @@ class AudioRedactionEngine(Engine):
                 skip_reason=None,
                 warnings=[],
             )
-            return EngineOutput(data=output, produced_artifacts=[produced])
+            return TaskResponse(data=output, produced_artifacts=[produced])
 
         # Extract time ranges from entities
         ranges = self._extract_time_ranges(entities, buffer_ms)
@@ -112,7 +112,7 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "redacting_ranges",
-            job_id=engine_input.job_id,
+            job_id=task_request.job_id,
             entity_count=len(entities),
             range_count=len(merged_ranges),
         )
@@ -122,7 +122,7 @@ class AudioRedactionEngine(Engine):
 
         self.logger.info(
             "audio_redaction_complete",
-            job_id=engine_input.job_id,
+            job_id=task_request.job_id,
             redacted_audio_artifact_id=artifact_id,
         )
 
@@ -138,7 +138,7 @@ class AudioRedactionEngine(Engine):
         # Build redaction map
         redaction_map = self._build_redaction_map(merged_ranges, entities)
 
-        output = AudioRedactOutput(
+        output = RedactionResponse(
             redacted_audio_artifact_id=artifact_id,
             redaction_mode=mode,
             buffer_ms=buffer_ms,
@@ -150,7 +150,7 @@ class AudioRedactionEngine(Engine):
             warnings=[],
         )
 
-        return EngineOutput(data=output, produced_artifacts=[produced])
+        return TaskResponse(data=output, produced_artifacts=[produced])
 
     def _extract_time_ranges(
         self, entities: list[dict], buffer_ms: int

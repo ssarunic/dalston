@@ -183,7 +183,7 @@ class NoCapableEngineError(Exception):
             for alt in self.catalog_alternatives:
                 lines.append(f"    - {alt.engine_id}")
                 lines.append(
-                    f"      Start: docker compose up stt-batch-{self.stage}-{alt.engine_id}"
+                    f"      Start: docker compose up stt-{self.stage}-{alt.engine_id}"
                 )
 
         return "\n".join(lines)

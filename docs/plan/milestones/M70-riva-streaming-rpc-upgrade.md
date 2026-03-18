@@ -5,7 +5,7 @@
 | **Goal** | Implement batch and RT Riva engines from scratch against a NIM gRPC sidecar, then upgrade from `offline_recognize()` to `streaming_recognize()` with per-path `interim_results` configuration |
 | **Duration** | 5–8 days |
 | **Dependencies** | M63 (engine unification), M64 (registry unification) |
-| **Primary Deliverable** | Two production-ready engines (`stt-batch-transcribe-riva`, `stt-rt-riva`) using `streaming_recognize()` — batch streams audio in chunks with no timeout risk; RT emits native NIM partial results with low first-word latency |
+| **Primary Deliverable** | Two production-ready engines (`stt-transcribe-riva`, `stt-rt-riva`) using `streaming_recognize()` — batch streams audio in chunks with no timeout risk; RT emits native NIM partial results with low first-word latency |
 | **Status** | Proposed |
 
 ## Outcomes
@@ -71,7 +71,7 @@ not their own resource usage. Keeping them separate added operational overhead
 (two Dockerfiles, two compose services, two deployment units) without meaningful
 benefit.
 
-The Riva engine was consolidated into `engines/stt-unified/riva/` following the
+The Riva engine was consolidated into `engines/stt-transcribe/riva/` following the
 same unified runner pattern as ONNX, faster-whisper, NeMo, HF-ASR, and vLLM-ASR.
 The shared resource is a `RivaClient` (gRPC channel + ASR service) rather than
 a GPU model, but the runner structure is identical:
@@ -80,13 +80,13 @@ a GPU model, but the runner structure is identical:
 - `batch_engine.py` — batch adapter, accepts injected `RivaClient`
 - `rt_engine.py` — RT adapter, accepts injected `RivaClient`
 - `runner.py` — creates one `RivaClient`, wires both adapters with `AdmissionController`
-- Single Docker container, single compose service (`stt-unified-riva`)
+- Single Docker container, single compose service (`stt-transcribe-riva`)
 
 ## Scope
 
 In scope:
 
-- `engines/stt-unified/riva/` — unified engine (riva_client.py, batch_engine.py, rt_engine.py, runner.py, Dockerfile, requirements.txt, rt_engine.yaml)
+- `engines/stt-transcribe/riva/` — unified engine (riva_client.py, batch_engine.py, rt_engine.py, runner.py, Dockerfile, requirements.txt, rt_engine.yaml)
 - Riva NIM sidecar service in `docker-compose.yml` (behind `riva` profile)
 - `DALSTON_RIVA_URI` env var (default `localhost:50051`) for NIM gRPC endpoint
 - `DALSTON_RIVA_CHUNK_MS` env var (default 100 ms) for batch chunk size
@@ -154,7 +154,7 @@ Gate: `engine.yaml` files parse correctly via `EngineCapabilities.from_yaml()`.
 import grpc
 import riva.client
 
-from dalston.engine_sdk import Engine, EngineInput, EngineOutput, BatchTaskContext
+from dalston.engine_sdk import Engine, EngineRequest, EngineResponse, BatchTaskContext
 from dalston.common.pipeline_types import TranscribeOutput, TranscribeSegment, WordTimestamp
 
 
@@ -165,7 +165,7 @@ class RivaBatchEngine(Engine):
         channel = grpc.insecure_channel(uri)
         self._asr = riva.client.ASRService(channel)
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, engine_input: EngineRequest, ctx: BatchTaskContext) -> EngineResponse:
         audio_bytes = engine_input.audio_path.read_bytes()
         language = engine_input.params.get("language", "en")
 
@@ -203,7 +203,7 @@ class RivaBatchEngine(Engine):
             language=language,
             duration=engine_input.audio_duration,
         )
-        return EngineOutput(data=output)
+        return EngineResponse(data=output)
 
     def health_check(self) -> dict:
         try:
@@ -393,8 +393,8 @@ riva-nim:
   profiles: [riva]
   restart: unless-stopped
 
-stt-batch-transcribe-riva:
-  image: dalston/stt-batch-transcribe-riva:1.0.0
+stt-transcribe-riva:
+  image: dalston/stt-transcribe-riva:1.0.0
   build:
     context: .
     dockerfile: engines/stt-transcribe/riva/Dockerfile

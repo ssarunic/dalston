@@ -357,7 +357,7 @@ if __name__ == "__main__":
 ### docker-compose.yml Addition
 
 ```yaml
-stt-batch-transcribe-parakeet-onnx:
+stt-transcribe-parakeet-onnx:
   image: dalston/engine-parakeet-onnx:latest
   build:
     context: .
@@ -649,7 +649,7 @@ if __name__ == "__main__":
 ### docker-compose.yml Addition
 
 ```yaml
-stt-batch-transcribe-hf-asr:
+stt-transcribe-hf-asr:
   image: dalston/engine-hf-asr:latest
   build:
     context: .
@@ -1025,7 +1025,7 @@ if __name__ == "__main__":
 ### docker-compose.yml Addition
 
 ```yaml
-stt-batch-transcribe-vllm-asr:
+stt-transcribe-vllm-asr:
   image: dalston/engine-vllm-asr:latest
   build:
     context: .

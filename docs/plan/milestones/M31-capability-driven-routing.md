@@ -93,7 +93,7 @@ Job Submission
 
 ```bash
 # Deploy new engine (no code changes)
-docker compose up -d stt-batch-transcribe-canary
+docker compose up -d stt-transcribe-canary
 
 # Submit job - new engine is selected if it's the best match
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
@@ -172,7 +172,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 ```bash
 # Submit job, faster-whisper selected
 # Kill faster-whisper mid-processing
-docker compose stop stt-batch-transcribe-whisper
+docker compose stop stt-transcribe-whisper
 
 # Task automatically re-routes to parakeet (if language compatible)
 # Logs show: engine_reselected, original=faster-whisper, new=parakeet
@@ -517,7 +517,7 @@ def _build_message(self) -> str:
         lines.append("  Available in catalog (not running):")
         for alt in self.catalog_alternatives:
             lines.append(f"    - {alt.engine_id}")
-            lines.append(f"      Start: docker compose up stt-batch-{self.stage}-{alt.engine_id}")
+            lines.append(f"      Start: docker compose up stt-{self.stage}-{alt.engine_id}")
 
     return "\n".join(lines)
 
@@ -1165,7 +1165,7 @@ pytest tests/integration/test_dag_capability_driven.py -v
 # Deploy test engine, verify it's selected appropriately
 
 # 4. Language routing works
-docker compose up -d stt-batch-transcribe-parakeet  # English only
+docker compose up -d stt-transcribe-parakeet  # English only
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@croatian.wav" -F "language=hr"
 # Should return 422 with actionable error

@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 import structlog
 
 import dalston.telemetry
-from dalston.common.artifacts import ArtifactSelector, InputBinding
+from dalston.common.artifacts import ArtifactSelector, RequestBinding
 from dalston.common.models import Task, TaskStatus
 from dalston.orchestrator.defaults import DEFAULT_TASK_MAX_RETRIES
 
@@ -53,7 +53,7 @@ def _audio_input_binding(
     role: str = "prepared",
 ) -> list[dict]:
     """Create a single audio slot binding for a task."""
-    binding = InputBinding(
+    binding = RequestBinding(
         slot="audio",
         selector=ArtifactSelector(
             producer_stage=producer_stage,
@@ -354,8 +354,8 @@ def _build_dag_with_engines(
         dependencies=[],
         input_bindings=[],
         config=prepare_config,
-        input_uri=audio_uri,
-        output_uri=None,
+        request_uri=audio_uri,
+        response_uri=None,
         retries=0,
         max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
@@ -388,8 +388,8 @@ def _build_dag_with_engines(
         dependencies=[prepare_task.id],
         input_bindings=_audio_input_binding(),
         config=transcribe_config,
-        input_uri=None,
-        output_uri=None,
+        request_uri=None,
+        response_uri=None,
         retries=0,
         max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
@@ -411,8 +411,8 @@ def _build_dag_with_engines(
             dependencies=[transcribe_task.id],
             input_bindings=_audio_input_binding(),
             config=align_config,
-            input_uri=None,
-            output_uri=None,
+            request_uri=None,
+            response_uri=None,
             retries=0,
             max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
@@ -460,8 +460,8 @@ def _create_diarize_task(
         dependencies=dependencies,
         input_bindings=_audio_input_binding(),
         config=config,
-        input_uri=None,
-        output_uri=None,
+        request_uri=None,
+        response_uri=None,
         retries=0,
         max_retries=DEFAULT_TASK_MAX_RETRIES,
         required=True,
@@ -525,8 +525,8 @@ def _build_per_channel_dag_with_engines(
             dependencies=[prepare_task.id],
             input_bindings=_audio_input_binding(channel=channel),
             config=channel_transcribe_config,
-            input_uri=None,
-            output_uri=None,
+            request_uri=None,
+            response_uri=None,
             retries=0,
             max_retries=DEFAULT_TASK_MAX_RETRIES,
             required=True,
@@ -547,8 +547,8 @@ def _build_per_channel_dag_with_engines(
                 dependencies=[transcribe_task.id],
                 input_bindings=_audio_input_binding(channel=channel),
                 config=align_config,
-                input_uri=None,
-                output_uri=None,
+                request_uri=None,
+                response_uri=None,
                 retries=0,
                 max_retries=DEFAULT_TASK_MAX_RETRIES,
                 required=True,

@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from dalston.common.artifacts import ArtifactReference, InputBinding
+from dalston.common.artifacts import ArtifactReference, RequestBinding
 from dalston.common.audio_defaults import DEFAULT_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
@@ -276,10 +276,10 @@ class AudioMedia(BaseModel):
     )
 
 
-class TaskInputData(BaseModel):
-    """Task input data written to S3 for engine consumption.
+class TaskRequestData(BaseModel):
+    """Task request data written to S3 for engine consumption.
 
-    This is the schema for task input.json files that engines read.
+    This is the schema for task request.json files that engines read.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -290,7 +290,7 @@ class TaskInputData(BaseModel):
     payload: dict[str, Any] | None = Field(
         default=None, description="Typed stage payload data"
     )
-    input_bindings: list[InputBinding] = Field(
+    request_bindings: list[RequestBinding] = Field(
         default_factory=list, description="Declared input-slot artifact bindings"
     )
     resolved_artifact_ids: dict[str, str] = Field(
@@ -302,7 +302,7 @@ class TaskInputData(BaseModel):
         description="Task-local artifact reference index for materialization",
     )
 
-    previous_outputs: dict[str, Any] = Field(
+    previous_responses: dict[str, Any] = Field(
         default_factory=dict, description="Results from dependency stages"
     )
     config: dict[str, Any] = Field(
@@ -396,7 +396,7 @@ class StageInput(BaseModel):
         return values
 
 
-class PrepareInput(StageInput):
+class PreparationRequest(StageInput):
     """Input for audio preparation stage."""
 
     target_sample_rate: int = Field(
@@ -415,7 +415,7 @@ class PrepareInput(StageInput):
     )
 
 
-class TranscribeInput(StageInput):
+class TranscriptionRequest(StageInput):
     """Input for transcription stage."""
 
     # Runtime/model selection
@@ -475,7 +475,7 @@ class TranscribeInput(StageInput):
     best_of: int | None = Field(default=None, description="Number of candidates")
 
 
-class AlignInput(StageInput):
+class AlignmentRequest(StageInput):
     """Input for alignment stage."""
 
     target_granularity: TimestampGranularity = Field(
@@ -492,7 +492,7 @@ class AlignInput(StageInput):
     )
 
 
-class DiarizeInput(StageInput):
+class DiarizationRequest(StageInput):
     """Input for diarization stage."""
 
     num_speakers: int | None = Field(
@@ -507,7 +507,7 @@ class DiarizeInput(StageInput):
     detect_overlap: bool = Field(default=True, description="Detect overlapping speech")
 
 
-class MergeInput(StageInput):
+class MergeRequest(StageInput):
     """Input for merge stage."""
 
     merge_strategy: str = Field(
@@ -527,7 +527,7 @@ class MergeInput(StageInput):
 # =============================================================================
 
 
-class PrepareOutput(BaseModel):
+class PreparationResponse(BaseModel):
     """Output from audio preparation stage."""
 
     model_config = ConfigDict(extra="forbid")
@@ -718,7 +718,7 @@ class TranscriptMetaKeys:
     MODEL_ID = "model_id"
 
 
-class AlignOutput(BaseModel):
+class AlignmentResponse(BaseModel):
     """Output from alignment stage."""
 
     model_config = ConfigDict(extra="forbid")
@@ -753,7 +753,7 @@ class AlignOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
 
-class DiarizeOutput(BaseModel):
+class DiarizationResponse(BaseModel):
     """Output from diarization stage."""
 
     model_config = ConfigDict(extra="forbid")
@@ -816,7 +816,7 @@ class TranscriptMetadata(BaseModel):
     )
 
 
-class MergeOutput(BaseModel):
+class MergeResponse(BaseModel):
     """Output from merge stage - the final transcript."""
 
     model_config = ConfigDict(extra="forbid")
@@ -901,7 +901,7 @@ class PIIMetadata(BaseModel):
     processing_time_ms: int = Field(..., ge=0, description="Processing time in ms")
 
 
-class PIIDetectOutput(BaseModel):
+class PIIDetectionResponse(BaseModel):
     """Output from PII detection stage."""
 
     model_config = ConfigDict(extra="forbid")
@@ -923,7 +923,7 @@ class PIIDetectOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Any warnings")
 
 
-class AudioRedactOutput(BaseModel):
+class RedactionResponse(BaseModel):
     """Output from audio redaction stage."""
 
     model_config = ConfigDict(extra="forbid")
@@ -950,14 +950,14 @@ class AudioRedactOutput(BaseModel):
 # Type aliases for convenience
 # =============================================================================
 
-# Previous outputs dict with typed values
-PreviousOutputs = dict[
+# Previous responses dict with typed values
+PreviousResponses = dict[
     str,
-    PrepareOutput
+    PreparationResponse
     | Transcript
-    | AlignOutput
-    | DiarizeOutput
-    | PIIDetectOutput
-    | AudioRedactOutput
+    | AlignmentResponse
+    | DiarizationResponse
+    | PIIDetectionResponse
+    | RedactionResponse
     | None,
 ]

@@ -164,6 +164,8 @@ async def _ensure_default_tenant() -> None:
 def reset_session_state() -> None:
     """Testing utility for resetting lazy globals."""
     global _engine, _session_factory, _mode, _initialized_database_url, _db_init_lock
+    if _engine is not None:
+        _engine.sync_engine.dispose()
     _engine = None
     _session_factory = None
     _mode = None

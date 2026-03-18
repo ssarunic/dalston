@@ -556,7 +556,7 @@ def _debug_capture_failure_bundle(
     except Exception:  # noqa: BLE001
         running = []
 
-    engine_services = [s for s in running if s.startswith("stt-batch-")]
+    engine_services = [s for s in running if s.startswith("stt-")]
     services = ["orchestrator", *engine_services]
     _debug_capture_logs(
         ctx,
@@ -857,9 +857,7 @@ def get_preferred_transcribe_model(ctx: RunContext) -> str:
     """Pick a running transcribe ENGINE_ID for deterministic scenario submissions."""
     running_services = list_running_compose_services(ctx)
     transcribe_services = sorted(
-        service
-        for service in running_services
-        if service.startswith("stt-batch-transcribe-")
+        service for service in running_services if service.startswith("stt-transcribe-")
     )
     for service in transcribe_services:
         engine_id = get_service_engine_id(ctx, service)
@@ -1148,7 +1146,7 @@ def scenario_prepare_cold_start(ctx: RunContext) -> tuple[str, list[str]]:
     return _run_cold_start_scenario(
         ctx,
         scenario_name="prepare_cold_start",
-        services_to_pause=["stt-batch-prepare"],
+        services_to_pause=["stt-prepare"],
         stage_hint="prepare",
         audio_file=ctx.audio_file,
         submit_kwargs={"model": get_preferred_transcribe_model(ctx)},
@@ -1158,7 +1156,7 @@ def scenario_prepare_cold_start(ctx: RunContext) -> tuple[str, list[str]]:
 def scenario_transcribe_cold_start(ctx: RunContext) -> tuple[str, list[str]]:
     running = list_running_compose_services(ctx)
     transcribe_services = sorted(
-        service for service in running if service.startswith("stt-batch-transcribe-")
+        service for service in running if service.startswith("stt-transcribe-")
     )
     if not transcribe_services:
         raise ScenarioSkipped("transcribe_cold_start: no running transcribe services")
@@ -1193,7 +1191,7 @@ def scenario_merge_cold_start(ctx: RunContext) -> tuple[str, list[str]]:
     return _run_cold_start_scenario(
         ctx,
         scenario_name="merge_cold_start",
-        services_to_pause=["stt-batch-merge"],
+        services_to_pause=["stt-merge"],
         stage_hint="merge",
         audio_file=ctx.audio_file,
         submit_kwargs={"model": get_preferred_transcribe_model(ctx)},

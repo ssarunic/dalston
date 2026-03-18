@@ -128,7 +128,7 @@ Expose profile and executor metadata in health/status/metrics to simplify debugg
    - profile-specific caches/materialization paths are execution details, not API changes
 6. Freeze venv invocation mechanics:
    - subprocess-based execution in target venv Python
-   - explicit serialization contract for `EngineInput`/`EngineOutput` (JSON envelope + artifact references)
+   - explicit serialization contract for `EngineRequest`/`EngineResponse` (JSON envelope + artifact references)
    - no importlib `sys.path` injection isolation strategy
 7. Define selection precedence and validation rules.
 8. Define profile-specific error taxonomy and fallback policy (explicitly no silent fallback).

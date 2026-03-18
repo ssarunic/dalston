@@ -204,7 +204,7 @@ pytest -m e2e
 - **RT delegation**: `WhisperStreamingEngine` (`engines/stt-rt/faster-whisper/engine.py`)
   delegates to `TranscribeCore` via optional `core=` injection.
 - **Unified runner**: `UnifiedFasterWhisperRunner`
-  (`engines/stt-unified/faster-whisper/runner.py`) — single process with one
+  (`engines/stt-transcribe/faster-whisper/runner.py`) — single process with one
   `TranscribeCore`, batch adapter in background thread, RT adapter in async loop.
 - **Admission control**: `AdmissionController`
   (`dalston/engine_sdk/admission.py`) with `DALSTON_RT_RESERVATION`,
@@ -220,15 +220,15 @@ pytest -m e2e
   shared core with `OnnxModelManager`. Batch (`ParakeetOnnxEngine`) and RT
   (`ParakeetOnnxStreamingEngine`) both delegate via `core=` injection.
 - **Unified runners implemented**: `UnifiedNemoRunner`
-  (`engines/stt-unified/nemo/runner.py`) and `UnifiedOnnxRunner`
-  (`engines/stt-unified/onnx/runner.py`) — same structure as the
+  (`engines/stt-transcribe/nemo/runner.py`) and `UnifiedOnnxRunner`
+  (`engines/stt-transcribe/onnx/runner.py`) — same structure as the
   faster-whisper runner (one core, batch thread + RT async loop, shared
   admission controller).
-- **Dockerfiles created**: `engines/stt-unified/nemo/Dockerfile` and
-  `engines/stt-unified/onnx/Dockerfile` with GPU/CPU build-arg variants.
-- **Promoted to docker-compose**: 8 legacy split services (`stt-batch-transcribe-nemo*`,
-  `stt-rt-nemo*`) replaced by 4 unified services (`stt-unified-nemo`,
-  `stt-unified-nemo-cpu`, `stt-unified-onnx-cpu`, `stt-unified-onnx`).
+- **Dockerfiles created**: `engines/stt-transcribe/nemo/Dockerfile` and
+  `engines/stt-transcribe/onnx/Dockerfile` with GPU/CPU build-arg variants.
+- **Promoted to docker-compose**: 8 legacy split services (`stt-transcribe-nemo*`,
+  `stt-rt-nemo*`) replaced by 4 unified services (`stt-transcribe-nemo`,
+  `stt-transcribe-nemo-cpu`, `stt-transcribe-onnx-cpu`, `stt-transcribe-onnx`).
 - **hf-asr, vllm-asr, voxtral**: batch-only engine_ids with no RT counterpart to
   unify — no core extraction needed.
 

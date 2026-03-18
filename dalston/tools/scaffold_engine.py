@@ -274,8 +274,8 @@ from dalston.engine_sdk import (
     Engine,
     EngineCapabilities,
     BatchTaskContext,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -305,18 +305,18 @@ class {class_name}(Engine):
         self.logger.info("model_loaded")
 
     def process(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> EngineOutput:
+        self, task_request: TaskRequest, ctx: BatchTaskContext
+    ) -> TaskResponse:
         """Process audio input.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
 
         Returns:
-            EngineOutput with processing results
+            TaskResponse with processing results
         """
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         # Load model (lazy loading, cached)
         self._load_model(config)
@@ -329,7 +329,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return EngineOutput(data=result)
+        return TaskResponse(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
@@ -370,7 +370,7 @@ def generate_dockerfile(config: ScaffoldConfig) -> str:
 # {config.description}
 #
 # Build from repo root:
-#   docker compose build stt-batch-{config.stage}-{config.engine_id}
+#   docker compose build stt-{config.stage}-{config.engine_id}
 #
 {gpu_comment}
 FROM python:3.11-slim
@@ -437,10 +437,10 @@ def generate_readme(config: ScaffoldConfig) -> str:
 
 ```bash
 # Build the engine
-docker compose build stt-batch-{config.stage}-{config.engine_id}
+docker compose build stt-{config.stage}-{config.engine_id}
 
 # Run with docker compose
-docker compose up -d stt-batch-{config.stage}-{config.engine_id}
+docker compose up -d stt-{config.stage}-{config.engine_id}
 ```
 
 ## Configuration
@@ -545,8 +545,8 @@ def generate_variant_dockerfile(engine_family: str, stage: str) -> str:
     return f"""# {engine_family.title()} Engine (Parameterized)
 #
 # Build with specific variant:
-#   docker compose build --build-arg MODEL_VARIANT=base stt-batch-{stage}-{engine_family}-base
-#   docker compose build --build-arg MODEL_VARIANT=large-v3 stt-batch-{stage}-{engine_family}-large-v3
+#   docker compose build --build-arg MODEL_VARIANT=base stt-{stage}-{engine_family}-base
+#   docker compose build --build-arg MODEL_VARIANT=large-v3 stt-{stage}-{engine_family}-large-v3
 #
 ARG MODEL_VARIANT=large-v3
 
@@ -610,8 +610,8 @@ from typing import Any
 from dalston.engine_sdk import (
     Engine,
     BatchTaskContext,
-    EngineInput,
-    EngineOutput,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -644,17 +644,17 @@ class {class_name}(Engine):
         self.logger.info("model_loaded", model_variant=self._model_variant)
 
     def process(
-        self, engine_input: EngineInput, ctx: BatchTaskContext
-    ) -> EngineOutput:
+        self, task_request: TaskRequest, ctx: BatchTaskContext
+    ) -> TaskResponse:
         """Process audio input.
 
         Args:
-            engine_input: Task input with audio file path and config
+            task_request: Task input with audio file path and config
 
         Returns:
-            EngineOutput with processing results
+            TaskResponse with processing results
         """
-        audio_path = engine_input.audio_path
+        audio_path = task_request.audio_path
 
         # Load model (lazy loading, cached)
         self._load_model()
@@ -667,7 +667,7 @@ class {class_name}(Engine):
 
         self.logger.info("processing_complete")
 
-        return EngineOutput(data=result)
+        return TaskResponse(data=result)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
@@ -718,13 +718,13 @@ This engine supports multiple variants with different hardware requirements:
 
 | Variant | Command |
 |---------|---------|
-{chr(10).join(f"| {v} | `docker compose up stt-batch-{stage}-{engine_family}-{v}` |" for v in variants)}
+{chr(10).join(f"| {v} | `docker compose up stt-{stage}-{engine_family}-{v}` |" for v in variants)}
 
 ## Adding a New Variant
 
 1. Create `variants/{{new-variant}}.yaml` with appropriate hardware specs
 2. Add service to `docker-compose.yml`
-3. Build: `docker compose build --build-arg MODEL_VARIANT={{new-variant}} stt-batch-{stage}-{engine_family}-{{new-variant}}`
+3. Build: `docker compose build --build-arg MODEL_VARIANT={{new-variant}} stt-{stage}-{engine_family}-{{new-variant}}`
 """,
     }
 

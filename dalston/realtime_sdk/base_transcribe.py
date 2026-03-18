@@ -15,8 +15,8 @@ from dalston.common.pipeline_types import (
     Character,
     Phoneme,
     TimestampGranularity,
-    TranscribeInput,
     Transcript,
+    TranscriptionRequest,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -33,7 +33,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
     def transcribe(
         self,
         audio: np.ndarray,
-        params: TranscribeInput,
+        params: TranscriptionRequest,
     ) -> Transcript:
         """Transcribe audio and return a Transcript.
 
@@ -44,7 +44,7 @@ class BaseRealtimeTranscribeEngine(RealtimeEngine):
     def transcribe_v1(
         self,
         audio: np.ndarray,
-        params: TranscribeInput,
+        params: TranscriptionRequest,
     ) -> Transcript:
         """Transcribe audio and return a Transcript.
 

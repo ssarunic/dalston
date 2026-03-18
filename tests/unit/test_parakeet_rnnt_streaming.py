@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscriptionRequest
 from dalston.engine_sdk.inference.nemo_inference import (
     NemoInference,
     NeMoSegmentResult,
@@ -51,7 +51,7 @@ def _cleanup_injected_modules():
 
 def _load_rt_engine_module():
     """Load the RT parakeet engine module via importlib."""
-    engine_path = Path("engines/stt-unified/nemo/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/rt_engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
 
@@ -503,7 +503,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-tdt-1.1b"),
+            TranscriptionRequest(language="en", loaded_model_id="parakeet-tdt-1.1b"),
         )
 
         assert result.text == "hello world"
@@ -516,7 +516,7 @@ class TestRTEngineExistingPathUnchanged:
 
         result = engine.transcribe(
             audio,
-            TranscribeInput(language="en", loaded_model_id="parakeet-ctc-0.6b"),
+            TranscriptionRequest(language="en", loaded_model_id="parakeet-ctc-0.6b"),
         )
 
         assert result.text == "hello world"

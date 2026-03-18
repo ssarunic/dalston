@@ -288,10 +288,31 @@ async def upgrade_to_head(database_url: str) -> MigrationResult:
         raise MigrationError(f"Unexpected migration failure: {exc}") from exc
 
 
+async def _ensure_version_table(engine) -> None:
+    """Pre-create alembic_version with a wide version_num column.
+
+    Alembic's default is VARCHAR(32) which is too narrow for our descriptive
+    revision IDs (e.g. '0002_drop_realtime_enhance_on_end').  The env.py
+    ``version_num_type`` setting is only honoured by some code-paths, so we
+    ensure the table exists with VARCHAR(128) before Alembic touches it.
+    If the table already exists this is a no-op.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS alembic_version ("
+                "  version_num VARCHAR(128) NOT NULL, "
+                "  CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)"
+                ")"
+            )
+        )
+
+
 async def _run_alembic_upgrade(alembic_cfg, url: str, head: str) -> MigrationResult:
     """Run alembic upgrade head in a thread (Alembic is sync)."""
     engine = create_async_engine(url, echo=False)
     try:
+        await _ensure_version_table(engine)
         current = await _get_current_revision(engine)
         log.info("alembic_upgrade_start", current_revision=current, target=head)
 

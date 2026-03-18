@@ -93,7 +93,7 @@ Selection rules:
 
 Non-container lite executors use the same task contract regardless of profile. The subprocess envelope is JSON and carries:
 
-- input: `task_id`, `job_id`, `stage`, `config`, `payload`, `previous_outputs`, `resolved_artifact_ids`, `artifact_index`
+- input: `task_id`, `job_id`, `stage`, `config`, `payload`, `previous_responses`, `resolved_artifact_ids`, `artifact_index`
 - output: `task_id`, `job_id`, `stage`, `data`, `produced_artifacts`, `produced_artifact_ids`
 
 Artifact bytes stay out-of-band via artifact references. Isolation for `venv` is subprocess-based only; Dalston does not use `sys.path` injection for profile isolation.
@@ -640,7 +640,7 @@ When no engine matches requirements, the error explains why:
 }
 ```
 
-This tells operators exactly what to start: `docker compose up stt-batch-transcribe-faster-whisper`
+This tells operators exactly what to start: `docker compose up stt-transcribe-faster-whisper`
 
 ### Zero-Code Engine Additions
 
@@ -648,7 +648,7 @@ New engines participate in routing automatically based on their `engine.yaml` ca
 
 ```bash
 # Deploy new engine (no orchestrator code changes needed)
-docker compose up -d stt-batch-transcribe-canary
+docker compose up -d stt-transcribe-canary
 
 # Submit job - new engine is selected if it's the best match
 curl -X POST http://localhost:8000/v1/audio/transcriptions \

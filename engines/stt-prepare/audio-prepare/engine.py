@@ -13,9 +13,9 @@ from dalston.engine_sdk import (
     AudioMedia,
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
-    PrepareOutput,
+    PreparationResponse,
+    TaskRequest,
+    TaskResponse,
 )
 
 
@@ -59,19 +59,19 @@ class AudioPrepareEngine(Engine):
 
     def process(
         self,
-        engine_input: EngineInput,
+        task_request: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         """Convert audio to standardized format.
 
         Args:
-            engine_input: Task input with audio file path
+            task_request: Task input with audio file path
 
         Returns:
-            EngineOutput with PrepareOutput containing artifact IDs and metadata
+            TaskResponse with PreparationResponse containing artifact IDs and metadata
         """
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         # Get config options with defaults
         target_sample_rate = config.get("target_sample_rate", self.DEFAULT_SAMPLE_RATE)
@@ -96,7 +96,7 @@ class AudioPrepareEngine(Engine):
                 audio_path=audio_path,
                 original_metadata=original_metadata,
                 target_sample_rate=target_sample_rate,
-                task_id=engine_input.task_id,
+                task_id=task_request.task_id,
                 ctx=ctx,
             )
 
@@ -118,7 +118,7 @@ class AudioPrepareEngine(Engine):
         self.logger.info("prepared_audio_metadata", metadata=prepared_metadata)
 
         logical_name = "prepared_audio"
-        artifact_id = build_task_artifact_id(engine_input.task_id, logical_name)
+        artifact_id = build_task_artifact_id(task_request.task_id, logical_name)
         produced = ctx.describe_artifact(
             logical_name=logical_name,
             local_path=prepared_path,
@@ -138,13 +138,13 @@ class AudioPrepareEngine(Engine):
             bit_depth=prepared_metadata["bit_depth"],
         )
 
-        output = PrepareOutput(
+        output = PreparationResponse(
             channel_files=[prepared],
             split_channels=False,
             engine_id="audio-prepare",
         )
 
-        return EngineOutput(data=output, produced_artifacts=[produced])
+        return TaskResponse(data=output, produced_artifacts=[produced])
 
     def _process_split_channels(
         self,
@@ -154,7 +154,7 @@ class AudioPrepareEngine(Engine):
         target_sample_rate: int,
         task_id: str,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         """Process audio by splitting into separate channel files.
 
         Used for per_channel speaker detection where each channel
@@ -168,7 +168,7 @@ class AudioPrepareEngine(Engine):
             ctx: Task execution context
 
         Returns:
-            EngineOutput with PrepareOutput containing channel_files array
+            TaskResponse with PreparationResponse containing channel_files array
         """
         num_channels = original_metadata["channels"]
         if num_channels > 2:
@@ -223,13 +223,13 @@ class AudioPrepareEngine(Engine):
             )
 
         # Build typed output
-        output = PrepareOutput(
+        output = PreparationResponse(
             channel_files=channel_files,
             split_channels=True,
             engine_id="audio-prepare",
         )
 
-        return EngineOutput(data=output, produced_artifacts=produced_artifacts)
+        return TaskResponse(data=output, produced_artifacts=produced_artifacts)
 
     def _extract_channel(
         self,

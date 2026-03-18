@@ -10,13 +10,13 @@ from pydantic import BaseModel
 
 from dalston.common.artifacts import MaterializedArtifact, ProducedArtifact
 from dalston.common.pipeline_types import (
-    AlignOutput,
-    AudioRedactOutput,
-    DiarizeOutput,
-    PIIDetectOutput,
-    PrepareOutput,
-    TranscribeInput,
+    AlignmentResponse,
+    DiarizationResponse,
+    PIIDetectionResponse,
+    PreparationResponse,
+    RedactionResponse,
     Transcript,
+    TranscriptionRequest,
     VocabularySupport,
 )
 
@@ -50,7 +50,7 @@ class EngineCapabilities(BaseModel):
 
 
 @dataclass
-class EngineInput(Generic[PayloadT]):
+class TaskRequest(Generic[PayloadT]):
     """Input envelope provided to an engine's process method."""
 
     task_id: str
@@ -58,7 +58,7 @@ class EngineInput(Generic[PayloadT]):
     stage: str = "unknown"
     config: dict[str, Any] = field(default_factory=dict)
     payload: PayloadT | dict[str, Any] | None = None
-    previous_outputs: dict[str, Any] = field(default_factory=dict)
+    previous_responses: dict[str, Any] = field(default_factory=dict)
     audio_path: Path | None = None
     materialized_artifacts: dict[str, MaterializedArtifact] = field(
         default_factory=dict
@@ -88,43 +88,45 @@ class EngineInput(Generic[PayloadT]):
             return media if isinstance(media, dict) else None
         return None
 
-    def get_prepare_output(self) -> PrepareOutput | None:
-        return self._get_typed_output("prepare", PrepareOutput)
+    def get_prepare_response(self) -> PreparationResponse | None:
+        return self._get_typed_response("prepare", PreparationResponse)
 
     def get_transcript(self, key: str = "transcribe") -> Transcript | None:
         """Get transcribe output as Transcript."""
-        return self._get_typed_output(key, Transcript)
+        return self._get_typed_response(key, Transcript)
 
-    def get_transcribe_params(self) -> TranscribeInput:
+    def get_transcribe_params(self) -> TranscriptionRequest:
         """Validate and return typed transcribe parameters from config."""
-        return TranscribeInput.model_validate(self.config)
+        return TranscriptionRequest.model_validate(self.config)
 
-    def get_align_output(self, key: str = "align") -> AlignOutput | None:
-        return self._get_typed_output(key, AlignOutput)
+    def get_align_response(self, key: str = "align") -> AlignmentResponse | None:
+        return self._get_typed_response(key, AlignmentResponse)
 
-    def get_diarize_output(self) -> DiarizeOutput | None:
-        return self._get_typed_output("diarize", DiarizeOutput)
+    def get_diarize_response(self) -> DiarizationResponse | None:
+        return self._get_typed_response("diarize", DiarizationResponse)
 
-    def get_pii_detect_output(self, key: str = "pii_detect") -> PIIDetectOutput | None:
-        return self._get_typed_output(key, PIIDetectOutput)
+    def get_pii_detect_response(
+        self, key: str = "pii_detect"
+    ) -> PIIDetectionResponse | None:
+        return self._get_typed_response(key, PIIDetectionResponse)
 
-    def get_audio_redact_output(
+    def get_audio_redact_response(
         self, key: str = "audio_redact"
-    ) -> AudioRedactOutput | None:
-        return self._get_typed_output(key, AudioRedactOutput)
+    ) -> RedactionResponse | None:
+        return self._get_typed_response(key, RedactionResponse)
 
-    def _get_typed_output(self, key: str, model: type[T]) -> T | None:
-        data = self.previous_outputs.get(key)
+    def _get_typed_response(self, key: str, model: type[T]) -> T | None:
+        data = self.previous_responses.get(key)
         if data is None:
             return None
         return model.model_validate(data)
 
-    def get_raw_output(self, key: str) -> dict[str, Any] | None:
-        return self.previous_outputs.get(key)
+    def get_raw_response(self, key: str) -> dict[str, Any] | None:
+        return self.previous_responses.get(key)
 
 
 @dataclass
-class EngineOutput(Generic[OutputT]):
+class TaskResponse(Generic[OutputT]):
     """Output envelope returned by an engine's process method."""
 
     data: BaseModel | dict[str, Any]

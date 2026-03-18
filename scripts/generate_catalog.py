@@ -34,15 +34,11 @@ def find_engine_id_yamls(engines_dir: Path) -> list[Path]:
     """Find all engine YAML files (engine_id definitions)."""
     yamls: list[Path] = []
 
-    for pattern in ("**/engine.yaml", "**/rt_engine.yaml"):
-        for yaml_path in engines_dir.glob(pattern):
-            # Skip realtime engines for now (separate migration)
-            if "stt-rt" in str(yaml_path):
-                continue
-            # Merge engine_id was replaced by orchestrator transcript assembly.
-            if "stt-merge" in str(yaml_path):
-                continue
-            yamls.append(yaml_path)
+    for yaml_path in engines_dir.glob("**/engine.yaml"):
+        # Merge engine_id was replaced by orchestrator transcript assembly.
+        if "stt-merge" in str(yaml_path):
+            continue
+        yamls.append(yaml_path)
 
     return sorted(yamls)
 
@@ -55,7 +51,7 @@ def load_yaml(path: Path) -> dict:
 
 def derive_image_name(engine_id: str, stage: str, version: str) -> str:
     """Derive Docker image name from engine_id metadata."""
-    return f"dalston/stt-batch-{stage}-{engine_id}:{version}"
+    return f"dalston/stt-{stage}-{engine_id}:{version}"
 
 
 def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:

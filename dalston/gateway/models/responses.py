@@ -304,13 +304,13 @@ class TaskArtifactResponse(BaseModel):
     stage: str
     engine_id: str
     status: str
-    input: dict[str, Any] | None = Field(
+    request: dict[str, Any] | None = Field(
         default=None,
-        description="Task input as passed to the engine (from input.json in S3)",
+        description="Task request as passed to the engine (from request.json in S3)",
     )
-    output: dict[str, Any] | None = Field(
+    response: dict[str, Any] | None = Field(
         default=None,
-        description="Task output (from output.json in S3). Null if task has not completed.",
+        description="Task response (from response.json in S3). Null if task has not completed.",
     )
 
 

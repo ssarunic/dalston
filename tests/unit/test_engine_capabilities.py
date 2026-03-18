@@ -19,7 +19,7 @@ import pytest
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 from dalston.orchestrator.catalog import EngineCatalog
 from dalston.orchestrator.exceptions import (
     CatalogValidationError,
@@ -94,8 +94,8 @@ class TestEngineGetCapabilities:
 
         class TestEngine(Engine):
             def process(
-                self, input: EngineInput, ctx: BatchTaskContext
-            ) -> EngineOutput:
+                self, input: TaskRequest, ctx: BatchTaskContext
+            ) -> TaskResponse:
                 pass
 
         engine = TestEngine()
@@ -110,8 +110,8 @@ class TestEngineGetCapabilities:
 
         class CustomEngine(Engine):
             def process(
-                self, input: EngineInput, ctx: BatchTaskContext
-            ) -> EngineOutput:
+                self, input: TaskRequest, ctx: BatchTaskContext
+            ) -> TaskResponse:
                 pass
 
             def get_capabilities(self) -> EngineCapabilities:

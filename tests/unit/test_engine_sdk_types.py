@@ -1,4 +1,4 @@
-"""Unit tests for engine SDK types (EngineInput, EngineOutput).
+"""Unit tests for engine SDK types (TaskRequest, TaskResponse).
 
 Tests the typed accessors for previous stage outputs and serialization.
 """
@@ -10,10 +10,10 @@ from pydantic import ValidationError
 
 from dalston.common.artifacts import ProducedArtifact
 from dalston.common.pipeline_types import (
-    AlignOutput,
+    AlignmentResponse,
     AudioMedia,
-    DiarizeOutput,
-    PrepareOutput,
+    DiarizationResponse,
+    PreparationResponse,
     Segment,
     SpeakerTurn,
     TimestampGranularity,
@@ -22,57 +22,57 @@ from dalston.common.pipeline_types import (
     TranscriptWord,
     Word,
 )
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class TestTaskInputBasics:
-    """Tests for basic EngineInput functionality."""
+    """Tests for basic TaskRequest functionality."""
 
-    def test_create_task_input(self):
-        """Test creating a EngineInput."""
-        task_input = EngineInput(
+    def test_create_task_request(self):
+        """Test creating a TaskRequest."""
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
         )
-        assert task_input.task_id == "task-123"
-        assert task_input.job_id == "job-456"
-        assert task_input.audio_path == Path("/tmp/audio.wav")
+        assert task_request.task_id == "task-123"
+        assert task_request.job_id == "job-456"
+        assert task_request.audio_path == Path("/tmp/audio.wav")
 
-    def test_task_input_with_config(self):
-        """Test EngineInput with configuration."""
-        task_input = EngineInput(
+    def test_task_request_with_config(self):
+        """Test TaskRequest with configuration."""
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
             config={"model": "large-v3", "language": "en"},
         )
-        assert task_input.config["model"] == "large-v3"
-        assert task_input.config["language"] == "en"
+        assert task_request.config["model"] == "large-v3"
+        assert task_request.config["language"] == "en"
 
-    def test_task_input_with_previous_outputs(self):
-        """Test EngineInput with previous outputs dict."""
-        task_input = EngineInput(
+    def test_task_request_with_previous_responses(self):
+        """Test TaskRequest with previous outputs dict."""
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "prepare": {"duration": 60.0, "sample_rate": 16000},
             },
         )
-        assert "prepare" in task_input.previous_outputs
+        assert "prepare" in task_request.previous_responses
 
 
-class TestTaskInputGetPrepareOutput:
-    """Tests for EngineInput.get_prepare_output()."""
+class TestTaskInputGetPreparationResponse:
+    """Tests for TaskRequest.get_prepare_response()."""
 
-    def test_get_prepare_output_valid(self):
+    def test_get_prepare_response_valid(self):
         """Test getting valid prepare output."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "prepare": {
                     "channel_files": [
                         {
@@ -89,45 +89,45 @@ class TestTaskInputGetPrepareOutput:
                 },
             },
         )
-        output = task_input.get_prepare_output()
+        output = task_request.get_prepare_response()
         assert output is not None
-        assert isinstance(output, PrepareOutput)
+        assert isinstance(output, PreparationResponse)
         assert len(output.channel_files) == 1
         assert output.channel_files[0].duration == 60.5
         assert output.channel_files[0].sample_rate == 16000
         assert output.channel_files[0].channels == 1
 
-    def test_get_prepare_output_missing(self):
+    def test_get_prepare_response_missing(self):
         """Test getting prepare output when not present."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={},
+            previous_responses={},
         )
-        output = task_input.get_prepare_output()
+        output = task_request.get_prepare_response()
         assert output is None
 
-    def test_get_prepare_output_invalid_data(self):
+    def test_get_prepare_response_invalid_data(self):
         """Test getting prepare output with invalid data raises validation error."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "prepare": {"invalid": "data"},  # Missing required fields
             },
         )
         with pytest.raises(ValidationError):
-            task_input.get_prepare_output()
+            task_request.get_prepare_response()
 
-    def test_get_prepare_output_with_split_channels(self):
+    def test_get_prepare_response_with_split_channels(self):
         """Test getting prepare output with split channel data."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "prepare": {
                     "channel_files": [
                         {
@@ -152,22 +152,22 @@ class TestTaskInputGetPrepareOutput:
                 },
             },
         )
-        output = task_input.get_prepare_output()
+        output = task_request.get_prepare_response()
         assert output is not None
         assert output.split_channels is True
         assert len(output.channel_files) == 2
 
 
 class TestTaskInputGetTranscript:
-    """Tests for EngineInput.get_transcript()."""
+    """Tests for TaskRequest.get_transcript()."""
 
     def test_get_transcript_valid(self):
         """Test getting valid transcript."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "transcribe": {
                     "segments": [
                         {"start": 0.0, "end": 5.0, "text": "Hello world"},
@@ -179,7 +179,7 @@ class TestTaskInputGetTranscript:
                 },
             },
         )
-        output = task_input.get_transcript()
+        output = task_request.get_transcript()
         assert output is not None
         assert isinstance(output, Transcript)
         assert output.text == "Hello world"
@@ -188,11 +188,11 @@ class TestTaskInputGetTranscript:
 
     def test_get_transcript_with_words(self):
         """Test getting transcript with word timestamps."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "transcribe": {
                     "segments": [
                         {
@@ -212,7 +212,7 @@ class TestTaskInputGetTranscript:
                 },
             },
         )
-        output = task_input.get_transcript()
+        output = task_request.get_transcript()
         assert output is not None
         assert output.segments[0].words is not None
         assert len(output.segments[0].words) == 2
@@ -220,11 +220,11 @@ class TestTaskInputGetTranscript:
 
     def test_get_transcript_per_channel(self):
         """Test getting transcript for specific channel."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "transcribe_ch0": {
                     "segments": [{"start": 0.0, "end": 5.0, "text": "Channel 0"}],
                     "text": "Channel 0",
@@ -239,8 +239,8 @@ class TestTaskInputGetTranscript:
                 },
             },
         )
-        ch0 = task_input.get_transcript("transcribe_ch0")
-        ch1 = task_input.get_transcript("transcribe_ch1")
+        ch0 = task_request.get_transcript("transcribe_ch0")
+        ch1 = task_request.get_transcript("transcribe_ch1")
         assert ch0 is not None
         assert ch1 is not None
         assert ch0.text == "Channel 0"
@@ -248,26 +248,26 @@ class TestTaskInputGetTranscript:
 
     def test_get_transcript_missing(self):
         """Test getting transcript when not present."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={},
+            previous_responses={},
         )
-        output = task_input.get_transcript()
+        output = task_request.get_transcript()
         assert output is None
 
 
-class TestTaskInputGetAlignOutput:
-    """Tests for EngineInput.get_align_output()."""
+class TestTaskInputGetAlignmentResponse:
+    """Tests for TaskRequest.get_align_response()."""
 
-    def test_get_align_output_valid(self):
+    def test_get_align_response_valid(self):
         """Test getting valid align output."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "align": {
                     "segments": [
                         {
@@ -295,19 +295,19 @@ class TestTaskInputGetAlignOutput:
                 },
             },
         )
-        output = task_input.get_align_output()
+        output = task_request.get_align_response()
         assert output is not None
-        assert isinstance(output, AlignOutput)
+        assert isinstance(output, AlignmentResponse)
         assert output.word_timestamps is True
         assert output.alignment_confidence == 0.92
 
-    def test_get_align_output_skipped(self):
+    def test_get_align_response_skipped(self):
         """Test getting align output when skipped."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "align": {
                     "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
                     "text": "Hello",
@@ -320,18 +320,18 @@ class TestTaskInputGetAlignOutput:
                 },
             },
         )
-        output = task_input.get_align_output()
+        output = task_request.get_align_response()
         assert output is not None
         assert output.skipped is True
         assert output.skip_reason is not None
 
-    def test_get_align_output_per_channel(self):
+    def test_get_align_response_per_channel(self):
         """Test getting align output for specific channel."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "align_ch0": {
                     "segments": [{"start": 0.0, "end": 1.0, "text": "Ch0"}],
                     "text": "Ch0",
@@ -341,21 +341,21 @@ class TestTaskInputGetAlignOutput:
                 },
             },
         )
-        output = task_input.get_align_output("align_ch0")
+        output = task_request.get_align_response("align_ch0")
         assert output is not None
         assert output.text == "Ch0"
 
 
-class TestTaskInputGetDiarizeOutput:
-    """Tests for EngineInput.get_diarize_output()."""
+class TestTaskInputGetDiarizationResponse:
+    """Tests for TaskRequest.get_diarize_response()."""
 
-    def test_get_diarize_output_valid(self):
+    def test_get_diarize_response_valid(self):
         """Test getting valid diarize output."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "diarize": {
                     "turns": [
                         {"speaker": "SPEAKER_00", "start": 0.0, "end": 5.0},
@@ -369,20 +369,20 @@ class TestTaskInputGetDiarizeOutput:
                 },
             },
         )
-        output = task_input.get_diarize_output()
+        output = task_request.get_diarize_response()
         assert output is not None
-        assert isinstance(output, DiarizeOutput)
+        assert isinstance(output, DiarizationResponse)
         assert output.num_speakers == 2
         assert len(output.turns) == 2
         assert output.turns[0].speaker == "SPEAKER_00"
 
-    def test_get_diarize_output_with_overlap(self):
+    def test_get_diarize_response_with_overlap(self):
         """Test getting diarize output with overlapping speech."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "diarize": {
                     "turns": [
                         {"speaker": "SPEAKER_00", "start": 0.0, "end": 5.0},
@@ -401,43 +401,43 @@ class TestTaskInputGetDiarizeOutput:
                 },
             },
         )
-        output = task_input.get_diarize_output()
+        output = task_request.get_diarize_response()
         assert output is not None
         assert output.overlap_duration == 0.5
         assert output.turns[1].overlapping_speakers == ["SPEAKER_00"]
 
-    def test_get_diarize_output_skipped(self):
+    def test_get_diarize_response_skipped(self):
         """Test getting diarize output when skipped."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "diarize": {
                     "turns": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 999999.0}],
                     "speakers": ["SPEAKER_00"],
                     "num_speakers": 1,
                     "engine_id": "pyannote-4.0",
                     "skipped": True,
-                    "skip_reason": "DIARIZATION_DISABLED=true",
+                    "skip_reason": "stage_skipped_by_orchestrator",
                 },
             },
         )
-        output = task_input.get_diarize_output()
+        output = task_request.get_diarize_response()
         assert output is not None
         assert output.skipped is True
 
 
 class TestTaskInputGetRawOutput:
-    """Tests for EngineInput.get_raw_output()."""
+    """Tests for TaskRequest.get_raw_response()."""
 
-    def test_get_raw_output(self):
+    def test_get_raw_response(self):
         """Test getting raw output dict."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "transcribe": {
                     "text": "Hello",
                     "language": "en",
@@ -445,29 +445,29 @@ class TestTaskInputGetRawOutput:
                 },
             },
         )
-        raw = task_input.get_raw_output("transcribe")
+        raw = task_request.get_raw_response("transcribe")
         assert raw is not None
         assert raw["text"] == "Hello"
         assert raw["custom_field"] == "value"
 
-    def test_get_raw_output_missing(self):
+    def test_get_raw_response_missing(self):
         """Test getting raw output when not present."""
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="task-123",
             job_id="job-456",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={},
+            previous_responses={},
         )
-        raw = task_input.get_raw_output("transcribe")
+        raw = task_request.get_raw_response("transcribe")
         assert raw is None
 
 
 class TestTaskOutput:
-    """Tests for EngineOutput class."""
+    """Tests for TaskResponse class."""
 
     def test_create_task_output_with_dict(self):
-        """Test creating EngineOutput with dict data."""
-        output = EngineOutput(
+        """Test creating TaskResponse with dict data."""
+        output = TaskResponse(
             data={
                 "text": "Hello world",
                 "language": "en",
@@ -476,18 +476,18 @@ class TestTaskOutput:
         assert output.data["text"] == "Hello world"
 
     def test_create_task_output_with_pydantic_model(self):
-        """Test creating EngineOutput with Pydantic model."""
+        """Test creating TaskResponse with Pydantic model."""
         transcript = Transcript(
             segments=[TranscriptSegment(start=0.0, end=1.0, text="Hello")],
             text="Hello",
             language="en",
             engine_id="test",
         )
-        output = EngineOutput(data=transcript)
+        output = TaskResponse(data=transcript)
         assert isinstance(output.data, Transcript)
 
     def test_task_output_to_dict_from_pydantic(self):
-        """Test EngineOutput.to_dict() with Pydantic model."""
+        """Test TaskResponse.to_dict() with Pydantic model."""
         transcript = Transcript(
             segments=[
                 TranscriptSegment(
@@ -506,7 +506,7 @@ class TestTaskOutput:
             timestamp_granularity=TimestampGranularity.WORD,
             engine_id="test",
         )
-        output = EngineOutput(data=transcript)
+        output = TaskResponse(data=transcript)
         data = output.to_dict()
 
         assert isinstance(data, dict)
@@ -517,8 +517,8 @@ class TestTaskOutput:
         assert data["segments"][0]["words"][0]["text"] == "Hello"
 
     def test_task_output_to_dict_from_dict(self):
-        """Test EngineOutput.to_dict() with dict data."""
-        output = EngineOutput(
+        """Test TaskResponse.to_dict() with dict data."""
+        output = TaskResponse(
             data={
                 "text": "Hello",
                 "custom": "value",
@@ -529,8 +529,8 @@ class TestTaskOutput:
         assert data["custom"] == "value"
 
     def test_task_output_with_produced_artifacts(self):
-        """Test EngineOutput with produced artifact descriptors."""
-        output = EngineOutput(
+        """Test TaskResponse with produced artifact descriptors."""
+        output = TaskResponse(
             data={"result": "success"},
             produced_artifacts=[
                 ProducedArtifact(
@@ -564,17 +564,17 @@ class TestTaskInputTypedOutputIntegration:
         )
 
         # Create task input for align stage with serialized transcript
-        task_input = EngineInput(
+        task_request = TaskRequest(
             task_id="align-task",
             job_id="job-123",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
+            previous_responses={
                 "transcribe": transcript.model_dump(mode="json"),
             },
         )
 
         # Align stage gets typed output
-        output = task_input.get_transcript()
+        output = task_request.get_transcript()
         assert output is not None
         assert output.text == "Hello world"
         assert output.language == "en"
@@ -583,7 +583,7 @@ class TestTaskInputTypedOutputIntegration:
     def test_all_stages_to_merge_flow(self):
         """Test all stage outputs can be consumed by merge stage."""
         # Simulate all upstream outputs
-        prepare_output = PrepareOutput(
+        prepare_response = PreparationResponse(
             channel_files=[
                 AudioMedia(
                     artifact_id="s3://bucket/audio.wav",
@@ -605,7 +605,7 @@ class TestTaskInputTypedOutputIntegration:
             engine_id="faster-whisper",
         )
 
-        align_output = AlignOutput(
+        align_response = AlignmentResponse(
             segments=[
                 Segment(
                     start=0.0,
@@ -620,31 +620,31 @@ class TestTaskInputTypedOutputIntegration:
             engine_id="phoneme-align",
         )
 
-        diarize_output = DiarizeOutput(
+        diarize_response = DiarizationResponse(
             turns=[SpeakerTurn(speaker="SPEAKER_00", start=0.0, end=5.0)],
             speakers=["SPEAKER_00"],
             num_speakers=1,
             engine_id="pyannote-4.0",
         )
 
-        # Create merge task input
-        task_input = EngineInput(
+        # Create merge task request
+        task_request = TaskRequest(
             task_id="merge-task",
             job_id="job-123",
             audio_path=Path("/tmp/audio.wav"),
-            previous_outputs={
-                "prepare": prepare_output.model_dump(mode="json"),
+            previous_responses={
+                "prepare": prepare_response.model_dump(mode="json"),
                 "transcribe": transcript.model_dump(mode="json"),
-                "align": align_output.model_dump(mode="json"),
-                "diarize": diarize_output.model_dump(mode="json"),
+                "align": align_response.model_dump(mode="json"),
+                "diarize": diarize_response.model_dump(mode="json"),
             },
         )
 
         # Merge stage gets all typed outputs
-        prepare = task_input.get_prepare_output()
-        transcribe = task_input.get_transcript()
-        align = task_input.get_align_output()
-        diarize = task_input.get_diarize_output()
+        prepare = task_request.get_prepare_response()
+        transcribe = task_request.get_transcript()
+        align = task_request.get_align_response()
+        diarize = task_request.get_diarize_response()
 
         assert prepare is not None
         assert len(prepare.channel_files) == 1

@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Goal** | Make engine development truly no-infra by adding a first-class local runner utility (`audio + config.json -> output.json`) and removing leftover compatibility bridges |
+| **Goal** | Make engine development truly no-infra by adding a first-class local runner utility (`audio + config.json -> response.json`) and removing leftover compatibility bridges |
 | **Duration** | 5-7 days |
 | **Dependencies** | M51 (stateless engine contract + artifact materialization) |
-| **Deliverable** | File-based local runner command, canonical `output.json`, strict no-compat cleanup, updated docs/specs/tests |
+| **Deliverable** | File-based local runner command, canonical `response.json`, strict no-compat cleanup, updated docs/specs/tests |
 | **Status** | Planned |
 
 ## Starting State (Post-M51)
@@ -18,13 +18,13 @@ M51 already delivered the core primitives:
 
 Known gaps at the start of M52:
 
-1. No file-based CLI entrypoint (`audio + config.json -> output.json`).
+1. No file-based CLI entrypoint (`audio + config.json -> response.json`).
 2. `LocalRunner.run()` still has stage-specific behavior (`if stage == "merge"` writing `transcript.json`).
-3. Canonical `output.json` schema is not explicitly frozen in specs.
+3. Canonical `response.json` schema is not explicitly frozen in specs.
 4. Legacy SDK alias surface still exists (`TaskInput` / `TaskOutput`).
 5. Batch runner still has mixed-version stream fallback logic.
-6. `EngineInput._get_typed_output()` silently swallows parse errors and returns `None`.
-7. `EngineInput.__post_init__` falls back to `/tmp/dalston-empty-audio` when no audio artifact exists.
+6. `EngineRequest._get_typed_response()` silently swallows parse errors and returns `None`.
+7. `EngineRequest.__post_init__` falls back to `/tmp/dalston-empty-audio` when no audio artifact exists.
 
 ---
 
@@ -34,8 +34,8 @@ Known gaps at the start of M52:
 
 1. Any engine can be run locally with no Redis, no S3, and no orchestrator process.
 2. Default developer flow is one command with a local audio file and a JSON config file.
-3. The local runner emits a canonical `output.json` envelope that mirrors runner output shape (`task_id`, `job_id`, `stage`, `data`, `produced_artifacts`, `produced_artifact_ids`).
-4. Advanced stages (`align`, `diarize`, `pii_detect`, `audio_redact`, `merge`) are supported with optional local JSON files for `payload`, `previous_outputs`, and non-audio artifacts.
+3. The local runner emits a canonical `response.json` envelope that mirrors runner output shape (`task_id`, `job_id`, `stage`, `data`, `produced_artifacts`, `produced_artifact_ids`).
+4. Advanced stages (`align`, `diarize`, `pii_detect`, `audio_redact`, `merge`) are supported with optional local JSON files for `payload`, `previous_responses`, and non-audio artifacts.
 
 ### DX outcomes
 
@@ -58,7 +58,7 @@ Known gaps at the start of M52:
 3. At least one side-effect-heavy engine can be executed locally through the file-based flow.
 4. No remaining `TaskInput`/`TaskOutput` compatibility aliases in SDK public surface.
 5. No legacy queue fallback path remains in batch runner.
-6. `_get_typed_output` no longer fails silently.
+6. `_get_typed_response` no longer fails silently.
 7. `/tmp/dalston-empty-audio` placeholder fallback is removed.
 
 ---
@@ -75,10 +75,10 @@ Define one file-based contract for local runs and enforce it strictly:
 
 1. Required: engine reference, stage, `config.json`, and output path.
 2. Required for simple path: `audio` file.
-3. Optional for advanced stages: `payload.json`, `previous_outputs.json`, `artifacts.json`.
+3. Optional for advanced stages: `payload.json`, `previous_responses.json`, `artifacts.json`.
 4. Strict validation with fail-closed errors for malformed input.
 
-Canonical `output.json` schema frozen in Phase 0:
+Canonical `response.json` schema frozen in Phase 0:
 
 ```json
 {
@@ -99,7 +99,7 @@ python -m dalston.engine_sdk.local_runner run \
   --stage transcribe \
   --audio ./fixtures/audio.wav \
   --config ./fixtures/transcribe-config.json \
-  --output ./tmp/output.json
+  --output ./tmp/response.json
 ```
 
 Advanced invocation (align/diarize/pii_detect path):
@@ -112,7 +112,7 @@ python -m dalston.engine_sdk.local_runner run \
   --payload ./fixtures/align-payload.json \
   --previous-outputs ./fixtures/previous-outputs.json \
   --artifacts ./fixtures/artifacts.json \
-  --output ./tmp/output.json
+  --output ./tmp/response.json
 ```
 
 ### Strategy 3: Clean-cut compatibility policy
@@ -130,7 +130,7 @@ No stage-specific output side effects inside runner utility code. Any stage-spec
    - Derive from `materialized_artifacts["audio"]` (or first artifact) when available.
    - If no materialized artifacts are present, keep `audio_path=None` (no placeholder path).
 2. Typed output policy:
-   - Remove catch-all exception swallowing in `_get_typed_output`.
+   - Remove catch-all exception swallowing in `_get_typed_response`.
    - Parse failures must produce explicit failure signals (raised or structured error path), not silent `None`.
 
 ### Strategy 6: Docs/specs as part of the implementation, not follow-up
@@ -157,9 +157,9 @@ The local-run workflow and contracts are part of the deliverable. Implementation
 1. Define CLI UX and JSON schemas before code changes:
    - command args
    - required vs optional files
-   - canonical `output.json` shape
+   - canonical `response.json` shape
 2. Define error model (missing files, invalid JSON, invalid engine ref, missing artifacts).
-3. Freeze `audio_path` and `_get_typed_output` contract decisions for clean-cut behavior.
+3. Freeze `audio_path` and `_get_typed_response` contract decisions for clean-cut behavior.
 4. Lock contract in docs/specs first to prevent tool drift.
 
 Expected files:
@@ -173,7 +173,7 @@ Expected files:
 2. Add dynamic engine loader from `<module:Class>` reference.
 3. Load `config.json` and optional JSON files.
 4. Resolve local artifact paths and invoke `LocalRunner`.
-5. Always write a requested `output.json` file (all stages).
+5. Always write a requested `response.json` file (all stages).
 
 Expected files:
 
@@ -184,7 +184,7 @@ Expected files:
 
 1. Validate JSON schemas and path existence.
 2. Enforce deterministic defaults (`job_id`, `task_id`) when not provided.
-3. Ensure emitted `output.json` is stable and reproducible.
+3. Ensure emitted `response.json` is stable and reproducible.
 4. Remove hardcoded `if stage == "merge"` sidecar write behavior from `LocalRunner.run()`.
 5. Keep runner generic; no stage-specific branches in local utility flow.
 
@@ -199,7 +199,7 @@ Expected files:
 1. Remove SDK alias bridge types:
    - `TaskInput` / `TaskOutput` alias exports.
 2. Remove mixed-version queue polling fallback in batch runner.
-3. Replace silent parse behavior in `_get_typed_output` with explicit failure behavior.
+3. Replace silent parse behavior in `_get_typed_response` with explicit failure behavior.
 4. Remove `/tmp/dalston-empty-audio` placeholder fallback; keep `audio_path` optional.
 5. Update scaffolder/templates to generate only current types.
 
@@ -252,8 +252,8 @@ Expected files:
 ### Automated tests
 
 1. New local runner CLI unit tests:
-   - happy path (`audio + config -> output.json`)
-   - advanced path (`payload/previous_outputs/artifacts`)
+   - happy path (`audio + config -> response.json`)
+   - advanced path (`payload/previous_responses/artifacts`)
    - validation failures (missing/invalid JSON, bad engine ref)
    - deterministic envelope assertions
 2. Materializer/local store regression tests:
@@ -293,8 +293,8 @@ pytest \
 
 ### Manual verification
 
-1. Run local command for one transcribe engine on a local WAV and inspect `output.json`.
-2. Run advanced local command (with `payload`, `previous_outputs`, `artifacts`) and inspect `output.json`.
+1. Run local command for one transcribe engine on a local WAV and inspect `response.json`.
+2. Run advanced local command (with `payload`, `previous_responses`, `artifacts`) and inspect `response.json`.
 3. Confirm no Redis/S3 services are running and local run still succeeds.
 4. Confirm local runner no longer writes `transcript.json` through hardcoded stage checks.
 
@@ -313,11 +313,11 @@ pytest \
 
 ## Exit Criteria
 
-1. Local runner command supports `audio + config.json -> output.json` without Redis/S3.
+1. Local runner command supports `audio + config.json -> response.json` without Redis/S3.
 2. Canonical output envelope is produced for all stages.
 3. Hardcoded merge-specific side effect in local runner is removed.
 4. Legacy compatibility code targeted by M52 is removed.
-5. `_get_typed_output` no longer swallows parse errors silently.
+5. `_get_typed_response` no longer swallows parse errors silently.
 6. `audio_path` placeholder fallback is removed and contract is explicit.
 7. Documentation/specs reflect the new workflow and removed legacy patterns.
 8. Test suite for local runner + cleanup guardrails passes.

@@ -1,6 +1,6 @@
 """Transcript assembly from stage outputs (M68).
 
-Assembles MergeOutput from individual stage outputs without requiring
+Assembles MergeResponse from individual stage outputs without requiring
 a merge engine. Called by the orchestrator on job completion for both
 mono and per-channel pipelines.
 """
@@ -13,11 +13,11 @@ from typing import Any
 import structlog
 
 from dalston.common.pipeline_types import (
-    AlignOutput,
-    DiarizeOutput,
+    AlignmentResponse,
+    DiarizationResponse,
     LanguageInfo,
     MergedSegment,
-    MergeOutput,
+    MergeResponse,
     Segment,
     Speaker,
     SpeakerDetectionMode,
@@ -49,8 +49,8 @@ def assemble_transcript(
     word_timestamps_requested: bool = False,
     known_speaker_names: list[str] | None = None,
     pipeline_stages: list[str] | None = None,
-) -> MergeOutput:
-    """Assemble a MergeOutput transcript from individual stage outputs.
+) -> MergeResponse:
+    """Assemble a MergeResponse transcript from individual stage outputs.
 
     This replaces the merge engine for mono (non-per-channel) pipelines.
     It reads the outputs from transcribe, align, and diarize stages and
@@ -66,7 +66,7 @@ def assemble_transcript(
             from stage_outputs keys.
 
     Returns:
-        MergeOutput with assembled transcript.
+        MergeResponse with assembled transcript.
     """
     # Parse stage outputs into typed models where possible
     prepare_data = stage_outputs.get("prepare", {})
@@ -86,18 +86,18 @@ def assemble_transcript(
     if not transcribe_data:
         raise ValueError("Missing 'transcribe' stage output")
     transcript_v1 = _parse_transcript(transcribe_data)
-    align_output = _try_parse_align(align_data) if align_data else None
-    diarize_output = _try_parse_diarize(diarize_data) if diarize_data else None
+    align_response = _try_parse_align(align_data) if align_data else None
+    diarize_response = _try_parse_diarize(diarize_data) if diarize_data else None
 
     # Select segment source and determine word timestamp availability
     segments_source, word_timestamps_available, pipeline_warnings = _select_segments(
-        align_output=align_output,
+        align_response=align_response,
         transcript=transcript_v1,
     )
 
     # Build speaker assignments from diarization
     diarization_turns, diarization_speakers = _extract_diarization(
-        diarize_output=diarize_output,
+        diarize_response=diarize_response,
         diarize_data=diarize_data,
         speaker_detection=speaker_detection,
         pipeline_warnings=pipeline_warnings,
@@ -156,7 +156,7 @@ def assemble_transcript(
         pipeline_warnings=pipeline_warnings,
     )
 
-    transcript = MergeOutput(
+    transcript = MergeResponse(
         job_id=job_id,
         version="1.0",
         metadata=metadata,
@@ -192,8 +192,8 @@ def assemble_per_channel_transcript(
     word_timestamps_requested: bool = False,
     known_speaker_names: list[str] | None = None,
     pipeline_stages: list[str] | None = None,
-) -> MergeOutput:
-    """Assemble a MergeOutput transcript from per-channel stage outputs.
+) -> MergeResponse:
+    """Assemble a MergeResponse transcript from per-channel stage outputs.
 
     This replaces the merge engine for per-channel pipelines. Each audio
     channel is treated as a separate speaker. Segments from all channels
@@ -213,7 +213,7 @@ def assemble_per_channel_transcript(
         pipeline_stages: Explicit list of stages that ran.
 
     Returns:
-        MergeOutput with assembled transcript.
+        MergeResponse with assembled transcript.
     """
     prepare_data = stage_outputs.get("prepare", {})
     audio_duration, audio_channels, sample_rate = _extract_audio_metadata(prepare_data)
@@ -253,10 +253,10 @@ def assemble_per_channel_transcript(
         if not transcribe_data:
             raise ValueError(f"Missing '{transcribe_key}' stage output")
         transcript_v1 = _parse_transcript(transcribe_data)
-        align_output = _try_parse_align(align_data) if align_data else None
+        align_response = _try_parse_align(align_data) if align_data else None
 
         segments_source, ch_word_ts, ch_warnings = _select_segments(
-            align_output=align_output,
+            align_response=align_response,
             transcript=transcript_v1,
         )
         if ch_word_ts:
@@ -341,7 +341,7 @@ def assemble_per_channel_transcript(
         pipeline_warnings=pipeline_warnings,
     )
 
-    transcript = MergeOutput(
+    transcript = MergeResponse(
         job_id=job_id,
         version="1.0",
         metadata=metadata,
@@ -442,7 +442,7 @@ def _extract_audio_metadata(
     if not prepare_data:
         return 0.0, 1, 16000
 
-    # Try typed PrepareOutput format (channel_files array)
+    # Try typed PreparationResponse format (channel_files array)
     channel_files = prepare_data.get("channel_files", [])
     if channel_files and isinstance(channel_files[0], dict):
         first = channel_files[0]
@@ -493,25 +493,25 @@ def _parse_transcript(data: dict[str, Any]) -> Transcript:
     return Transcript.model_validate(data)
 
 
-def _try_parse_align(data: dict[str, Any]) -> AlignOutput | None:
-    """Try to parse align data into a typed AlignOutput."""
+def _try_parse_align(data: dict[str, Any]) -> AlignmentResponse | None:
+    """Try to parse align data into a typed AlignmentResponse."""
     try:
-        return AlignOutput.model_validate(data)
+        return AlignmentResponse.model_validate(data)
     except Exception:
         return None
 
 
-def _try_parse_diarize(data: dict[str, Any]) -> DiarizeOutput | None:
-    """Try to parse diarize data into a typed DiarizeOutput."""
+def _try_parse_diarize(data: dict[str, Any]) -> DiarizationResponse | None:
+    """Try to parse diarize data into a typed DiarizationResponse."""
     try:
-        return DiarizeOutput.model_validate(data)
+        return DiarizationResponse.model_validate(data)
     except Exception:
         return None
 
 
 def _select_segments(
     *,
-    align_output: AlignOutput | None,
+    align_response: AlignmentResponse | None,
     transcript: Transcript,
 ) -> tuple[list[Segment] | list[TranscriptSegment], bool, list]:
     """Select the best available segments and determine word timestamp availability.
@@ -521,17 +521,17 @@ def _select_segments(
     """
     pipeline_warnings: list = []
 
-    if align_output is not None:
-        if align_output.skipped:
-            logger.warning("alignment_skipped", reason=align_output.skip_reason)
-            pipeline_warnings.extend(align_output.warnings)
+    if align_response is not None:
+        if align_response.skipped:
+            logger.warning("alignment_skipped", reason=align_response.skip_reason)
+            pipeline_warnings.extend(align_response.warnings)
             segments_source: list[Segment] | list[TranscriptSegment] = list(
                 transcript.segments
             )
             word_timestamps_available = False
         else:
-            segments_source = list(align_output.segments)
-            word_timestamps_available = align_output.word_timestamps
+            segments_source = list(align_response.segments)
+            word_timestamps_available = align_response.word_timestamps
     else:
         segments_source = list(transcript.segments)
         word_timestamps_available = any(s.words for s in transcript.segments)
@@ -541,7 +541,7 @@ def _select_segments(
 
 def _extract_diarization(
     *,
-    diarize_output: DiarizeOutput | None,
+    diarize_response: DiarizationResponse | None,
     diarize_data: dict[str, Any] | None,
     speaker_detection: str,
     pipeline_warnings: list,
@@ -553,12 +553,12 @@ def _extract_diarization(
     if speaker_detection != "diarize":
         return diarization_turns, diarization_speakers
 
-    if diarize_output is not None:
-        if diarize_output.skipped:
-            pipeline_warnings.extend(diarize_output.warnings)
+    if diarize_response is not None:
+        if diarize_response.skipped:
+            pipeline_warnings.extend(diarize_response.warnings)
         else:
-            diarization_turns = diarize_output.turns
-            diarization_speakers = diarize_output.speakers
+            diarization_turns = diarize_response.turns
+            diarization_speakers = diarize_response.speakers
     elif diarize_data is not None:
         # Fall back to raw dict
         raw_turns = diarize_data.get("turns", [])

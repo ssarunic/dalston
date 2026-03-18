@@ -109,6 +109,7 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         self._providers: list[str | tuple[str, dict]] = []
         if device == "cuda":
             self._providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            self._validate_cuda_compute()
         else:
             self._providers = ["CPUExecutionProvider"]
 
@@ -120,6 +121,41 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         )
 
         super().__init__(**kwargs)
+
+    # acquire() telemetry is handled by the base ModelManager (M76).
+    # No override needed — spans and metrics fire for all engines.
+
+    @staticmethod
+    def _validate_cuda_compute() -> None:
+        """Verify that ONNX Runtime can actually execute on GPU.
+
+        Both onnxruntime (CPU) and onnxruntime-gpu install into the same
+        Python namespace. Whichever is installed last wins. If the CPU
+        package overwrites the GPU package's files, CUDAExecutionProvider
+        won't be available despite onnxruntime-gpu being "installed".
+        """
+        try:
+            import onnxruntime as ort
+
+            providers = ort.get_available_providers()
+            if "CUDAExecutionProvider" not in providers:
+                logger.error(
+                    "cuda_ep_not_available",
+                    available_providers=providers,
+                    ort_version=ort.__version__,
+                    hint="CUDAExecutionProvider not found. The CPU onnxruntime "
+                    "package may have overwritten onnxruntime-gpu files. "
+                    "Fix: pip install --force-reinstall --no-deps onnxruntime-gpu",
+                )
+                return
+
+            logger.info(
+                "cuda_compute_validated",
+                ort_version=ort.__version__,
+                available_providers=providers,
+            )
+        except Exception:
+            logger.exception("cuda_validation_error")
 
     def _load_model(self, model_id: str) -> OnnxASRModel:
         """Load an ONNX ASR model.
@@ -227,18 +263,9 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         Returns:
             Configured OnnxModelManager instance
         """
-        # Auto-detect device
-        device = os.environ.get("DALSTON_DEVICE", "").lower()
-        if not device or device == "auto":
-            try:
-                import onnxruntime as ort
+        from dalston.engine_sdk.device import detect_device
 
-                if "CUDAExecutionProvider" in ort.get_available_providers():
-                    device = "cuda"
-                else:
-                    device = "cpu"
-            except ImportError:
-                device = "cpu"
+        device = detect_device(include_mps=False)
 
         quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
 

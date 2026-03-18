@@ -5,6 +5,7 @@ import structlog
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from dalston.gateway.middleware.correlation import (
@@ -43,9 +44,7 @@ class TestCorrelationIdMiddleware:
     @pytest.fixture
     def app(self, captured_context):
         """Create a test Starlette app with the middleware."""
-        app = Starlette()
 
-        @app.route("/test")
         async def test_endpoint(request: Request):
             # Capture the structlog contextvars at the time of the request
             ctx = structlog.contextvars.get_contextvars()
@@ -56,6 +55,9 @@ class TestCorrelationIdMiddleware:
             )
             return PlainTextResponse("ok")
 
+        app = Starlette(
+            routes=[Route("/test", test_endpoint)],
+        )
         app.add_middleware(CorrelationIdMiddleware)
         return app
 

@@ -244,7 +244,7 @@ class PIIDetectionEngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         self.load_model(input.config)
 
-        transcript = input.previous_outputs["transcription"]
+        transcript = input.previous_responses["transcription"]
         entity_types = input.config.get("entity_types", self._default_entities())
 
         # Run detection
@@ -333,7 +333,7 @@ class AudioRedactionEngine(Engine):
 
     def process(self, input: TaskInput) -> TaskOutput:
         audio_path = input.audio_path
-        entities = input.previous_outputs["pii_detection"]["entities"]
+        entities = input.previous_responses["pii_detection"]["entities"]
         mode = input.config.get("redaction_mode", "silence")
         buffer_ms = input.config.get("buffer_ms", 50)
 

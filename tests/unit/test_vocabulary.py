@@ -29,28 +29,28 @@ def _ctx(task_id: str, job_id: str, stage: str = "transcribe") -> BatchTaskConte
 # =============================================================================
 
 
-class TestTranscribeInputVocabulary:
-    """Tests for vocabulary field in TranscribeInput."""
+class TestTranscriptionRequestVocabulary:
+    """Tests for vocabulary field in TranscriptionRequest."""
 
     def test_vocabulary_field_accepts_list_of_strings(self):
         """Test that vocabulary accepts a list of strings."""
-        from dalston.common.pipeline_types import TranscribeInput
+        from dalston.common.pipeline_types import TranscriptionRequest
 
-        input_data = TranscribeInput(vocabulary=["Dalston", "FastAPI", "Redis"])
+        input_data = TranscriptionRequest(vocabulary=["Dalston", "FastAPI", "Redis"])
         assert input_data.vocabulary == ["Dalston", "FastAPI", "Redis"]
 
     def test_vocabulary_field_defaults_to_none(self):
         """Test that vocabulary defaults to None."""
-        from dalston.common.pipeline_types import TranscribeInput
+        from dalston.common.pipeline_types import TranscriptionRequest
 
-        input_data = TranscribeInput()
+        input_data = TranscriptionRequest()
         assert input_data.vocabulary is None
 
     def test_vocabulary_field_allows_empty_list(self):
         """Test that vocabulary allows empty list."""
-        from dalston.common.pipeline_types import TranscribeInput
+        from dalston.common.pipeline_types import TranscriptionRequest
 
-        input_data = TranscribeInput(vocabulary=[])
+        input_data = TranscriptionRequest(vocabulary=[])
         assert input_data.vocabulary == []
 
 
@@ -99,7 +99,7 @@ except ImportError:
 
 def load_whisper_engine():
     """Load FasterWhisperBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-unified/faster-whisper/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/faster-whisper/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("Faster-whisper engine not found")
 
@@ -149,11 +149,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_passed_as_hotwords(self, engine_with_mock_model):
         """Test that vocabulary is passed to transcribe as hotwords."""
-        from dalston.engine_sdk import EngineInput
+        from dalston.engine_sdk import TaskRequest
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = EngineInput(
+        input_data = TaskRequest(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -169,11 +169,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_not_passed_when_none(self, engine_with_mock_model):
         """Test that hotwords is not passed when vocabulary is None."""
-        from dalston.engine_sdk import EngineInput
+        from dalston.engine_sdk import TaskRequest
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = EngineInput(
+        input_data = TaskRequest(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -188,11 +188,11 @@ class TestWhisperEngineVocabulary:
 
     def test_vocabulary_empty_list_not_passed(self, engine_with_mock_model):
         """Test that hotwords is not passed for empty vocabulary."""
-        from dalston.engine_sdk import EngineInput
+        from dalston.engine_sdk import TaskRequest
 
         engine, mock_model = engine_with_mock_model
 
-        input_data = EngineInput(
+        input_data = TaskRequest(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -213,7 +213,7 @@ class TestWhisperEngineVocabulary:
 
 def load_parakeet_engine():
     """Load NemoBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-unified/nemo/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet engine not found")
 
@@ -289,11 +289,11 @@ class TestParakeetEngineVocabulary:
 
     def test_vocabulary_boosting_enabled_no_warning(self, engine_with_mock_model):
         """Test that vocabulary boosting is enabled without warning when successful."""
-        from dalston.engine_sdk import EngineInput
+        from dalston.engine_sdk import TaskRequest
 
         engine = engine_with_mock_model
 
-        input_data = EngineInput(
+        input_data = TaskRequest(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),
@@ -308,11 +308,11 @@ class TestParakeetEngineVocabulary:
 
     def test_vocabulary_none_no_warning(self, engine_with_mock_model):
         """Test that no vocabulary produces no warning."""
-        from dalston.engine_sdk import EngineInput
+        from dalston.engine_sdk import TaskRequest
 
         engine = engine_with_mock_model
 
-        input_data = EngineInput(
+        input_data = TaskRequest(
             task_id=str(uuid4()),
             job_id=str(uuid4()),
             audio_path=Path("/tmp/test.wav"),

@@ -1,0 +1,46 @@
+schema_version: "1.1"
+id: stt-rt-faster-whisper
+engine_id: faster-whisper
+stage: transcribe
+mode: realtime
+name: Faster Whisper Realtime
+version: 1.0.0
+description: |
+  Real-time streaming transcription using faster-whisper (CTranslate2).
+  VAD-chunked transcription with word-level timestamps.
+
+container:
+  gpu: optional
+  memory: 8G
+  model_cache: /models/faster-whisper
+
+capabilities:
+  native_streaming: true
+  word_timestamps: true
+  max_concurrency: 4
+
+input:
+  audio_formats:
+    - pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
+hardware:
+  min_vram_gb: 4
+  recommended_gpu:
+    - t4
+    - a10g
+  supports_cpu: true
+  min_ram_gb: 4
+
+performance:
+  rtf_gpu: 0.03
+  rtf_cpu: 0.4
+  warm_start_latency_ms: 30

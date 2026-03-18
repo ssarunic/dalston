@@ -26,10 +26,10 @@ class JobResultStats:
 
 
 def extract_stats_from_transcript(transcript: dict[str, Any]) -> JobResultStats:
-    """Extract summary statistics from a MergeOutput transcript.
+    """Extract summary statistics from a MergeResponse transcript.
 
     Args:
-        transcript: The transcript dict (MergeOutput format) from the merge stage.
+        transcript: The transcript dict (MergeResponse format) from the merge stage.
 
     Returns:
         JobResultStats with extracted statistics.

@@ -194,7 +194,7 @@ GET /v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts
 
   "input": {
     "audio_uri": "s3://dalston-artifacts/jobs/job_abc123/audio/prepared.wav",
-    "previous_outputs": {
+    "previous_responses": {
       "prepare": {
         "duration": 150.5,
         "channels": 1,
@@ -238,11 +238,11 @@ GET /v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts
 | `stage` | string | Pipeline stage |
 | `engine_id` | string | Engine that processed this task |
 | `status` | string | Task status |
-| `input` | object | Task input as passed to the engine (from `input.json` in S3) |
+| `input` | object | Task input as passed to the engine (from `request.json` in S3) |
 | `input.audio_uri` | string | S3 URI of the audio file this task received |
-| `input.previous_outputs` | object | Outputs from upstream stages, keyed by stage name |
+| `input.previous_responses` | object | Outputs from upstream stages, keyed by stage name |
 | `input.config` | object | Engine-specific configuration parameters |
-| `output` | object / null | Task output (from `output.json` in S3). Null if task has not completed. |
+| `output` | object / null | Task output (from `response.json` in S3). Null if task has not completed. |
 | `output.data` | object | The engine's result data |
 
 #### Error Responses
@@ -263,7 +263,7 @@ When a task has failed, the `output` field is null, and the error is available i
   "stage": "diarize",
   "status": "failed",
   "input": {
-    "previous_outputs": {
+    "previous_responses": {
       "transcribe": {"segments": [...]},
       "align": {"segments": [...]}
     },
@@ -382,7 +382,7 @@ No additional retention logic is needed — artifacts are already stored under `
 
 ### Data Model Changes
 
-No schema migrations are required. The existing `tasks` table already contains all fields needed for the stage breakdown. The `input_uri` and `output_uri` columns point to S3 objects containing the full artifact data.
+No schema migrations are required. The existing `tasks` table already contains all fields needed for the stage breakdown. The `request_uri` and `response_uri` columns point to S3 objects containing the full artifact data.
 
 One minor addition to support clean stage naming for per-channel pipelines:
 
@@ -405,7 +405,7 @@ One minor addition to support clean stage naming for per-channel pipelines:
 |------|--------|
 | `dalston/gateway/api/v1/transcription.py` | Include `stages` in job status response |
 | `dalston/gateway/services/jobs.py` | Add `get_job_tasks()` and `get_task_artifacts()` service methods |
-| `dalston/gateway/services/storage.py` | Add `get_task_input()` and `get_task_output()` to fetch from S3 |
+| `dalston/gateway/services/storage.py` | Add `get_task_request()` and `get_task_response()` to fetch from S3 |
 | `dalston/gateway/main.py` | Register tasks router |
 | `dalston/gateway/api/console.py` | Add task list and artifact endpoints for console API |
 | `web/src/api/client.ts` | Add `getJobTasks()` and `getTaskArtifacts()` methods |
@@ -416,7 +416,7 @@ One minor addition to support clean stage naming for per-channel pipelines:
 - [ ] Add `StageResponse` Pydantic model with stage, task_id, engine_id, status, timing, error fields
 - [ ] Add `TaskListResponse` and `TaskArtifactResponse` Pydantic models
 - [ ] Add `get_job_tasks(job_id, tenant_id)` to jobs service — queries tasks table, returns ordered list
-- [ ] Add `get_task_artifacts(job_id, task_id, tenant_id)` to storage service — fetches input.json and output.json from S3
+- [ ] Add `get_task_artifacts(job_id, task_id, tenant_id)` to storage service — fetches request.json and response.json from S3
 - [ ] Modify job status endpoint to include `stages` array (query tasks, map to StageResponse)
 - [ ] Create `GET /v1/audio/transcriptions/{job_id}/tasks` endpoint
 - [ ] Create `GET /v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts` endpoint

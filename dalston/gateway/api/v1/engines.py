@@ -67,7 +67,7 @@ class EnginePerformanceResponse(BaseModel):
     rtf_cpu: float | None = None
 
 
-class EngineResponse(BaseModel):
+class TaskResponse(BaseModel):
     """Single engine in API response."""
 
     id: str
@@ -86,7 +86,7 @@ class EngineResponse(BaseModel):
 class EnginesListResponse(BaseModel):
     """Response for GET /v1/engines."""
 
-    engines: list[EngineResponse]
+    engines: list[TaskResponse]
     total: int
 
 
@@ -145,7 +145,7 @@ async def list_engines(
     running_engines = await registry.get_all()
     running_map = {e.engine_id: e for e in running_engines}
 
-    engines: list[EngineResponse] = []
+    engines: list[TaskResponse] = []
 
     # Process all engines from catalog
     for entry in catalog.get_all_engines():
@@ -170,7 +170,7 @@ async def list_engines(
         available_models = models_by_engine_id.get(engine_id) or None
 
         engines.append(
-            EngineResponse(
+            TaskResponse(
                 id=engine_id,
                 name=None,  # Could be added to catalog if needed
                 stage=caps.stages[0] if caps.stages else "unknown",

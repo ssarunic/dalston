@@ -21,8 +21,8 @@ class Emotion2VecEngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         self._load_model()
 
-        audio_path = input.previous_outputs["prepare"]["audio_path"]
-        segments = input.previous_outputs.get("align", input.previous_outputs.get("transcribe"))["segments"]
+        audio_path = input.previous_responses["prepare"]["audio_path"]
+        segments = input.previous_responses.get("align", input.previous_responses.get("transcribe"))["segments"]
 
         results = []
         for seg in segments:
@@ -100,7 +100,7 @@ class PANNsEventsEngine(Engine):
             from panns_inference import AudioTagging
             self.model = AudioTagging(checkpoint_path=None, device='cuda')
 
-        audio_path = input.previous_outputs["prepare"]["audio_path"]
+        audio_path = input.previous_responses["prepare"]["audio_path"]
         audio, sr = sf.read(audio_path)
 
         events = []
@@ -261,11 +261,11 @@ The merger collects enrichment outputs and integrates them:
 ```python
 def process(self, input: TaskInput) -> TaskOutput:
     # Get base segments from align or transcribe
-    segments = input.previous_outputs.get("align", input.previous_outputs.get("transcribe"))["segments"]
-    speakers = input.previous_outputs.get("diarize", {}).get("speakers", [])
+    segments = input.previous_responses.get("align", input.previous_responses.get("transcribe"))["segments"]
+    speakers = input.previous_responses.get("diarize", {}).get("speakers", [])
 
     # Add emotions to segments
-    emotions = input.previous_outputs.get("detect_emotions", {}).get("emotions", [])
+    emotions = input.previous_responses.get("detect_emotions", {}).get("emotions", [])
     emotion_map = {e["segment_id"]: e for e in emotions}
     for seg in segments:
         if seg["id"] in emotion_map:
@@ -273,10 +273,10 @@ def process(self, input: TaskInput) -> TaskOutput:
             seg["emotion_confidence"] = emotion_map[seg["id"]]["confidence"]
 
     # Get audio events
-    events = input.previous_outputs.get("detect_events", {}).get("events", [])
+    events = input.previous_responses.get("detect_events", {}).get("events", [])
 
     # Apply LLM refinements
-    refine = input.previous_outputs.get("refine", {})
+    refine = input.previous_responses.get("refine", {})
     if refine:
         if refine.get("segments"):
             segments = refine["segments"]

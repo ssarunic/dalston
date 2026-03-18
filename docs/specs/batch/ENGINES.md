@@ -349,13 +349,13 @@ All engines use the `dalston-engine-sdk` package for communication with the orch
 from dalston.engine_sdk import (
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
+    EngineRequest,
+    EngineResponse,
     Segment,
     TranscribeOutput,
 )
 from dalston.engine_sdk.model_manager import ModelManager
-from dalston.common.pipeline_types import TranscribeInput
+from dalston.common.pipeline_types import TranscribeRequest
 
 class MyTranscribeEngine(Engine):
     """Runtime-based transcription engine."""
@@ -367,18 +367,18 @@ class MyTranscribeEngine(Engine):
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
         )
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, input: EngineRequest, ctx: BatchTaskContext) -> EngineResponse:
         """Process a single task."""
         del ctx
         # Parse canonical typed transcribe params
-        params: TranscribeInput = input.get_transcribe_params()
+        params: TranscribeRequest = input.get_transcribe_params()
         model_id = params.loaded_model_id or os.environ.get("DALSTON_DEFAULT_MODEL_ID")
 
         # Acquire model (loads if needed)
         with self.model_manager.acquire(model_id) as model:
             result = model.transcribe(input.audio_path)
 
-        return EngineOutput(
+        return EngineResponse(
             data=TranscribeOutput(
                 segments=[Segment(**s) for s in result.segments],
                 text=result.text,
@@ -439,17 +439,17 @@ if storage.is_cached("nvidia/parakeet-tdt-1.1b"):
     path = storage.get_local_path("nvidia/parakeet-tdt-1.1b")
 ```
 
-### EngineInput
+### EngineRequest
 
 ```python
 @dataclass
-class EngineInput:
+class EngineRequest:
     task_id: str
     job_id: str
     stage: str
     config: dict[str, Any]
     payload: dict[str, Any] | None
-    previous_outputs: dict[str, Any]
+    previous_responses: dict[str, Any]
     audio_path: Path | None             # Derived from materialized artifacts when present
     materialized_artifacts: dict[str, MaterializedArtifact]
 ```
@@ -462,10 +462,10 @@ python -m dalston.engine_sdk.local_runner run \
   --stage transcribe \
   --audio ./fixtures/audio.wav \
   --config ./fixtures/transcribe-config.json \
-  --output ./tmp/output.json
+  --output ./tmp/response.json
 ```
 
-`output.json` is always written with this envelope:
+`response.json` is always written with this envelope:
 
 ```json
 {
@@ -557,7 +557,7 @@ CMD ["python", "/app/engine.py"]
 ### docker-compose.yml Service
 
 ```yaml
-stt-batch-transcribe-faster-whisper:
+stt-transcribe-faster-whisper:
   build:
     context: ./engines/stt-transcribe/faster-whisper
   environment:

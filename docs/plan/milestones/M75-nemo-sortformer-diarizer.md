@@ -77,7 +77,7 @@ Sortformer supports streaming inference natively, but this milestone implements 
 
 - Create `engines/stt-diarize/nemo-sortformer/engine.py`
 - Load `SortformerEncLabelModel.from_pretrained()` on first task (lazy init)
-- Accept audio file path from `EngineInput`
+- Accept audio file path from `EngineRequest`
 - Call `model.diarize(audio=[path], batch_size=1)` to get segment tuples
 - Map `(start, end, speaker_index)` tuples to `SpeakerTurn` objects
 - Compute overlap statistics from segments
@@ -147,7 +147,7 @@ turns = [
 
 **Deliverables:**
 
-- Add `stt-batch-diarize-nemo-sortformer` service to `docker-compose.yml`
+- Add `stt-diarize-nemo-sortformer` service to `docker-compose.yml`
 - GPU profile (same pattern as nemo-msdd)
 - Environment: `DALSTON_ENGINE_ID=nemo-sortformer`, `REDIS_URL`, `HF_HOME`
 - Volume mount for model cache
@@ -187,7 +187,7 @@ turns = [
 
 ```bash
 # Build the engine
-docker compose build stt-batch-diarize-nemo-sortformer
+docker compose build stt-diarize-nemo-sortformer
 
 # Start with GPU profile
 make dev-gpu

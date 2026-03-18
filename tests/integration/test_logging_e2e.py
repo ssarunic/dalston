@@ -267,7 +267,7 @@ class TestRequestIdInTaskMetadata:
             job_id=uuid4(),
             stage="transcribe",
             engine_id="faster-whisper",
-            input_uri="s3://bucket/audio.wav",
+            request_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],
         )
@@ -277,7 +277,7 @@ class TestRequestIdInTaskMetadata:
         structlog.contextvars.bind_contextvars(request_id="req_xyz789")
 
         with patch(
-            "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
+            "dalston.orchestrator.scheduler.write_task_request", new_callable=AsyncMock
         ):
             await queue_task(mock_redis, task, mock_settings, mock_registry)
 
@@ -308,7 +308,7 @@ class TestRequestIdInTaskMetadata:
             job_id=uuid4(),
             stage="transcribe",
             engine_id="faster-whisper",
-            input_uri="s3://bucket/audio.wav",
+            request_uri="s3://bucket/audio.wav",
             config={},
             depends_on=[],
         )
@@ -317,7 +317,7 @@ class TestRequestIdInTaskMetadata:
         structlog.contextvars.clear_contextvars()
 
         with patch(
-            "dalston.orchestrator.scheduler.write_task_input", new_callable=AsyncMock
+            "dalston.orchestrator.scheduler.write_task_request", new_callable=AsyncMock
         ):
             await queue_task(mock_redis, task, mock_settings, mock_registry)
 

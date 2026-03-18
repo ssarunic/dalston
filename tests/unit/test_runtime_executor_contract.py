@@ -15,7 +15,7 @@ from dalston.engine_sdk.executors import (
     RuntimeExecutor,
 )
 from dalston.engine_sdk.local_runner import LocalRunner
-from dalston.engine_sdk.types import EngineCapabilities, EngineInput, EngineOutput
+from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 from dalston.gateway.services.artifact_store import LocalFilesystemArtifactStoreAdapter
 from dalston.orchestrator.catalog import CatalogEntry
 from dalston.orchestrator.lite_main import (
@@ -28,10 +28,10 @@ from dalston.orchestrator.lite_main import (
 class _EchoEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
-        return EngineOutput(
+    ) -> TaskResponse:
+        return TaskResponse(
             data={
                 "stage": input.stage,
                 "engine_id": ctx.engine_id,
@@ -87,7 +87,7 @@ def test_inproc_executor_matches_local_runner_contract(tmp_path: Path) -> None:
         job_id="job-local",
         stage="transcribe",
         config={"model": "tiny"},
-        previous_outputs={},
+        previous_responses={},
         payload={"x": 1},
         artifacts={"audio": audio},
     )
@@ -100,7 +100,7 @@ def test_inproc_executor_matches_local_runner_contract(tmp_path: Path) -> None:
             engine_id="local",
             instance="local-runner",
             config={"model": "tiny"},
-            previous_outputs={},
+            previous_responses={},
             payload={"x": 1},
             artifacts={"audio": audio},
             metadata={"mode": "local"},
@@ -150,7 +150,7 @@ async def test_lite_pipeline_selects_executor_from_execution_profile(
         / "job-1"
         / "tasks"
         / "transcribe"
-        / "output.json"
+        / "response.json"
     )
     assert json.loads(output_path.read_text())["text"] == "executor transcript"
 

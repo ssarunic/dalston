@@ -47,8 +47,8 @@ def _create_mock_task(
     task.required = required
     task.retries = retries
     task.error = error
-    task.input_uri = f"s3://bucket/jobs/{job_id}/tasks/{task_id}/input.json"
-    task.output_uri = f"s3://bucket/jobs/{job_id}/tasks/{task_id}/output.json"
+    task.request_uri = f"s3://bucket/jobs/{job_id}/tasks/{task_id}/input.json"
+    task.response_uri = f"s3://bucket/jobs/{job_id}/tasks/{task_id}/output.json"
     return task
 
 
@@ -622,14 +622,14 @@ class TestTaskArtifactsEndpoint:
             "segments": [{"start": 0.0, "end": 1.0, "text": "Hello world"}],
         }
 
-        async def mock_get_task_input(self, job_id, task_id):
+        async def mock_get_task_request(self, job_id, task_id):
             return mock_input
 
-        async def mock_get_task_output(self, job_id, task_id):
+        async def mock_get_task_response(self, job_id, task_id):
             return mock_output
 
-        monkeypatch.setattr(StorageService, "get_task_input", mock_get_task_input)
-        monkeypatch.setattr(StorageService, "get_task_output", mock_get_task_output)
+        monkeypatch.setattr(StorageService, "get_task_request", mock_get_task_request)
+        monkeypatch.setattr(StorageService, "get_task_response", mock_get_task_response)
 
         response = client.get(
             f"/v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts"
@@ -642,8 +642,8 @@ class TestTaskArtifactsEndpoint:
         assert data["job_id"] == str(job_id)
         assert data["stage"] == "transcribe"
         assert data["status"] == "completed"
-        assert data["input"]["config"]["model"] == "large-v3"
-        assert data["output"]["text"] == "Hello world"
+        assert data["request"]["config"]["model"] == "large-v3"
+        assert data["response"]["text"] == "Hello world"
 
     def test_get_artifacts_failed_task_no_output(
         self, client, mock_jobs_service, monkeypatch
@@ -667,14 +667,14 @@ class TestTaskArtifactsEndpoint:
 
         mock_input = {"config": {"num_speakers": None}}
 
-        async def mock_get_task_input(self, job_id, task_id):
+        async def mock_get_task_request(self, job_id, task_id):
             return mock_input
 
-        async def mock_get_task_output(self, job_id, task_id):
+        async def mock_get_task_response(self, job_id, task_id):
             return None  # No output for failed task
 
-        monkeypatch.setattr(StorageService, "get_task_input", mock_get_task_input)
-        monkeypatch.setattr(StorageService, "get_task_output", mock_get_task_output)
+        monkeypatch.setattr(StorageService, "get_task_request", mock_get_task_request)
+        monkeypatch.setattr(StorageService, "get_task_response", mock_get_task_response)
 
         response = client.get(
             f"/v1/audio/transcriptions/{job_id}/tasks/{task_id}/artifacts"
@@ -684,8 +684,8 @@ class TestTaskArtifactsEndpoint:
         data = response.json()
 
         assert data["status"] == "failed"
-        assert data["input"] is not None
-        assert data["output"] is None
+        assert data["request"] is not None
+        assert data["response"] is None
 
     def test_get_artifacts_pending_task_returns_400(self, client, mock_jobs_service):
         """Test 400 response for pending task (no artifacts yet)."""

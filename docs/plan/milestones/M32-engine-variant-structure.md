@@ -302,7 +302,7 @@ Replace single services with per-variant services.
 
 ```yaml
 # Before
-stt-batch-transcribe-whisper:
+stt-transcribe-whisper:
   build:
     context: .
     dockerfile: engines/transcribe/faster-whisper/Dockerfile
@@ -310,7 +310,7 @@ stt-batch-transcribe-whisper:
     - ENGINE_ID=faster-whisper
 
 # After
-stt-batch-transcribe-whisper-base:
+stt-transcribe-whisper-base:
   build:
     context: .
     dockerfile: engines/transcribe/whisper/Dockerfile
@@ -320,7 +320,7 @@ stt-batch-transcribe-whisper-base:
     - ENGINE_ID=whisper-base
   profiles: [whisper-base]
 
-stt-batch-transcribe-whisper-large-v3:
+stt-transcribe-whisper-large-v3:
   build:
     context: .
     dockerfile: engines/transcribe/whisper/Dockerfile
@@ -329,7 +329,7 @@ stt-batch-transcribe-whisper-large-v3:
   environment:
     - ENGINE_ID=whisper-large-v3
 
-stt-batch-transcribe-whisper-large-v3-turbo:
+stt-transcribe-whisper-large-v3-turbo:
   build:
     context: .
     dockerfile: engines/transcribe/whisper/Dockerfile
@@ -412,10 +412,10 @@ python scripts/generate_catalog.py --dry-run | jq '.engines | keys'
 #  "whisper-large-v3", "whisper-large-v3-turbo", ...]
 
 # 3. Build specific variant
-docker compose build stt-batch-transcribe-whisper-large-v3
+docker compose build stt-transcribe-whisper-large-v3
 
 # 4. Run and test
-docker compose up -d gateway orchestrator redis stt-batch-transcribe-whisper-large-v3
+docker compose up -d gateway orchestrator redis stt-transcribe-whisper-large-v3
 
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -H "Authorization: Bearer dk_test" \
@@ -423,7 +423,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "model=whisper-large-v3"
 
 # 5. Verify engine registers with correct ID
-docker compose logs stt-batch-transcribe-whisper-large-v3 | grep "engine_registered"
+docker compose logs stt-transcribe-whisper-large-v3 | grep "engine_registered"
 # Should show engine_id=whisper-large-v3
 ```
 

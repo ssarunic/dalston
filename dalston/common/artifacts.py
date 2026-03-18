@@ -24,7 +24,7 @@ class ArtifactSelector(BaseModel):
     required: bool = Field(default=True)
 
 
-class InputBinding(BaseModel):
+class RequestBinding(BaseModel):
     """Binds an input slot to a selector."""
 
     model_config = ConfigDict(extra="forbid")

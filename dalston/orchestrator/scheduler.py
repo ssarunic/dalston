@@ -17,10 +17,10 @@ import structlog.contextvars
 from redis.asyncio import Redis
 
 import dalston.telemetry
-from dalston.common.artifacts import ArtifactReference, ArtifactSelector, InputBinding
+from dalston.common.artifacts import ArtifactReference, ArtifactSelector, RequestBinding
 from dalston.common.events import publish_engine_needed
 from dalston.common.models import Task
-from dalston.common.pipeline_types import AudioMedia, TaskInputData
+from dalston.common.pipeline_types import AudioMedia, TaskRequestData
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
@@ -205,7 +205,7 @@ def _matches_selector(
 
 def _resolve_input_bindings(
     *,
-    bindings: list[InputBinding],
+    bindings: list[RequestBinding],
     artifact_index: dict[str, ArtifactReference],
 ) -> dict[str, str]:
     """Resolve slot bindings to concrete artifact IDs."""
@@ -232,7 +232,7 @@ async def queue_task(
     task: Task,
     settings: Settings,
     registry: UnifiedEngineRegistry,
-    previous_outputs: dict[str, Any] | None = None,
+    previous_responses: dict[str, Any] | None = None,
     audio_metadata: dict[str, Any] | None = None,
     catalog: EngineCatalog | None = None,
     enqueue_idempotency_key: str | None = None,
@@ -252,7 +252,7 @@ async def queue_task(
         task: Task to queue
         settings: Application settings (for S3 bucket)
         registry: Batch engine registry for availability checks
-        previous_outputs: Outputs from dependency tasks (keyed by stage)
+        previous_responses: Responses from dependency tasks (keyed by stage)
         audio_metadata: Audio file metadata (format, duration, sample_rate, channels)
         catalog: Engine catalog for validation (uses singleton if not provided)
         enqueue_idempotency_key: Optional idempotency key for stream enqueue.
@@ -266,7 +266,7 @@ async def queue_task(
     job_id_str = str(task.job_id)
     queue_id = task.engine_id
     if not task.input_bindings and isinstance(task.config, dict):
-        bindings_from_config = task.config.get("input_bindings")
+        bindings_from_config = task.config.get("request_bindings")
         if isinstance(bindings_from_config, list):
             task = task.model_copy(update={"input_bindings": bindings_from_config})
 
@@ -419,27 +419,27 @@ async def queue_task(
         audio_duration=audio_duration,
     )
 
-    # 2. Write task input.json to S3
-    input_doc = await write_task_input(
+    # 2. Write task request.json to S3
+    request_doc = await write_task_request(
         redis=redis,
         task=task,
         settings=settings,
-        previous_outputs=previous_outputs or {},
+        previous_responses=previous_responses or {},
         audio_metadata=audio_metadata,
     )
-    if isinstance(input_doc, dict):
-        input_bindings_json = json.dumps(input_doc.get("input_bindings", []))
+    if isinstance(request_doc, dict):
+        request_bindings_json = json.dumps(request_doc.get("request_bindings", []))
         resolved_artifact_ids_json = json.dumps(
-            input_doc.get("resolved_artifact_ids", {})
+            request_doc.get("resolved_artifact_ids", {})
         )
     else:
-        input_bindings_json = "[]"
+        request_bindings_json = "[]"
         resolved_artifact_ids_json = "{}"
 
     await redis.hset(
         metadata_key,
         mapping={
-            "input_bindings_json": input_bindings_json,
+            "request_bindings_json": request_bindings_json,
             "resolved_artifact_ids_json": resolved_artifact_ids_json,
         },
     )
@@ -475,39 +475,41 @@ async def queue_task(
     log.info("task_queued", stream=f"dalston:stream:{queue_id}", message_id=message_id)
 
 
-async def write_task_input(
+async def write_task_request(
     redis: Redis,
     task: Task,
     settings: Settings,
-    previous_outputs: dict[str, Any],
+    previous_responses: dict[str, Any],
     audio_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write task input.json to S3.
+    """Write task request.json to S3.
 
     Args:
-        task: Task to write input for
+        task: Task to write request for
         settings: Application settings
-        previous_outputs: Outputs from dependency tasks
+        previous_responses: Responses from dependency tasks
         audio_metadata: Audio file metadata (for prepare stage)
 
     Returns:
-        Dict containing S3 URI and resolved artifact metadata used in input.json
+        Dict containing S3 URI and resolved artifact metadata used in request.json
     """
     task_id_str = str(task.id)
     job_id_str = str(task.job_id)
-    bindings = [InputBinding.model_validate(binding) for binding in task.input_bindings]
+    bindings = [
+        RequestBinding.model_validate(binding) for binding in task.input_bindings
+    ]
     artifact_index = await _load_job_artifact_index(redis, job_id_str)
     payload: dict[str, Any] | None = None
 
     # Prepare is the root stage: resolve original upload as an artifact reference.
     if task.stage == "prepare":
         source_artifact_id = f"{job_id_str}:source:audio"
-        if not task.input_uri:
-            raise ValueError("prepare task missing input_uri")
+        if not task.request_uri:
+            raise ValueError("prepare task missing request_uri")
         artifact_index[source_artifact_id] = ArtifactReference(
             artifact_id=source_artifact_id,
             kind="audio",
-            storage_locator=task.input_uri,
+            storage_locator=task.request_uri,
             media_type=None,
             role="source",
             producer_stage="gateway",
@@ -524,28 +526,28 @@ async def write_task_input(
         )
 
     effective_config = {
-        key: value for key, value in task.config.items() if key != "input_bindings"
+        key: value for key, value in task.config.items() if key != "request_bindings"
     }
 
-    input_data = TaskInputData(
+    request_data = TaskRequestData(
         task_id=task_id_str,
         job_id=job_id_str,
         payload=payload,
-        previous_outputs=previous_outputs,
+        previous_responses=previous_responses,
         config=effective_config,
-        input_bindings=bindings,
+        request_bindings=bindings,
         resolved_artifact_ids=resolved_artifact_ids,
         artifact_index=artifact_index,
     )
 
-    # S3 path: jobs/{job_id}/tasks/{task_id}/input.json
-    s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/input.json"
+    # S3 path: jobs/{job_id}/tasks/{task_id}/request.json
+    s3_key = f"jobs/{job_id_str}/tasks/{task_id_str}/request.json"
 
     async with get_s3_client(settings) as s3:
         await s3.put_object(
             Bucket=settings.s3_bucket,
             Key=s3_key,
-            Body=input_data.model_dump_json(indent=2, exclude_none=True).encode(
+            Body=request_data.model_dump_json(indent=2, exclude_none=True).encode(
                 "utf-8"
             ),
             ContentType="application/json",
@@ -554,26 +556,26 @@ async def write_task_input(
     s3_uri = f"s3://{settings.s3_bucket}/{s3_key}"
 
     logger.debug(
-        "wrote_task_input",
+        "wrote_task_request",
         task_id=task_id_str,
         s3_uri=s3_uri,
     )
 
     return {
         "s3_uri": s3_uri,
-        "input_bindings": [
+        "request_bindings": [
             binding.model_dump(mode="json", exclude_none=True) for binding in bindings
         ],
         "resolved_artifact_ids": resolved_artifact_ids,
     }
 
 
-async def get_task_output(
+async def get_task_response(
     job_id: UUID,
     task_id: UUID,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    """Fetch task output.json from S3.
+    """Fetch task response.json from S3.
 
     Args:
         job_id: Job UUID
@@ -581,9 +583,9 @@ async def get_task_output(
         settings: Application settings
 
     Returns:
-        Parsed output data or None if not found
+        Parsed response data or None if not found
     """
-    s3_key = f"jobs/{job_id}/tasks/{task_id}/output.json"
+    s3_key = f"jobs/{job_id}/tasks/{task_id}/response.json"
 
     try:
         async with get_s3_client(settings) as s3:

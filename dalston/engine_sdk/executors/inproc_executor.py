@@ -13,7 +13,7 @@ from dalston.engine_sdk.materializer import (
     ArtifactMaterializer,
     LocalFilesystemArtifactStore,
 )
-from dalston.engine_sdk.types import EngineInput
+from dalston.engine_sdk.types import TaskRequest
 
 
 class InProcExecutor(RuntimeExecutor):
@@ -53,13 +53,13 @@ class InProcExecutor(RuntimeExecutor):
                 target_dir=temp_dir / "materialized",
             )
 
-            engine_input = EngineInput(
+            task_request = TaskRequest(
                 task_id=request.task_id,
                 job_id=request.job_id,
                 stage=request.stage,
                 config=request.config,
                 payload=request.payload,
-                previous_outputs=request.previous_outputs,
+                previous_responses=request.previous_responses,
                 materialized_artifacts=materialized,
             )
             ctx = BatchTaskContext(
@@ -71,19 +71,19 @@ class InProcExecutor(RuntimeExecutor):
                 metadata=request.metadata,
             )
 
-            output = request.engine.process(engine_input, ctx)
+            response = request.engine.process(task_request, ctx)
             persisted = self._materializer.persist_produced(
                 job_id=request.job_id,
                 task_id=request.task_id,
                 stage=request.stage,
-                produced_artifacts=output.produced_artifacts,
+                produced_artifacts=response.produced_artifacts,
             )
 
             return {
                 "task_id": request.task_id,
                 "job_id": request.job_id,
                 "stage": request.stage,
-                "data": output.to_dict(),
+                "data": response.to_dict(),
                 "produced_artifacts": [
                     artifact.model_dump(mode="json", exclude_none=True)
                     for artifact in persisted
@@ -96,12 +96,10 @@ class InProcExecutor(RuntimeExecutor):
     def _local_locator_builder(
         self,
         job_id: str,
-        artifact_id: str,
+        task_id: str,
         produced: ProducedArtifact,
     ) -> str:
         suffix = produced.local_path.suffix or ".bin"
         filename = f"{produced.logical_name}{suffix}"
-        destination = (
-            self.output_dir / "jobs" / job_id / "artifacts" / artifact_id / filename
-        )
+        destination = self.output_dir / "jobs" / job_id / "tasks" / task_id / filename
         return str(destination)

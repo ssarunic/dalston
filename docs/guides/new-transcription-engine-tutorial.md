@@ -87,8 +87,8 @@ from dalston.engine_sdk import (
     AlignmentMethod,
     BatchTaskContext,
     Engine,
-    EngineInput,
-    EngineOutput,
+    EngineRequest,
+    EngineResponse,
     Segment,
     TimestampGranularity,
     TranscribeOutput,
@@ -106,7 +106,7 @@ class MyAsrEngine(Engine):
             # load your engine ID model here
             self._model = object()
 
-    def process(self, input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, input: EngineRequest, ctx: BatchTaskContext) -> EngineResponse:
         self._load_model(input.config)
 
         audio_path = input.audio_path
@@ -146,7 +146,7 @@ class MyAsrEngine(Engine):
             timestamp_granularity_actual=TimestampGranularity.WORD,
             alignment_method=AlignmentMethod.ATTENTION,
         )
-        return EngineOutput(data=out)
+        return EngineResponse(data=out)
 ```
 
 Notes:
@@ -163,14 +163,14 @@ from pathlib import Path
 
 from dalston.common.artifacts import MaterializedArtifact
 from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineInput
+from dalston.engine_sdk.types import EngineRequest
 
 
 def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"fake")
 
-    task_input = EngineInput(
+    task_input = EngineRequest(
         task_id="task-1",
         job_id="job-1",
         stage="transcribe",
@@ -206,7 +206,7 @@ python -m dalston.engine_sdk.local_runner run \
   --stage transcribe \
   --audio ./fixtures/audio.wav \
   --config ./fixtures/transcribe-config.json \
-  --output ./tmp/output.json
+  --output ./tmp/response.json
 ```
 
 Advanced stages can include optional JSON inputs:
@@ -219,10 +219,10 @@ python -m dalston.engine_sdk.local_runner run \
   --payload ./fixtures/align-payload.json \
   --previous-outputs ./fixtures/previous-outputs.json \
   --artifacts ./fixtures/artifacts.json \
-  --output ./tmp/output.json
+  --output ./tmp/response.json
 ```
 
-`output.json` always uses the canonical envelope:
+`response.json` always uses the canonical envelope:
 
 ```json
 {

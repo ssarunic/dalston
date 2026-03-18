@@ -210,7 +210,7 @@ class TestGenerateEnginePy:
         content = generate_engine_py(basic_config)
 
         assert "def process(" in content
-        assert "self, engine_input: EngineInput, ctx: BatchTaskContext" in content
+        assert "self, task_request: TaskRequest, ctx: BatchTaskContext" in content
         assert "def health_check(self)" in content
         assert "def get_capabilities(self)" in content
 

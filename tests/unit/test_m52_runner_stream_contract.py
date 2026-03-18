@@ -11,18 +11,18 @@ from dalston.common.artifacts import ProducedArtifact
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.runner import EngineRunner
-from dalston.engine_sdk.types import EngineInput, EngineOutput
+from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
 
 class _NoopEngine(Engine):
     def process(
         self,
-        input: EngineInput,
+        input: TaskRequest,
         ctx: BatchTaskContext,
-    ) -> EngineOutput:
+    ) -> TaskResponse:
         del input
         del ctx
-        return EngineOutput(data={})
+        return TaskResponse(data={})
 
 
 def test_runner_has_no_legacy_stage_fallback_method() -> None:
@@ -105,7 +105,7 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
     runner._redis = MagicMock()
     runner.s3_bucket = "test-bucket"
 
-    output = EngineOutput(
+    output = TaskResponse(
         data={"job_id": "job-1"},
         produced_artifacts=[
             ProducedArtifact(
@@ -123,6 +123,7 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
         job_id="job-1",
         output=output,
         processing_time=1.23,
+        stage="transcribe",
     )
 
     assert upload_file_calls == [
@@ -130,7 +131,7 @@ def test_runner_uses_final_transcript_artifact_for_canonical_uri(
     ]
     assert len(upload_json_calls) == 1
     output_payload, output_locator = upload_json_calls[0]
-    assert output_locator == "s3://test-bucket/jobs/job-1/tasks/task-1/output.json"
+    assert output_locator == "s3://test-bucket/jobs/job-1/tasks/task-1/response.json"
     assert (
         output_payload["canonical_transcript_uri"]
         == "s3://test-bucket/jobs/job-1/transcript.json"

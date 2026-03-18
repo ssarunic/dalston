@@ -183,11 +183,11 @@ class TestMixedLoadBenchmark:
         )
         mock_process = MagicMock(return_value="result")
 
-        def admitted_process(engine_input, ctx):
+        def admitted_process(task_request, ctx):
             if not controller.admit_batch():
                 raise TaskDeferredError("Admission controller rejected batch task")
             try:
-                return mock_process(engine_input, ctx)
+                return mock_process(task_request, ctx)
             finally:
                 controller.release_batch()
 

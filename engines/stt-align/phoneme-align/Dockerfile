@@ -4,7 +4,7 @@
 # Supports both GPU (CUDA) and CPU modes with automatic detection.
 #
 # Build from repo root:
-#   docker compose build stt-batch-align-phoneme-cpu
+#   docker compose build stt-align-phoneme-cpu
 #
 # For GPU support, use docker compose --profile gpu
 
