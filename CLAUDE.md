@@ -36,11 +36,7 @@ uvicorn dalston.gateway.main:app --reload --host 0.0.0.0 --port 8000
 # Start Orchestrator (development)
 python -m dalston.orchestrator.main
 
-# Start Real-time engine (development)
-cd engines/realtime/whisper-streaming
-export DALSTON_WORKER_ID=dev-worker
-export REDIS_URL=redis://localhost:6379
-python engine.py
+# Real-time engines run via Docker (engines/stt-transcribe/)
 ```
 
 ### Local Docker Setup (via Makefile)
@@ -121,6 +117,16 @@ make lint
 
 # Format code
 make fmt
+
+# Install git hooks (pre-push: lint + mypy + validate-engines)
+make install-hooks
+
+# Kill local Python processes (use before switching to Docker mode)
+make clean-local
+
+# Live SDK parity tests (requires running stack + DALSTON_API_KEY)
+make test-openai-sdk-live
+make test-elevenlabs-sdk-live
 ```
 
 ### Health Checks
@@ -184,7 +190,7 @@ docker compose exec redis redis-cli XINFO CONSUMERS "dalston:events:stream" orch
 
 ### Adding New Engines
 
-1. Create directory: `engines/{stage}/{engine-id}/`
+1. Create directory: `engines/stt-{stage}/{engine-id}/`
 2. Add files: `Dockerfile`, `requirements.txt`, `engine.yaml`, `engine.py`
 3. Implement `Engine.process()` method using dalston-engine-sdk
 4. Add service definition to docker-compose.yml
@@ -200,11 +206,13 @@ docker compose exec redis redis-cli XINFO CONSUMERS "dalston:events:stream" orch
 
 - `dalston/gateway/` - FastAPI REST + WebSocket API server
 - `dalston/orchestrator/` - Batch job DAG scheduling
-- `dalston/session_router/` - Real-time worker pool management
+- `dalston/session_router/` - Real-time worker pool management (deprecated, being merged into gateway)
 - `dalston/engine_sdk/` - SDK for batch engines (Redis queue-based)
 - `dalston/realtime_sdk/` - SDK for real-time engines (WebSocket-based)
 - `dalston/common/` - Shared types, events, audit, constants
 - `dalston/db/` - SQLAlchemy ORM models, migrations, session management
+- `dalston/schemas/` - Shared Pydantic response/request schemas
+- `dalston/tools/` - Internal tooling and utilities
 - `engines/` - Engine implementations organized by stage
 - `cli/` - Dalston CLI (`dalston_cli` package)
 - `sdk/` - Python client SDK (`dalston_sdk` package)
