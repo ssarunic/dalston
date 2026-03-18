@@ -2,7 +2,7 @@
 name = "dalston"
 version = "0.1.0"
 description = "Modular, self-hosted audio transcription server"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "pydantic==2.12.5",
     "pydantic-settings==2.13.1",
