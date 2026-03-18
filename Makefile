@@ -23,7 +23,7 @@ help:
 	@echo "Local Development:"
 	@echo "  make dev             - Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)"
 	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + transcribe + align + merge)"
-	@echo "  make dev-gpu         - Start with GPU engines (requires NVIDIA GPU)"
+	@echo "  make dev-gpu         - Start with GPU engines (layers docker-compose.gpu.yml)"
 	@echo "  make dev-riva        - Start with Riva NIM engines (requires NVIDIA GPU)"
 	@echo "  make dev-observability - Start with monitoring stack (jaeger, prometheus, grafana)"
 	@echo "  make stop            - Stop all services"
@@ -32,8 +32,8 @@ help:
 	@echo "  make ps              - Show running services"
 	@echo ""
 	@echo "Building:"
-	@echo "  make build-cpu       - Build CPU engine variants (for Mac development)"
-	@echo "  make build-gpu       - Build GPU engine variants (requires NVIDIA GPU)"
+	@echo "  make build-cpu       - Build all engine images (CPU)"
+	@echo "  make build-gpu       - Build all engine images (GPU/CUDA)"
 	@echo "  make build-engine ENGINE=<name> - Build a specific engine"
 	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
@@ -89,12 +89,13 @@ dev-minimal: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-prepare stt-transcribe-faster-whisper-cpu stt-align-phoneme-cpu
+		stt-prepare stt-transcribe-faster-whisper stt-align-phoneme
 
-# Start with GPU engines (requires NVIDIA GPU)
+# Start with GPU engines (layers docker-compose.gpu.yml for CUDA builds + GPU resources)
 dev-gpu: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
-		docker compose --profile local-infra --profile local-object-storage --profile gpu up -d --build
+		docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+		--profile local-infra --profile local-object-storage --profile gpu up -d --build
 
 # Start with Riva NIM engines (requires NVIDIA GPU for NIM sidecar)
 dev-riva: clean-local
@@ -126,23 +127,13 @@ ps:
 # BUILDING
 # ============================================================
 
-# Build CPU engine variants (for Mac development)
+# Build all engine images (CPU — default)
 build-cpu:
-	docker compose build \
-		stt-prepare \
-		stt-transcribe-faster-whisper \
-		stt-transcribe-nemo-cpu \
-		stt-transcribe-onnx-cpu \
-		stt-transcribe-faster-whisper-cpu \
-		stt-align-phoneme-cpu \
-		stt-diarize-pyannote-4.0-cpu \
-		stt-diarize-nemo-msdd-cpu \
-		stt-diarize-nemo-sortformer-cpu \
-		stt-pii-detect-presidio
+	docker compose build
 
-# Build GPU engine variants
+# Build all engine images (GPU/CUDA — layers docker-compose.gpu.yml)
 build-gpu:
-	docker compose --profile gpu build
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu build
 
 # Build a specific engine
 # Usage: make build-engine ENGINE=stt-transcribe-faster-whisper
@@ -174,24 +165,24 @@ deploy-web:
 # Start on AWS with local infra + GPU
 aws-start:
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
-		docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+		docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml \
 		--env-file .env.aws \
 		--profile local-infra --profile gpu up -d
 
 # Stop AWS services
 aws-stop:
-	docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml \
 		--env-file .env.aws \
 		--profile local-infra --profile gpu down
 
 # Follow logs on AWS
 aws-logs:
-	docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml \
 		--env-file .env.aws logs -f
 
 # Show AWS service status
 aws-ps:
-	docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml \
 		--env-file .env.aws ps
 
 # ============================================================
@@ -252,12 +243,14 @@ validate:
 	@docker compose --profile local-infra config > /dev/null
 	@echo "Validating local-object-storage profile..."
 	@docker compose --profile local-object-storage config > /dev/null
-	@echo "Validating gpu profile..."
-	@docker compose --profile gpu config > /dev/null
+	@echo "Validating gpu override..."
+	@docker compose -f docker-compose.yml -f docker-compose.gpu.yml config > /dev/null
+	@echo "Validating gpu override + gpu profile..."
+	@docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gpu config > /dev/null
 	@echo "Validating riva profile..."
 	@docker compose --profile riva config > /dev/null
 	@echo "Validating AWS override..."
-	@S3_BUCKET=test AWS_REGION=eu-west-2 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml config > /dev/null
+	@S3_BUCKET=test AWS_REGION=eu-west-2 docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml config > /dev/null
 	@echo "All compose configurations valid"
 
 # Check service health

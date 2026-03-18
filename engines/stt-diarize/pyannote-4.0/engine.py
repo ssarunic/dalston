@@ -121,8 +121,9 @@ class PyannoteEngine(Engine):
 
         loaded_model_id = config.get("loaded_model_id")
         if not loaded_model_id:
-            raise ValueError(
-                "Missing required config field 'loaded_model_id' for diarize stage."
+            loaded_model_id = os.environ.get(
+                "DALSTON_DEFAULT_MODEL_ID",
+                "pyannote/speaker-diarization-community-1",
             )
 
         # Get speaker count hints

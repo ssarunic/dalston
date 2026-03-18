@@ -21,6 +21,7 @@ Environment variables (in addition to each adapter's own env vars):
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import threading
 from typing import Any
@@ -132,6 +133,16 @@ class UnifiedFasterWhisperRunner:
                 self._admission.release_rt()
 
         self._rt_engine._handle_connection = admitted_handle
+
+        # Start the batch engine's HTTP server (TranscribeHTTPServer) on
+        # port 9100 BEFORE the RT engine starts.  This gives the FastAPI
+        # server the port, so /v1/transcribe is available.  The RT engine's
+        # _start_metrics_server will detect the port is in use and skip,
+        # which is correct — all M79 endpoints are served by TranscribeHTTPServer.
+        metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
+        self._http_server = self._batch_engine.create_http_server(port=metrics_port)
+        self._http_task = asyncio.create_task(self._http_server.serve())
+        logger.info("http_server_started", port=metrics_port)
 
         # Start batch adapter in background thread
         self._batch_thread = threading.Thread(
