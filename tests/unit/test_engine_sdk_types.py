@@ -419,7 +419,7 @@ class TestTaskInputGetDiarizationResponse:
                     "num_speakers": 1,
                     "engine_id": "pyannote-4.0",
                     "skipped": True,
-                    "skip_reason": "DIARIZATION_DISABLED=true",
+                    "skip_reason": "stage_skipped_by_orchestrator",
                 },
             },
         )

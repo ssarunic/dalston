@@ -113,36 +113,11 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def _detect_device(self) -> tuple[str, torch.dtype]:
-        """Detect the best available device and dtype.
+        """Detect the best available device and dtype."""
+        from dalston.engine_sdk.device import detect_device
 
-        Returns:
-            Tuple of (device, torch_dtype)
-        """
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        if requested_device == "cpu":
-            self.logger.info(
-                "using_cpu_device",
-                message="Running on CPU with float32 - inference will be slower than GPU",
-            )
-            return "cpu", torch.float32
-
-        if torch.cuda.is_available():
-            return "cuda", torch.float16
-
-        if requested_device == "cuda":
-            raise RuntimeError("DALSTON_DEVICE=cuda but CUDA is not available.")
-
-        if requested_device not in ("", "auto"):
-            raise ValueError(
-                f"Unknown DALSTON_DEVICE value: {requested_device}. Use cuda or cpu."
-            )
-
-        self.logger.info(
-            "cuda_not_available",
-            message="CUDA not available, falling back to CPU with float32",
-        )
-        return "cpu", torch.float32
+        device = detect_device(include_mps=False)
+        return device, torch.float16 if device == "cuda" else torch.float32
 
     def transcribe_audio(
         self, task_request: TaskRequest, ctx: BatchTaskContext

@@ -75,6 +75,7 @@ from dalston.common.pipeline_types import (
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.device import detect_device
 from dalston.engine_sdk.local_runner import LocalRunner
 from dalston.engine_sdk.model_manager import LoadedModel, ModelManager
 from dalston.engine_sdk.types import (
@@ -117,6 +118,7 @@ __all__ = [
     # Core SDK
     "BaseBatchTranscribeEngine",
     "Engine",
+    "detect_device",
     "EngineCapabilities",
     "LocalRunner",
     "TaskRequest",

@@ -559,7 +559,6 @@ services:
       DALSTON_ENGINE_ID: pyannote-4.0
       DALSTON_WORKER_ID: pyannote-cpu-1
       HF_TOKEN: ${HF_TOKEN:-}
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -580,7 +579,7 @@ services:
     profiles: [gpu]
     restart: unless-stopped
 
-  # NeMo MSDD (GPU preferred, CPU allowed with NEMO_ALLOW_CPU=true)
+  # NeMo MSDD (GPU preferred)
   stt-diarize-nemo-msdd:
     image: dalston/stt-diarize-nemo-msdd:latest
     build:
@@ -592,8 +591,6 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-gpu1
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
-      DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
@@ -612,8 +609,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: nemo-msdd
       DALSTON_WORKER_ID: nemo-msdd-cpu1
-      DALSTON_DIARIZATION_DISABLED: ${DALSTON_DIARIZATION_DISABLED:-false}
-      DALSTON_NEMO_ALLOW_CPU: "true"
+      DALSTON_DEVICE: cpu
     volumes:
       - model-cache:/models
     shm_size: '2gb'

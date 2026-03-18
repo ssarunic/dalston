@@ -260,18 +260,9 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         Returns:
             Configured OnnxModelManager instance
         """
-        # Auto-detect device
-        device = os.environ.get("DALSTON_DEVICE", "").lower()
-        if not device or device == "auto":
-            try:
-                import onnxruntime as ort
+        from dalston.engine_sdk.device import detect_device
 
-                if "CUDAExecutionProvider" in ort.get_available_providers():
-                    device = "cuda"
-                else:
-                    device = "cpu"
-            except ImportError:
-                device = "cpu"
+        device = detect_device(include_mps=False)
 
         quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
 

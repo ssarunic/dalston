@@ -132,11 +132,16 @@ class FasterWhisperInference:
         max_loaded: int = 2,
         preload: str | None = None,
     ) -> None:
+        from dalston.engine_sdk.device import detect_device
+
         if device is not None and compute_type is not None:
             self._device = device
             self._compute_type = compute_type
         else:
-            self._device, self._compute_type = self._detect_device()
+            self._device = device or detect_device(include_mps=False)
+            self._compute_type = compute_type or (
+                "float16" if self._device == "cuda" else "int8"
+            )
 
         self._manager = FasterWhisperModelManager(
             device=self._device,
@@ -169,48 +174,6 @@ class FasterWhisperInference:
     def manager(self) -> FasterWhisperModelManager:
         """Expose manager for stats, shutdown, and cache queries."""
         return self._manager
-
-    # -- Device detection ----------------------------------------------------
-
-    @staticmethod
-    def _detect_device() -> tuple[str, str]:
-        """Detect the best available device and compute type.
-
-        Returns:
-            Tuple of (device, compute_type)
-        """
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        if requested_device == "cpu":
-            logger.info(
-                "using_cpu_device",
-                message="Running on CPU with int8 compute",
-            )
-            return "cpu", "int8"
-
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                return "cuda", "float16"
-        except ImportError:
-            pass
-
-        if requested_device == "cuda":
-            raise RuntimeError(
-                "DALSTON_DEVICE=cuda but CUDA is not available for faster-whisper."
-            )
-
-        if requested_device not in ("", "auto"):
-            raise ValueError(
-                f"Unknown DALSTON_DEVICE value: {requested_device}. Use cuda or cpu."
-            )
-
-        logger.info(
-            "cuda_not_available",
-            message="CUDA not available, falling back to CPU with int8 compute",
-        )
-        return "cpu", "int8"
 
     # -- Model normalization -------------------------------------------------
 

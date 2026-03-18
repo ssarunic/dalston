@@ -10,7 +10,6 @@ The engine maps detected entities to word timestamps from the transcript
 to enable audio redaction in the subsequent stage.
 """
 
-import os
 import re
 import time
 from collections import defaultdict
@@ -25,6 +24,7 @@ from dalston.engine_sdk import (
     Segment,
     TaskRequest,
     TaskResponse,
+    detect_device,
 )
 
 # Entity type to category mapping
@@ -122,34 +122,9 @@ class PIIDetectionEngine(Engine):
         self._gliner_model = None
         self._gliner_models: dict[str, Any] = {}
         self._active_gliner_model_id: str | None = None
-        self._device = self._resolve_device()
+        # GLiNER doesn't support MPS well
+        self._device = detect_device(include_mps=False)
         self.logger.info("pii_detection_engine_initialized", device=self._device)
-
-    def _resolve_device(self) -> str:
-        """Resolve inference device from DEVICE env with auto-detect fallback."""
-        requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
-
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-        except ImportError:
-            cuda_available = False
-
-        if requested_device == "cpu":
-            return "cpu"
-
-        if requested_device == "cuda":
-            if not cuda_available:
-                raise RuntimeError(
-                    "DEVICE=cuda but CUDA is not available for pii-presidio."
-                )
-            return "cuda"
-
-        if requested_device in ("", "auto"):
-            return "cuda" if cuda_available else "cpu"
-
-        raise ValueError(f"Unknown DEVICE value: {requested_device}. Use cuda or cpu.")
 
     def _load_presidio(self) -> None:
         """Load Presidio analyzer and anonymizer."""

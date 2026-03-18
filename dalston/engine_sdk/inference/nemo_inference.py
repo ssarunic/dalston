@@ -651,15 +651,9 @@ class NemoInference:
             DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
             DALSTON_MODEL_PRELOAD: Model to preload (optional)
         """
-        # Auto-detect device
-        device = os.environ.get("DALSTON_DEVICE", "").lower()
-        if not device or device == "auto":
-            try:
-                import torch
+        from dalston.engine_sdk.device import detect_device
 
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                device = "cpu"
+        device = detect_device(include_mps=False)
 
         return cls(
             device=device,

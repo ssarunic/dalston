@@ -27,6 +27,7 @@ from dalston.engine_sdk import (
     TaskResponse,
     TimestampGranularity,
     Word,
+    detect_device,
 )
 
 
@@ -41,22 +42,11 @@ class PhonemeAlignEngine(Engine):
     def __init__(self) -> None:
         super().__init__()
         self._align_models: dict[str, tuple[Any, AlignModelMetadata]] = {}
-        self._device, self._compute_type = self._detect_device()
+        self._device = detect_device()
+        self._compute_type = "float16" if self._device == "cuda" else "float32"
         self.logger.info(
             "detected_device", device=self._device, compute_type=self._compute_type
         )
-
-    def _detect_device(self) -> tuple[str, str]:
-        """Detect the best available compute device.
-
-        Preference order: CUDA → MPS (Apple Silicon) → CPU.
-        """
-        if torch.cuda.is_available():
-            return "cuda", "float16"
-        if torch.backends.mps.is_available():
-            # MPS supports float32 reliably; float16 has limited op coverage.
-            return "mps", "float32"
-        return "cpu", "float32"
 
     def _get_align_model(
         self, language: str, loaded_model_id: str
