@@ -7,7 +7,7 @@
 #   docker build -t dalston/stt-vllm-asr:latest -f engines/stt-transcribe/vllm-asr/Dockerfile .
 
 # --- GPU only (vLLM requires CUDA) ---
-FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04
+FROM nvidia/cuda:13.2.0-runtime-ubuntu24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
