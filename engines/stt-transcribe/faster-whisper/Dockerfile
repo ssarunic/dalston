@@ -58,7 +58,7 @@ ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 # Engine code (all adapters colocated in stt-transcribe/faster-whisper/)
 WORKDIR /app
 COPY engines/stt-transcribe/faster-whisper/ engines/stt-transcribe/faster-whisper/
-COPY engines/stt-transcribe/faster-whisper/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/faster-whisper/engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 

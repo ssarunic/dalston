@@ -144,8 +144,8 @@ class TestFindRuntimeYamls:
             files = find_engine_id_yamls(engines_dir)
             # Should find engine.yaml files
             assert len(files) >= 5
-            # All files should be engine.yaml or rt_engine.yaml
-            assert all(f.name in ("engine.yaml", "rt_engine.yaml") for f in files)
+            # All files should be engine.yaml
+            assert all(f.name == "engine.yaml" for f in files)
 
     def test_empty_for_nonexistent_dir(self) -> None:
         """Should return empty list for non-existent directory."""
