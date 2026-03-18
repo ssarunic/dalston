@@ -1,7 +1,7 @@
 """Unit tests for AuditService with fail-open behavior."""
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -9,28 +9,30 @@ import pytest
 from dalston.common.audit import AuditService
 
 
+@pytest.fixture
+def mock_db_session(mock_async_db):
+    """Alias the shared mock_async_db fixture for audit tests."""
+    return mock_async_db
+
+
+@pytest.fixture
+def audit_service(mock_db_session):
+    """Create an AuditService with mock db session factory."""
+
+    @asynccontextmanager
+    async def session_factory():
+        yield mock_db_session
+
+    return AuditService(db_session_factory=session_factory)
+
+
+@pytest.fixture
+def tenant_id() -> UUID:
+    return UUID("12345678-1234-1234-1234-123456789abc")
+
+
 class TestAuditServiceLog:
     """Tests for AuditService.log method."""
-
-    @pytest.fixture
-    def mock_db_session(self):
-        """Create a mock database session."""
-        session = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        """Create an AuditService with mock db session factory."""
-
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
-    @pytest.fixture
-    def tenant_id(self) -> UUID:
-        return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
     async def test_log_creates_audit_entry(
@@ -64,14 +66,13 @@ class TestAuditServiceLog:
         assert audit_entry.correlation_id == "corr-123"
 
     @pytest.mark.asyncio
-    async def test_log_fail_open_on_db_error(self, tenant_id):
+    async def test_log_fail_open_on_db_error(self, mock_async_db, tenant_id):
         """Test that log fails open when database error occurs."""
-        mock_session = AsyncMock()
-        mock_session.commit.side_effect = Exception("Database unavailable")
+        mock_async_db.commit.side_effect = Exception("Database unavailable")
 
         @asynccontextmanager
         async def failing_session_factory():
-            yield mock_session
+            yield mock_async_db
 
         audit_service = AuditService(db_session_factory=failing_session_factory)
 
@@ -152,25 +153,8 @@ class TestAuditServiceJobMethods:
     """Tests for job-related audit convenience methods."""
 
     @pytest.fixture
-    def mock_db_session(self):
-        session = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
-    @pytest.fixture
     def job_id(self) -> UUID:
         return UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-
-    @pytest.fixture
-    def tenant_id(self) -> UUID:
-        return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
     async def test_log_job_created(
@@ -327,25 +311,8 @@ class TestAuditServiceApiKeyMethods:
     """Tests for API key audit methods."""
 
     @pytest.fixture
-    def mock_db_session(self):
-        session = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
-    @pytest.fixture
     def key_id(self) -> UUID:
         return UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
-
-    @pytest.fixture
-    def tenant_id(self) -> UUID:
-        return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
     async def test_log_api_key_created(
@@ -383,25 +350,8 @@ class TestAuditServiceSessionMethods:
     """Tests for session-related audit convenience methods."""
 
     @pytest.fixture
-    def mock_db_session(self):
-        session = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
-    @pytest.fixture
     def session_id(self) -> UUID:
         return UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-
-    @pytest.fixture
-    def tenant_id(self) -> UUID:
-        return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
     async def test_log_session_started(
@@ -444,18 +394,6 @@ class TestAuditServiceSessionMethods:
 class TestAuditServiceSecurityMethods:
     """Tests for security-related audit convenience methods."""
 
-    @pytest.fixture
-    def mock_db_session(self):
-        return AsyncMock()
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
     @pytest.mark.asyncio
     async def test_log_permission_denied(
         self, audit_service: AuditService, mock_db_session
@@ -487,22 +425,6 @@ class TestAuditServiceSecurityMethods:
 
 class TestAuditServiceModelMethods:
     """Tests for model registry audit methods."""
-
-    @pytest.fixture
-    def mock_db_session(self):
-        return AsyncMock()
-
-    @pytest.fixture
-    def audit_service(self, mock_db_session):
-        @asynccontextmanager
-        async def session_factory():
-            yield mock_db_session
-
-        return AuditService(db_session_factory=session_factory)
-
-    @pytest.fixture
-    def tenant_id(self) -> UUID:
-        return UUID("12345678-1234-1234-1234-123456789abc")
 
     @pytest.mark.asyncio
     async def test_log_model_downloaded_with_tenant(

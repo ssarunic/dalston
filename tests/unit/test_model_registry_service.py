@@ -20,9 +20,9 @@ def service() -> ModelRegistryService:
 
 
 @pytest.fixture
-def mock_db() -> AsyncMock:
-    """Create a mock async database session."""
-    return AsyncMock()
+def mock_db(mock_async_db) -> AsyncMock:
+    """Alias the shared mock_async_db fixture."""
+    return mock_async_db
 
 
 @pytest.fixture

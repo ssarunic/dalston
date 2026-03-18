@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -100,3 +101,17 @@ def _default_lite_stub_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests deterministic by avoiding heavyweight local model defaults."""
     monkeypatch.setenv("DALSTON_LITE_TRANSCRIBE_BACKEND", "stub")
     monkeypatch.setenv("DALSTON_LITE_DIARIZE_BACKEND", "stub")
+
+
+@pytest.fixture
+def mock_async_db() -> AsyncMock:
+    """AsyncMock DB session with synchronous SQLAlchemy methods correctly mocked.
+
+    SQLAlchemy's ``Session.add()`` and ``Session.expire()`` are synchronous.
+    A plain ``AsyncMock`` turns them into coroutines that, when called without
+    ``await``, emit ``RuntimeWarning: coroutine … was never awaited``.
+    """
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.expire = MagicMock()
+    return db

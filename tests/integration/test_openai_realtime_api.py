@@ -480,7 +480,9 @@ async def test_openai_client_to_worker_rejects_double_wrapped_session_update_sha
     assert all(payload.get("type") != "config" for payload in text_payloads)
 
 
-def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock]:
+def _build_rest_realtime_create_app(
+    api_key: APIKey, mock_db: AsyncMock | None = None
+) -> tuple[FastAPI, AsyncMock]:
     app = FastAPI()
     app.include_router(openai_realtime_router, prefix="/v1")
 
@@ -492,11 +494,15 @@ def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock
         reset_seconds=60,
     )
 
+    if mock_db is None:
+        mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.expire = MagicMock()
+
+    _db = mock_db
+
     async def _fake_require_auth() -> APIKey:
         return api_key
-
-    async def _fake_get_db() -> AsyncMock:
-        return AsyncMock()
 
     async def _fake_get_redis() -> AsyncMock:
         return AsyncMock()
@@ -506,7 +512,7 @@ def _build_rest_realtime_create_app(api_key: APIKey) -> tuple[FastAPI, AsyncMock
     app.dependency_overrides[get_security_manager] = lambda: SecurityManager(
         mode="api_key"
     )
-    app.dependency_overrides[get_db] = _fake_get_db
+    app.dependency_overrides[get_db] = lambda: _db
     app.dependency_overrides[get_redis] = _fake_get_redis
     return app, limiter
 

@@ -265,6 +265,7 @@ class TestOpenAITranscriptionEndpoint:
         mock_rate_limiter,
         mock_export_service,
         mock_audit_service,
+        mock_async_db,
         api_key,
     ):
         from dalston.gateway.dependencies import (
@@ -282,7 +283,7 @@ class TestOpenAITranscriptionEndpoint:
         app = FastAPI()
         app.include_router(transcription_router, prefix="/v1")
 
-        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_db] = lambda: mock_async_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
@@ -793,6 +794,7 @@ class TestOpenAITranslationEndpoint:
         mock_ingestion_service,
         mock_rate_limiter,
         mock_export_service,
+        mock_async_db,
         api_key,
     ):
         from dalston.gateway.dependencies import (
@@ -811,7 +813,7 @@ class TestOpenAITranslationEndpoint:
         setup_exception_handlers(app)
         app.include_router(translation_router, prefix="/v1")
 
-        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_db] = lambda: mock_async_db
         app.dependency_overrides[get_jobs_service] = lambda: mock_jobs_service
         app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_settings] = lambda: mock_settings
