@@ -43,13 +43,10 @@ Environment variables:
 from __future__ import annotations
 
 import os
-import time
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
-import dalston.metrics
-import dalston.telemetry
 from dalston.engine_sdk.model_manager import ModelManager
 
 if TYPE_CHECKING:
@@ -125,34 +122,8 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
 
         super().__init__(**kwargs)
 
-    def acquire(self, model_id: str) -> OnnxASRModel:
-        """Acquire a model, wrapping with M76 telemetry span + histogram."""
-        cache_hit = self.is_loaded(model_id)
-        start = time.monotonic()
-        with dalston.telemetry.create_span(
-            "engine.model_acquire",
-            attributes={
-                "dalston.model_id": model_id,
-                "dalston.cache_hit": cache_hit,
-                "dalston.device": self.device,
-            },
-        ):
-            model = super().acquire(model_id)
-        duration = time.monotonic() - start
-
-        # If it wasn't loaded before but is now, it was a cold load
-        actual_cache_hit = cache_hit  # True if model was already loaded
-        dalston.metrics.observe_engine_model_acquire(
-            engine_id=os.environ.get("DALSTON_ENGINE_ID", "onnx"),
-            model_id=model_id,
-            duration=duration,
-            cache_hit=actual_cache_hit,
-        )
-        if not actual_cache_hit:
-            dalston.telemetry.set_span_attribute(
-                "dalston.load_time_s", round(duration, 3)
-            )
-        return model
+    # acquire() telemetry is handled by the base ModelManager (M76).
+    # No override needed — spans and metrics fire for all engines.
 
     @staticmethod
     def _validate_cuda_compute() -> None:

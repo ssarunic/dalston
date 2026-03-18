@@ -45,7 +45,7 @@ engine.{id}.process                    ← existing linked span
   ├── engine.process                   ← existing, now with children from engine code
   │     ├── engine.model_acquire       ← NEW (model manager lock + load)
   │     ├── engine.vad_load            ← NEW (Silero VAD lazy load)
-  │     ├── engine.inference           ← NEW (actual recognition call)
+  │     ├── engine.recognize           ← NEW (actual recognition call)
   │     └── engine.parse_result        ← NEW (token→word grouping)
   └── engine.upload_output             ← existing
 ```
@@ -56,7 +56,7 @@ engine.{id}.process                    ← existing linked span
 engine.{id}.http_process               ← NEW root span for HTTP requests
   ├── engine.model_acquire             ← NEW (same as batch — shared inference layer)
   ├── engine.vad_load                  ← NEW
-  ├── engine.inference                 ← NEW
+  ├── engine.recognize                 ← NEW
   └── engine.parse_result              ← NEW
 ```
 
@@ -64,7 +64,7 @@ engine.{id}.http_process               ← NEW root span for HTTP requests
 
 - No changes to runner.py itself — sub-spans are created by engine code using `dalston.telemetry.create_span()`
 - `run_engine_http()` wraps `engine.process()` in an `engine.{id}.http_process` root span
-- HTTP-specific metrics: `dalston_engine_http_request_seconds`, `dalston_engine_http_requests_total`
+- HTTP-specific metrics: `dalston_engine_direct_request_seconds`, `dalston_engine_direct_requests_total`
 - Engine authors opt-in to granular tracing by adding spans in their inference code
 - Existing engines continue working unchanged (single `engine.process` span)
 
@@ -84,9 +84,9 @@ engine.{id}.http_process               ← NEW root span for HTTP requests
   - Histogram: `dalston_engine_model_acquire_seconds`
 - `_get_or_load_vad()` wrapped in `engine.vad_load` span
   - Attributes: `cache_hit` (bool)
-- `_transcribe_with_vad()` / `_transcribe_direct()`: `recognize()` call wrapped in `engine.inference` span
+- `_transcribe_with_vad()` / `_transcribe_direct()`: `recognize()` call wrapped in `engine.recognize` span
   - Attributes: `audio_duration_s`, `segment_count`, `device`, `mode` (vad/direct), `rtf`
-  - Histograms: `dalston_engine_inference_seconds`, `dalston_engine_rtf`, `dalston_engine_vad_segments`
+  - Histograms: `dalston_engine_recognize_seconds`, `dalston_engine_rtf`, `dalston_engine_vad_segments`
 - `_parse_result()` / `_parse_vad_result()` wrapped in `engine.parse_result` span
   - Attributes: `word_count`, `char_count`, `segment_count`
 
@@ -141,23 +141,31 @@ engine.{id}.http_process               ← NEW root span for HTTP requests
 
 **Files Modified:**
 
-- `dalston/engine_sdk/inference/onnx_inference.py` — Emit histograms alongside inference spans
-- `dalston/engine_sdk/managers/onnx.py` — Emit model acquire histogram
-- `dalston/engine_sdk/http_server.py` — Emit HTTP-specific histograms
-- `dalston/metrics.py` — Add engine-level histogram definitions
+- `dalston/engine_sdk/model_manager.py` — Emit model acquire histogram (covers all engines)
+- `dalston/engine_sdk/inference/onnx_inference.py` — Emit recognize + RTF + VAD histograms
+- `dalston/engine_sdk/inference/faster_whisper_inference.py` — Emit recognize + RTF histograms
+- `dalston/engine_sdk/inference/nemo_inference.py` — Emit recognize + RTF histograms
+- `dalston/engine_sdk/http_server.py` — Emit direct-request histograms
+- `dalston/metrics.py` — Histogram and counter definitions
 
 **New Metrics:**
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `dalston_engine_model_acquire_seconds` | Histogram | `engine_id`, `model_id`, `cache_hit` | Time to acquire model |
-| `dalston_engine_inference_seconds` | Histogram | `engine_id`, `model_id`, `device` | Pure inference time |
-| `dalston_engine_rtf` | Histogram | `engine_id`, `model_id`, `device` | Real-time factor |
-| `dalston_engine_vad_segments` | Histogram | `engine_id` | VAD segment count per job |
-| `dalston_engine_http_request_seconds` | Histogram | `engine_id`, `endpoint`, `status_code` | HTTP request duration (M79 path only) |
-| `dalston_engine_http_requests_total` | Counter | `engine_id`, `endpoint`, `status_code` | HTTP request count (M79 path only) |
+| `dalston_engine_model_acquire_seconds` | Histogram | `engine_id`, `model`, `in_memory` | Time to acquire model handle (lock + possible cold load) |
+| `dalston_engine_recognize_seconds` | Histogram | `engine_id`, `model`, `device` | Wall-clock time for the recognize/transcribe call |
+| `dalston_engine_realtime_factor_ratio` | Histogram | `engine_id`, `model`, `device` | Real-time factor (processing_time / audio_duration) |
+| `dalston_engine_vad_segment_count` | Histogram | `engine_id` | VAD segment count per transcription |
+| `dalston_engine_direct_request_seconds` | Histogram | `engine_id`, `endpoint`, `status_code` | HTTP request duration (M79 leaf API only) |
+| `dalston_engine_direct_requests_total` | Counter | `engine_id`, `endpoint`, `status_code` | HTTP request count (M79 leaf API only) |
 
-**Key design decision:** Metrics are emitted at the **inference layer** (inside `OnnxInference` and `OnnxModelManager`), not in `runner.py`. This ensures they fire for both the batch queue path and the HTTP direct path without duplication. HTTP-specific metrics (`http_request_seconds`, `http_requests_total`) are emitted in `run_engine_http()` since they only apply to the HTTP transport.
+**Key design decisions:**
+
+- `model_acquire` is instrumented in the **base `ModelManager`**, so all engines (ONNX, Faster-Whisper, NeMo, HF-ASR) get it for free.
+- Recognize/RTF metrics are emitted in each engine's **inference module**, not in `runner.py`, so they fire for both batch queue and HTTP direct paths.
+- Label name `model` (not `model_id`) matches existing engine metrics, enabling PromQL joins.
+- `in_memory` label (not `cache_hit`) accurately describes whether the model was already loaded in memory.
+- Direct-request metrics use `direct_` prefix to distinguish from gateway HTTP metrics.
 
 **Why both spans and metrics:** Spans are per-request (debug individual slow jobs). Metrics are aggregated (alert when p99 inference time exceeds threshold, dashboard showing RTF trends over time).
 
@@ -195,12 +203,12 @@ open http://localhost:16686
 #   engine.onnx.process                    ~15s  ← click to expand
 #     engine.model_acquire                   ~0.01s (cache hit)
 #     engine.vad_load                        ~0.01s (cached)
-#     engine.inference                       ~14s
+#     engine.recognize                       ~14s
 #     engine.parse_result                    ~0.002s
 #   engine.final-merger.process            ~1s
 
 # Verify metrics
-curl -s http://localhost:9100/metrics | grep dalston_engine_inference_seconds
+curl -s http://localhost:9100/metrics | grep dalston_engine_recognize_seconds
 ```
 
 ### HTTP direct path
@@ -215,24 +223,27 @@ curl -X POST http://localhost:9100/v1/transcribe \
 #   engine.onnx.http_process               ~15s  ← root span for HTTP path
 #     engine.model_acquire                   ~0.01s (cache hit)
 #     engine.vad_load                        ~0.01s (cached)
-#     engine.inference                       ~14s
+#     engine.recognize                       ~14s
 #     engine.parse_result                    ~0.002s
 
 # Verify HTTP-specific metrics
-curl -s http://localhost:9100/metrics | grep dalston_engine_http_request_seconds
-curl -s http://localhost:9100/metrics | grep dalston_engine_http_requests_total
+curl -s http://localhost:9100/metrics | grep dalston_engine_direct_request_seconds
+curl -s http://localhost:9100/metrics | grep dalston_engine_direct_requests_total
 ```
 
 ---
 
 ## Checkpoint
 
-- [x] ONNX engine emits `model_acquire`, `vad_load`, `inference`, `parse_result` sub-spans
+- [x] ONNX engine emits `model_acquire`, `vad_load`, `recognize`, `parse_result` sub-spans
+- [x] Faster-Whisper engine emits `model_acquire`, `recognize` sub-spans
+- [x] NeMo engine emits `model_acquire`, `recognize`, `parse_result` sub-spans
+- [x] `model_acquire` span + histogram in base `ModelManager` — covers all engines
 - [x] Span attributes include `model_id`, `device`, `rtf`, `segment_count`
-- [ ] Other engines (NeMo, Faster-Whisper) follow same span pattern
+- [x] Label `model` (not `model_id`) for PromQL join compatibility with existing metrics
 - [ ] Realtime spans are sampled to avoid overhead
 - [x] Histogram metrics emitted alongside spans
-- [x] HTTP path has root span (`engine.{id}.http_process`) and HTTP-specific metrics
+- [x] HTTP path has root span (`engine.{id}.http_process`) and direct-request metrics
 - [ ] Jaeger waterfall shows full engine breakdown for a batch job
 - [ ] Jaeger waterfall shows full engine breakdown for an HTTP direct request
 - [x] Zero overhead when `OTEL_ENABLED=false` confirmed (NoOpTracer + metrics guard)

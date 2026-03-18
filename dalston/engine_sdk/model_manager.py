@@ -32,6 +32,7 @@ Environment variables:
 from __future__ import annotations
 
 import gc
+import os
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -39,6 +40,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 import structlog
+
+import dalston.metrics
+import dalston.telemetry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -142,6 +146,10 @@ class ModelManager(ABC, Generic[T]):
         This increments the reference count to prevent eviction during use.
         Caller MUST call release() when done.
 
+        Wraps the operation in an ``engine.model_acquire`` span (M76) and
+        records the ``dalston_engine_model_acquire_seconds`` histogram.
+        Both are no-ops when tracing/metrics are disabled.
+
         Args:
             model_id: Identifier of the model to acquire
 
@@ -152,22 +160,41 @@ class ModelManager(ABC, Generic[T]):
             RuntimeError: If max_loaded models are in use and none can be evicted
             Exception: If model loading fails
         """
-        with self._lock:
-            if model_id not in self._models:
-                self._maybe_evict_for_capacity()
-                self._load_and_register(model_id)
+        in_memory = self.is_loaded(model_id)
+        start = time.monotonic()
 
-            entry = self._models[model_id]
-            entry.ref_count += 1
-            entry.touch()
+        with dalston.telemetry.create_span(
+            "engine.model_acquire",
+            attributes={
+                "dalston.model_id": model_id,
+                "dalston.in_memory": in_memory,
+            },
+        ):
+            with self._lock:
+                if model_id not in self._models:
+                    self._maybe_evict_for_capacity()
+                    self._load_and_register(model_id)
 
-            logger.debug(
-                "model_acquired",
-                model_id=model_id,
-                ref_count=entry.ref_count,
-            )
+                entry = self._models[model_id]
+                entry.ref_count += 1
+                entry.touch()
 
-            return entry.model
+                logger.debug(
+                    "model_acquired",
+                    model_id=model_id,
+                    ref_count=entry.ref_count,
+                )
+
+                model = entry.model
+
+        duration = time.monotonic() - start
+        dalston.metrics.observe_engine_model_acquire(
+            engine_id=os.environ.get("DALSTON_ENGINE_ID", "unknown"),
+            model=model_id,
+            duration=duration,
+            in_memory=in_memory,
+        )
+        return model
 
     def release(self, model_id: str) -> None:
         """Release a model reference.

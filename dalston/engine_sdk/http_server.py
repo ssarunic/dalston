@@ -233,7 +233,7 @@ async def run_engine_http(
     finally:
         cleanup_audio(task_request.audio_path)
         duration = time.monotonic() - start
-        dalston.metrics.observe_engine_http_request(
+        dalston.metrics.observe_engine_direct_request(
             engine_id, endpoint, status_code, duration
         )
-        dalston.metrics.inc_engine_http_requests(engine_id, endpoint, status_code)
+        dalston.metrics.inc_engine_direct_requests(engine_id, endpoint, status_code)

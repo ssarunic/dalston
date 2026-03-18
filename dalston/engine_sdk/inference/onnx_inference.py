@@ -195,10 +195,11 @@ class OnnxInference:
 
         audio_duration_s = len(audio) / 16000.0
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
+        model_id = self._current_model_id or ""
 
         start = time.monotonic()
         with dalston.telemetry.create_span(
-            "engine.inference",
+            "engine.recognize",
             attributes={
                 "dalston.device": self._device,
                 "dalston.audio_duration_s": round(audio_duration_s, 3),
@@ -206,14 +207,16 @@ class OnnxInference:
             },
         ):
             result = ts_model.recognize(audio, sample_rate=16000)
-        inference_time = time.monotonic() - start
+        recognize_time = time.monotonic() - start
 
-        dalston.metrics.observe_engine_inference(
-            engine_id, "", self._device, inference_time
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self._device, recognize_time
         )
         if audio_duration_s > 0:
-            rtf = inference_time / audio_duration_s
-            dalston.metrics.observe_engine_rtf(engine_id, "", self._device, rtf)
+            rtf = recognize_time / audio_duration_s
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self._device, rtf
+            )
             dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
 
         return self._parse_result(result)
@@ -247,40 +250,39 @@ class OnnxInference:
         ).with_timestamps()
 
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
+        model_id = self._current_model_id or ""
 
         # recognize() returns Iterator[TimestampedSegmentResult]
         start = time.monotonic()
         with dalston.telemetry.create_span(
-            "engine.inference",
+            "engine.recognize",
             attributes={
                 "dalston.device": self._device,
                 "dalston.mode": "vad",
             },
         ):
             vad_segments = list(vad_ts_model.recognize(audio_path))
-        inference_time = time.monotonic() - start
+        recognize_time = time.monotonic() - start
 
         segment_count = len(vad_segments)
         dalston.telemetry.set_span_attribute("dalston.segment_count", segment_count)
-        dalston.metrics.observe_engine_vad_segments(engine_id, segment_count)
+        dalston.metrics.observe_engine_vad_segment_count(engine_id, segment_count)
 
         # Compute audio duration from segments for RTF
         audio_duration_s = max(
             (float(s.end) for s in vad_segments), default=0.0
         )
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self._device, recognize_time
+        )
         if audio_duration_s > 0:
             dalston.telemetry.set_span_attribute(
                 "dalston.audio_duration_s", round(audio_duration_s, 3)
             )
-            rtf = inference_time / audio_duration_s
+            rtf = recognize_time / audio_duration_s
             dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
-            dalston.metrics.observe_engine_inference(
-                engine_id, "", self._device, inference_time
-            )
-            dalston.metrics.observe_engine_rtf(engine_id, "", self._device, rtf)
-        else:
-            dalston.metrics.observe_engine_inference(
-                engine_id, "", self._device, inference_time
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self._device, rtf
             )
 
         return self._parse_vad_result(vad_segments)
