@@ -1,13 +1,12 @@
 version: 2
 updates:
-  # Python dependencies
+  # Python dependencies (main server)
   - package-ecosystem: pip
     directory: "/"
     schedule:
       interval: weekly
       day: monday
     groups:
-      # Group minor and patch updates to reduce PR noise
       minor-and-patch:
         update-types:
           - minor
@@ -17,6 +16,296 @@ updates:
     labels:
       - dependencies
       - python
+
+  # Python SDK
+  - package-ecosystem: pip
+    directory: "/sdk"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+
+  # CLI
+  - package-ecosystem: pip
+    directory: "/cli"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+
+  # Engine dependencies
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/faster-whisper"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/onnx"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/hf-asr"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/nemo"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/riva"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-transcribe/vllm-asr"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-align/phoneme-align"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-diarize/pyannote-4.0"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-diarize/nemo-msdd"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-diarize/nemo-sortformer"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-detect/pii-presidio"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-redact/audio-redactor"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-merge/final-merger"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-prepare/audio-prepare"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-combo/whisper-align-pyannote"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        update-types:
+          - major
+          - minor
+          - patch
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
 
   # Web console (npm)
   - package-ecosystem: npm
@@ -35,7 +324,18 @@ updates:
       - dependencies
       - javascript
 
-  # Docker base images
+  # Root npm (Playwright)
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - javascript
+
+  # Docker base images (core services)
   - package-ecosystem: docker
     directory: "/docker"
     schedule:
@@ -45,6 +345,172 @@ updates:
     labels:
       - dependencies
       - docker
+
+  # Engine Dockerfiles
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/faster-whisper"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/onnx"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/hf-asr"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/nemo"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/riva"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-transcribe/vllm-asr"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-align/phoneme-align"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-diarize/pyannote-4.0"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-diarize/nemo-msdd"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-diarize/nemo-sortformer"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-detect/pii-presidio"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-redact/audio-redactor"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-merge/final-merger"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-prepare/audio-prepare"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
+
+  - package-ecosystem: docker
+    directory: "/engines/stt-combo/whisper-align-pyannote"
+    schedule:
+      interval: monthly
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - docker
+      - engines
 
   # GitHub Actions
   - package-ecosystem: github-actions
