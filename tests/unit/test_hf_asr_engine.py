@@ -30,7 +30,7 @@ def _ctx(task_request: TaskRequest) -> BatchTaskContext:
 
 def load_hf_asr_engine():
     """Load HfAsrBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-unified/hf-asr/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/hf-asr/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("HF-ASR engine not found")
 

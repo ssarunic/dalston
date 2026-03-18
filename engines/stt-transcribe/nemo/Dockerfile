@@ -1,13 +1,12 @@
-# Unified HF-ASR Engine
+# Unified NeMo Engine
 #
-# One process, one model manager, both batch and realtime interfaces.
-# Supports any HuggingFace model with pipeline_tag=automatic-speech-recognition.
+# One process, one NeMo model, both batch and realtime interfaces.
 #
 # Build from repo root:
-#   CPU:  docker build -t dalston/stt-hf-asr:latest -f engines/stt-unified/hf-asr/Dockerfile .
-#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-hf-asr:latest -f engines/stt-unified/hf-asr/Dockerfile .
+#   CPU:  docker build --build-arg DEVICE=cpu -t dalston/stt-nemo:latest -f engines/stt-transcribe/nemo/Dockerfile .
+#   GPU:  docker build -t dalston/stt-nemo:latest -f engines/stt-transcribe/nemo/Dockerfile .
 
-ARG DEVICE=cpu
+ARG DEVICE=cuda
 
 # --- CPU base ---
 FROM python:3.12-slim AS base-cpu
@@ -21,12 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- Common ---
 FROM base-${DEVICE} AS base
-ARG DEVICE=cpu
+ARG DEVICE=cuda
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
+    build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Dalston SDK
@@ -35,28 +36,35 @@ COPY pyproject.toml .
 COPY dalston/ dalston/
 RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime-sdk]"
 
-# HF-ASR engine dependencies
+# NeMo engine dependencies
 WORKDIR /engine
-COPY engines/stt-unified/hf-asr/requirements.txt .
+COPY engines/stt-transcribe/nemo/requirements.txt .
+RUN if [ "$DEVICE" = "cpu" ]; then \
+        pip install --no-cache-dir --break-system-packages \
+            torch --index-url https://download.pytorch.org/whl/cpu && \
+        pip install --no-cache-dir --break-system-packages torchaudio; \
+    fi
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
 ENV HF_HOME=/models/huggingface
-RUN mkdir -p /models/huggingface
+ENV TORCH_HOME=/models/torch
+ENV NEMO_CACHE=/models/nemo
+RUN mkdir -p /models/huggingface /models/torch /models/nemo
 
 # Silero VAD model — baked in to eliminate runtime download
 RUN mkdir -p /models/silero-vad \
     && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 
-# Engine code (all adapters colocated in stt-unified/hf-asr/)
+# Engine code (all adapters colocated in stt-transcribe/nemo/)
 WORKDIR /app
-COPY engines/stt-unified/hf-asr/ engines/stt-unified/hf-asr/
-COPY engines/stt-unified/hf-asr/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/nemo/ engines/stt-transcribe/nemo/
+COPY engines/stt-transcribe/nemo/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/hf-asr/runner.py"]
+CMD ["python", "engines/stt-transcribe/nemo/runner.py"]

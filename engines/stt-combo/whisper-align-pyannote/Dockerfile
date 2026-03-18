@@ -6,7 +6,7 @@
 #
 # Build from repo root:
 #   docker build -t dalston/stt-whisper-align-pyannote:latest \
-#     -f engines/stt-unified/whisper-align-pyannote/Dockerfile .
+#     -f engines/stt-combo/whisper-align-pyannote/Dockerfile .
 
 FROM python:3.12-slim AS base
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,11 +19,11 @@ RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk]"
 
 # Composite engine dependencies (httpx for calling children)
 WORKDIR /engine
-COPY engines/stt-unified/whisper-align-pyannote/requirements.txt .
+COPY engines/stt-combo/whisper-align-pyannote/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Engine config
-COPY engines/stt-unified/whisper-align-pyannote/engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-combo/whisper-align-pyannote/engine.yaml /etc/dalston/engine.yaml
 
 EXPOSE 9100
 

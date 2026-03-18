@@ -49,7 +49,7 @@ def _make_core_result(
 
 
 def _build_rt_engine(core_result: OnnxTranscriptionResult):
-    engine_path = Path("engines/stt-unified/onnx/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/onnx/rt_engine.py")
     spec = importlib.util.spec_from_file_location("m63_parakeet_onnx_rt", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

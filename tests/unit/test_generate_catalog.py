@@ -74,14 +74,14 @@ class TestDeriveImageName:
     """Tests for derive_image_name function."""
 
     def test_batch_engine_image(self) -> None:
-        """Batch engine should have stt-batch prefix."""
+        """Batch engine should have stt-{stage} prefix."""
         result = derive_image_name("faster-whisper", "transcribe", "1.0.0")
-        assert result == "dalston/stt-batch-transcribe-faster-whisper:1.0.0"
+        assert result == "dalston/stt-transcribe-faster-whisper:1.0.0"
 
     def test_diarize_stage(self) -> None:
         """Other stages should work correctly."""
         result = derive_image_name("pyannote-4.0", "diarize", "1.0.0")
-        assert result == "dalston/stt-batch-diarize-pyannote-4.0:1.0.0"
+        assert result == "dalston/stt-diarize-pyannote-4.0:1.0.0"
 
 
 class TestTransformRuntimeToEntry:

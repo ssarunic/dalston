@@ -5,13 +5,13 @@
 #   start-stt-onnx.sh [start] [TAG]   # Launch instance (default command)
 #   start-stt-onnx.sh stop             # Terminate running instance
 
-INSTANCE_TAG="dalston-stt-unified-onnx"
-CONTAINERS_TO_WAIT=("stt-unified-onnx")
+INSTANCE_TAG="dalston-stt-transcribe-onnx"
+CONTAINERS_TO_WAIT=("stt-transcribe-onnx")
 
 build_container_run_block() {
   cat <<'BLOCK'
 docker pull DALSTON_ECR/dalston/stt-onnx:DALSTON_TAG
-docker run -d --name stt-unified-onnx --gpus all --restart unless-stopped \
+docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -p 9000:9000 \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \

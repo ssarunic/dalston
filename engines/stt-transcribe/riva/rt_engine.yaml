@@ -1,5 +1,5 @@
 schema_version: "1.1"
-id: stt-unified-riva
+id: stt-transcribe-riva
 engine_id: riva
 stage: transcribe
 mode: realtime

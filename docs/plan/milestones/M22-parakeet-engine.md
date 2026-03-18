@@ -160,7 +160,7 @@ See [implementation plan](../impl/M22-22.2-parakeet-realtime-engine.md) for deta
 
 ```yaml
 # Batch engine
-stt-batch-transcribe-parakeet:
+stt-transcribe-parakeet:
   build: ./engines/transcribe/parakeet
   deploy:
     resources:
@@ -265,7 +265,7 @@ wscat -c "ws://localhost:8000/v1/audio/transcriptions/stream?model=parakeet-0.6b
 
 ```bash
 # Batch engine health
-docker compose logs stt-batch-transcribe-parakeet | grep "healthy"
+docker compose logs stt-transcribe-parakeet | grep "healthy"
 
 # Real-time worker health
 docker compose exec redis redis-cli HGETALL dalston:realtime:worker:stt-rt-transcribe-parakeet-1

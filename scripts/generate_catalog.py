@@ -55,7 +55,7 @@ def load_yaml(path: Path) -> dict:
 
 def derive_image_name(engine_id: str, stage: str, version: str) -> str:
     """Derive Docker image name from engine_id metadata."""
-    return f"dalston/stt-batch-{stage}-{engine_id}:{version}"
+    return f"dalston/stt-{stage}-{engine_id}:{version}"
 
 
 def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:

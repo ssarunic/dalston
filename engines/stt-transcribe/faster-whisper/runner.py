@@ -1,15 +1,15 @@
-"""Unified ONNX runner: one process, one model, both interfaces.
+"""Unified faster-whisper runner: one process, one model, both interfaces.
 
-This runner creates a single OnnxInference (one loaded ONNX model) and
-passes it to both the batch engine adapter (queue polling) and the realtime
-engine adapter (WebSocket server). An AdmissionController gates both paths
-to prevent realtime starvation under batch load.
+This runner creates a single FasterWhisperInference (one loaded model) and passes
+it to both the batch engine adapter (queue polling) and the realtime engine
+adapter (WebSocket server). An AdmissionController gates both paths to
+prevent realtime starvation under batch load.
 
 This is the M63 "unified engine instance" — batch and RT share the same
-ONNX Runtime session instead of loading independent copies.
+GPU-resident model instead of loading independent copies.
 
 Usage:
-    python -m engines.stt-unified.onnx.runner
+    python -m engines.stt-transcribe.faster-whisper.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
@@ -32,16 +32,16 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.inference.onnx_inference import OnnxInference
+from dalston.engine_sdk.inference.faster_whisper_inference import FasterWhisperInference
 
 logger = structlog.get_logger()
 
 
-class UnifiedOnnxRunner:
-    """Runs batch + realtime ONNX adapters in a single process.
+class UnifiedFasterWhisperRunner:
+    """Runs batch + realtime faster-whisper adapters in a single process.
 
     Key properties:
-    - ONE OnnxInference instance (one ONNX session in memory)
+    - ONE FasterWhisperInference instance (one model in GPU memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -52,7 +52,7 @@ class UnifiedOnnxRunner:
 
     def __init__(self) -> None:
         # Create single shared core
-        self._core = OnnxInference.from_env()
+        self._core = FasterWhisperInference.from_env()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -64,9 +64,9 @@ class UnifiedOnnxRunner:
         self._running = False
 
         logger.info(
-            "unified_onnx_runner_init",
+            "unified_runner_init",
             device=self._core.device,
-            quantization=self._core.quantization,
+            compute_type=self._core.compute_type,
             admission=self._admission.get_status(),
         )
 
@@ -85,14 +85,12 @@ class UnifiedOnnxRunner:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        # Both engines live in the same directory as this runner.
-        # sys.path includes the script directory when run via `python runner.py`.
-        from batch_engine import OnnxBatchEngine
-        from rt_engine import OnnxRealtimeEngine
+        from batch_engine import FasterWhisperBatchEngine
+        from rt_engine import FasterWhisperRealtimeEngine
 
-        # Create adapters sharing the same OnnxInference
-        self._batch_engine = OnnxBatchEngine(core=self._core)
-        self._rt_engine = OnnxRealtimeEngine(core=self._core)
+        # Create adapters sharing the same FasterWhisperInference
+        self._batch_engine = FasterWhisperBatchEngine(core=self._core)
+        self._rt_engine = FasterWhisperRealtimeEngine(core=self._core)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
@@ -169,7 +167,7 @@ class UnifiedOnnxRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_onnx_runner_shutting_down")
+        logger.info("unified_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -189,7 +187,7 @@ class UnifiedOnnxRunner:
         self._core.shutdown()
 
         logger.info(
-            "unified_onnx_runner_stopped",
+            "unified_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -203,13 +201,14 @@ class BatchRejectedError(TaskDeferredError):
     """
 
 
-def _ensure_import_path() -> None:
-    """Ensure this directory is on sys.path for sibling imports.
+# ---------------------------------------------------------------------------
+# Import path: ensure the engine directory is on sys.path so that sibling
+# modules (batch_engine, rt_engine) can be imported by name.
+# ---------------------------------------------------------------------------
 
-    When run as ``python runner.py``, Python adds the script's directory
-    automatically.  When loaded via ``importlib.util.spec_from_file_location``
-    (e.g. from tests), the directory may not be on sys.path.
-    """
+
+def _ensure_import_path() -> None:
+    """Add this file's directory to sys.path for sibling imports."""
     import sys
     from pathlib import Path
 
@@ -222,5 +221,5 @@ _ensure_import_path()
 
 
 if __name__ == "__main__":
-    runner = UnifiedOnnxRunner()
+    runner = UnifiedFasterWhisperRunner()
     runner.run()

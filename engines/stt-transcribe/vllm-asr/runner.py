@@ -1,44 +1,95 @@
-"""Unified NeMo runner: one process, one model, both interfaces.
+"""Unified vLLM-ASR runner: one process, one vLLM instance, both interfaces.
 
-This runner creates a single NemoInference (one loaded NeMo model) and passes
-it to both the batch engine adapter (queue polling) and the realtime engine
-adapter (WebSocket server). An AdmissionController gates both paths to
-prevent realtime starvation under batch load.
+This runner creates a single vLLM LLM instance and passes it to both
+the batch engine adapter (queue polling) and the realtime engine adapter
+(WebSocket server). An AdmissionController gates both paths to prevent
+realtime starvation under batch load.
+
+Supports any model in the ADAPTER_REGISTRY (Voxtral, Qwen2-Audio).
 
 Usage:
-    python -m engines.stt-unified.nemo.runner
+    python -m engines.stt-transcribe.vllm-asr.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
 
+    DALSTON_DEFAULT_MODEL_ID: HF model ID to preload (default: mistralai/Voxtral-Mini-3B-2507)
+    DALSTON_VLLM_GPU_MEMORY_UTILIZATION: GPU memory fraction (default: 0.9)
+    DALSTON_VLLM_MAX_MODEL_LEN: Maximum context length (default: 4096)
 """
 
 from __future__ import annotations
 
 import asyncio
+import gc
+import os
 import signal
 import threading
 from typing import Any
 
 import structlog
+import torch
 
 from dalston.engine_sdk.admission import (
     AdmissionConfig,
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.inference.nemo_inference import NemoInference
+from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 
 logger = structlog.get_logger()
 
+DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
 
-class UnifiedNemoRunner:
-    """Runs batch + realtime NeMo adapters in a single process.
+
+def _create_vllm_instance() -> Any:
+    """Create a shared vLLM LLM instance."""
+    try:
+        from vllm import LLM
+    except ImportError as e:
+        raise RuntimeError(
+            "vLLM not installed. Install with: pip install 'vllm[audio]>=0.6.0'"
+        ) from e
+
+    model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
+
+    if model_id not in ADAPTER_REGISTRY:
+        raise ValueError(
+            f"No adapter for model: {model_id}. "
+            f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
+        )
+
+    gpu_memory_utilization = float(
+        os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+    )
+    max_model_len = int(os.environ.get("DALSTON_VLLM_MAX_MODEL_LEN", "4096"))
+
+    logger.info(
+        "loading_shared_vllm_model",
+        model_id=model_id,
+        gpu_memory_utilization=gpu_memory_utilization,
+        max_model_len=max_model_len,
+    )
+
+    llm = LLM(
+        model=model_id,
+        trust_remote_code=True,
+        gpu_memory_utilization=gpu_memory_utilization,
+        max_model_len=max_model_len,
+        limit_mm_per_prompt={"audio": 1},
+    )
+
+    logger.info("shared_vllm_model_loaded", model_id=model_id)
+    return llm
+
+
+class UnifiedVllmAsrRunner:
+    """Runs batch + realtime vLLM-ASR adapters in a single process.
 
     Key properties:
-    - ONE NemoInference instance (one NeMo model in GPU memory)
+    - ONE vLLM LLM instance (one model in GPU memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -48,8 +99,13 @@ class UnifiedNemoRunner:
     """
 
     def __init__(self) -> None:
-        # Create single shared core
-        self._core = NemoInference.from_env()
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "vLLM-ASR requires CUDA. GPU not available on this system."
+            )
+
+        # Create single shared vLLM instance
+        self._llm = _create_vllm_instance()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -61,32 +117,25 @@ class UnifiedNemoRunner:
         self._running = False
 
         logger.info(
-            "unified_nemo_runner_init",
-            device=self._core.device,
+            "unified_vllm_asr_runner_init",
             admission=self._admission.get_status(),
+            cuda_device_count=torch.cuda.device_count(),
         )
 
     def run(self) -> None:
-        """Start the unified runner.
-
-        This is the main entry point. It:
-        1. Creates batch + RT engine adapters sharing the same core
-        2. Starts batch adapter in a background thread
-        3. Runs RT adapter in the main async loop
-        4. Coordinates shutdown across both
-        """
+        """Start the unified runner."""
         asyncio.run(self._run_async())
 
     async def _run_async(self) -> None:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        from batch_engine import NemoBatchEngine
-        from rt_engine import NemoRealtimeEngine
+        from batch_engine import VllmAsrBatchEngine
+        from rt_engine import VllmAsrRealtimeEngine
 
-        # Create adapters sharing the same NemoInference
-        self._batch_engine = NemoBatchEngine(core=self._core)
-        self._rt_engine = NemoRealtimeEngine(core=self._core)
+        # Create adapters sharing the same vLLM instance
+        self._batch_engine = VllmAsrBatchEngine(llm=self._llm)
+        self._rt_engine = VllmAsrRealtimeEngine(llm=self._llm)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
@@ -163,7 +212,7 @@ class UnifiedNemoRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_nemo_runner_shutting_down")
+        logger.info("unified_vllm_asr_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -179,11 +228,17 @@ class UnifiedNemoRunner:
         if self._batch_thread and self._batch_thread.is_alive():
             self._batch_thread.join(timeout=10)
 
-        # Shutdown shared core (unloads models)
-        self._core.shutdown()
+        # Release shared vLLM instance
+        if self._llm is not None:
+            del self._llm
+            self._llm = None
+
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            gc.collect()
 
         logger.info(
-            "unified_nemo_runner_stopped",
+            "unified_vllm_asr_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -217,5 +272,5 @@ _ensure_import_path()
 
 
 if __name__ == "__main__":
-    runner = UnifiedNemoRunner()
+    runner = UnifiedVllmAsrRunner()
     runner.run()

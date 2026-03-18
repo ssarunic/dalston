@@ -56,7 +56,7 @@ def configure_metrics(service_name: str) -> None:
 
     Args:
         service_name: Identifier for this service (e.g. "gateway",
-            "orchestrator", "stt-batch-transcribe-whisper").
+            "orchestrator", "stt-transcribe-whisper").
 
     Environment Variables:
         DALSTON_METRICS_ENABLED: Set to "false" to disable metrics (default: "true")

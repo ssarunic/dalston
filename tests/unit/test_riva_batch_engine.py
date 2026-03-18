@@ -21,7 +21,7 @@ import pytest
 from dalston.engine_sdk import TaskRequest
 from dalston.engine_sdk.context import BatchTaskContext
 
-UNIFIED_RIVA_DIR = Path("engines/stt-unified/riva")
+UNIFIED_RIVA_DIR = Path("engines/stt-transcribe/riva")
 
 
 def _ctx(task_id: str, job_id: str) -> BatchTaskContext:

@@ -5,8 +5,8 @@
 #   start-pyannote.sh [start] [TAG]   # Launch instance (default command)
 #   start-pyannote.sh stop             # Terminate running instance
 
-INSTANCE_TAG="dalston-stt-batch-diarize-pyannote-4-0"
-CONTAINERS_TO_WAIT=("stt-batch-diarize-pyannote-4-0")
+INSTANCE_TAG="dalston-stt-diarize-pyannote-4-0"
+CONTAINERS_TO_WAIT=("stt-diarize-pyannote-4-0")
 
 prereq_check() {
   [[ -z "${HF_TOKEN:-}" ]] && { echo "ERROR: HF_TOKEN environment variable is required for pyannote models"; exit 1; }
@@ -15,7 +15,7 @@ prereq_check() {
 build_container_run_block() {
   cat <<'BLOCK'
 docker pull DALSTON_ECR/dalston/stt-diarize-pyannote:DALSTON_TAG
-docker run -d --name stt-batch-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
+docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-gpu-1 \

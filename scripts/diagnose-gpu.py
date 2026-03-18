@@ -2,11 +2,11 @@
 """GPU diagnostic script for ONNX engine containers.
 
 Run inside a running container to diagnose GPU/CUDA issues:
-    docker exec stt-unified-onnx python /app/scripts/diagnose-gpu.py
+    docker exec stt-transcribe-onnx python /app/scripts/diagnose-gpu.py
 
 Or copy into container first:
-    docker cp scripts/diagnose-gpu.py stt-unified-onnx:/tmp/
-    docker exec stt-unified-onnx python /tmp/diagnose-gpu.py
+    docker cp scripts/diagnose-gpu.py stt-transcribe-onnx:/tmp/
+    docker exec stt-transcribe-onnx python /tmp/diagnose-gpu.py
 """
 
 import subprocess

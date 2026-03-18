@@ -273,7 +273,7 @@ class TestVllmAudioBridge:
 
 def load_vllm_asr_engine():
     """Load VllmAsrBatchEngine from engines directory using importlib."""
-    engine_path = Path("engines/stt-unified/vllm-asr/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/vllm-asr/batch_engine.py")
     if not engine_path.exists():
         pytest.skip("vLLM-ASR engine not found")
 

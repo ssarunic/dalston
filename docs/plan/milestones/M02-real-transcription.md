@@ -90,9 +90,9 @@ engines/merge/final-merger/
 
 | Service | Image | GPU | Purpose |
 | --- | --- | --- | --- |
-| `stt-batch-prepare` | audio-prepare | No | FFmpeg conversion |
-| `stt-batch-transcribe-whisper-cpu` | faster-whisper | Yes | Transcription |
-| `stt-batch-merge` | final-merger | No | Output assembly |
+| `stt-prepare` | audio-prepare | No | FFmpeg conversion |
+| `stt-transcribe-whisper-cpu` | faster-whisper | Yes | Transcription |
+| `stt-merge` | final-merger | No | Output assembly |
 
 **Configuration:**
 
@@ -167,7 +167,7 @@ curl http://localhost:8000/v1/audio/transcriptions/job_xyz789
 
 ### Future Work / Notes
 
-- **GPU support**: The `stt-batch-transcribe-whisper` service in docker-compose.yml provides GPU acceleration via the `--profile gpu` flag. Not tested in this milestone.
+- **GPU support**: The `stt-transcribe-whisper` service in docker-compose.yml provides GPU acceleration via the `--profile gpu` flag. Not tested in this milestone.
 - **Model caching**: The `whisper-models` volume persists downloaded models between container restarts.
-- **Scaling**: Can scale faster-whisper with `docker compose up -d --scale stt-batch-transcribe-whisper-cpu=N`.
+- **Scaling**: Can scale faster-whisper with `docker compose up -d --scale stt-transcribe-whisper-cpu=N`.
 - **Word timestamps**: Already enabled in faster-whisper output, but Gateway response doesn't expose them yet (M03 scope).

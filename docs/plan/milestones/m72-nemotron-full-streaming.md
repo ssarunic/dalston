@@ -119,7 +119,7 @@ Gate: unit tests with mocked `BatchedFrameASRRNNT` pass.
 
 ### Step 3 — `rt_engine.py` wiring
 
-Update `engines/stt-unified/nemo/rt_engine.py`:
+Update `engines/stt-transcribe/nemo/rt_engine.py`:
 
 - Read `DALSTON_RNNT_BUFFER_SECS` env var in `__init__` (default `4.0`).
 - Pass `buffer_secs=self._rnnt_buffer_secs` in `transcribe_streaming` call.
@@ -180,7 +180,7 @@ Gate: `get_streaming_decode_fn("nemotron-streaming-rnnt-0.6b")` returns a callab
 
 - `dalston/engine_sdk/managers/nemo.py` — add `CACHE_AWARE_STREAMING_MODELS`, `is_cache_aware_streaming()`
 - `dalston/engine_sdk/inference/nemo_inference.py` — add `_run_batched_frame_asr()`, branch
-- `engines/stt-unified/nemo/rt_engine.py` — wire `get_streaming_decode_fn`, `DALSTON_RNNT_BUFFER_SECS`
+- `engines/stt-transcribe/nemo/rt_engine.py` — wire `get_streaming_decode_fn`, `DALSTON_RNNT_BUFFER_SECS`
 - NeMo `BatchedFrameASRRNNT`: `nemo.collections.asr.parts.utils.streaming_utils`
 - NVIDIA model card: `nvidia/nemotron-speech-streaming-en-0.6b`
 - `docs/plan/milestones/m71-parakeet-rnnt-cache-aware-streaming.md`

@@ -1,29 +1,31 @@
-"""Unified vLLM-ASR runner: one process, one vLLM instance, both interfaces.
+"""Unified HF-ASR runner: one process, one model manager, both interfaces.
 
-This runner creates a single vLLM LLM instance and passes it to both
-the batch engine adapter (queue polling) and the realtime engine adapter
-(WebSocket server). An AdmissionController gates both paths to prevent
-realtime starvation under batch load.
+This runner creates a single HFTransformersModelManager and passes it to
+both the batch engine adapter (queue polling) and the realtime engine
+adapter (WebSocket server). An AdmissionController gates both paths to
+prevent realtime starvation under batch load.
 
-Supports any model in the ADAPTER_REGISTRY (Voxtral, Qwen2-Audio).
+Supports any model on HuggingFace Hub with
+pipeline_tag=automatic-speech-recognition.
 
 Usage:
-    python -m engines.stt-unified.vllm-asr.runner
+    python -m engines.stt-transcribe.hf-asr.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
 
-    DALSTON_DEFAULT_MODEL_ID: HF model ID to preload (default: mistralai/Voxtral-Mini-3B-2507)
-    DALSTON_VLLM_GPU_MEMORY_UTILIZATION: GPU memory fraction (default: 0.9)
-    DALSTON_VLLM_MAX_MODEL_LEN: Maximum context length (default: 4096)
+    DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: openai/whisper-large-v3)
+    DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
+    DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
+    DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
+    DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
 """
 
 from __future__ import annotations
 
 import asyncio
-import gc
 import os
 import signal
 import threading
@@ -37,59 +39,70 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
+from dalston.engine_sdk.managers import HFTransformersModelManager
 
 logger = structlog.get_logger()
 
-DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
+DEFAULT_MODEL_ID = "openai/whisper-large-v3"
 
 
-def _create_vllm_instance() -> Any:
-    """Create a shared vLLM LLM instance."""
-    try:
-        from vllm import LLM
-    except ImportError as e:
-        raise RuntimeError(
-            "vLLM not installed. Install with: pip install 'vllm[audio]>=0.6.0'"
-        ) from e
+def _detect_device() -> tuple[str, torch.dtype]:
+    """Detect the best available device and dtype."""
+    requested_device = os.environ.get("DALSTON_DEVICE", "").lower()
 
-    model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
+    if requested_device == "cpu":
+        return "cpu", torch.float32
 
-    if model_id not in ADAPTER_REGISTRY:
+    if torch.cuda.is_available():
+        return "cuda", torch.float16
+
+    if requested_device == "cuda":
+        raise RuntimeError("DALSTON_DEVICE=cuda but CUDA is not available.")
+
+    if requested_device not in ("", "auto"):
         raise ValueError(
-            f"No adapter for model: {model_id}. "
-            f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
+            f"Unknown DALSTON_DEVICE value: {requested_device}. Use cuda or cpu."
         )
 
-    gpu_memory_utilization = float(
-        os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")
+    return "cpu", torch.float32
+
+
+def _create_shared_manager() -> HFTransformersModelManager:
+    """Create a shared HFTransformersModelManager for both adapters."""
+    device, torch_dtype = _detect_device()
+
+    model_storage = None
+    s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+    if s3_bucket:
+        from dalston.engine_sdk.model_storage import S3ModelStorage
+
+        model_storage = S3ModelStorage.from_env()
+        logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+
+    manager = HFTransformersModelManager(
+        device=device,
+        torch_dtype=torch_dtype,
+        model_storage=model_storage,
+        ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+        max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+        preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
     )
-    max_model_len = int(os.environ.get("DALSTON_VLLM_MAX_MODEL_LEN", "4096"))
 
     logger.info(
-        "loading_shared_vllm_model",
-        model_id=model_id,
-        gpu_memory_utilization=gpu_memory_utilization,
-        max_model_len=max_model_len,
+        "shared_manager_created",
+        device=device,
+        torch_dtype=str(torch_dtype),
+        ttl_seconds=manager.ttl_seconds,
+        max_loaded=manager.max_loaded,
     )
-
-    llm = LLM(
-        model=model_id,
-        trust_remote_code=True,
-        gpu_memory_utilization=gpu_memory_utilization,
-        max_model_len=max_model_len,
-        limit_mm_per_prompt={"audio": 1},
-    )
-
-    logger.info("shared_vllm_model_loaded", model_id=model_id)
-    return llm
+    return manager
 
 
-class UnifiedVllmAsrRunner:
-    """Runs batch + realtime vLLM-ASR adapters in a single process.
+class UnifiedHfAsrRunner:
+    """Runs batch + realtime HF-ASR adapters in a single process.
 
     Key properties:
-    - ONE vLLM LLM instance (one model in GPU memory)
+    - ONE HFTransformersModelManager (shared model cache)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -99,13 +112,8 @@ class UnifiedVllmAsrRunner:
     """
 
     def __init__(self) -> None:
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "vLLM-ASR requires CUDA. GPU not available on this system."
-            )
-
-        # Create single shared vLLM instance
-        self._llm = _create_vllm_instance()
+        # Create single shared model manager
+        self._manager = _create_shared_manager()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -117,9 +125,9 @@ class UnifiedVllmAsrRunner:
         self._running = False
 
         logger.info(
-            "unified_vllm_asr_runner_init",
+            "unified_hf_asr_runner_init",
+            device=self._manager.device,
             admission=self._admission.get_status(),
-            cuda_device_count=torch.cuda.device_count(),
         )
 
     def run(self) -> None:
@@ -130,12 +138,13 @@ class UnifiedVllmAsrRunner:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        from batch_engine import VllmAsrBatchEngine
-        from rt_engine import VllmAsrRealtimeEngine
+        # Import adapters (sibling modules, on sys.path via _ensure_import_path)
+        from batch_engine import HfAsrBatchEngine
+        from rt_engine import HfAsrRealtimeEngine
 
-        # Create adapters sharing the same vLLM instance
-        self._batch_engine = VllmAsrBatchEngine(llm=self._llm)
-        self._rt_engine = VllmAsrRealtimeEngine(llm=self._llm)
+        # Create adapters sharing the same manager
+        self._batch_engine = HfAsrBatchEngine(manager=self._manager)
+        self._rt_engine = HfAsrRealtimeEngine(manager=self._manager)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
@@ -212,7 +221,7 @@ class UnifiedVllmAsrRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_vllm_asr_runner_shutting_down")
+        logger.info("unified_hf_asr_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -228,17 +237,11 @@ class UnifiedVllmAsrRunner:
         if self._batch_thread and self._batch_thread.is_alive():
             self._batch_thread.join(timeout=10)
 
-        # Release shared vLLM instance
-        if self._llm is not None:
-            del self._llm
-            self._llm = None
-
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            gc.collect()
+        # Shutdown shared manager (unloads all models)
+        self._manager.shutdown()
 
         logger.info(
-            "unified_vllm_asr_runner_stopped",
+            "unified_hf_asr_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -272,5 +275,5 @@ _ensure_import_path()
 
 
 if __name__ == "__main__":
-    runner = UnifiedVllmAsrRunner()
+    runner = UnifiedHfAsrRunner()
     runner.run()

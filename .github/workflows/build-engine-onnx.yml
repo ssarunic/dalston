@@ -19,7 +19,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'engines/stt-unified/onnx/**'
+      - 'engines/stt-transcribe/onnx/**'
       - 'dalston/**'
       - 'pyproject.toml'
   workflow_dispatch:  # manual trigger
@@ -60,7 +60,7 @@ jobs:
             --build-arg DEVICE=cuda \
             -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPO:latest \
-            -f engines/stt-unified/onnx/Dockerfile \
+            -f engines/stt-transcribe/onnx/Dockerfile \
             .
 
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG

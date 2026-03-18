@@ -73,7 +73,7 @@ make logs-all      # all services
 make ps
 
 # Rebuild and restart a specific engine
-make rebuild ENGINE=stt-batch-transcribe-faster-whisper-base
+make rebuild ENGINE=stt-transcribe-faster-whisper-base
 
 # Rebuild gateway with latest web console changes
 make deploy-web

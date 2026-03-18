@@ -51,7 +51,7 @@ def _cleanup_injected_modules():
 
 def _load_rt_engine_module():
     """Load the RT parakeet engine module via importlib."""
-    engine_path = Path("engines/stt-unified/nemo/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/nemo/rt_engine.py")
     if not engine_path.exists():
         pytest.skip("Parakeet streaming engine not found")
 

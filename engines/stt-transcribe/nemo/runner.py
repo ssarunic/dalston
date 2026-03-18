@@ -1,15 +1,12 @@
-"""Unified faster-whisper runner: one process, one model, both interfaces.
+"""Unified NeMo runner: one process, one model, both interfaces.
 
-This runner creates a single FasterWhisperInference (one loaded model) and passes
+This runner creates a single NemoInference (one loaded NeMo model) and passes
 it to both the batch engine adapter (queue polling) and the realtime engine
 adapter (WebSocket server). An AdmissionController gates both paths to
 prevent realtime starvation under batch load.
 
-This is the M63 "unified engine instance" — batch and RT share the same
-GPU-resident model instead of loading independent copies.
-
 Usage:
-    python -m engines.stt-unified.faster-whisper.runner
+    python -m engines.stt-transcribe.nemo.runner
 
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
@@ -32,16 +29,16 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.engine_sdk.inference.faster_whisper_inference import FasterWhisperInference
+from dalston.engine_sdk.inference.nemo_inference import NemoInference
 
 logger = structlog.get_logger()
 
 
-class UnifiedFasterWhisperRunner:
-    """Runs batch + realtime faster-whisper adapters in a single process.
+class UnifiedNemoRunner:
+    """Runs batch + realtime NeMo adapters in a single process.
 
     Key properties:
-    - ONE FasterWhisperInference instance (one model in GPU memory)
+    - ONE NemoInference instance (one NeMo model in GPU memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
@@ -52,7 +49,7 @@ class UnifiedFasterWhisperRunner:
 
     def __init__(self) -> None:
         # Create single shared core
-        self._core = FasterWhisperInference.from_env()
+        self._core = NemoInference.from_env()
 
         # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
@@ -64,9 +61,8 @@ class UnifiedFasterWhisperRunner:
         self._running = False
 
         logger.info(
-            "unified_runner_init",
+            "unified_nemo_runner_init",
             device=self._core.device,
-            compute_type=self._core.compute_type,
             admission=self._admission.get_status(),
         )
 
@@ -85,12 +81,12 @@ class UnifiedFasterWhisperRunner:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        from batch_engine import FasterWhisperBatchEngine
-        from rt_engine import FasterWhisperRealtimeEngine
+        from batch_engine import NemoBatchEngine
+        from rt_engine import NemoRealtimeEngine
 
-        # Create adapters sharing the same FasterWhisperInference
-        self._batch_engine = FasterWhisperBatchEngine(core=self._core)
-        self._rt_engine = FasterWhisperRealtimeEngine(core=self._core)
+        # Create adapters sharing the same NemoInference
+        self._batch_engine = NemoBatchEngine(core=self._core)
+        self._rt_engine = NemoRealtimeEngine(core=self._core)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
@@ -167,7 +163,7 @@ class UnifiedFasterWhisperRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_runner_shutting_down")
+        logger.info("unified_nemo_runner_shutting_down")
 
         # Stop RT adapter
         if self._rt_engine:
@@ -187,7 +183,7 @@ class UnifiedFasterWhisperRunner:
         self._core.shutdown()
 
         logger.info(
-            "unified_runner_stopped",
+            "unified_nemo_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -221,5 +217,5 @@ _ensure_import_path()
 
 
 if __name__ == "__main__":
-    runner = UnifiedFasterWhisperRunner()
+    runner = UnifiedNemoRunner()
     runner.run()

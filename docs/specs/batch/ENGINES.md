@@ -557,7 +557,7 @@ CMD ["python", "/app/engine.py"]
 ### docker-compose.yml Service
 
 ```yaml
-stt-batch-transcribe-faster-whisper:
+stt-transcribe-faster-whisper:
   build:
     context: ./engines/stt-transcribe/faster-whisper
   environment:

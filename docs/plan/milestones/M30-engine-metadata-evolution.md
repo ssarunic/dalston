@@ -254,7 +254,7 @@ python scripts/generate_catalog.py \
       "id": "faster-whisper",
       "stage": "transcribe",
       "version": "1.2.0",
-      "image": "dalston/stt-batch-transcribe-whisper:1.2.0",
+      "image": "dalston/stt-transcribe-whisper:1.2.0",
       "capabilities": { ... },
       "hardware": { ... },
       "performance": { ... }
@@ -538,7 +538,7 @@ curl http://localhost:8000/v1/capabilities | jq '.languages'
 # ["en", "es", "fr", ...]
 
 # 4. Verify error messages
-docker compose stop stt-batch-transcribe-whisper-cpu
+docker compose stop stt-transcribe-whisper-cpu
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -H "Authorization: Bearer dk_test" \
   -F "file=@test.mp3" \

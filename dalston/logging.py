@@ -67,7 +67,7 @@ def configure(service_name: str) -> None:
 
     Args:
         service_name: Identifier for this service (e.g. "gateway",
-            "orchestrator", "stt-batch-transcribe-whisper").
+            "orchestrator", "stt-transcribe-whisper").
 
     Environment Variables:
         DALSTON_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).

@@ -7,7 +7,7 @@
 # assemble redacted mono WAVs into stereo output.
 #
 # Build from repo root:
-#   docker compose build stt-batch-merge
+#   docker compose build stt-merge
 
 FROM dalston/engine-base:latest
 

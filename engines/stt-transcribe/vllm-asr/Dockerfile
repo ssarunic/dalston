@@ -4,7 +4,7 @@
 # Supports Voxtral, Qwen2-Audio, and any model in the adapter registry.
 #
 # Build from repo root:
-#   docker build -t dalston/stt-vllm-asr:latest -f engines/stt-unified/vllm-asr/Dockerfile .
+#   docker build -t dalston/stt-vllm-asr:latest -f engines/stt-transcribe/vllm-asr/Dockerfile .
 
 # --- GPU only (vLLM requires CUDA) ---
 FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04
@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime
 
 # vLLM engine dependencies
 WORKDIR /engine
-COPY engines/stt-unified/vllm-asr/requirements.txt .
+COPY engines/stt-transcribe/vllm-asr/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
@@ -39,14 +39,14 @@ RUN mkdir -p /models/silero-vad \
     && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 
-# Engine code (all adapters colocated in stt-unified/vllm-asr/)
+# Engine code (all adapters colocated in stt-transcribe/vllm-asr/)
 WORKDIR /app
-COPY engines/stt-unified/vllm-asr/ engines/stt-unified/vllm-asr/
-COPY engines/stt-unified/vllm-asr/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/vllm-asr/ engines/stt-transcribe/vllm-asr/
+COPY engines/stt-transcribe/vllm-asr/rt_engine.yaml /etc/dalston/engine.yaml
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/vllm-asr/runner.py"]
+CMD ["python", "engines/stt-transcribe/vllm-asr/runner.py"]

@@ -114,8 +114,8 @@ dalston-aws setup --instance-type t3.xlarge
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-onnx \
-  stt-batch-transcribe-faster-whisper stt-batch-align-phoneme-cpu stt-batch-merge
+  stt-prepare stt-transcribe-onnx \
+  stt-transcribe-faster-whisper stt-align-phoneme-cpu stt-merge
 ```
 
 ### Memory budget (16 GB)
@@ -246,19 +246,19 @@ Or cherry-pick engine_ids:
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-merge \
-  stt-batch-transcribe-nemo \
-  stt-batch-transcribe-faster-whisper \
-  stt-batch-align-phoneme \
-  stt-batch-diarize-pyannote-4.0 \
+  stt-prepare stt-merge \
+  stt-transcribe-nemo \
+  stt-transcribe-faster-whisper \
+  stt-align-phoneme \
+  stt-diarize-pyannote-4.0 \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
 **Using nemo-msdd instead of pyannote** (no HF_TOKEN required, open CC-BY-4.0 license):
 
 ```bash
-# Replace stt-batch-diarize-pyannote-4.0 with:
-  stt-batch-diarize-nemo-msdd
+# Replace stt-diarize-pyannote-4.0 with:
+  stt-diarize-nemo-msdd
 ```
 
 ### Cost
@@ -371,11 +371,11 @@ Use `CUDA_VISIBLE_DEVICES` in a compose override to pin engine_ids to GPUs:
 ```yaml
 # In docker-compose.aws-multigpu.yml (override)
 services:
-  stt-batch-transcribe-nemo:
+  stt-transcribe-nemo:
     environment:
       CUDA_VISIBLE_DEVICES: "0"
 
-  stt-batch-transcribe-faster-whisper:
+  stt-transcribe-faster-whisper:
     environment:
       CUDA_VISIBLE_DEVICES: "0"
 
@@ -383,19 +383,19 @@ services:
     environment:
       CUDA_VISIBLE_DEVICES: "1"
 
-  stt-batch-diarize-nemo-msdd:
+  stt-diarize-nemo-msdd:
     environment:
       CUDA_VISIBLE_DEVICES: "1"
 
-  stt-batch-transcribe-vllm-asr:
+  stt-transcribe-vllm-asr:
     environment:
       CUDA_VISIBLE_DEVICES: "2"
 
-  stt-batch-align-phoneme:
+  stt-align-phoneme:
     environment:
       CUDA_VISIBLE_DEVICES: "3"
 
-  stt-batch-pii-detect-presidio-gpu:
+  stt-pii-detect-presidio-gpu:
     environment:
       CUDA_VISIBLE_DEVICES: "3"
 ```
@@ -477,20 +477,20 @@ All Dalston engines connect to Redis directly via `REDIS_URL`. Put Redis on the 
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-merge \
-  stt-batch-pii-detect-presidio \
-  stt-batch-audio-redact-audio \
-  stt-batch-transcribe-onnx
+  stt-prepare stt-merge \
+  stt-pii-detect-presidio \
+  stt-audio-redact-audio \
+  stt-transcribe-onnx
 
 # On the GPU instance (g5.xlarge)
 # .env.gpu points REDIS_URL and DATABASE_URL to the control plane
 REDIS_URL=redis://10.0.1.10:6379 \
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.gpu --profile gpu up -d \
-  stt-batch-transcribe-nemo \
-  stt-batch-transcribe-faster-whisper \
-  stt-batch-align-phoneme \
-  stt-batch-diarize-nemo-msdd \
+  stt-transcribe-nemo \
+  stt-transcribe-faster-whisper \
+  stt-align-phoneme \
+  stt-diarize-nemo-msdd \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
@@ -665,12 +665,12 @@ Start these services:
 docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
   --env-file .env.aws --profile local-infra up -d \
   gateway orchestrator \
-  stt-batch-prepare \
-  stt-batch-transcribe-nemo \
-  stt-batch-transcribe-faster-whisper \
-  stt-batch-align-phoneme \
-  stt-batch-diarize-nemo-msdd \
-  stt-batch-merge \
+  stt-prepare \
+  stt-transcribe-nemo \
+  stt-transcribe-faster-whisper \
+  stt-align-phoneme \
+  stt-diarize-nemo-msdd \
+  stt-merge \
   stt-rt-transcribe-parakeet-rnnt-0.6b
 ```
 
@@ -927,7 +927,7 @@ The `observability` compose profile adds Prometheus, Grafana, Jaeger, and a queu
 │         ├── gateway:8000/metrics                 │
 │         ├── orchestrator:8001/metrics            │
 │         ├── metrics-exporter:9100/metrics        │
-│         ├── stt-batch-*:9100/metrics             │
+│         ├── stt-*:9100/metrics             │
 │         └── stt-rt-*:9100/metrics                │
 │                                                  │
 │  ┌──────────────┐                                │

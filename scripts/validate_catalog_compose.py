@@ -55,8 +55,8 @@ def collect_batch_ids(services: dict) -> set[str]:
     batch_ids: set[str] = set()
     for service_name, service in services.items():
         if not (
-            service_name.startswith("stt-batch-")
-            or service_name.startswith("stt-unified-")
+            service_name.startswith("stt-")
+            or service_name.startswith("stt-transcribe-")
         ):
             continue
         env = parse_environment(service.get("environment"))

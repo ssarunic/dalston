@@ -20,7 +20,7 @@ import pytest
 
 from dalston.common.pipeline_types import TranscriptionRequest
 
-UNIFIED_RIVA_DIR = Path("engines/stt-unified/riva")
+UNIFIED_RIVA_DIR = Path("engines/stt-transcribe/riva")
 
 
 def _make_mock_word(

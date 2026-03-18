@@ -205,4 +205,4 @@ pytest tests/unit/test_faster_whisper_rt_contract.py
 - `dalston/realtime_sdk/session.py`
 - `engines/stt-transcribe/*/engine.py`
 - `engines/stt-rt/*/engine.py`
-- `engines/stt-unified/*/runner.py`
+- `engines/stt-transcribe/*/runner.py`

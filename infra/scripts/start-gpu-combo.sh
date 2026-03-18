@@ -14,7 +14,7 @@
 # even when both are running inference concurrently across different jobs.
 
 INSTANCE_TAG="dalston-gpu-combo"
-CONTAINERS_TO_WAIT=("stt-unified-onnx" "stt-batch-diarize-pyannote-4-0")
+CONTAINERS_TO_WAIT=("stt-transcribe-onnx" "stt-diarize-pyannote-4-0")
 
 prereq_check() {
   [[ -z "${HF_TOKEN:-}" ]] && { echo "ERROR: HF_TOKEN environment variable is required for pyannote models"; exit 1; }
@@ -25,7 +25,7 @@ build_container_run_block() {
 docker pull DALSTON_ECR/dalston/stt-onnx:DALSTON_ONNX_TAG
 docker pull DALSTON_ECR/dalston/stt-diarize-pyannote:DALSTON_PYANNOTE_TAG
 
-docker run -d --name stt-unified-onnx --gpus all --restart unless-stopped \
+docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -p 9000:9000 \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \
@@ -36,7 +36,7 @@ docker run -d --name stt-unified-onnx --gpus all --restart unless-stopped \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
   DALSTON_ECR/dalston/stt-onnx:DALSTON_ONNX_TAG
 
-docker run -d --name stt-batch-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
+docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-gpu-1 \

@@ -131,7 +131,7 @@ Best for: Testing, development, or when you only need basic transcription withou
 ```bash
 docker compose --profile local-infra --profile local-object-storage up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-merge
+  stt-prepare stt-transcribe-faster-whisper-base stt-merge
 ```
 
 Submit jobs with `timestamps_granularity=segment` to skip alignment.
@@ -143,7 +143,7 @@ Best for: Production use requiring word-level timestamps.
 ```bash
 docker compose --profile local-infra --profile local-object-storage up -d \
   gateway orchestrator \
-  stt-batch-prepare stt-batch-transcribe-faster-whisper-base stt-batch-align-whisperx-cpu stt-batch-merge
+  stt-prepare stt-transcribe-faster-whisper-base stt-align-whisperx-cpu stt-merge
 ```
 
 ### Option C: Full Pipeline (With Speaker Diarization)
@@ -154,7 +154,7 @@ Best for: Meeting transcription, interviews, multi-speaker content.
 docker compose --profile local-infra --profile local-object-storage up -d
 ```
 
-This starts the default CPU-safe stack, including `stt-batch-diarize-pyannote-4.0-cpu` for speaker identification.
+This starts the default CPU-safe stack, including `stt-diarize-pyannote-4.0-cpu` for speaker identification.
 
 ### Option D: GPU-Accelerated
 
@@ -275,13 +275,13 @@ curl http://localhost:8000/v1/audio/transcriptions/JOB_ID \
 
 ```bash
 # Scale transcription engines
-docker compose up -d --scale stt-batch-transcribe-whisper-cpu=2
+docker compose up -d --scale stt-transcribe-whisper-cpu=2
 
 # Scale multiple engines
 docker compose up -d \
-  --scale stt-batch-transcribe-whisper-cpu=2 \
-  --scale stt-batch-align-whisperx-cpu=2 \
-  --scale stt-batch-diarize-pyannote-v40-cpu=2
+  --scale stt-transcribe-whisper-cpu=2 \
+  --scale stt-align-whisperx-cpu=2 \
+  --scale stt-diarize-pyannote-v40-cpu=2
 ```
 
 ### Resource limits
@@ -290,7 +290,7 @@ Add to `docker-compose.override.yml`:
 
 ```yaml
 services:
-  stt-batch-transcribe-whisper-cpu:
+  stt-transcribe-whisper-cpu:
     deploy:
       resources:
         limits:
@@ -303,7 +303,7 @@ services:
 
 ```yaml
 services:
-  stt-batch-transcribe-whisper-cpu:
+  stt-transcribe-whisper-cpu:
     deploy:
       resources:
         reservations:
@@ -312,7 +312,7 @@ services:
               device_ids: ['0']
               capabilities: [gpu]
 
-  stt-batch-diarize-pyannote-v40-cpu:
+  stt-diarize-pyannote-v40-cpu:
     deploy:
       resources:
         reservations:
@@ -411,7 +411,7 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f gateway
-docker compose logs -f stt-batch-transcribe-whisper-cpu
+docker compose logs -f stt-transcribe-whisper-cpu
 ```
 
 ### Update deployment
@@ -492,7 +492,7 @@ docker info | grep -i engine_id
 docker stats
 
 # Reduce concurrent processing by scaling down
-docker compose up -d --scale stt-batch-transcribe-whisper-cpu=1
+docker compose up -d --scale stt-transcribe-whisper-cpu=1
 ```
 
 ### Jobs stuck in pending
@@ -528,10 +528,10 @@ Models are downloaded on first use. If downloads fail:
 
 ```bash
 # Check internet connectivity from container
-docker compose exec stt-batch-transcribe-whisper-cpu curl -I https://huggingface.co
+docker compose exec stt-transcribe-whisper-cpu curl -I https://huggingface.co
 
 # Manually download models
-docker compose exec stt-batch-transcribe-whisper-cpu python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
+docker compose exec stt-transcribe-whisper-cpu python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
 ```
 
 ### HuggingFace token issues
@@ -540,10 +540,10 @@ For diarization engines:
 
 ```bash
 # Verify token is set
-docker compose exec stt-batch-diarize-pyannote-v40-cpu printenv HF_TOKEN
+docker compose exec stt-diarize-pyannote-v40-cpu printenv HF_TOKEN
 
 # Test token validity
-docker compose exec stt-batch-diarize-pyannote-v40-cpu python -c "
+docker compose exec stt-diarize-pyannote-v40-cpu python -c "
 from huggingface_hub import HfApi
 api = HfApi()
 print(api.whoami())

@@ -325,7 +325,7 @@ watch -n 2 "curl -s http://localhost:8000/v1/audio/transcriptions/$JOB_ID \
   -H 'Authorization: Bearer $DALSTON_API_KEY' | jq '{status, text}'"
 
 # Verify no AWS credentials in engine containers
-docker compose exec stt-batch-transcribe-faster-whisper-base \
+docker compose exec stt-transcribe-faster-whisper-base \
   env | grep -E "AWS_|S3_ENDPOINT" || echo "PASS: no credentials in engine"
 
 # Verify presigned URLs are written to task metadata

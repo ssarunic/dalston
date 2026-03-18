@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-UNIFIED_YAML = Path("engines/stt-unified/riva/rt_engine.yaml")
+UNIFIED_YAML = Path("engines/stt-transcribe/riva/rt_engine.yaml")
 
 
 class TestUnifiedEngineYaml:

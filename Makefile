@@ -80,7 +80,7 @@ dev-minimal: clean-local
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose --profile local-infra --profile local-object-storage up -d --build \
 		gateway orchestrator \
-		stt-batch-prepare stt-unified-faster-whisper-cpu stt-batch-align-phoneme-cpu
+		stt-prepare stt-transcribe-faster-whisper-cpu stt-align-phoneme-cpu
 
 # Start with GPU engines (requires NVIDIA GPU)
 dev-gpu: clean-local
@@ -120,22 +120,22 @@ ps:
 # Build CPU engine variants (for Mac development)
 build-cpu:
 	docker compose build \
-		stt-batch-prepare \
-		stt-batch-transcribe-faster-whisper \
-		stt-unified-nemo-cpu \
-		stt-unified-onnx-cpu \
-		stt-unified-faster-whisper-cpu \
-		stt-batch-align-phoneme-cpu \
-		stt-batch-diarize-pyannote-4.0-cpu \
-		stt-batch-diarize-nemo-msdd-cpu \
-		stt-batch-pii-detect-presidio
+		stt-prepare \
+		stt-transcribe-faster-whisper \
+		stt-transcribe-nemo-cpu \
+		stt-transcribe-onnx-cpu \
+		stt-transcribe-faster-whisper-cpu \
+		stt-align-phoneme-cpu \
+		stt-diarize-pyannote-4.0-cpu \
+		stt-diarize-nemo-msdd-cpu \
+		stt-pii-detect-presidio
 
 # Build GPU engine variants
 build-gpu:
 	docker compose --profile gpu build
 
 # Build a specific engine
-# Usage: make build-engine ENGINE=stt-batch-transcribe-faster-whisper
+# Usage: make build-engine ENGINE=stt-transcribe-faster-whisper
 build-engine:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make build-engine ENGINE=<service-name>)
@@ -143,7 +143,7 @@ endif
 	docker compose build $(ENGINE)
 
 # Rebuild and restart a specific engine
-# Usage: make rebuild ENGINE=stt-batch-transcribe-faster-whisper
+# Usage: make rebuild ENGINE=stt-transcribe-faster-whisper
 rebuild:
 ifndef ENGINE
 	$(error ENGINE is required. Usage: make rebuild ENGINE=<service-name>)

@@ -1,10 +1,10 @@
-# Unified Faster Whisper Engine
+# Unified ONNX Engine
 #
-# One process, one CTranslate2 model, both batch and realtime interfaces.
+# One process, one ONNX model, both batch and realtime interfaces.
 #
 # Build from repo root:
-#   CPU:  docker build -t dalston/stt-faster-whisper:latest -f engines/stt-unified/faster-whisper/Dockerfile .
-#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-faster-whisper:latest -f engines/stt-unified/faster-whisper/Dockerfile .
+#   CPU:  docker build -t dalston/stt-onnx:latest -f engines/stt-transcribe/onnx/Dockerfile .
+#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-onnx:latest -f engines/stt-transcribe/onnx/Dockerfile .
 
 ARG DEVICE=cpu
 
@@ -12,10 +12,11 @@ ARG DEVICE=cpu
 FROM python:3.12-slim AS base-cpu
 
 # --- GPU base ---
-FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu24.04 AS base-cuda
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-dev python3-pip \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Common ---
@@ -34,35 +35,35 @@ COPY pyproject.toml .
 COPY dalston/ dalston/
 RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime-sdk]"
 
-# Faster Whisper engine dependencies
+# ONNX engine dependencies
 WORKDIR /engine
-COPY engines/stt-unified/faster-whisper/requirements.txt .
-RUN if [ "$DEVICE" = "cpu" ]; then \
+COPY engines/stt-transcribe/onnx/requirements.txt .
+RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
-            torch --index-url https://download.pytorch.org/whl/cpu && \
-        pip install --no-cache-dir --break-system-packages torchaudio; \
+            "onnx-asr[hub]>=0.5.0" \
+            "onnxruntime-gpu>=1.19.2"; \
+    else \
+        pip install --no-cache-dir --break-system-packages -r requirements.txt; \
     fi
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Model cache
 ENV HF_HOME=/models/huggingface
-ENV TORCH_HOME=/models/torch
-ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
-RUN mkdir -p /models/huggingface /models/torch /models/ctranslate2/faster-whisper
+RUN mkdir -p /models/huggingface
 
 # Silero VAD model — baked in to eliminate runtime download
 RUN mkdir -p /models/silero-vad \
     && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 
-# Engine code (all adapters colocated in stt-unified/faster-whisper/)
+# Engine code (all ONNX engine files in a single directory)
 WORKDIR /app
-COPY engines/stt-unified/faster-whisper/ engines/stt-unified/faster-whisper/
-COPY engines/stt-unified/faster-whisper/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/onnx/ engines/stt-transcribe/onnx/
+COPY engines/stt-transcribe/onnx/rt_engine.yaml /etc/dalston/engine.yaml
+COPY scripts/diagnose-gpu.py scripts/diagnose-gpu.py
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/faster-whisper/runner.py"]
+CMD ["python", "engines/stt-transcribe/onnx/runner.py"]

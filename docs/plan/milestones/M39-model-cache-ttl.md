@@ -54,9 +54,9 @@ x-model-volumes: &model-volumes
 
 # All engine services use:
 services:
-  stt-batch-transcribe-faster-whisper:
+  stt-transcribe-faster-whisper:
     volumes: *model-volumes
-  stt-batch-diarize-pyannote:
+  stt-diarize-pyannote:
     volumes: *model-volumes
   # ... etc
 ```
@@ -529,11 +529,11 @@ make build-cpu
 make dev-minimal
 
 # Verify models download to correct location
-docker compose exec stt-batch-transcribe-faster-whisper ls -la /models/
+docker compose exec stt-transcribe-faster-whisper ls -la /models/
 # Should show: huggingface/, ctranslate2/, torch/
 
 # Verify HuggingFace cache structure
-docker compose exec stt-batch-transcribe-faster-whisper ls /models/huggingface/hub/
+docker compose exec stt-transcribe-faster-whisper ls /models/huggingface/hub/
 # Should show: models--Systran--faster-whisper-large-v3-turbo/
 
 # Run transcription to trigger model download

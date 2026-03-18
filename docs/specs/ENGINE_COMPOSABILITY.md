@@ -42,7 +42,7 @@ skipped. This works well for simple cases but has limitations:
 
 - **NIM integration gap.** NVIDIA NIM containers bundle transcription,
   diarisation, timestamps, and punctuation behind a single gRPC call. Dalston's
-  Riva engine driver (`engines/stt-unified/riva/`) already wraps this, but the
+  Riva engine driver (`engines/stt-transcribe/riva/`) already wraps this, but the
   system has no clean way to represent a NIM container as a single engine that
   happens to cover many stages. Today, each NIM deployment is registered as a
   `stage: transcribe` engine with boolean capability flags
@@ -241,7 +241,7 @@ Dalston's structured result format. Dalston does not adopt any vendor's
 protocol as its own API surface.
 
 This is already the pattern in the codebase. The Riva engine driver
-(`engines/stt-unified/riva/riva_client.py`) speaks gRPC to the NIM container
+(`engines/stt-transcribe/riva/riva_client.py`) speaks gRPC to the NIM container
 and translates Riva's `StreamingRecognitionResult` into Dalston's `Transcript`
 type. The faster-whisper driver does the same via in-process Python. The
 pattern simply needs to be formalised and extended.

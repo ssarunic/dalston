@@ -28,13 +28,13 @@ services:
     volumes:
       - /data/redis:/data
 
-  stt-batch-prepare:
+  stt-prepare:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
       AWS_REGION: ${AWS_REGION}
 
-  stt-unified-faster-whisper:
+  stt-transcribe-faster-whisper:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -43,7 +43,7 @@ services:
     volumes:
       - /data/models:/data/models
 
-  stt-unified-nemo:
+  stt-transcribe-nemo:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -53,7 +53,7 @@ services:
     volumes:
       - /data/models:/data/models
 
-  stt-batch-align-phoneme:
+  stt-align-phoneme:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -63,7 +63,7 @@ services:
       - /data/models:/data/models
 
 
-  stt-batch-pii-detect-presidio-gpu:
+  stt-pii-detect-presidio-gpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -73,7 +73,7 @@ services:
       - /data/models:/data/models
 
   # ONNX Parakeet unified (CPU)
-  stt-unified-onnx-cpu:
+  stt-transcribe-onnx-cpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -83,7 +83,7 @@ services:
       - /data/models:/data/models
 
   # ONNX Parakeet unified (GPU)
-  stt-unified-onnx:
+  stt-transcribe-onnx:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -93,7 +93,7 @@ services:
       - /data/models:/data/models
 
   # NeMo Parakeet unified (CPU)
-  stt-unified-nemo-cpu:
+  stt-transcribe-nemo-cpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -104,7 +104,7 @@ services:
       - /data/models:/data/models
 
   # Pyannote 4.0 diarization (CPU)
-  stt-batch-diarize-pyannote-4.0-cpu:
+  stt-diarize-pyannote-4.0-cpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -114,7 +114,7 @@ services:
       - /data/models:/data/models
 
   # Pyannote 4.0 diarization (GPU)
-  stt-batch-diarize-pyannote-4.0:
+  stt-diarize-pyannote-4.0:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -124,7 +124,7 @@ services:
       - /data/models:/data/models
 
   # NeMo MSDD diarization (GPU)
-  stt-batch-diarize-nemo-msdd:
+  stt-diarize-nemo-msdd:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -134,7 +134,7 @@ services:
       - /data/models:/data/models
 
   # NeMo MSDD diarization (CPU)
-  stt-batch-diarize-nemo-msdd-cpu:
+  stt-diarize-nemo-msdd-cpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}

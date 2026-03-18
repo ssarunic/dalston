@@ -1,25 +1,21 @@
-"""Unified Riva runner: one process, one gRPC channel, both interfaces.
+"""Unified ONNX runner: one process, one model, both interfaces.
 
-This runner creates a single RivaClient (one gRPC channel to the NIM
-sidecar) and passes it to both the batch engine adapter (queue polling)
-and the realtime engine adapter (WebSocket server).  An AdmissionController
-gates both paths to prevent realtime starvation under batch load.
+This runner creates a single OnnxInference (one loaded ONNX model) and
+passes it to both the batch engine adapter (queue polling) and the realtime
+engine adapter (WebSocket server). An AdmissionController gates both paths
+to prevent realtime starvation under batch load.
 
-Unlike other unified engines (ONNX, faster-whisper) where the shared
-resource is a GPU-resident model, here the shared resource is the gRPC
-connection to an external NIM sidecar.  The consolidation benefit is
-operational consistency -- one container, one deployment unit, one set
-of env vars -- rather than GPU memory savings.
+This is the M63 "unified engine instance" — batch and RT share the same
+ONNX Runtime session instead of loading independent copies.
 
 Usage:
-    python engines/stt-unified/riva/runner.py
+    python -m engines.stt-transcribe.onnx.runner
 
 Environment variables (in addition to each adapter's own env vars):
-    DALSTON_RIVA_URI: gRPC endpoint for Riva NIM (default: localhost:50051)
-    DALSTON_RIVA_CHUNK_MS: Chunk size in ms for batch streaming (default: 100)
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
+
 """
 
 from __future__ import annotations
@@ -30,56 +26,73 @@ import threading
 from typing import Any
 
 import structlog
-from riva_client import RivaClient
 
 from dalston.engine_sdk.admission import (
     AdmissionConfig,
     AdmissionController,
     TaskDeferredError,
 )
+from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 
 logger = structlog.get_logger()
 
 
-class UnifiedRivaRunner:
-    """Runs batch + realtime Riva adapters in a single process.
+class UnifiedOnnxRunner:
+    """Runs batch + realtime ONNX adapters in a single process.
 
     Key properties:
-    - ONE RivaClient instance (one gRPC channel to NIM)
+    - ONE OnnxInference instance (one ONNX session in memory)
     - ONE AdmissionController (shared QoS policy)
     - Batch adapter runs in a background thread (sync queue polling)
     - RT adapter runs in the async event loop (WebSocket server)
+
+    The runner owns the lifecycle of both adapters and coordinates
+    graceful shutdown across both.
     """
 
     def __init__(self) -> None:
-        self._core = RivaClient.from_env()
+        # Create single shared core
+        self._core = OnnxInference.from_env()
+
+        # Create admission controller
         self._admission = AdmissionController(AdmissionConfig.from_env())
 
+        # Adapters (created lazily in run())
         self._batch_engine: Any = None
         self._rt_engine: Any = None
         self._batch_thread: threading.Thread | None = None
         self._running = False
 
         logger.info(
-            "unified_riva_runner_init",
-            riva_uri=self._core.uri,
-            chunk_ms=self._core.chunk_ms,
+            "unified_onnx_runner_init",
+            device=self._core.device,
+            quantization=self._core.quantization,
             admission=self._admission.get_status(),
         )
 
     def run(self) -> None:
-        """Start the unified runner."""
+        """Start the unified runner.
+
+        This is the main entry point. It:
+        1. Creates batch + RT engine adapters sharing the same core
+        2. Starts batch adapter in a background thread
+        3. Runs RT adapter in the main async loop
+        4. Coordinates shutdown across both
+        """
         asyncio.run(self._run_async())
 
     async def _run_async(self) -> None:
         """Async entry point that starts both adapters."""
         self._running = True
 
-        from batch_engine import RivaBatchEngine
-        from rt_engine import RivaRealtimeEngine
+        # Both engines live in the same directory as this runner.
+        # sys.path includes the script directory when run via `python runner.py`.
+        from batch_engine import OnnxBatchEngine
+        from rt_engine import OnnxRealtimeEngine
 
-        self._batch_engine = RivaBatchEngine(core=self._core)
-        self._rt_engine = RivaRealtimeEngine(core=self._core)
+        # Create adapters sharing the same OnnxInference
+        self._batch_engine = OnnxBatchEngine(core=self._core)
+        self._rt_engine = OnnxRealtimeEngine(core=self._core)
 
         # Wrap batch engine's process to check admission
         original_process = self._batch_engine.process
@@ -156,23 +169,27 @@ class UnifiedRivaRunner:
         if not self._running:
             return
         self._running = False
-        logger.info("unified_riva_runner_shutting_down")
+        logger.info("unified_onnx_runner_shutting_down")
 
+        # Stop RT adapter
         if self._rt_engine:
             await self._rt_engine.shutdown()
 
+        # Stop batch adapter
         if self._batch_engine and hasattr(self._batch_engine, "_runner"):
             runner = self._batch_engine._runner
             if runner:
                 runner.stop()
 
+        # Wait for batch thread
         if self._batch_thread and self._batch_thread.is_alive():
             self._batch_thread.join(timeout=10)
 
+        # Shutdown shared core (unloads models)
         self._core.shutdown()
 
         logger.info(
-            "unified_riva_runner_stopped",
+            "unified_onnx_runner_stopped",
             final_admission_status=self._admission.get_status(),
         )
 
@@ -187,7 +204,12 @@ class BatchRejectedError(TaskDeferredError):
 
 
 def _ensure_import_path() -> None:
-    """Ensure this directory is on sys.path for sibling imports."""
+    """Ensure this directory is on sys.path for sibling imports.
+
+    When run as ``python runner.py``, Python adds the script's directory
+    automatically.  When loaded via ``importlib.util.spec_from_file_location``
+    (e.g. from tests), the directory may not be on sys.path.
+    """
     import sys
     from pathlib import Path
 
@@ -200,5 +222,5 @@ _ensure_import_path()
 
 
 if __name__ == "__main__":
-    runner = UnifiedRivaRunner()
+    runner = UnifiedOnnxRunner()
     runner.run()

@@ -4,7 +4,7 @@
 # Supports GPU (recommended) or CPU (slow, for testing).
 #
 # Build from repo root:
-#   docker compose build stt-batch-diarize-nemo-msdd
+#   docker compose build stt-diarize-nemo-msdd
 
 # Use plain Python to avoid NGC container version conflicts
 FROM python:3.11-slim

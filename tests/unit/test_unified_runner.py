@@ -163,7 +163,7 @@ class TestTaskDeferredError:
         import sys
         from pathlib import Path
 
-        runner_path = Path("engines/stt-unified/faster-whisper/runner.py")
+        runner_path = Path("engines/stt-transcribe/faster-whisper/runner.py")
         spec = importlib.util.spec_from_file_location("unified_runner_mod", runner_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

@@ -34,7 +34,7 @@ def _cleanup_injected_modules():
 
 def _load_rt_engine():
     """Load FasterWhisperRealtimeEngine from file to avoid import path issues."""
-    engine_path = Path("engines/stt-unified/faster-whisper/rt_engine.py")
+    engine_path = Path("engines/stt-transcribe/faster-whisper/rt_engine.py")
     spec = importlib.util.spec_from_file_location("m63_whisper_rt_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

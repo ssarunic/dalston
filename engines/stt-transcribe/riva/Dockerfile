@@ -4,7 +4,7 @@
 # CPU-only -- all GPU inference runs in the Riva NIM sidecar container.
 #
 # Build from repo root:
-#   docker build -t dalston/stt-riva:latest -f engines/stt-unified/riva/Dockerfile .
+#   docker build -t dalston/stt-riva:latest -f engines/stt-transcribe/riva/Dockerfile .
 
 FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -e ".[engine-sdk,realtime-sdk]"
 
 # Riva engine dependencies
 WORKDIR /engine
-COPY engines/stt-unified/riva/requirements.txt .
+COPY engines/stt-transcribe/riva/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Silero VAD model — baked in to eliminate runtime download
@@ -32,8 +32,8 @@ ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 
 # Engine code
 WORKDIR /app
-COPY engines/stt-unified/riva/ engines/stt-unified/riva/
-COPY engines/stt-unified/riva/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/riva/ engines/stt-transcribe/riva/
+COPY engines/stt-transcribe/riva/rt_engine.yaml /etc/dalston/engine.yaml
 
 # Default environment
 ENV DALSTON_RIVA_URI=riva-nim:50051
@@ -43,4 +43,4 @@ ENV DALSTON_UNIFIED_ENGINE_ENABLED=true
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-unified/riva/runner.py"]
+CMD ["python", "engines/stt-transcribe/riva/runner.py"]

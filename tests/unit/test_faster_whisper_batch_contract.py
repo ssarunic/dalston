@@ -32,7 +32,7 @@ def _ctx(task_id: str, job_id: str) -> BatchTaskContext:
 
 def _load_whisper_engine_class():
     """Load FasterWhisperBatchEngine class once from file to avoid import path issues."""
-    engine_path = Path("engines/stt-unified/faster-whisper/batch_engine.py")
+    engine_path = Path("engines/stt-transcribe/faster-whisper/batch_engine.py")
     spec = importlib.util.spec_from_file_location("m63_whisper_engine", engine_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

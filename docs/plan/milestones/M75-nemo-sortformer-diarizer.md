@@ -147,7 +147,7 @@ turns = [
 
 **Deliverables:**
 
-- Add `stt-batch-diarize-nemo-sortformer` service to `docker-compose.yml`
+- Add `stt-diarize-nemo-sortformer` service to `docker-compose.yml`
 - GPU profile (same pattern as nemo-msdd)
 - Environment: `DALSTON_ENGINE_ID=nemo-sortformer`, `REDIS_URL`, `HF_HOME`
 - Volume mount for model cache
@@ -187,7 +187,7 @@ turns = [
 
 ```bash
 # Build the engine
-docker compose build stt-batch-diarize-nemo-sortformer
+docker compose build stt-diarize-nemo-sortformer
 
 # Start with GPU profile
 make dev-gpu

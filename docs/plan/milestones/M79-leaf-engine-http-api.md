@@ -296,8 +296,8 @@ response identical to what the queue-based path produces.
 
 **Files modified:**
 
-- `engines/stt-unified/onnx-asr/batch_engine.py` — add `create_http_server()` returning `TranscribeHTTPServer`
-- `engines/stt-unified/onnx-asr/engine.yaml` — add `interface` block
+- `engines/stt-transcribe/onnx-asr/batch_engine.py` — add `create_http_server()` returning `TranscribeHTTPServer`
+- `engines/stt-transcribe/onnx-asr/engine.yaml` — add `interface` block
 - `docker-compose.yml` — expose port 9100 on the onnx-asr service
 
 **Deliverables:**
@@ -336,8 +336,8 @@ audio, verify response matches queue-based output.
 
 **Files modified:**
 
-- `engines/stt-unified/faster-whisper/batch_engine.py` — add `create_http_server()`
-- `engines/stt-unified/faster-whisper/engine.yaml` — add `interface` block
+- `engines/stt-transcribe/faster-whisper/batch_engine.py` — add `create_http_server()`
+- `engines/stt-transcribe/faster-whisper/engine.yaml` — add `interface` block
 
 **Deliverables:**
 
