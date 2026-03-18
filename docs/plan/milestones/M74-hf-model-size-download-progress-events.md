@@ -6,7 +6,7 @@
 | **Duration** | 2-3 days (incremental, test-gated) |
 | **Dependencies** | M40 (model registry), M42 (console model management), M13 (CLI) |
 | **Primary Deliverable** | Persistent model download progress (bytes + percent) with optional Redis event push and client consumption |
-| **Status** | Proposed |
+| **Status** | In Progress — T1-T3, T5-T6 complete; T4 (Redis events) deferred, T7 (tests) partial |
 
 ## Background
 

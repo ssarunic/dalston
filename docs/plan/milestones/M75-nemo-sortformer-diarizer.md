@@ -6,7 +6,7 @@
 | **Duration**     | 1-2 days                                                                         |
 | **Dependencies** | None (existing engine SDK, pipeline types, and orchestrator selection all support new engines) |
 | **Deliverable**  | Batch diarization engine using `SortformerEncLabelModel` with 4-speaker streaming-capable architecture |
-| **Status**       | Pending                                                                          |
+| **Status**       | Complete                                                                         |
 
 ## User Story
 

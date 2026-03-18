@@ -6,7 +6,7 @@
 | **Duration**       | 3–4 weeks                                                    |
 | **Dependencies**   | M79 (Leaf Engine HTTP API), M63 (Engine Unification), M64 (Registry Unification), M66 (Session Router Consolidation) |
 | **Deliverable**    | Stage-specific engine APIs, orchestrator-driven placement for both modes, fleet status API, deprecation of stream-pull dispatch |
-| **Status**         | Not Started                                                  |
+| **Status**         | In Progress — 80.1 partial (typed request/response models for validation in existing Redis path)                    |
 
 ## User Story
 
@@ -47,6 +47,7 @@ NVIDIA Parakeet NIM exposes a purpose-built ASR API:
 - Ports: HTTP on 9000, gRPC on 50051
 
 Key design choices in NIM:
+
 - **No generic task interface** — the endpoint *is* the domain: transcription in, transcript out
 - **No URL/URI input** — audio must be uploaded in the request body (max 25 MB) or streamed via gRPC/WebSocket
 - **No async/webhook support** — processing is synchronous. The caller blocks until the transcript is ready. For long files, NIM uses `true-ofl` profiles that VAD-segment audio into ~30s chunks and parallelize inference internally
@@ -477,6 +478,7 @@ Like NIM, the engine API is **synchronous** — the engine processes the request
 For long-running tasks (multi-minute transcriptions), the orchestrator holds the HTTP connection open with a generous timeout. If the connection drops, the orchestrator retries on the same or different instance.
 
 This is simpler than webhooks because:
+
 - No callback URL management
 - No engine-to-orchestrator network path needed (engines don't need to reach the orchestrator)
 - Retry is trivial — just re-POST
@@ -703,6 +705,7 @@ class ControlAPIServer:
 ```
 
 Key design decisions:
+
 - **Synchronous request/response** — the orchestrator holds the HTTP connection open. No webhooks needed.
 - **Typed validation at the boundary** — `self._request_type.model_validate_json(body)` validates the request against the stage-specific Pydantic model. Malformed requests fail with 422 before touching the engine.
 - **Admission check before processing** — returns 409 immediately if at capacity, so the orchestrator can try another instance.
@@ -745,6 +748,7 @@ class DiarizeEngine(Engine):
 ```
 
 Migration path:
+
 1. Add typed `process()` method to each engine class
 2. Keep the generic `process(TaskRequest)` as a compatibility shim that constructs the typed request from `config`
 3. The control API calls the typed method directly
@@ -945,6 +949,7 @@ If the orchestrator crashes mid-placement, on restart it can detect stale placem
 | `push_only` | Typed HTTP only | Control API only, no polling |
 
 Migration path:
+
 1. Deploy engines with control API (80.1–80.3) — they still poll streams
 2. Switch orchestrator to `push` — typed HTTP dispatch, stream fallback
 3. Observe: verify `dalston_placement_fallback_total` is zero
@@ -1028,6 +1033,7 @@ dalston_fleet_dispatch_mode{mode="stream|push|push_only"}
 ### Orchestrator becomes a single point of failure for dispatch
 
 **Mitigation:**
+
 - In `push` mode (not `push_only`), stream fallback ensures tasks are dispatched if orchestrator restarts
 - Engine heartbeats continue independently of the control API
 - Orchestrator restart recovery: re-place tasks with stale placement records
@@ -1036,6 +1042,7 @@ dalston_fleet_dispatch_mode{mode="stream|push|push_only"}
 ### Synchronous HTTP ties up orchestrator connections during long tasks
 
 **Mitigation:**
+
 - The orchestrator uses an async HTTP client (`httpx.AsyncClient`). Each placement is a coroutine, not a thread. Hundreds can be in-flight concurrently.
 - Connection timeout is `task_timeout + 30s` — generous but bounded.
 - If the connection drops (engine crash, network), the orchestrator retries on another instance.
@@ -1043,6 +1050,7 @@ dalston_fleet_dispatch_mode{mode="stream|push|push_only"}
 ### Engine control API adds attack surface
 
 **Mitigation:**
+
 - Control API is on the internal network (same as Redis, S3). Not exposed externally.
 - No authentication needed on internal control plane (same trust model as current Redis streams).
 - Input validation via Pydantic models at the boundary — rejects malformed requests before reaching engine code.

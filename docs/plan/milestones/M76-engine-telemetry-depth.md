@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M19 (distributed tracing — complete), M20 (metrics — complete), M79 (leaf engine HTTP API — complete) |
 | **Deliverable** | Jaeger waterfall shows sub-spans for model loading, VAD, inference, and result parsing within each engine task, regardless of whether the task arrived via Redis queue or direct HTTP |
-| **Status** | In progress — ONNX engine instrumented (76.1, 76.2, 76.5) |
+| **Status** | In Progress — 76.1-76.3, 76.5 complete; 76.4 (realtime spans) remaining |
 
 ## User Story
 
