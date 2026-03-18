@@ -245,6 +245,48 @@ def _init_engine_metrics() -> None:
         ["engine_id", "model"],
     )
 
+    # M76: Inference-layer telemetry (fires for both batch queue and HTTP paths)
+    _engine_metrics["model_acquire_seconds"] = Histogram(
+        "dalston_engine_model_acquire_seconds",
+        "Time to acquire model handle (lock + possible cold load)",
+        ["engine_id", "model", "in_memory"],
+        buckets=(0.001, 0.01, 0.1, 0.5, 1, 2.5, 5, 10, 30, 60),
+    )
+
+    _engine_metrics["recognize_seconds"] = Histogram(
+        "dalston_engine_recognize_seconds",
+        "Wall-clock time for the recognize/transcribe call",
+        ["engine_id", "model", "device"],
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+    )
+
+    _engine_metrics["realtime_factor_ratio"] = Histogram(
+        "dalston_engine_realtime_factor_ratio",
+        "Real-time factor (processing_time / audio_duration)",
+        ["engine_id", "model", "device"],
+        buckets=(0.01, 0.03, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.0, 5.0),
+    )
+
+    _engine_metrics["vad_segment_count"] = Histogram(
+        "dalston_engine_vad_segment_count",
+        "Number of VAD segments per transcription",
+        ["engine_id"],
+        buckets=(1, 2, 5, 10, 20, 50, 100, 200),
+    )
+
+    _engine_metrics["direct_request_seconds"] = Histogram(
+        "dalston_engine_direct_request_seconds",
+        "Total HTTP request duration for direct engine calls (M79 leaf API)",
+        ["engine_id", "endpoint", "status_code"],
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+    )
+
+    _engine_metrics["direct_requests_total"] = Counter(
+        "dalston_engine_direct_requests_total",
+        "Total HTTP requests to direct engine endpoints (M79 leaf API)",
+        ["engine_id", "endpoint", "status_code"],
+    )
+
 
 def _init_session_router_metrics() -> None:
     """Initialize Session Router-specific metrics."""
@@ -747,6 +789,71 @@ def inc_tasks_skipped_cancelled(stage: str) -> None:
     if not _metrics_enabled or "tasks_skipped_cancelled_total" not in _engine_metrics:
         return
     _engine_metrics["tasks_skipped_cancelled_total"].labels(stage=stage).inc()
+
+
+# -- M76: Inference-layer metrics (fires for both batch and HTTP paths) -------
+
+
+def observe_engine_model_acquire(
+    engine_id: str, model: str, duration: float, *, in_memory: bool
+) -> None:
+    """Record time to acquire a model handle (lock + possible cold load)."""
+    if not _metrics_enabled or "model_acquire_seconds" not in _engine_metrics:
+        return
+    _engine_metrics["model_acquire_seconds"].labels(
+        engine_id=engine_id,
+        model=model,
+        in_memory=str(in_memory).lower(),
+    ).observe(duration)
+
+
+def observe_engine_recognize(
+    engine_id: str, model: str, device: str, duration: float
+) -> None:
+    """Record wall-clock time for the recognize/transcribe call."""
+    if not _metrics_enabled or "recognize_seconds" not in _engine_metrics:
+        return
+    _engine_metrics["recognize_seconds"].labels(
+        engine_id=engine_id, model=model, device=device
+    ).observe(duration)
+
+
+def observe_engine_realtime_factor(
+    engine_id: str, model: str, device: str, rtf: float
+) -> None:
+    """Record real-time factor (processing_time / audio_duration)."""
+    if not _metrics_enabled or "realtime_factor_ratio" not in _engine_metrics:
+        return
+    _engine_metrics["realtime_factor_ratio"].labels(
+        engine_id=engine_id, model=model, device=device
+    ).observe(rtf)
+
+
+def observe_engine_vad_segment_count(engine_id: str, count: int) -> None:
+    """Record number of VAD segments produced."""
+    if not _metrics_enabled or "vad_segment_count" not in _engine_metrics:
+        return
+    _engine_metrics["vad_segment_count"].labels(engine_id=engine_id).observe(count)
+
+
+def observe_engine_direct_request(
+    engine_id: str, endpoint: str, status_code: int, duration: float
+) -> None:
+    """Record an HTTP request to a direct engine endpoint (M79 leaf API)."""
+    if not _metrics_enabled or "direct_request_seconds" not in _engine_metrics:
+        return
+    _engine_metrics["direct_request_seconds"].labels(
+        engine_id=engine_id, endpoint=endpoint, status_code=str(status_code)
+    ).observe(duration)
+
+
+def inc_engine_direct_requests(engine_id: str, endpoint: str, status_code: int) -> None:
+    """Increment the request counter for direct engine endpoints (M79 leaf API)."""
+    if not _metrics_enabled or "direct_requests_total" not in _engine_metrics:
+        return
+    _engine_metrics["direct_requests_total"].labels(
+        engine_id=engine_id, endpoint=endpoint, status_code=str(status_code)
+    ).inc()
 
 
 # =============================================================================

@@ -13,6 +13,7 @@ its own output contract.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,6 +21,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import structlog
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.engine_sdk.managers import FasterWhisperModelManager
 
 if TYPE_CHECKING:
@@ -151,6 +154,7 @@ class FasterWhisperInference:
             max_loaded=max_loaded,
             preload=preload,
         )
+        self._current_model_id: str | None = None
 
         logger.info(
             "transcribe_core_init",
@@ -205,11 +209,13 @@ class FasterWhisperInference:
             config = FasterWhisperConfig()
 
         model_id = self.normalize_model_id(model_id)
+        self._current_model_id = model_id
         model = self._manager.acquire(model_id)
         try:
             return self._transcribe_with_model(model, audio, config)
         finally:
             self._manager.release(model_id)
+            self._current_model_id = None
 
     def _transcribe_with_model(
         self,
@@ -248,56 +254,90 @@ class FasterWhisperInference:
         if config.hotwords:
             transcribe_kwargs["hotwords"] = config.hotwords
 
-        # Run inference
-        segments_generator, info = model.transcribe(
-            audio_input,
-            **transcribe_kwargs,
-        )
+        engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
+        model_id = self._current_model_id or ""
 
-        # Collect results into neutral types
-        segments: list[SegmentResult] = []
-        for segment in segments_generator:
-            words: list[WordResult] = []
-            if segment.words:
-                words = [
-                    WordResult(
-                        word=w.word.strip(),
-                        start=round(w.start, 3),
-                        end=round(w.end, 3),
-                        probability=round(w.probability, 3),
-                    )
-                    for w in segment.words
-                ]
-
-            raw_tokens = getattr(segment, "tokens", None)
-            raw_avg_logprob = getattr(segment, "avg_logprob", None)
-            raw_compression_ratio = getattr(segment, "compression_ratio", None)
-            raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
-
-            segments.append(
-                SegmentResult(
-                    start=round(segment.start, 3),
-                    end=round(segment.end, 3),
-                    text=segment.text.strip(),
-                    words=words,
-                    tokens=list(raw_tokens) if raw_tokens else None,
-                    avg_logprob=(
-                        round(raw_avg_logprob, 4)
-                        if raw_avg_logprob is not None
-                        else None
-                    ),
-                    compression_ratio=(
-                        round(raw_compression_ratio, 4)
-                        if raw_compression_ratio is not None
-                        else None
-                    ),
-                    no_speech_prob=(
-                        round(raw_no_speech_prob, 4)
-                        if raw_no_speech_prob is not None
-                        else None
-                    ),
-                )
+        # Run inference — span covers transcribe() + segment iteration
+        start = time.monotonic()
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.device": self._device,
+                "dalston.compute_type": self._compute_type,
+                "dalston.beam_size": config.beam_size,
+                "dalston.vad_filter": config.vad_filter,
+            },
+        ):
+            segments_generator, info = model.transcribe(
+                audio_input,
+                **transcribe_kwargs,
             )
+
+            # Collect results into neutral types (iterating the generator
+            # drives inference for CTranslate2, so it must be inside the span)
+            segments: list[SegmentResult] = []
+            for segment in segments_generator:
+                words: list[WordResult] = []
+                if segment.words:
+                    words = [
+                        WordResult(
+                            word=w.word.strip(),
+                            start=round(w.start, 3),
+                            end=round(w.end, 3),
+                            probability=round(w.probability, 3),
+                        )
+                        for w in segment.words
+                    ]
+
+                raw_tokens = getattr(segment, "tokens", None)
+                raw_avg_logprob = getattr(segment, "avg_logprob", None)
+                raw_compression_ratio = getattr(segment, "compression_ratio", None)
+                raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
+
+                segments.append(
+                    SegmentResult(
+                        start=round(segment.start, 3),
+                        end=round(segment.end, 3),
+                        text=segment.text.strip(),
+                        words=words,
+                        tokens=list(raw_tokens) if raw_tokens else None,
+                        avg_logprob=(
+                            round(raw_avg_logprob, 4)
+                            if raw_avg_logprob is not None
+                            else None
+                        ),
+                        compression_ratio=(
+                            round(raw_compression_ratio, 4)
+                            if raw_compression_ratio is not None
+                            else None
+                        ),
+                        no_speech_prob=(
+                            round(raw_no_speech_prob, 4)
+                            if raw_no_speech_prob is not None
+                            else None
+                        ),
+                    )
+                )
+
+        recognize_time = time.monotonic() - start
+        audio_duration_s = info.duration
+
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self._device, recognize_time
+        )
+        if audio_duration_s > 0:
+            rtf = recognize_time / audio_duration_s
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self._device, rtf
+            )
+            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+            dalston.telemetry.set_span_attribute(
+                "dalston.audio_duration_s", round(audio_duration_s, 3)
+            )
+
+        word_count = sum(len(s.words) for s in segments)
+        dalston.telemetry.set_span_attribute("dalston.word_count", word_count)
+        dalston.telemetry.set_span_attribute("dalston.segment_count", len(segments))
 
         return TranscriptionResult(
             segments=segments,

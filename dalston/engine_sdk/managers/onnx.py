@@ -122,6 +122,9 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
 
         super().__init__(**kwargs)
 
+    # acquire() telemetry is handled by the base ModelManager (M76).
+    # No override needed — spans and metrics fire for all engines.
+
     @staticmethod
     def _validate_cuda_compute() -> None:
         """Verify that ONNX Runtime can actually execute on GPU.

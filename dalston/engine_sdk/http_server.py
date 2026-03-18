@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import Response
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import TaskRequest, TaskResponse
 
@@ -197,8 +200,13 @@ async def run_engine_http(
     """Shared handler body: process a task request and return a response dict.
 
     Calls ``engine.process()`` in a thread, cleans up the temp directory,
-    and formats the response.
+    and formats the response.  Wraps the call in a root span so that
+    inference sub-spans (M76) have a parent in Jaeger.
     """
+    endpoint = f"/v1/{stage}"
+    start = time.monotonic()
+    status_code = 200
+
     ctx = BatchTaskContext.for_http(
         task_id=task_request.task_id,
         job_id=task_request.job_id,
@@ -206,9 +214,26 @@ async def run_engine_http(
         stage=stage,
     )
     try:
-        result: TaskResponse = await asyncio.to_thread(
-            engine.process, task_request, ctx
-        )
-        return to_http_response(result, engine_id)
+        with dalston.telemetry.create_span(
+            f"engine.{engine_id}.http_process",
+            attributes={
+                "dalston.engine_id": engine_id,
+                "dalston.stage": stage,
+                "dalston.task_id": task_request.task_id,
+                "dalston.transport": "http",
+            },
+        ):
+            result: TaskResponse = await asyncio.to_thread(
+                engine.process, task_request, ctx
+            )
+            return to_http_response(result, engine_id)
+    except Exception:
+        status_code = 500
+        raise
     finally:
         cleanup_audio(task_request.audio_path)
+        duration = time.monotonic() - start
+        dalston.metrics.observe_engine_direct_request(
+            engine_id, endpoint, status_code, duration
+        )
+        dalston.metrics.inc_engine_direct_requests(engine_id, endpoint, status_code)

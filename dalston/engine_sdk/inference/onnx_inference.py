@@ -14,12 +14,15 @@ inference call exceeds GPU memory limits.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import structlog
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.engine_sdk.managers import OnnxModelManager
 
 logger = structlog.get_logger()
@@ -104,6 +107,7 @@ class OnnxInference:
         self._device = device
         self._quantization = quantization
         self._vad: Any | None = None  # Lazy-loaded Silero VAD
+        self._current_model_id: str | None = None  # Set during transcribe()
 
         logger.info(
             "onnx_inference_init",
@@ -146,11 +150,14 @@ class OnnxInference:
         Returns:
             OnnxTranscriptionResult with text, segments, and words.
         """
+        # Store model_id for child spans to reference
+        self._current_model_id = model_id
         model = self._manager.acquire(model_id)
         try:
             return self.transcribe_with_model(model, audio)
         finally:
             self._manager.release(model_id)
+            self._current_model_id = None
 
     def transcribe_with_model(
         self,
@@ -185,7 +192,33 @@ class OnnxInference:
             audio = audio.astype(np.float32)
         if audio.ndim > 1:
             audio = audio.squeeze()
-        result = ts_model.recognize(audio, sample_rate=16000)
+
+        audio_duration_s = len(audio) / 16000.0
+        engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
+        model_id = self._current_model_id or ""
+
+        start = time.monotonic()
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.device": self._device,
+                "dalston.audio_duration_s": round(audio_duration_s, 3),
+                "dalston.mode": "direct",
+            },
+        ):
+            result = ts_model.recognize(audio, sample_rate=16000)
+        recognize_time = time.monotonic() - start
+
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self._device, recognize_time
+        )
+        if audio_duration_s > 0:
+            rtf = recognize_time / audio_duration_s
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self._device, rtf
+            )
+            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+
         return self._parse_result(result)
 
     def _transcribe_with_vad(
@@ -216,25 +249,61 @@ class OnnxInference:
             batch_size=vad_batch_size,
         ).with_timestamps()
 
+        engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
+        model_id = self._current_model_id or ""
+
         # recognize() returns Iterator[TimestampedSegmentResult]
-        vad_segments = vad_ts_model.recognize(audio_path)
+        start = time.monotonic()
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.device": self._device,
+                "dalston.mode": "vad",
+            },
+        ):
+            vad_segments = list(vad_ts_model.recognize(audio_path))
+        recognize_time = time.monotonic() - start
+
+        segment_count = len(vad_segments)
+        dalston.telemetry.set_span_attribute("dalston.segment_count", segment_count)
+        dalston.metrics.observe_engine_vad_segment_count(engine_id, segment_count)
+
+        # Compute audio duration from segments for RTF
+        audio_duration_s = max((float(s.end) for s in vad_segments), default=0.0)
+        dalston.metrics.observe_engine_recognize(
+            engine_id, model_id, self._device, recognize_time
+        )
+        if audio_duration_s > 0:
+            dalston.telemetry.set_span_attribute(
+                "dalston.audio_duration_s", round(audio_duration_s, 3)
+            )
+            rtf = recognize_time / audio_duration_s
+            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self._device, rtf
+            )
 
         return self._parse_vad_result(vad_segments)
 
     def _get_or_load_vad(self) -> Any:
         """Lazy-load Silero VAD model."""
-        if self._vad is None:
-            try:
-                from onnx_asr import load_vad
-            except ImportError as e:
-                raise ImportError(
-                    "onnx-asr VAD support not available. "
-                    "Install with: pip install onnx-asr[hub]"
-                ) from e
+        cache_hit = self._vad is not None
+        with dalston.telemetry.create_span(
+            "engine.vad_load",
+            attributes={"dalston.cache_hit": cache_hit},
+        ):
+            if self._vad is None:
+                try:
+                    from onnx_asr import load_vad
+                except ImportError as e:
+                    raise ImportError(
+                        "onnx-asr VAD support not available. "
+                        "Install with: pip install onnx-asr[hub]"
+                    ) from e
 
-            logger.info("loading_silero_vad")
-            self._vad = load_vad("silero")
-            logger.info("silero_vad_loaded")
+                logger.info("loading_silero_vad")
+                self._vad = load_vad("silero")
+                logger.info("silero_vad_loaded")
         return self._vad
 
     # -- Result parsing ------------------------------------------------------
@@ -251,44 +320,53 @@ class OnnxInference:
         Returns:
             OnnxTranscriptionResult
         """
-        if hasattr(result, "text"):
-            text = str(result.text).strip()
-        else:
-            text = str(result).strip()
+        with dalston.telemetry.create_span("engine.parse_result") as span:
+            if hasattr(result, "text"):
+                text = str(result.text).strip()
+            else:
+                text = str(result).strip()
 
-        if not text:
-            return OnnxTranscriptionResult()
+            if not text:
+                return OnnxTranscriptionResult()
 
-        all_words: list[OnnxWordResult] = []
+            all_words: list[OnnxWordResult] = []
 
-        # Try structured word output first (from some onnx-asr versions)
-        if hasattr(result, "words") and result.words:
-            for w in result.words:
-                word_text = str(w.word if hasattr(w, "word") else w.text).strip()
-                if word_text:
-                    all_words.append(
-                        OnnxWordResult(
-                            word=word_text,
-                            start=round(float(w.start), 3),
-                            end=round(float(w.end), 3),
+            # Try structured word output first (from some onnx-asr versions)
+            if hasattr(result, "words") and result.words:
+                for w in result.words:
+                    word_text = str(w.word if hasattr(w, "word") else w.text).strip()
+                    if word_text:
+                        all_words.append(
+                            OnnxWordResult(
+                                word=word_text,
+                                start=round(float(w.start), 3),
+                                end=round(float(w.end), 3),
+                            )
                         )
-                    )
-        # Fall back to token-level timestamps
-        elif hasattr(result, "tokens") and hasattr(result, "timestamps"):
-            tokens = result.tokens
-            timestamps = result.timestamps
-            if tokens and timestamps and len(tokens) == len(timestamps):
-                all_words = self._tokens_to_words(tokens, timestamps)
+            # Fall back to token-level timestamps
+            elif hasattr(result, "tokens") and hasattr(result, "timestamps"):
+                tokens = result.tokens
+                timestamps = result.timestamps
+                if tokens and timestamps and len(tokens) == len(timestamps):
+                    all_words = self._tokens_to_words(tokens, timestamps)
 
-        # Build segments from words
-        segments = self._words_to_segments(all_words, text)
+            # Build segments from words
+            segments = self._words_to_segments(all_words, text)
 
-        return OnnxTranscriptionResult(
-            text=text,
-            segments=segments,
-            language="en",
-            language_probability=1.0,
-        )
+            if hasattr(span, "set_attributes"):
+                span.set_attributes(
+                    {
+                        "dalston.word_count": len(all_words),
+                        "dalston.char_count": len(text),
+                    }
+                )
+
+            return OnnxTranscriptionResult(
+                text=text,
+                segments=segments,
+                language="en",
+                language_probability=1.0,
+            )
 
     def _parse_vad_result(self, vad_segments: Any) -> OnnxTranscriptionResult:
         """Parse VAD-segmented recognition results into neutral types.
@@ -300,61 +378,72 @@ class OnnxInference:
 
         Token timestamps are offset by segment.start to produce absolute times.
         """
-        all_segments: list[OnnxSegmentResult] = []
-        all_text_parts: list[str] = []
+        with dalston.telemetry.create_span("engine.parse_result") as span:
+            all_segments: list[OnnxSegmentResult] = []
+            all_text_parts: list[str] = []
 
-        for seg in vad_segments:
-            seg_text = str(seg.text).strip()
-            if not seg_text:
-                continue
+            for seg in vad_segments:
+                seg_text = str(seg.text).strip()
+                if not seg_text:
+                    continue
 
-            all_text_parts.append(seg_text)
-            seg_start = float(seg.start)
-            seg_end = float(seg.end)
+                all_text_parts.append(seg_text)
+                seg_start = float(seg.start)
+                seg_end = float(seg.end)
 
-            # Parse words from token-level timestamps (offset to absolute time)
-            seg_words: list[OnnxWordResult] = []
-            if (
-                hasattr(seg, "tokens")
-                and hasattr(seg, "timestamps")
-                and seg.tokens
-                and seg.timestamps
-            ):
-                raw_words = self._tokens_to_words(seg.tokens, seg.timestamps)
-                for w in raw_words:
-                    seg_words.append(
-                        OnnxWordResult(
-                            word=w.word,
-                            start=round(w.start + seg_start, 3),
-                            end=round(w.end + seg_start, 3),
-                            confidence=w.confidence,
+                # Parse words from token-level timestamps (offset to absolute time)
+                seg_words: list[OnnxWordResult] = []
+                if (
+                    hasattr(seg, "tokens")
+                    and hasattr(seg, "timestamps")
+                    and seg.tokens
+                    and seg.timestamps
+                ):
+                    raw_words = self._tokens_to_words(seg.tokens, seg.timestamps)
+                    for w in raw_words:
+                        seg_words.append(
+                            OnnxWordResult(
+                                word=w.word,
+                                start=round(w.start + seg_start, 3),
+                                end=round(w.end + seg_start, 3),
+                                confidence=w.confidence,
+                            )
                         )
-                    )
 
-            all_segments.append(
-                OnnxSegmentResult(
-                    start=round(seg_start, 3),
-                    end=round(seg_end, 3),
-                    text=seg_text,
-                    words=seg_words,
+                all_segments.append(
+                    OnnxSegmentResult(
+                        start=round(seg_start, 3),
+                        end=round(seg_end, 3),
+                        text=seg_text,
+                        words=seg_words,
+                    )
                 )
+
+            full_text = " ".join(all_text_parts)
+            word_count = sum(len(s.words) for s in all_segments)
+
+            if hasattr(span, "set_attributes"):
+                span.set_attributes(
+                    {
+                        "dalston.word_count": word_count,
+                        "dalston.char_count": len(full_text),
+                        "dalston.segment_count": len(all_segments),
+                    }
+                )
+
+            logger.info(
+                "vad_transcription_parsed",
+                segment_count=len(all_segments),
+                word_count=word_count,
+                char_count=len(full_text),
             )
 
-        full_text = " ".join(all_text_parts)
-
-        logger.info(
-            "vad_transcription_parsed",
-            segment_count=len(all_segments),
-            word_count=sum(len(s.words) for s in all_segments),
-            char_count=len(full_text),
-        )
-
-        return OnnxTranscriptionResult(
-            text=full_text,
-            segments=all_segments,
-            language="en",
-            language_probability=1.0,
-        )
+            return OnnxTranscriptionResult(
+                text=full_text,
+                segments=all_segments,
+                language="en",
+                language_probability=1.0,
+            )
 
     @staticmethod
     def _is_word_boundary(token_text: str) -> bool:
