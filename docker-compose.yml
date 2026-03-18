@@ -535,6 +535,7 @@ services:
       - model-cache:/models
     depends_on: *batch-depends
     profiles: [gpu]
+    logging: *default-logging
     restart: unless-stopped
 
   # NeMo Sortformer Speaker Diarization - CPU variant (slow but works, ≤4 speakers)
@@ -555,6 +556,7 @@ services:
       - model-cache:/models
     shm_size: '2gb'
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # --- PII DETECT STAGE ---
@@ -601,6 +603,7 @@ services:
       DALSTON_ENGINE_ID: whisper-align-pyannote
       DALSTON_WORKER_ID: combo-wap-1
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # ============================================================
