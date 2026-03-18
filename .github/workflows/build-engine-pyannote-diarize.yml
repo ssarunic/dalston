@@ -41,7 +41,7 @@ jobs:
 
       # OIDC auth — no stored AWS credentials needed
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-ecr-push
           aws-region: ${{ env.AWS_REGION }}
