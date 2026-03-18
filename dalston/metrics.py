@@ -847,9 +847,7 @@ def observe_engine_direct_request(
     ).observe(duration)
 
 
-def inc_engine_direct_requests(
-    engine_id: str, endpoint: str, status_code: int
-) -> None:
+def inc_engine_direct_requests(engine_id: str, endpoint: str, status_code: int) -> None:
     """Increment the request counter for direct engine endpoints (M79 leaf API)."""
     if not _metrics_enabled or "direct_requests_total" not in _engine_metrics:
         return

@@ -269,9 +269,7 @@ class OnnxInference:
         dalston.metrics.observe_engine_vad_segment_count(engine_id, segment_count)
 
         # Compute audio duration from segments for RTF
-        audio_duration_s = max(
-            (float(s.end) for s in vad_segments), default=0.0
-        )
+        audio_duration_s = max((float(s.end) for s in vad_segments), default=0.0)
         dalston.metrics.observe_engine_recognize(
             engine_id, model_id, self._device, recognize_time
         )
