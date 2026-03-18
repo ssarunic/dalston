@@ -58,7 +58,7 @@ ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 # Engine code (all ONNX engine files in a single directory)
 WORKDIR /app
 COPY engines/stt-transcribe/onnx/ engines/stt-transcribe/onnx/
-COPY engines/stt-transcribe/onnx/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/onnx/engine.yaml /etc/dalston/engine.yaml
 COPY scripts/diagnose-gpu.py scripts/diagnose-gpu.py
 
 ENV NVIDIA_VISIBLE_DEVICES=all

@@ -31,6 +31,13 @@ input:
   sample_rate: 16000
   channels: 1
 
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
 hardware:
   supports_cpu: true
   min_ram_gb: 1

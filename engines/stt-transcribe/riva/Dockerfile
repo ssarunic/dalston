@@ -33,7 +33,7 @@ ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 # Engine code
 WORKDIR /app
 COPY engines/stt-transcribe/riva/ engines/stt-transcribe/riva/
-COPY engines/stt-transcribe/riva/rt_engine.yaml /etc/dalston/engine.yaml
+COPY engines/stt-transcribe/riva/engine.yaml /etc/dalston/engine.yaml
 
 # Default environment
 ENV DALSTON_RIVA_URI=riva-nim:50051
