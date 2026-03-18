@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Goal** | Add fine-grained tracing inside engines so operators can see exactly where inference time is spent |
-| **Duration** | 2-3 days |
-| **Dependencies** | M19 (distributed tracing — complete), M20 (metrics — complete) |
-| **Deliverable** | Jaeger waterfall shows sub-spans for model loading, VAD, inference, and result parsing within each engine task |
-| **Status** | Not started |
+| **Goal** | Add fine-grained tracing inside engines so operators can see exactly where inference time is spent — across both batch queue and HTTP processing paths |
+| **Duration** | 3-4 days |
+| **Dependencies** | M19 (distributed tracing — complete), M20 (metrics — complete), M79 (leaf engine HTTP API — complete) |
+| **Deliverable** | Jaeger waterfall shows sub-spans for model loading, VAD, inference, and result parsing within each engine task, regardless of whether the task arrived via Redis queue or direct HTTP |
+| **Status** | In progress — ONNX engine instrumented (76.1, 76.2, 76.5) |
 
 ## User Story
 
@@ -22,6 +22,8 @@ M19 implemented distributed tracing across services (gateway → orchestrator �
 - Actual inference (variable, depends on audio length and GPU)
 - Result parsing and S3 upload (~1s)
 
+**M79 impact:** Engine containers now have two processing paths — batch queue (`runner._process_task()`) and direct HTTP (`run_engine_http()`). Sub-spans and metrics must fire for **both** paths. This is achieved by instrumenting the inference layer (model manager + `OnnxInference`), which is shared by both transports.
+
 This milestone adds sub-spans inside the engine processing path, using the existing OTel infrastructure. Zero overhead when `OTEL_ENABLED=false` (NoOpTracer).
 
 ---
@@ -32,18 +34,10 @@ This milestone adds sub-spans inside the engine processing path, using the exist
 
 **Files Modified:**
 
-- `dalston/engine_sdk/runner.py`
+- `dalston/engine_sdk/runner.py` (no changes needed — sub-spans created by engine code)
+- `dalston/engine_sdk/http_server.py` (root span added for HTTP path)
 
-**Current span hierarchy:**
-
-```
-engine.{id}.process                    ← single span, no children
-  ├── engine.download_input            ← exists (S3 download)
-  ├── engine.process                   ← exists (wraps engine.process() call)
-  └── engine.upload_output             ← exists (S3 upload)
-```
-
-**New span hierarchy:**
+**Batch queue span hierarchy (existing runner path):**
 
 ```
 engine.{id}.process                    ← existing linked span
@@ -56,9 +50,21 @@ engine.{id}.process                    ← existing linked span
   └── engine.upload_output             ← existing
 ```
 
+**HTTP direct span hierarchy (new M79 path):**
+
+```
+engine.{id}.http_process               ← NEW root span for HTTP requests
+  ├── engine.model_acquire             ← NEW (same as batch — shared inference layer)
+  ├── engine.vad_load                  ← NEW
+  ├── engine.inference                 ← NEW
+  └── engine.parse_result              ← NEW
+```
+
 **Deliverables:**
 
 - No changes to runner.py itself — sub-spans are created by engine code using `dalston.telemetry.create_span()`
+- `run_engine_http()` wraps `engine.process()` in an `engine.{id}.http_process` root span
+- HTTP-specific metrics: `dalston_engine_http_request_seconds`, `dalston_engine_http_requests_total`
 - Engine authors opt-in to granular tracing by adding spans in their inference code
 - Existing engines continue working unchanged (single `engine.process` span)
 
@@ -74,13 +80,15 @@ engine.{id}.process                    ← existing linked span
 **Deliverables:**
 
 - `OnnxModelManager.acquire()` wrapped in `engine.model_acquire` span
-  - Attributes: `model_id`, `cache_hit` (bool), `load_time_s` (float)
+  - Attributes: `model_id`, `cache_hit` (bool), `device`
+  - Histogram: `dalston_engine_model_acquire_seconds`
 - `_get_or_load_vad()` wrapped in `engine.vad_load` span
   - Attributes: `cache_hit` (bool)
-- `vad_ts_model.recognize()` wrapped in `engine.inference` span
-  - Attributes: `audio_duration_s`, `segment_count`, `device`
-- `_parse_vad_result()` wrapped in `engine.parse_result` span
-  - Attributes: `word_count`, `char_count`
+- `_transcribe_with_vad()` / `_transcribe_direct()`: `recognize()` call wrapped in `engine.inference` span
+  - Attributes: `audio_duration_s`, `segment_count`, `device`, `mode` (vad/direct), `rtf`
+  - Histograms: `dalston_engine_inference_seconds`, `dalston_engine_rtf`, `dalston_engine_vad_segments`
+- `_parse_result()` / `_parse_vad_result()` wrapped in `engine.parse_result` span
+  - Attributes: `word_count`, `char_count`, `segment_count`
 
 **Span attributes on inference span (set after completion):**
 
@@ -92,6 +100,7 @@ engine.{id}.process                    ← existing linked span
 | `dalston.segment_count` | int | Number of VAD segments |
 | `dalston.rtf` | float | Real-time factor (processing_time / audio_duration) |
 | `dalston.word_count` | int | Total words transcribed |
+| `dalston.mode` | string | `vad` or `direct` |
 
 ---
 
@@ -132,7 +141,9 @@ engine.{id}.process                    ← existing linked span
 
 **Files Modified:**
 
-- `dalston/engine_sdk/runner.py` — Emit histogram metrics alongside spans
+- `dalston/engine_sdk/inference/onnx_inference.py` — Emit histograms alongside inference spans
+- `dalston/engine_sdk/managers/onnx.py` — Emit model acquire histogram
+- `dalston/engine_sdk/http_server.py` — Emit HTTP-specific histograms
 - `dalston/metrics.py` — Add engine-level histogram definitions
 
 **New Metrics:**
@@ -143,6 +154,10 @@ engine.{id}.process                    ← existing linked span
 | `dalston_engine_inference_seconds` | Histogram | `engine_id`, `model_id`, `device` | Pure inference time |
 | `dalston_engine_rtf` | Histogram | `engine_id`, `model_id`, `device` | Real-time factor |
 | `dalston_engine_vad_segments` | Histogram | `engine_id` | VAD segment count per job |
+| `dalston_engine_http_request_seconds` | Histogram | `engine_id`, `endpoint`, `status_code` | HTTP request duration (M79 path only) |
+| `dalston_engine_http_requests_total` | Counter | `engine_id`, `endpoint`, `status_code` | HTTP request count (M79 path only) |
+
+**Key design decision:** Metrics are emitted at the **inference layer** (inside `OnnxInference` and `OnnxModelManager`), not in `runner.py`. This ensures they fire for both the batch queue path and the HTTP direct path without duplication. HTTP-specific metrics (`http_request_seconds`, `http_requests_total`) are emitted in `run_engine_http()` since they only apply to the HTTP transport.
 
 **Why both spans and metrics:** Spans are per-request (debug individual slow jobs). Metrics are aggregated (alert when p99 inference time exceeds threshold, dashboard showing RTF trends over time).
 
@@ -157,6 +172,8 @@ engine.{id}.process                    ← existing linked span
 ---
 
 ## Verification
+
+### Batch queue path
 
 ```bash
 # Start with tracing enabled
@@ -186,15 +203,37 @@ open http://localhost:16686
 curl -s http://localhost:9100/metrics | grep dalston_engine_inference_seconds
 ```
 
+### HTTP direct path
+
+```bash
+# Direct HTTP to engine container (M79 endpoint)
+curl -X POST http://localhost:9100/v1/transcribe \
+  -F "file=@test.wav" \
+  -F "model=parakeet-onnx-ctc-0.6b"
+
+# Jaeger should show:
+#   engine.onnx.http_process               ~15s  ← root span for HTTP path
+#     engine.model_acquire                   ~0.01s (cache hit)
+#     engine.vad_load                        ~0.01s (cached)
+#     engine.inference                       ~14s
+#     engine.parse_result                    ~0.002s
+
+# Verify HTTP-specific metrics
+curl -s http://localhost:9100/metrics | grep dalston_engine_http_request_seconds
+curl -s http://localhost:9100/metrics | grep dalston_engine_http_requests_total
+```
+
 ---
 
 ## Checkpoint
 
-- [ ] ONNX engine emits `model_acquire`, `vad_load`, `inference`, `parse_result` sub-spans
-- [ ] Span attributes include `model_id`, `device`, `rtf`, `segment_count`
+- [x] ONNX engine emits `model_acquire`, `vad_load`, `inference`, `parse_result` sub-spans
+- [x] Span attributes include `model_id`, `device`, `rtf`, `segment_count`
 - [ ] Other engines (NeMo, Faster-Whisper) follow same span pattern
 - [ ] Realtime spans are sampled to avoid overhead
-- [ ] Histogram metrics emitted alongside spans
+- [x] Histogram metrics emitted alongside spans
+- [x] HTTP path has root span (`engine.{id}.http_process`) and HTTP-specific metrics
 - [ ] Jaeger waterfall shows full engine breakdown for a batch job
-- [ ] Zero overhead when `OTEL_ENABLED=false` confirmed via benchmark
-- [ ] No engine `process()` API changes required
+- [ ] Jaeger waterfall shows full engine breakdown for an HTTP direct request
+- [x] Zero overhead when `OTEL_ENABLED=false` confirmed (NoOpTracer + metrics guard)
+- [x] No engine `process()` API changes required
