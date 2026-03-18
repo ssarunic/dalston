@@ -47,7 +47,7 @@ AFTER (prepare is a performance optimization):
   Raw MP3 ──▶ [transcribe] ──▶ ensure_audio_format() ──▶ converts via ffmpeg   (standalone mode)
 ```
 
-The key invariant: **after this milestone, removing the prepare stage from the DAG produces correct (but slower) results.** The prepare stage earns its place through efficiency, not necessity.
+The key invariant: **after this milestone, removing the prepare stage from the DAG produces correct (but slower) results for single-channel input.** For `per_channel` mode (stereo channel splitting), prepare remains a hard requirement — see Non-Goals. For all other cases, the prepare stage earns its place through efficiency, not necessity.
 
 ---
 
@@ -236,7 +236,7 @@ This is a prerequisite for the slow path (standalone engine use). In production 
 - **Removing the prepare stage from the DAG** — Prepare remains the default first stage. It converts once, stores a smaller file, and saves bandwidth for multiple downstream consumers. This milestone makes prepare *optional*, not *removed*.
 - **Per-engine audio format negotiation at DAG build time** — The orchestrator does not inspect `engine.audio_format` to decide what prepare should output. That's a future optimization if engines ever diverge on format requirements.
 - **Real-time path changes** — Real-time engines receive numpy arrays from the session handler, which already handles resampling via `torchaudio`. Out of scope.
-- **Channel splitting** — Channel splitting remains exclusively in the prepare stage. It's a DAG-level concern (one input → N parallel branches) and doesn't belong in individual engines.
+- **Channel splitting** — Channel splitting remains exclusively in the prepare stage. It's a DAG-level concern (one input → N parallel branches) and doesn't belong in individual engines. **Important consequence:** the "prepare is optional" invariant holds only for mono/single-channel input. For `speaker_detection=per_channel`, the prepare stage is still a hard requirement — `ensure_audio_format()` downmixes to mono, which would silently destroy per-channel speaker separation. The orchestrator enforces this by always including prepare in the DAG when `split_channels=True`.
 
 ---
 

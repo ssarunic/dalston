@@ -82,6 +82,12 @@ from dalston.common.pipeline_types import (
     Word,
     WordMetaKeys,
 )
+from dalston.engine_sdk.audio import (
+    SPEECH_STANDARD,
+    AudioFormat,
+    EngineAudioError,
+    ensure_audio_format,
+)
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.context import BatchTaskContext
@@ -125,6 +131,11 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    # Audio format utilities (M81)
+    "AudioFormat",
+    "EngineAudioError",
+    "SPEECH_STANDARD",
+    "ensure_audio_format",
     # Core SDK
     "BaseBatchTranscribeEngine",
     "Engine",

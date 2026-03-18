@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 import structlog
 import yaml
 
+from dalston.engine_sdk.audio import SPEECH_STANDARD, AudioFormat
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 
@@ -62,6 +63,10 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
             engine = MyTranscriptionEngine()
             engine.run()
     """
+
+    # Override in subclass to declare audio requirements.
+    # Set to None for engines that don't consume audio (e.g., merge, llm-cleanup).
+    audio_format: AudioFormat | None = SPEECH_STANDARD
 
     def __init__(self) -> None:
         """Initialize the engine."""

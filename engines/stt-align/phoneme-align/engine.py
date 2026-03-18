@@ -13,7 +13,6 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 import torch
-import torchaudio
 from align import AlignedSegment, InputSegment, align
 from model_loader import AlignModelMetadata, load_align_model
 
@@ -225,20 +224,15 @@ class PhonemeAlignEngine(Engine):
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def _load_audio(self, audio_path: Path) -> np.ndarray:
-        """Load audio file as 16 kHz mono numpy array."""
-        # Use soundfile directly (torchaudio 2.10+ requires torchcodec which isn't available on ARM64)
-        data, sample_rate = sf.read(str(audio_path), dtype="float32")
-        # Convert to torch tensor for resampling (soundfile returns [samples] or [samples, channels])
-        if data.ndim == 1:
-            waveform = torch.from_numpy(data).unsqueeze(0)  # [1, samples]
-        else:
-            waveform = torch.from_numpy(data.T)  # [channels, samples]
-        if sample_rate != 16_000:
-            resampler = torchaudio.transforms.Resample(sample_rate, 16_000)
-            waveform = resampler(waveform)
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        return waveform.squeeze(0).numpy()
+        """Load audio file as float32 numpy array.
+
+        The SDK's ensure_audio_format() guarantees 16 kHz mono before
+        process() is called, so no resampling is needed here.
+        """
+        data, _ = sf.read(str(audio_path), dtype="float32")
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        return data
 
     def _to_sdk_segments(
         self,

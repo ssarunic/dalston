@@ -115,6 +115,8 @@ PRESIDIO_TYPE_MAP = {
 class PIIDetectionEngine(Engine):
     """PII detection engine using GLiNER (primary) + Presidio (checksum-validated)."""
 
+    audio_format = None  # Text-only processing, no audio consumption
+
     def __init__(self) -> None:
         super().__init__()
         self._analyzer = None

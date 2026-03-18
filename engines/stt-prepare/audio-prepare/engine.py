@@ -5,6 +5,7 @@ Extracts duration and metadata using ffprobe.
 """
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,8 @@ class AudioPrepareEngine(Engine):
     Converts input audio to 16kHz, 16-bit, mono WAV suitable for
     downstream transcription engines.
     """
+
+    audio_format = None  # Prepare is the producer, not a consumer
 
     # Default output parameters
     DEFAULT_SAMPLE_RATE = 16000
@@ -56,6 +59,22 @@ class AudioPrepareEngine(Engine):
                 "ffmpeg and ffprobe must be installed. "
                 "Install with: apt-get install ffmpeg"
             ) from e
+
+    def _is_already_prepared(
+        self, input_path: Path, target_sample_rate: int, target_channels: int
+    ) -> bool:
+        """Check if input already matches the target format."""
+        try:
+            import soundfile as sf
+
+            info = sf.info(str(input_path))
+            return (
+                info.samplerate == target_sample_rate
+                and info.channels == target_channels
+                and info.subtype == "PCM_16"
+            )
+        except Exception:
+            return False
 
     def process(
         self,
@@ -103,14 +122,20 @@ class AudioPrepareEngine(Engine):
         # Standard processing: convert to mono
         target_channels = params.target_channels
 
-        # Step 2: Convert to standardized format
-        prepared_path = audio_path.parent / "prepared.wav"
-        self._convert_audio(
-            input_path=audio_path,
-            output_path=prepared_path,
-            sample_rate=target_sample_rate,
-            channels=target_channels,
-        )
+        # Fast path: skip ffmpeg if input is already in the target format
+        if self._is_already_prepared(audio_path, target_sample_rate, target_channels):
+            self.logger.info("audio_already_prepared", audio_path=str(audio_path))
+            prepared_path = audio_path.parent / "prepared.wav"
+            shutil.copy2(audio_path, prepared_path)
+        else:
+            # Step 2: Convert to standardized format
+            prepared_path = audio_path.parent / "prepared.wav"
+            self._convert_audio(
+                input_path=audio_path,
+                output_path=prepared_path,
+                sample_rate=target_sample_rate,
+                channels=target_channels,
+            )
         self.logger.info("converted_audio_saved", prepared_path=str(prepared_path))
 
         # Step 3: Probe converted audio to verify
