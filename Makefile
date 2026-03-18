@@ -8,7 +8,8 @@
         aws-start aws-stop aws-logs \
         health clean clean-local validate test lint test-openai-sdk-live \
         test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
-        sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto
+        sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto \
+        install-hooks
 
 # Python interpreter used for pytest-driven targets.
 # Prefer local virtualenv when present for consistent dependency resolution.
@@ -54,6 +55,7 @@ help:
 	@echo "  make health          - Check service health"
 	@echo ""
 	@echo "Utilities:"
+	@echo "  make install-hooks   - Install git hooks (pre-push checks)"
 	@echo "  make clean           - Remove stopped containers and unused images"
 	@echo "  make clean-local     - Kill local Python processes (orchestrator, gateway)"
 
@@ -69,6 +71,13 @@ clean-local:
 	@pkill -f "dalston\.gateway" 2>/dev/null || true
 	@pkill -f "dalston\.session_router" 2>/dev/null || true
 	@echo "Done."
+
+install-hooks:
+	@echo "Installing git hooks..."
+	@cp hooks/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@pre-commit install
+	@echo "✓ Git hooks installed."
 
 # Start full local stack with all CPU engines
 dev: clean-local
