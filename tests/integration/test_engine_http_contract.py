@@ -97,9 +97,7 @@ class TestEngineHTTPContract:
                 "transcript": json.dumps(
                     {
                         "text": "Hello world",
-                        "segments": [
-                            {"start": 0.0, "end": 1.0, "text": "Hello world"}
-                        ],
+                        "segments": [{"start": 0.0, "end": 1.0, "text": "Hello world"}],
                         "language": "en",
                     }
                 ),
