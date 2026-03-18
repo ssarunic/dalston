@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ def _repo_root() -> Path:
 
 
 def _engine_id_python() -> Path:
-    return _repo_root() / ".venv" / "bin" / "python"
+    return Path(sys.executable)
 
 
 def _write_engine_module(tmp_path: Path) -> Path:
