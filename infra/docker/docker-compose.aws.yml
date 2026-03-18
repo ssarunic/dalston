@@ -98,16 +98,6 @@ services:
     volumes:
       - /data/models:/data/models
 
-  # NeMo MSDD diarization (CPU)
-  stt-diarize-nemo-msdd-cpu:
-    environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
-      NEMO_CACHE: /data/models
-    volumes:
-      - /data/models:/data/models
-
   # NeMo Sortformer diarization (GPU)
   stt-diarize-nemo-sortformer:
     environment:

@@ -566,6 +566,19 @@ services:
     depends_on: *batch-depends
     restart: unless-stopped
 
+  # --- COMPOSITE ENGINES ---
+  stt-combo-whisper-align-pyannote:
+    image: dalston/stt-combo-whisper-align-pyannote:latest
+    build:
+      context: .
+      dockerfile: engines/stt-combo/whisper-align-pyannote/Dockerfile
+    environment:
+      <<: [*common-env, *observability-env]
+      DALSTON_ENGINE_ID: whisper-align-pyannote
+      DALSTON_WORKER_ID: combo-wap-1
+    depends_on: *batch-depends
+    restart: unless-stopped
+
   # ============================================================
   # RIVA NIM SIDECAR + ENGINES (M70)
   # ============================================================
