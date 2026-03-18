@@ -41,7 +41,7 @@
     },
     "type": {
       "type": "string",
-      "enum": ["realtime"],
+      "enum": ["realtime", "composite"],
       "description": "Engine type for non-batch engines"
     },
     "name": {

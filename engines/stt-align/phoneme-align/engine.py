@@ -340,6 +340,12 @@ class PhonemeAlignEngine(Engine):
         )
         return TaskResponse(data=output)
 
+    def create_http_server(self, port: int = 9100):  # type: ignore[override]  # covariant return
+        """Return an ``AlignHTTPServer`` with ``POST /v1/align``."""
+        from dalston.engine_sdk.http_align import AlignHTTPServer
+
+        return AlignHTTPServer(engine=self, port=port)
+
     def health_check(self) -> dict[str, Any]:
         """Return health status including device info."""
         cuda_available = torch.cuda.is_available()

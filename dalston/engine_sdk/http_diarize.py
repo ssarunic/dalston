@@ -40,9 +40,7 @@ class DiarizeHTTPServer(EngineHTTPServer):
                 str | None,
                 Form(description="URL to audio file (S3 URI or HTTPS)"),
             ] = None,
-            loaded_model_id: Annotated[
-                str | None, Form(description="Model to use")
-            ] = None,
+            model: Annotated[str | None, Form(description="Model to use")] = None,
             num_speakers: Annotated[
                 int | None, Form(description="Exact number of speakers")
             ] = None,
@@ -56,8 +54,8 @@ class DiarizeHTTPServer(EngineHTTPServer):
             audio_path = await resolve_audio(file, audio_url)
 
             config: dict = {}
-            if loaded_model_id:
-                config["loaded_model_id"] = loaded_model_id
+            if model:
+                config["loaded_model_id"] = model
             if num_speakers is not None:
                 config["num_speakers"] = num_speakers
             if min_speakers is not None:

@@ -1,0 +1,62 @@
+schema_version: "1.1"
+id: whisper-align-pyannote
+engine_id: whisper-align-pyannote
+type: composite
+name: Faster-Whisper + Phoneme-Align + Pyannote Combined
+version: 1.1.0
+description: |
+  Composite engine that runs transcription (faster-whisper), phoneme-level
+  alignment (phoneme-align), and speaker diarization (pyannote-4.0),
+  returning a merged stage-keyed result.
+
+  Pipeline: transcribe and diarize run in parallel; align runs sequentially
+  after transcribe completes (it requires the transcript as input).
+
+  This is a Layer 2 composite engine per ENGINE_COMPOSABILITY §5.
+  Children are called via HTTP — each must be running as a separate
+  service with M79 HTTP endpoints.
+
+  Child URLs are resolved via Docker-DNS convention (service name as
+  hostname) or explicit environment variable overrides:
+    DALSTON_CHILD_URL_FASTER_WHISPER=http://faster-whisper:9100
+    DALSTON_CHILD_URL_PHONEME_ALIGN=http://phoneme-align:9100
+    DALSTON_CHILD_URL_PYANNOTE_4_0=http://pyannote-4-0:9100
+
+compose:
+  - engine: faster-whisper
+    stages: [transcribe]
+  - engine: phoneme-align
+    stages: [align]
+  - engine: pyannote-4.0
+    stages: [diarize]
+
+pipeline:
+  mode: parallel
+  parallel: [transcribe, diarize]
+  sequential_after: [align]
+  error_strategy: partial_result
+
+container:
+  gpu: none
+  memory: 512M
+
+capabilities:
+  max_audio_duration: 7200
+  native_streaming: false
+  word_timestamps: true
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe_and_diarize
+  port: 9100
+
+hardware:
+  min_vram_gb: 0
+  supports_cpu: true
+  min_ram_gb: 1
+
+performance:
+  rtf_gpu: null
+  rtf_cpu: null

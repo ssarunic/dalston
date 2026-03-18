@@ -100,6 +100,13 @@ output_schema:
       type: boolean
       description: Always true for this engine
 
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/align
+  port: 9100
+
 hardware:
   min_vram_gb: 2
   recommended_gpu:
