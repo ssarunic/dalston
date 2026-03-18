@@ -60,6 +60,7 @@ def inference():
         core._device = "cpu"
         core._quantization = "none"
         core._vad = None
+        core._current_model_id = None
         return core
 
 
