@@ -10,9 +10,9 @@ dependencies = [
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
     # Loose ranges cause pip resolver backtracking (20+ min in CI).
-    "opentelemetry-api==1.39.0",
-    "opentelemetry-sdk==1.39.0",
-    "opentelemetry-exporter-otlp-proto-grpc==1.39.0",
+    "opentelemetry-api==1.40.0",
+    "opentelemetry-sdk==1.40.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.40.0",
     # Prometheus metrics (M20)
     "prometheus-client==0.24.1",
 ]
@@ -29,16 +29,16 @@ gateway = [
     "asyncpg>=0.29.0",
     "aiosqlite>=0.20.0",  # Lite-mode SQLite async driver
     "greenlet>=3.3.0",
-    "aioboto3>=13.0.0",
-    "types-aiobotocore-s3>=2.13.0",
+    "aioboto3>=15.0.0",
+    "types-aiobotocore-s3>=3.0.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
     "tinytag>=2.0.0",  # Audio metadata extraction
     "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
-    "opentelemetry-instrumentation-fastapi==0.60b0",
-    "opentelemetry-instrumentation-redis==0.60b0",
-    "opentelemetry-instrumentation-httpx==0.60b0",
-    "opentelemetry-instrumentation-sqlalchemy==0.60b0",
+    "opentelemetry-instrumentation-fastapi==0.61b0",
+    "opentelemetry-instrumentation-redis==0.61b0",
+    "opentelemetry-instrumentation-httpx==0.61b0",
+    "opentelemetry-instrumentation-sqlalchemy==0.61b0",
     "alembic>=1.13.0",
 ]
 orchestrator = [
@@ -46,7 +46,7 @@ orchestrator = [
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "aiosqlite>=0.20.0",  # Lite-mode SQLite async driver
-    "aioboto3>=13.0.0",
+    "aioboto3>=15.0.0",
     "httpx>=0.26.0",
     "fastapi>=0.135.0",  # Required for importing gateway.services
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
@@ -58,11 +58,11 @@ orchestrator = [
 ]
 engine-sdk = [
     "redis>=7.0.0",
-    "boto3==1.40.61",
+    "boto3==1.42.70",
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
-    "opentelemetry-instrumentation-redis==0.60b0",
-    "opentelemetry-instrumentation-boto3sqs==0.60b0",
+    "opentelemetry-instrumentation-redis==0.61b0",
+    "opentelemetry-instrumentation-boto3sqs==0.61b0",
     # HTTP server for engine interface contract (M79)
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
@@ -79,8 +79,8 @@ realtime-sdk = [
     # - Other engines: don't need onnxruntime at all
     # The realtime_sdk.vad module lazy-imports onnxruntime at runtime.
     "soxr>=0.3.0",  # High-quality sample rate conversion (libsoxr)
-    "aioboto3>=13.0.0",  # S3 storage for audio/transcript persistence
-    "types-aiobotocore-s3>=2.13.0",
+    "aioboto3>=15.0.0",  # S3 storage for audio/transcript persistence
+    "types-aiobotocore-s3>=3.0.0",
     "audioop-lts>=0.2.1;python_version>='3.13'",  # audioop removed in Python 3.13
 ]
 session-router = [
@@ -99,11 +99,11 @@ dev = [
     "soxr>=0.3.0",  # For resampling tests
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
-    "opentelemetry-test-utils==0.60b0",
+    "opentelemetry-test-utils==0.61b0",
     # Pinned OpenAI SDK for M61 contract suite
-    "openai==2.28.0",
+    "openai==2.29.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.38.1",
+    "elevenlabs==2.39.0",
 ]
 
 [build-system]
