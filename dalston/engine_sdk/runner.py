@@ -76,6 +76,13 @@ class EngineRunner:
     DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
     DEFAULT_TASK_TIMEOUT = 600  # seconds — fallback if no timeout_at in task
 
+    # Temp directory purge policy: sweep orphaned dalston_task_* dirs on startup
+    # and periodically.  Default max age = 30 days; override with env var (seconds).
+    TEMP_PURGE_MAX_AGE_S = int(
+        os.environ.get("DALSTON_TEMP_PURGE_MAX_AGE_S", str(30 * 24 * 3600))
+    )
+    TEMP_PURGE_INTERVAL_S = 3600  # check once per hour
+
     def __init__(self, engine: Engine) -> None:
         """Initialize the runner.
 
@@ -296,6 +303,10 @@ class EngineRunner:
         This allows the orchestrator to know which model is loaded without
         requiring a model swap.
         """
+        last_purge = time.monotonic()
+        # Run an initial sweep on startup to catch leftovers from crashes
+        self._purge_stale_temp_dirs()
+
         while self._running:
             try:
                 # Read current task with lock for thread safety
@@ -323,9 +334,55 @@ class EngineRunner:
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))
+
+                # Periodic temp dir purge
+                now = time.monotonic()
+                if now - last_purge >= self.TEMP_PURGE_INTERVAL_S:
+                    self._purge_stale_temp_dirs()
+                    last_purge = now
+
             except Exception as e:
                 logger.warning("heartbeat_failed", error=str(e))
             time.sleep(self.HEARTBEAT_INTERVAL)
+
+    def _purge_stale_temp_dirs(self) -> None:
+        """Remove dalston_task_* directories older than TEMP_PURGE_MAX_AGE_S.
+
+        Catches orphans left by crashed containers or killed processes.
+        Skips the directory currently in use by an active task.
+        """
+        tmp_root = Path(tempfile.gettempdir())
+        cutoff = time.time() - self.TEMP_PURGE_MAX_AGE_S
+        removed = 0
+
+        try:
+            for entry in tmp_root.iterdir():
+                if not entry.name.startswith(self.TEMP_DIR_PREFIX):
+                    continue
+                if not entry.is_dir():
+                    continue
+                try:
+                    mtime = entry.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime >= cutoff:
+                    continue
+                # Don't remove the dir being used by the current task
+                with self._task_lock:
+                    current = self._current_task_id
+                if current and current in entry.name:
+                    continue
+                try:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+                except OSError:
+                    pass
+        except OSError:
+            # /tmp itself unreadable — nothing to do
+            pass
+
+        if removed:
+            logger.info("stale_temp_dirs_purged", count=removed)
 
     def _setup_signal_handlers(self) -> None:
         """Setup handlers for graceful shutdown.
@@ -632,6 +689,7 @@ class EngineRunner:
                     stage=task_request.stage,
                     metadata=task_metadata,
                     logger=self.engine.logger,
+                    temp_dir=temp_dir,
                 )
                 with dalston.telemetry.create_span("engine.process"):
                     with concurrent.futures.ThreadPoolExecutor(

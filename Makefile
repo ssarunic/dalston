@@ -251,6 +251,17 @@ validate:
 	@docker compose --profile riva config > /dev/null
 	@echo "Validating AWS override..."
 	@S3_BUCKET=test AWS_REGION=eu-west-2 docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml config > /dev/null
+	@echo "Checking log rotation on long-running services..."
+	@docker compose config --format json 2>/dev/null | python3 -c "\
+	import json, sys; \
+	config = json.load(sys.stdin); \
+	skip = {'minio-init'}; \
+	missing = [name for name, svc in config.get('services', {}).items() \
+	           if name not in skip \
+	           and svc.get('restart') \
+	           and 'max-size' not in (svc.get('logging', {}).get('options', {}))]; \
+	[print(f'  WARN: {n} is missing logging rotation (logging: *default-logging)') for n in sorted(missing)]; \
+	sys.exit(1) if missing else None" || { echo "FAIL: services above need 'logging: *default-logging'"; exit 1; }
 	@echo "All compose configurations valid"
 
 # Check service health

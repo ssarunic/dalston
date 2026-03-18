@@ -85,6 +85,14 @@ x-gpu-deploy: &gpu-deploy
           count: 1
           capabilities: [gpu]
 
+# Log rotation: cap each container at 50 MB × 3 files = 150 MB max per service.
+# Override per-service or via Docker daemon.json for a global default.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 # WebSocket healthcheck for realtime engines
 x-ws-healthcheck: &ws-healthcheck
   test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"]
@@ -112,6 +120,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     restart: unless-stopped
 
   redis:
@@ -136,6 +145,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     restart: unless-stopped
 
   minio:
@@ -154,6 +164,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     restart: unless-stopped
 
   minio-init:
@@ -255,6 +266,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    logging: *default-logging
     restart: unless-stopped
 
   orchestrator:
@@ -268,6 +280,7 @@ services:
       # Fail fast if another orchestrator is running (dev safety)
       DALSTON_SINGLE_INSTANCE: "true"
     depends_on: *core-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # ============================================================
@@ -290,6 +303,7 @@ services:
       DALSTON_ENGINE_ID: audio-prepare
       DALSTON_WORKER_ID: prepare-1
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # --- TRANSCRIBE STAGE ---
@@ -324,6 +338,7 @@ services:
       - model-cache:/models
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
+    logging: *default-logging
     restart: unless-stopped
 
   # M63: Unified Faster Whisper — multilingual batch + realtime.
@@ -354,6 +369,7 @@ services:
       - model-cache:/models
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
+    logging: *default-logging
     restart: unless-stopped
 
   # M63: Unified Parakeet ONNX — lightweight English, batch + realtime.
@@ -385,6 +401,7 @@ services:
       - model-cache:/models
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
+    logging: *default-logging
     restart: unless-stopped
 
   # vLLM Audio ASR (GPU-only — audio LLMs via vLLM)
@@ -409,6 +426,7 @@ services:
     deploy: *gpu-deploy
     profiles: [gpu]
     shm_size: '8gb'
+    logging: *default-logging
     restart: unless-stopped
 
   # M63: Unified HF-ASR — any HuggingFace ASR model, batch + realtime.
@@ -435,6 +453,7 @@ services:
       - model-cache:/models
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
+    logging: *default-logging
     restart: unless-stopped
 
   # --- ALIGN STAGE ---
@@ -454,6 +473,7 @@ services:
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # --- DIARIZE STAGE ---
@@ -474,6 +494,7 @@ services:
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # NeMo MSDD Speaker Diarization
@@ -493,6 +514,7 @@ services:
       - model-cache:/models
     shm_size: '2gb'
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # NeMo Sortformer Speaker Diarization (GPU, ≤4 speakers)
@@ -551,6 +573,7 @@ services:
     volumes:
       - model-cache:/models
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # --- AUDIO REDACT STAGE ---
@@ -564,6 +587,7 @@ services:
       DALSTON_ENGINE_ID: audio-redactor
       DALSTON_WORKER_ID: redactor-1
     depends_on: *batch-depends
+    logging: *default-logging
     restart: unless-stopped
 
   # --- COMPOSITE ENGINES ---
@@ -610,6 +634,7 @@ services:
       retries: 5
       start_period: 120s
     profiles: [riva]
+    logging: *default-logging
     restart: unless-stopped
 
   # Unified Riva engine — batch + realtime in one process, gRPC to NIM sidecar
@@ -633,6 +658,7 @@ services:
         condition: service_healthy
     healthcheck: *ws-healthcheck
     profiles: [riva]
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

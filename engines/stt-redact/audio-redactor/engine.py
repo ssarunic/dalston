@@ -6,7 +6,6 @@ timing information from the PII detection stage.
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -76,8 +75,7 @@ class AudioRedactionEngine(Engine):
         else:
             entities = [e.model_dump() for e in pii_output.entities]
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            output_path = Path(tmp.name)
+        output_path = ctx.temp_dir / f"redacted{channel_suffix}.wav"
 
         if not entities:
             self.logger.info("no_entities_to_redact", job_id=task_request.job_id)

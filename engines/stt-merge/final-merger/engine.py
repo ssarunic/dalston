@@ -697,6 +697,7 @@ class FinalMergerEngine(Engine):
             redacted_stereo_path = self._assemble_stereo_audio(
                 channel_paths=redacted_audio_paths,
                 sample_rate=sample_rate,
+                temp_dir=ctx.temp_dir,
             )
             if redacted_stereo_path:
                 logical_name = "redacted_stereo_audio"
@@ -821,6 +822,7 @@ class FinalMergerEngine(Engine):
         self,
         channel_paths: list[Path],
         sample_rate: int = 16000,
+        temp_dir: Path | None = None,
     ) -> Path | None:
         """Assemble multiple mono WAV files into a stereo WAV file using FFmpeg.
 
@@ -889,9 +891,12 @@ class FinalMergerEngine(Engine):
                 self.logger.error("ffmpeg_stereo_assembly_error", error=str(e))
                 return None
 
-            persisted = Path(
-                tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-            )
+            if temp_dir is not None:
+                persisted = temp_dir / "redacted_stereo.wav"
+            else:
+                persisted = Path(
+                    tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+                )
             persisted.write_bytes(output_path.read_bytes())
             return persisted
 
@@ -902,9 +907,7 @@ class FinalMergerEngine(Engine):
         transcript: MergeResponse,
     ):
         logical_name = "transcript"
-        output_path = Path(
-            tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
-        )
+        output_path = ctx.temp_dir / "transcript.json"
         output_path.write_text(
             json.dumps(transcript.model_dump(mode="json"), ensure_ascii=False),
             encoding="utf-8",

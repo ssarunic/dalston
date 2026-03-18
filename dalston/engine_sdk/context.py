@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ class BatchTaskContext:
     logger: structlog.stdlib.BoundLogger = field(
         default_factory=structlog.get_logger  # type: ignore[arg-type]
     )
+    temp_dir: Path = field(default_factory=lambda: Path(tempfile.mkdtemp()))
 
     @classmethod
     def for_http(
