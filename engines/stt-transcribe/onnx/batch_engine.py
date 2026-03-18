@@ -51,27 +51,6 @@ from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 # Decoder type extracted from model ID for alignment method reporting
 _DECODER_TYPES = {"ctc", "tdt", "rnnt"}
 
-# Accepted aliases to OnnxModelManager IDs.
-_MODEL_ID_ALIASES = {
-    # Canonical ONNX runtime IDs
-    "parakeet-onnx-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
-    "parakeet-onnx-ctc-1.1b": "parakeet-onnx-ctc-1.1b",
-    "parakeet-onnx-tdt-0.6b-v2": "parakeet-onnx-tdt-0.6b-v2",
-    "parakeet-onnx-tdt-0.6b-v3": "parakeet-onnx-tdt-0.6b-v3",
-    "parakeet-onnx-rnnt-0.6b": "parakeet-onnx-rnnt-0.6b",
-    # Legacy NVIDIA NeMo repo IDs
-    "nvidia/parakeet-ctc-0.6b": "parakeet-onnx-ctc-0.6b",
-    "nvidia/parakeet-ctc-1.1b": "parakeet-onnx-ctc-1.1b",
-    "nvidia/parakeet-tdt-0.6b-v2": "parakeet-onnx-tdt-0.6b-v2",
-    "nvidia/parakeet-tdt-0.6b-v3": "parakeet-onnx-tdt-0.6b-v3",
-    "nvidia/parakeet-rnnt-0.6b": "parakeet-onnx-rnnt-0.6b",
-    # ONNX model repositories published for onnx-asr
-    "istupakov/parakeet-ctc-0.6b-onnx": "parakeet-onnx-ctc-0.6b",
-    "istupakov/parakeet-tdt-0.6b-v2-onnx": "parakeet-onnx-tdt-0.6b-v2",
-    "istupakov/parakeet-tdt-0.6b-v3-onnx": "parakeet-onnx-tdt-0.6b-v3",
-    "istupakov/parakeet-rnnt-0.6b-onnx": "parakeet-onnx-rnnt-0.6b",
-}
-
 
 class OnnxBatchEngine(BaseBatchTranscribeEngine):
     """ONNX Runtime transcription engine for batch processing.
@@ -120,10 +99,6 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             shared_core=core is not None,
         )
 
-    def _normalize_model_id(self, loaded_model_id: str) -> str:
-        """Normalize accepted aliases to OnnxModelManager IDs."""
-        return _MODEL_ID_ALIASES.get(loaded_model_id, loaded_model_id)
-
     def transcribe_audio(
         self, task_request: TaskRequest, ctx: BatchTaskContext
     ) -> Transcript:
@@ -140,9 +115,8 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         params = task_request.get_transcribe_params()
         channel = params.channel
 
-        loaded_model_id = params.loaded_model_id or self._default_model_id
-        model_id = self._normalize_model_id(loaded_model_id)
-        decoder_type = self._get_decoder_type(loaded_model_id)
+        model_id = params.loaded_model_id or self._default_model_id
+        decoder_type = self._get_decoder_type(model_id)
         alignment_method = self._alignment_method_for(decoder_type)
 
         self.logger.info("transcribing", audio_path=str(audio_path))

@@ -144,24 +144,6 @@ class TestParakeetOnnxEngineCapabilities:
 class TestParakeetOnnxEngineModelLoading:
     """Tests for model loading and validation."""
 
-    def test_normalize_legacy_nvidia_model_id(self):
-        """Test that legacy NVIDIA IDs normalize to ONNX runtime IDs."""
-        OnnxBatchEngine = load_parakeet_onnx_engine()
-        engine = OnnxBatchEngine()
-        assert (
-            engine._normalize_model_id("nvidia/parakeet-ctc-0.6b")
-            == "parakeet-onnx-ctc-0.6b"
-        )
-
-    def test_normalize_onnx_hf_repo_id(self):
-        """Test that ONNX HF repo IDs normalize to ONNX runtime IDs."""
-        OnnxBatchEngine = load_parakeet_onnx_engine()
-        engine = OnnxBatchEngine()
-        assert (
-            engine._normalize_model_id("istupakov/parakeet-tdt-0.6b-v3-onnx")
-            == "parakeet-onnx-tdt-0.6b-v3"
-        )
-
     def test_core_manager_passes_through_unknown_model(self):
         """Test that unknown model IDs are passed through to onnx_asr."""
         from unittest.mock import MagicMock, patch
