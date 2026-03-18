@@ -8,7 +8,7 @@
 #   docker build -t dalston/stt-whisper-align-pyannote:latest \
 #     -f engines/stt-combo/whisper-align-pyannote/Dockerfile .
 
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Dalston SDK
