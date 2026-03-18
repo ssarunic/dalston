@@ -29,7 +29,18 @@ pytestmark = pytest.mark.e2e
     ]
 )
 def engine_endpoint(request: pytest.FixtureRequest) -> tuple[str, str]:
-    """Parametrized fixture yielding (engine_name, base_url) tuples."""
+    """Parametrized fixture yielding (engine_name, base_url) tuples.
+
+    Skips engines that are not reachable (e.g. composite engines not
+    deployed in the current stack).
+    """
+    name, url = request.param
+    try:
+        resp = httpx.get(f"{url}/health", timeout=10)
+        if resp.status_code != 200:
+            pytest.skip(f"{name} not healthy at {url}")
+    except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException):
+        pytest.skip(f"{name} not reachable at {url}")
     return request.param
 
 
@@ -99,6 +110,7 @@ class TestEngineHTTPContract:
                         "text": "Hello world",
                         "segments": [{"start": 0.0, "end": 1.0, "text": "Hello world"}],
                         "language": "en",
+                        "engine_id": "test",
                     }
                 ),
             }

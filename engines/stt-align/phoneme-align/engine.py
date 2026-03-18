@@ -49,16 +49,21 @@ class PhonemeAlignEngine(Engine):
         )
 
     def _get_align_model(
-        self, language: str, loaded_model_id: str
+        self, language: str, loaded_model_id: str | None
     ) -> tuple[Any, AlignModelMetadata] | None:
-        """Load or retrieve a cached alignment model by loaded_model_id."""
-        if loaded_model_id in self._align_models:
+        """Load or retrieve a cached alignment model.
+
+        When *loaded_model_id* is ``None``, ``load_align_model`` selects
+        the language-appropriate default (torchaudio bundle or HF Hub).
+        """
+        cache_key = loaded_model_id or f"_default_{language}"
+        if cache_key in self._align_models:
             self.logger.debug(
                 "using_cached_alignment_model",
                 language=language,
                 loaded_model_id=loaded_model_id,
             )
-            return self._align_models[loaded_model_id]
+            return self._align_models[cache_key]
 
         self.logger.info(
             "loading_alignment_model",
@@ -72,7 +77,7 @@ class PhonemeAlignEngine(Engine):
                 device=self._device,
                 model_name=loaded_model_id,
             )
-            self._align_models[loaded_model_id] = (model, metadata)
+            self._align_models[cache_key] = (model, metadata)
             self.logger.info(
                 "alignment_model_loaded",
                 language=language,
@@ -129,11 +134,7 @@ class PhonemeAlignEngine(Engine):
             language=language,
         )
 
-        loaded_model_id = task_request.config.get("loaded_model_id")
-        if not loaded_model_id:
-            raise ValueError(
-                "Missing required config field 'loaded_model_id' for align stage."
-            )
+        loaded_model_id = task_request.config.get("loaded_model_id") or None
 
         # Load alignment model
         model_result = self._get_align_model(language, loaded_model_id)
