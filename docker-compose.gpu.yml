@@ -1,0 +1,88 @@
+# GPU override — CUDA builds, GPU resource reservations, higher concurrency.
+#
+# Layers on top of docker-compose.yml. Do NOT use standalone.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# What changes per engine:
+#   - build.args.DEVICE: cpu → cuda (rebuilds with CUDA PyTorch/ONNX wheels)
+#   - deploy.resources: reserves an NVIDIA GPU
+#   - Concurrency env vars bumped (more sessions, higher inflight)
+#   - Some engines switch to larger default models
+
+x-gpu-deploy: &gpu-deploy
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+
+services:
+  # --- TRANSCRIBE STAGE ---
+
+  stt-transcribe-nemo:
+    build:
+      args:
+        DEVICE: cuda
+    environment:
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_DEVICE: cuda
+      DALSTON_MODEL_PRELOAD: parakeet-rnnt-1.1b
+      DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-2}
+      DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-4}
+      DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-6}
+    deploy: *gpu-deploy
+
+  stt-transcribe-faster-whisper:
+    build:
+      args:
+        DEVICE: cuda
+    environment:
+      DALSTON_MAX_SESSIONS: 4
+      DALSTON_DEVICE: cuda
+      DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-2}
+      DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-4}
+      DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-6}
+    deploy: *gpu-deploy
+
+  stt-transcribe-onnx:
+    build:
+      args:
+        DEVICE: cuda
+    environment:
+      DALSTON_DEVICE: cuda
+      DALSTON_MODEL_PRELOAD: parakeet-onnx-tdt-0.6b-v3
+    deploy: *gpu-deploy
+
+  # --- ALIGN STAGE ---
+
+  stt-align-phoneme:
+    environment:
+      DALSTON_WORKER_ID: palign-gpu-1
+    deploy: *gpu-deploy
+
+  # --- DIARIZE STAGE ---
+
+  stt-diarize-pyannote-4.0:
+    environment:
+      DALSTON_WORKER_ID: pyannote-gpu-1
+    deploy: *gpu-deploy
+
+  stt-diarize-nemo-msdd:
+    environment:
+      DALSTON_WORKER_ID: nemo-msdd-gpu1
+      DALSTON_DEVICE: cuda
+    deploy: *gpu-deploy
+
+  # --- PII DETECT STAGE ---
+
+  stt-pii-detect-presidio:
+    build:
+      args:
+        DEVICE: cuda
+    environment:
+      DALSTON_WORKER_ID: presidio-gpu1
+      DALSTON_DEVICE: cuda
+    deploy: *gpu-deploy
