@@ -19,11 +19,11 @@ from typing import Any
 
 from dalston.engine_sdk import (
     BatchTaskContext,
-    DiarizeOutput,
+    DiarizationResponse,
     Engine,
-    EngineInput,
-    EngineOutput,
     SpeakerTurn,
+    TaskRequest,
+    TaskResponse,
 )
 
 # Runtime model definitions for NeMo Sortformer diarization.
@@ -63,9 +63,7 @@ class NemoSortformerEngine(Engine):
         if self._disabled:
             self.logger.warning("diarization_disabled")
         else:
-            self.logger.info(
-                "nemo_sortformer_engine_initialized", device=self._device
-            )
+            self.logger.info("nemo_sortformer_engine_initialized", device=self._device)
 
     # ------------------------------------------------------------------
     # Device detection (shared pattern with nemo-msdd)
@@ -164,14 +162,14 @@ class NemoSortformerEngine(Engine):
     # Processing
     # ------------------------------------------------------------------
 
-    def process(self, engine_input: EngineInput, ctx: BatchTaskContext) -> EngineOutput:
+    def process(self, task_request: TaskRequest, ctx: BatchTaskContext) -> TaskResponse:
         """Run speaker diarization on audio file."""
         if self._disabled:
             self.logger.info("diarization_disabled_returning_mock_output")
             return self._mock_output()
 
-        audio_path = engine_input.audio_path
-        config = engine_input.config
+        audio_path = task_request.audio_path
+        config = task_request.config
 
         loaded_model_id = config.get("loaded_model_id")
         if not loaded_model_id:
@@ -203,9 +201,7 @@ class NemoSortformerEngine(Engine):
 
         try:
             self.logger.info("running_sortformer_diarization")
-            segments = model.diarize(
-                audio=[str(audio_path)], batch_size=1
-            )[0]
+            segments = model.diarize(audio=[str(audio_path)], batch_size=1)[0]
 
             # Convert (start, end, speaker_index) tuples to SpeakerTurn
             speakers_set: set[str] = set()
@@ -236,7 +232,7 @@ class NemoSortformerEngine(Engine):
                 overlap_ratio=overlap_ratio,
             )
 
-            output = DiarizeOutput(
+            output = DiarizationResponse(
                 speakers=speakers,
                 turns=turns,
                 num_speakers=len(speakers),
@@ -248,7 +244,7 @@ class NemoSortformerEngine(Engine):
                 warnings=[],
             )
 
-            return EngineOutput(data=output)
+            return TaskResponse(data=output)
         finally:
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
@@ -291,14 +287,12 @@ class NemoSortformerEngine(Engine):
             if active_speakers >= 2 and overlap_start is None:
                 overlap_start = time
 
-        overlap_ratio = (
-            overlap_duration / total_duration if total_duration > 0 else 0.0
-        )
+        overlap_ratio = overlap_duration / total_duration if total_duration > 0 else 0.0
         return round(overlap_duration, 3), round(overlap_ratio, 4)
 
-    def _mock_output(self) -> EngineOutput:
+    def _mock_output(self) -> TaskResponse:
         """Return mock output when diarization is disabled."""
-        output = DiarizeOutput(
+        output = DiarizationResponse(
             speakers=["SPEAKER_00"],
             turns=[SpeakerTurn(start=0.0, end=999999.0, speaker="SPEAKER_00")],
             num_speakers=1,
@@ -309,7 +303,7 @@ class NemoSortformerEngine(Engine):
             skip_reason="DIARIZATION_DISABLED=true",
             warnings=["Diarization disabled via environment variable"],
         )
-        return EngineOutput(data=output)
+        return TaskResponse(data=output)
 
     def health_check(self) -> dict[str, Any]:
         """Return health status."""
