@@ -9,7 +9,7 @@
 ARG DEVICE=cpu
 
 # --- CPU base ---
-FROM python:3.12-slim AS base-cpu
+FROM python:3.14-slim AS base-cpu
 
 # --- GPU base ---
 FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
