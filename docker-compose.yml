@@ -617,8 +617,8 @@ services:
     restart: unless-stopped
 
   # NeMo Sortformer Speaker Diarization (GPU, ≤4 speakers)
-  stt-batch-diarize-nemo-sortformer:
-    image: dalston/stt-batch-diarize-nemo-sortformer:latest
+  stt-diarize-nemo-sortformer:
+    image: dalston/stt-diarize-nemo-sortformer:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/nemo-sortformer/Dockerfile
@@ -637,8 +637,8 @@ services:
     restart: unless-stopped
 
   # NeMo Sortformer Speaker Diarization - CPU variant (slow but works, ≤4 speakers)
-  stt-batch-diarize-nemo-sortformer-cpu:
-    image: dalston/stt-batch-diarize-nemo-sortformer-cpu:latest
+  stt-diarize-nemo-sortformer-cpu:
+    image: dalston/stt-diarize-nemo-sortformer-cpu:latest
     build:
       context: .
       dockerfile: engines/stt-diarize/nemo-sortformer/Dockerfile

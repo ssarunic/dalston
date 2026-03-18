@@ -144,7 +144,7 @@ services:
       - /data/models:/data/models
 
   # NeMo Sortformer diarization (GPU)
-  stt-batch-diarize-nemo-sortformer:
+  stt-diarize-nemo-sortformer:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
@@ -154,7 +154,7 @@ services:
       - /data/models:/data/models
 
   # NeMo Sortformer diarization (CPU)
-  stt-batch-diarize-nemo-sortformer-cpu:
+  stt-diarize-nemo-sortformer-cpu:
     environment:
       DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
       DALSTON_S3_REGION: ${DALSTON_S3_REGION}
