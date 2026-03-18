@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-03-13T15:15:00.199751+00:00",
+  "generated_at": "2026-03-18T18:47:53.749195+00:00",
   "schema_version": "3.0",
-  "engine_count": 12,
+  "engine_count": 14,
   "engines": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -36,6 +36,41 @@
         "rtf_gpu": 0.02,
         "rtf_cpu": 0.3,
         "warm_start_latency_ms": 200
+      }
+    },
+    "whisper-align-pyannote": {
+      "id": "whisper-align-pyannote",
+      "name": "Faster-Whisper + Phoneme-Align + Pyannote Combined",
+      "version": "1.1.0",
+      "stage": null,
+      "type": null,
+      "description": "Composite engine that runs transcription (faster-whisper), phoneme-level\nalignment (phoneme-align), and speaker diarization (pyannote-4.0),\nreturning a merged stage-keyed result.\n\nPipeline: transcribe and diarize run in parallel; align runs sequentially\nafter transcribe completes (it requires the transcript as input).\n\nThis is a Layer 2 composite engine per ENGINE_COMPOSABILITY \u00a75.\nChildren are called via HTTP \u2014 each must be running as a separate\nservice with M79 HTTP endpoints.\n\nChild URLs are resolved via Docker-DNS convention (service name as\nhostname) or explicit environment variable overrides:\n  DALSTON_CHILD_URL_FASTER_WHISPER=http://faster-whisper:9100\n  DALSTON_CHILD_URL_PHONEME_ALIGN=http://phoneme-align:9100\n  DALSTON_CHILD_URL_PYANNOTE_4_0=http://pyannote-4-0:9100",
+      "image": "dalston/stt-None-whisper-align-pyannote:1.1.0",
+      "execution_profile": "container",
+      "capabilities": {
+        "stages": [
+          "transcribe",
+          "align",
+          "diarize"
+        ],
+        "supports_word_timestamps": true,
+        "supports_native_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": 0,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 1,
+        "memory": "512M"
+      },
+      "performance": {
+        "rtf_gpu": null,
+        "rtf_cpu": null,
+        "warm_start_latency_ms": null
       }
     },
     "pii-presidio": {
@@ -105,6 +140,42 @@
         "rtf_gpu": 0.05,
         "rtf_cpu": 2.0,
         "warm_start_latency_ms": 1000
+      }
+    },
+    "nemo-sortformer": {
+      "id": "nemo-sortformer",
+      "name": "NeMo Sortformer Speaker Diarization",
+      "version": "1.0.0",
+      "stage": "diarize",
+      "type": null,
+      "description": "Speaker diarization using NVIDIA NeMo SortformerEncLabelModel.\nEnd-to-end Transformer encoder model that directly predicts speaker labels\nfrom audio, resolving the permutation problem via arrival-time ordering.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports up to 4 speakers with native overlap handling and low DER.\nSupports optional min/max speaker count hints.",
+      "image": "dalston/stt-diarize-nemo-sortformer:1.0.0",
+      "execution_profile": "container",
+      "capabilities": {
+        "stages": [
+          "diarize"
+        ],
+        "supports_word_timestamps": false,
+        "supports_native_streaming": false,
+        "max_audio_duration": 7200,
+        "max_concurrency": null
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": true,
+        "min_vram_gb": 4,
+        "recommended_gpu": [
+          "t4",
+          "a10g"
+        ],
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "8G"
+      },
+      "performance": {
+        "rtf_gpu": 0.04,
+        "rtf_cpu": 2.5,
+        "warm_start_latency_ms": 800
       }
     },
     "pyannote-4.0": {
@@ -251,7 +322,7 @@
       "stage": "transcribe",
       "type": null,
       "description": "Real-time VAD-chunked transcription via HuggingFace Transformers ASR pipelines.\nSupports any model with pipeline_tag=automatic-speech-recognition on HuggingFace Hub\n(Whisper, Wav2Vec2, HuBERT, MMS, community fine-tunes).",
-      "image": "dalston/stt-transcribe-hf-asr-cpu:1.0.0",
+      "image": "dalston/stt-transcribe-hf-asr:1.0.0",
       "execution_profile": "container",
       "capabilities": {
         "stages": [
@@ -347,8 +418,8 @@
         "memory": "4G"
       },
       "performance": {
-        "rtf_gpu": 0.0003,
-        "rtf_cpu": 0.01,
+        "rtf_gpu": 0.03,
+        "rtf_cpu": 0.12,
         "warm_start_latency_ms": 50
       }
     },

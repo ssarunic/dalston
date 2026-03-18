@@ -72,8 +72,12 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
             f"expected one of {{{valid}}}"
         )
 
-    # Derive stages list
-    stages = [stage] if stage else []
+    # Derive stages list — for composite engines, collect from compose children
+    if stage:
+        stages = [stage]
+    else:
+        compose_children = data.get("compose") or []
+        stages = [s for child in compose_children for s in (child.get("stages") or [])]
 
     # Extract capabilities
     caps = data.get("capabilities") or {}
