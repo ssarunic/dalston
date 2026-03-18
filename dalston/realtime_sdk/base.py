@@ -682,11 +682,24 @@ class RealtimeEngine(ABC):
                 "dalston.instance": self.instance,
                 "dalston.language": config.language,
             },
-        ):
+        ) as session_span:
             try:
                 # Run session
                 await handler.run()
             finally:
+                # M76.4: Set session-level summary attributes
+                summary = handler.get_telemetry_summary()
+                if hasattr(session_span, "set_attributes"):
+                    session_span.set_attributes(
+                        {
+                            "dalston.total_chunks": summary["total_chunks"],
+                            "dalston.total_audio_s": summary["total_audio_s"],
+                            "dalston.avg_chunk_latency_ms": summary[
+                                "avg_chunk_latency_ms"
+                            ],
+                        }
+                    )
+
                 # Remove from tracking
                 del self._sessions[config.session_id]
                 # Unbind session_id from context

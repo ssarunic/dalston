@@ -351,6 +351,14 @@ def _init_realtime_metrics() -> None:
         buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05),
     )
 
+    # M76.4: Realtime per-chunk inference latency
+    _realtime_metrics["chunk_latency_seconds"] = Histogram(
+        "dalston_realtime_chunk_latency_seconds",
+        "Per-chunk inference latency in realtime sessions",
+        ["model"],
+        buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+    )
+
 
 def _init_queue_metrics() -> None:
     """Initialize Queue Exporter metrics."""
@@ -987,6 +995,18 @@ def observe_realtime_resample_duration(
     _realtime_metrics["resample_duration_seconds"].labels(
         from_rate=str(from_rate), to_rate=str(to_rate)
     ).observe(duration)
+
+
+def observe_realtime_chunk_latency(model: str, duration: float) -> None:
+    """Record per-chunk inference latency for realtime sessions (M76.4).
+
+    Args:
+        model: Model identifier
+        duration: Inference wall-clock time in seconds
+    """
+    if not _metrics_enabled or "chunk_latency_seconds" not in _realtime_metrics:
+        return
+    _realtime_metrics["chunk_latency_seconds"].labels(model=model).observe(duration)
 
 
 # =============================================================================

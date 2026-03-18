@@ -6,7 +6,7 @@
 | **Duration** | 3-4 days |
 | **Dependencies** | M19 (distributed tracing — complete), M20 (metrics — complete), M79 (leaf engine HTTP API — complete) |
 | **Deliverable** | Jaeger waterfall shows sub-spans for model loading, VAD, inference, and result parsing within each engine task, regardless of whether the task arrived via Redis queue or direct HTTP |
-| **Status** | In Progress — 76.1-76.3, 76.5 complete; 76.4 (realtime spans) remaining |
+| **Status** | Complete |
 
 ## User Story
 
@@ -241,10 +241,10 @@ curl -s http://localhost:9100/metrics | grep dalston_engine_direct_requests_tota
 - [x] `model_acquire` span + histogram in base `ModelManager` — covers all engines
 - [x] Span attributes include `model_id`, `device`, `rtf`, `segment_count`
 - [x] Label `model` (not `model_id`) for PromQL join compatibility with existing metrics
-- [ ] Realtime spans are sampled to avoid overhead
+- [x] Realtime spans are sampled to avoid overhead
 - [x] Histogram metrics emitted alongside spans
 - [x] HTTP path has root span (`engine.{id}.http_process`) and direct-request metrics
-- [ ] Jaeger waterfall shows full engine breakdown for a batch job
-- [ ] Jaeger waterfall shows full engine breakdown for an HTTP direct request
+- [x] Jaeger waterfall shows full engine breakdown for a batch job
+- [x] Jaeger waterfall shows full engine breakdown for an HTTP direct request
 - [x] Zero overhead when `OTEL_ENABLED=false` confirmed (NoOpTracer + metrics guard)
 - [x] No engine `process()` API changes required

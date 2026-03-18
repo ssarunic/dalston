@@ -7,6 +7,7 @@ audio buffering, VAD, ASR, and transcript assembly.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 try:
@@ -20,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import structlog
 
+import dalston.metrics
+import dalston.telemetry
 from dalston.common.audio_defaults import (
     DEFAULT_MAX_UTTERANCE_SECONDS,
     DEFAULT_MIN_SILENCE_MS,
@@ -457,6 +460,15 @@ class SessionHandler:
         # Distinct from _ended so streaming decode can drain before session.end.
         self._close_requested = False
 
+        # M76.4: Realtime telemetry state
+        self._rt_span_sample_rate = int(
+            os.environ.get("DALSTON_RT_SPAN_SAMPLE_RATE", "10")
+        )
+        self._rt_chunk_counter = 0  # Monotonic counter for sampling
+        self._rt_total_chunks = 0
+        self._rt_total_inference_s = 0.0
+        self._rt_total_audio_s = 0.0
+
         # Storage adapter (initialized in run() when storage is enabled)
         self._session_storage: SessionStorage | None = None
         self._raw_audio_buffer: list[bytes] = []  # Buffer until S3 client ready
@@ -623,14 +635,34 @@ class SessionHandler:
             self._chunks_since_partial = 0
             self._speech_audio_buffer = []
 
+            # M76.4: VAD endpoint span (unsampled — these are infrequent)
+            dalston.telemetry.set_span_attribute(
+                "dalston.vad.speech_start_at",
+                self._assembler.current_time,
+            )
+
             await self._send(
                 VADSpeechStartMessage(timestamp=self._assembler.current_time)
             )
 
         elif vad_result.event == "speech_end":
-            await self._send(
-                VADSpeechEndMessage(timestamp=self._assembler.current_time)
+            # M76.4: VAD endpoint span (unsampled)
+            speech_audio_duration = (
+                self._samples_to_seconds(len(vad_result.speech_audio))
+                if vad_result.speech_audio is not None
+                else 0.0
             )
+            with dalston.telemetry.create_span(
+                "realtime.vad.endpoint",
+                attributes={
+                    "dalston.session_id": self.config.session_id,
+                    "dalston.vad.speech_duration_s": speech_audio_duration,
+                    "dalston.vad.timestamp": self._assembler.current_time,
+                },
+            ):
+                await self._send(
+                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
+                )
 
             # Clear streaming state
             self._speech_audio_buffer = []
@@ -1042,20 +1074,54 @@ class SessionHandler:
 
         try:
             params = self._build_transcribe_params()
-            # Call ASR in thread pool to avoid blocking event loop
-            # This is critical for slow models (e.g., CPU inference) to
-            # prevent WebSocket keepalive ping timeouts
-            result = await asyncio.to_thread(
-                self._transcribe_fn,
-                audio,
-                params,
+            audio_duration = self._samples_to_seconds(len(audio))
+
+            # M76.4: Sampled per-chunk inference span
+            self._rt_chunk_counter += 1
+            emit_span = (self._rt_chunk_counter % self._rt_span_sample_rate) == 0
+
+            t0 = time.perf_counter()
+
+            if emit_span:
+                with dalston.telemetry.create_span(
+                    "realtime.chunk.inference",
+                    attributes={
+                        "dalston.session_id": self.config.session_id,
+                        "dalston.audio_duration_s": audio_duration,
+                        "dalston.chunk_index": self._rt_chunk_counter,
+                    },
+                ):
+                    result = await asyncio.to_thread(
+                        self._transcribe_fn,
+                        audio,
+                        params,
+                    )
+            else:
+                # Call ASR in thread pool to avoid blocking event loop
+                # This is critical for slow models (e.g., CPU inference) to
+                # prevent WebSocket keepalive ping timeouts
+                result = await asyncio.to_thread(
+                    self._transcribe_fn,
+                    audio,
+                    params,
+                )
+
+            elapsed = time.perf_counter() - t0
+
+            # M76.4: Accumulate session-level telemetry
+            self._rt_total_chunks += 1
+            self._rt_total_inference_s += elapsed
+            self._rt_total_audio_s += audio_duration
+
+            # M76.4: Record chunk latency metric
+            dalston.metrics.observe_realtime_chunk_latency(
+                self.config.model or "", elapsed
             )
 
             if self._ended or not result.text:
                 return
 
             # Add to assembler
-            audio_duration = self._samples_to_seconds(len(audio))
             segment = self._assembler.add_transcript(result, audio_duration)
 
             # Send transcript.final
@@ -1525,6 +1591,23 @@ class SessionHandler:
     def get_duration(self) -> float:
         """Get session wall-clock duration in seconds."""
         return time.time() - self._started_at
+
+    def get_telemetry_summary(self) -> dict[str, float | int]:
+        """Return M76.4 session-level telemetry summary.
+
+        Returns:
+            Dict with total_chunks, total_audio_s, avg_chunk_latency_ms.
+        """
+        avg_latency_ms = (
+            (self._rt_total_inference_s / self._rt_total_chunks * 1000)
+            if self._rt_total_chunks > 0
+            else 0.0
+        )
+        return {
+            "total_chunks": self._rt_total_chunks,
+            "total_audio_s": self._rt_total_audio_s,
+            "avg_chunk_latency_ms": avg_latency_ms,
+        }
 
     @property
     def error(self) -> str | None:

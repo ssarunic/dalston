@@ -740,12 +740,24 @@ class EngineRunner:
                     temp_dir=temp_dir,
                 )
                 with dalston.telemetry.create_span("engine.process"):
+                    # M76: Propagate OTel context into the worker thread
+                    # so that sub-spans (model_acquire, recognize, etc.)
+                    # appear as children rather than orphan traces.
+                    from opentelemetry import context as otel_context
+
+                    parent_ctx = otel_context.get_current()
+
+                    def _run_with_context():
+                        token = otel_context.attach(parent_ctx)
+                        try:
+                            return self.engine.process(task_request, task_ctx)
+                        finally:
+                            otel_context.detach(token)
+
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=1
                     ) as executor:
-                        future = executor.submit(
-                            self.engine.process, task_request, task_ctx
-                        )
+                        future = executor.submit(_run_with_context)
                         try:
                             output = future.result(timeout=task_timeout)
                         except concurrent.futures.TimeoutError as exc:
