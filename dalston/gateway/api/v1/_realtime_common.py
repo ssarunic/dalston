@@ -11,6 +11,7 @@ from uuid import UUID
 import structlog
 
 from dalston.common.redis import get_redis as _get_redis
+from dalston.common.registry import UnifiedEngineRegistry
 from dalston.config import get_settings
 from dalston.db.session import get_db as _get_db
 from dalston.gateway.services.auth import AuthService
@@ -185,19 +186,26 @@ async def resolve_rt_routing(
         except Exception as e:
             logger.warning("model_lookup_failed", model=routing_model, error=str(e))
     else:
-        # Auto-select: pick the largest ready streaming model from the registry (M48).
-        # This ensures workers load from S3, not directly from HuggingFace.
+        # Auto-select: pick the largest ready streaming model whose engine
+        # actually has available RT workers.
         try:
+            # Discover which engine_ids have live RT workers
+            redis = await _get_redis()
+            registry = UnifiedEngineRegistry(redis)
+            rt_workers = await registry.get_available(interface="realtime")
+            live_rt_engine_ids = {w.engine_id for w in rt_workers}
+
             async for db in _get_db():
                 downloaded_models = await ModelRegistryService().list_models(
                     db, stage="transcribe", status="ready"
                 )
-                rt_models = [m for m in downloaded_models if m.native_streaming]
+                rt_models = [
+                    m
+                    for m in downloaded_models
+                    if m.native_streaming and m.engine_id in live_rt_engine_ids
+                ]
 
                 if language and language != "auto":
-                    # Prefer native_streaming models that support the language;
-                    # fall back to any ready model supporting it so a valid
-                    # language request is never incorrectly rejected.
                     lang_rt = [
                         m
                         for m in rt_models

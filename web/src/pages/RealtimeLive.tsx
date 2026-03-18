@@ -101,8 +101,8 @@ export function RealtimeLive() {
     return registryData.data
       .filter((m) => m.status === 'ready' && rtRuntimes.has(m.engine_id))
       .map((m) => ({
-        id: m.loaded_model_id,  // Use loaded_model_id for the request
-        label: m.name || m.id,   // Display name
+        id: m.id,                // Full registry ID (e.g. "Systran/faster-whisper-tiny")
+        label: m.name || m.loaded_model_id,  // Display name
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [registryData, rtRuntimes])

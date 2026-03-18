@@ -101,6 +101,7 @@ class EngineRunner:
         self._task_lock = threading.Lock()  # Protects _current_task_id
         self._stage: str = "unknown"  # Pipeline stage from capabilities
         self._execution_profile = "container"
+        self._supports_realtime = bool(os.environ.get("DALSTON_WORKER_PORT"))
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
 
@@ -177,6 +178,17 @@ class EngineRunner:
         # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
         self._stage = capabilities.stages[0] if capabilities.stages else "unknown"
 
+        # Detect realtime capability: unified engines set DALSTON_WORKER_PORT
+        # for the WebSocket server that runs alongside the batch queue poller.
+        worker_port = os.environ.get("DALSTON_WORKER_PORT")
+        if worker_port:
+            interfaces = ["batch", "realtime"]
+            instance_host = os.environ.get("DALSTON_INSTANCE", self.instance)
+            endpoint = f"ws://{instance_host}:{worker_port}"
+        else:
+            interfaces = ["batch"]
+            endpoint = None
+
         # Register with unified engine registry
         self._unified_writer = UnifiedRegistryWriter(self.redis_url)
         self._unified_writer.register(
@@ -185,9 +197,10 @@ class EngineRunner:
                 engine_id=self.engine_id,
                 stage=self._stage,
                 status="idle",
-                interfaces=["batch"],
+                interfaces=interfaces,
                 capacity=1,
                 stream_name=self.stream_key,
+                endpoint=endpoint,
                 capabilities=capabilities,
                 execution_profile=self._execution_profile,
                 supports_word_timestamps=(
@@ -319,9 +332,16 @@ class EngineRunner:
                 loaded_model = runtime_state.get("loaded_model")
                 engine_status = runtime_state.get("status", "idle")
 
-                # Use "processing" when actively working on a task,
-                # otherwise use the engine's reported status (loading/unloading/error/idle)
-                status = "processing" if current_task else engine_status
+                # Use "processing"/"busy" when actively working on a task,
+                # otherwise use the engine's reported status.
+                # Unified engines use ready/busy vocabulary so the session
+                # coordinator treats them identically to pure-RT workers.
+                if current_task:
+                    status = "busy" if self._supports_realtime else "processing"
+                elif engine_status == "idle" and self._supports_realtime:
+                    status = "ready"
+                else:
+                    status = engine_status
 
                 if self._unified_writer:
                     try:
