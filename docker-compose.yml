@@ -302,6 +302,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: audio-prepare
       DALSTON_WORKER_ID: prepare-1
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -336,6 +337,7 @@ services:
       DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-3}
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
     logging: *default-logging
@@ -367,6 +369,7 @@ services:
       - "9101:9100"
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
     logging: *default-logging
@@ -399,6 +402,7 @@ services:
       - "9100:9100"
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
     logging: *default-logging
@@ -422,6 +426,7 @@ services:
       DALSTON_VLLM_MAX_MODEL_LEN: "4096"
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     deploy: *gpu-deploy
     profiles: [gpu]
@@ -451,6 +456,7 @@ services:
       DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-3}
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     healthcheck: *ws-healthcheck
     logging: *default-logging
@@ -472,6 +478,7 @@ services:
       - "9104:9100"
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -493,6 +500,7 @@ services:
       - "9102:9100"
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -513,6 +521,7 @@ services:
     volumes:
       - model-cache:/models
     shm_size: '2gb'
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -533,6 +542,7 @@ services:
       DALSTON_NEMO_ALLOW_CPU: ${DALSTON_NEMO_ALLOW_CPU:-false}
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     profiles: [gpu]
     logging: *default-logging
@@ -555,6 +565,7 @@ services:
     volumes:
       - model-cache:/models
     shm_size: '2gb'
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -574,6 +585,7 @@ services:
       DALSTON_DEVICE: cpu
     volumes:
       - model-cache:/models
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -588,6 +600,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: audio-redactor
       DALSTON_WORKER_ID: redactor-1
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -602,6 +615,7 @@ services:
       <<: [*common-env, *observability-env]
       DALSTON_ENGINE_ID: whisper-align-pyannote
       DALSTON_WORKER_ID: combo-wap-1
+    tmpfs: /tmp:size=2g
     depends_on: *batch-depends
     logging: *default-logging
     restart: unless-stopped
@@ -655,6 +669,7 @@ services:
       DALSTON_MAX_SESSIONS: 8
       DALSTON_RIVA_URI: riva-nim:50051
       DALSTON_RIVA_CHUNK_MS: 100
+    tmpfs: /tmp:size=2g
     depends_on:
       <<: *batch-depends
       riva-nim:

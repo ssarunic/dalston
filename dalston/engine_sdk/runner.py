@@ -345,18 +345,45 @@ class EngineRunner:
                 logger.warning("heartbeat_failed", error=str(e))
             time.sleep(self.HEARTBEAT_INTERVAL)
 
+    # Directories that are safe to sweep.  If tempfile.gettempdir() resolves
+    # to anything outside this set (e.g. "/" due to a misconfigured TMPDIR)
+    # the sweeper refuses to run.
+    _SAFE_TMP_ROOTS = frozenset({"/tmp", "/var/tmp", "/private/tmp"})
+
     def _purge_stale_temp_dirs(self) -> None:
         """Remove dalston_task_* directories older than TEMP_PURGE_MAX_AGE_S.
 
-        Catches orphans left by crashed containers or killed processes.
-        Skips the directory currently in use by an active task.
+        Defence-in-depth for orphans left by OOM-killed tasks inside a
+        still-running container.  The primary crash-recovery mechanism is
+        the tmpfs mount on /tmp (wiped automatically on container restart).
+
+        Guardrails:
+        - Only runs if gettempdir() resolves to a known safe root.
+        - Only targets directories matching TEMP_DIR_PREFIX exactly.
+        - Skips the directory used by the current active task.
+        - Caps the scan to 1 000 entries to avoid stalling on large dirs.
         """
-        tmp_root = Path(tempfile.gettempdir())
+        tmp_root = Path(tempfile.gettempdir()).resolve()
+
+        # Refuse to scan anything that doesn't look like a temp directory
+        if str(tmp_root) not in self._SAFE_TMP_ROOTS:
+            logger.warning(
+                "temp_purge_skipped_unsafe_root",
+                tmp_root=str(tmp_root),
+                safe_roots=sorted(self._SAFE_TMP_ROOTS),
+            )
+            return
+
         cutoff = time.time() - self.TEMP_PURGE_MAX_AGE_S
         removed = 0
+        scanned = 0
+        max_scan = 1000
 
         try:
             for entry in tmp_root.iterdir():
+                scanned += 1
+                if scanned > max_scan:
+                    break
                 if not entry.name.startswith(self.TEMP_DIR_PREFIX):
                     continue
                 if not entry.is_dir():
