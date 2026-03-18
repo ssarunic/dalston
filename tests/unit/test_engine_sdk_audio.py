@@ -5,6 +5,7 @@ Tests ensure_audio_format() fast path, slow path, and error handling.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -111,6 +112,9 @@ class TestEnsureAudioFormatFastPath:
             mock_run.assert_not_called()
 
 
+_has_ffmpeg = shutil.which("ffmpeg") is not None
+
+
 class TestEnsureAudioFormatSlowPath:
     """Tests for the slow path (conversion via ffmpeg)."""
 
@@ -124,6 +128,7 @@ class TestEnsureAudioFormatSlowPath:
         yield
         mod._ffmpeg_available = original
 
+    @pytest.mark.skipif(not _has_ffmpeg, reason="ffmpeg not installed")
     def test_non_compliant_converts(self, stereo_44k_wav: Path, tmp_path: Path):
         result = ensure_audio_format(stereo_44k_wav, work_dir=tmp_path)
         assert result != stereo_44k_wav
@@ -135,12 +140,14 @@ class TestEnsureAudioFormatSlowPath:
         assert info.channels == 1
         assert info.subtype == "PCM_16"
 
+    @pytest.mark.skipif(not _has_ffmpeg, reason="ffmpeg not installed")
     def test_different_sample_rate_converts(self, mono_48k_wav: Path, tmp_path: Path):
         result = ensure_audio_format(mono_48k_wav, work_dir=tmp_path)
         assert result != mono_48k_wav
         info = sf.info(str(result))
         assert info.samplerate == 16000
 
+    @pytest.mark.skipif(not _has_ffmpeg, reason="ffmpeg not installed")
     def test_custom_target_format(self, compliant_wav: Path, tmp_path: Path):
         target = AudioFormat(sample_rate=8000, channels=1, bit_depth=16)
         result = ensure_audio_format(compliant_wav, target=target, work_dir=tmp_path)
@@ -159,15 +166,19 @@ class TestEnsureAudioFormatSlowPath:
             result = ensure_audio_format(compliant_wav)
             assert result == compliant_wav
 
+    @pytest.mark.skipif(not _has_ffmpeg, reason="ffmpeg not installed")
     def test_work_dir_defaults_to_parent(self, stereo_44k_wav: Path):
         result = ensure_audio_format(stereo_44k_wav)
         assert result.parent == stereo_44k_wav.parent
 
     def test_ffmpeg_failure_raises(self, stereo_44k_wav: Path, tmp_path: Path):
-        with patch(
-            "dalston.engine_sdk.audio.subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                args=[], returncode=1, stderr="boom"
+        with (
+            patch("dalston.engine_sdk.audio._check_ffmpeg", return_value=True),
+            patch(
+                "dalston.engine_sdk.audio.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stderr="boom"
+                ),
             ),
         ):
             with pytest.raises(EngineAudioError, match="ffmpeg conversion failed"):
