@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import sys
 import tempfile
 from collections.abc import Callable
@@ -564,8 +565,11 @@ class LitePipeline:
                     "artifact_persistence": "ephemeral",
                 },
             )
-            response = await asyncio.to_thread(engine.process, task_request, ctx)
-            return response.to_dict()
+            try:
+                response = await asyncio.to_thread(engine.process, task_request, ctx)
+                return response.to_dict()
+            finally:
+                shutil.rmtree(ctx.temp_dir, ignore_errors=True)
 
         executor = self._resolve_executor(binding.entry.execution_profile)
         if executor is None:

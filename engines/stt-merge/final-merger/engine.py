@@ -822,7 +822,8 @@ class FinalMergerEngine(Engine):
         self,
         channel_paths: list[Path],
         sample_rate: int = 16000,
-        temp_dir: Path | None = None,
+        *,
+        temp_dir: Path,
     ) -> Path | None:
         """Assemble multiple mono WAV files into a stereo WAV file using FFmpeg.
 
@@ -891,12 +892,7 @@ class FinalMergerEngine(Engine):
                 self.logger.error("ffmpeg_stereo_assembly_error", error=str(e))
                 return None
 
-            if temp_dir is not None:
-                persisted = temp_dir / "redacted_stereo.wav"
-            else:
-                persisted = Path(
-                    tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-                )
+            persisted = temp_dir / "redacted_stereo.wav"
             persisted.write_bytes(output_path.read_bytes())
             return persisted
 

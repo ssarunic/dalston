@@ -102,6 +102,7 @@ class EngineRunner:
         self._stage: str = "unknown"  # Pipeline stage from capabilities
         self._execution_profile = "container"
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
+        self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
 
         # Load configuration from environment
         self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
@@ -363,7 +364,7 @@ class EngineRunner:
         - Skips the directory used by the current active task.
         - Caps the scan to 1 000 entries to avoid stalling on large dirs.
         """
-        tmp_root = Path(tempfile.gettempdir()).resolve()
+        tmp_root = self._tmp_root
 
         # Refuse to scan anything that doesn't look like a temp directory
         if str(tmp_root) not in self._SAFE_TMP_ROOTS:
@@ -400,7 +401,7 @@ class EngineRunner:
                 if current and current in entry.name:
                     continue
                 try:
-                    shutil.rmtree(entry, ignore_errors=True)
+                    shutil.rmtree(entry)
                     removed += 1
                 except OSError:
                     pass

@@ -69,6 +69,7 @@ class InProcExecutor(RuntimeExecutor):
                 job_id=request.job_id,
                 stage=request.stage,
                 metadata=request.metadata,
+                temp_dir=temp_dir,
             )
 
             response = request.engine.process(task_request, ctx)

@@ -232,6 +232,7 @@ async def run_engine_http(
         raise
     finally:
         cleanup_audio(task_request.audio_path)
+        shutil.rmtree(ctx.temp_dir, ignore_errors=True)
         duration = time.monotonic() - start
         dalston.metrics.observe_engine_direct_request(
             engine_id, endpoint, status_code, duration
