@@ -77,11 +77,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
         stages = [stage]
     else:
         compose_children = data.get("compose") or []
-        stages = [
-            s
-            for child in compose_children
-            for s in (child.get("stages") or [])
-        ]
+        stages = [s for child in compose_children for s in (child.get("stages") or [])]
 
     # Extract capabilities
     caps = data.get("capabilities") or {}
