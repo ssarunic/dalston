@@ -162,7 +162,7 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
     def get_local_cache_stats(self) -> dict[str, Any] | None:
         """Get local model cache statistics for heartbeat reporting.
 
-        Override this method in engines that use S3ModelStorage to report
+        Override this method in engines that use MultiSourceModelStorage to report
         which models are cached locally. The stats are included in heartbeat
         payloads so the orchestrator can track model availability.
 

@@ -3,22 +3,20 @@
 This manager handles loading and lifecycle management for faster-whisper models,
 which are CTranslate2 conversions of OpenAI Whisper models.
 
-Supported models:
-    - tiny, base, small, medium (lightweight models)
-    - large-v2, large-v3 (full accuracy)
-    - large-v3-turbo (accuracy + speed, CPU-capable)
-    - distil-large-v3 (distilled, faster)
+Accepts any HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
+or short names that faster-whisper's WhisperModel constructor understands
+(e.g., "large-v3-turbo").
 
 Example usage:
-    # With S3 storage (production):
-    storage = S3ModelStorage.from_env()
+    # With multi-source storage (production):
+    storage = MultiSourceModelStorage.from_env()
     manager = FasterWhisperModelManager(
         device="cuda",
         compute_type="float16",
         model_storage=storage,
     )
 
-    # Without S3 (local development):
+    # Without storage (local development, downloads via faster-whisper):
     manager = FasterWhisperModelManager.from_env()
 
     model = manager.acquire("large-v3-turbo")
@@ -31,7 +29,8 @@ Environment variables:
     WHISPER_MODELS_DIR: Directory for model cache (default: from model_paths)
     DALSTON_MODEL_TTL_SECONDS: Default TTL (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Max models to keep loaded (default: 2)
-    DALSTON_S3_BUCKET: S3 bucket for models (enables S3 storage)
+    DALSTON_MODEL_SOURCE: Model source ("s3", "hf", "auto"; default: "s3")
+    DALSTON_S3_BUCKET: S3 bucket for models (used when source includes S3)
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ from dalston.engine_sdk.model_paths import CTRANSLATE2_CACHE
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
 
-    from dalston.engine_sdk.model_storage import S3ModelStorage
+    from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
 logger = structlog.get_logger()
 
@@ -56,7 +55,7 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
     """Model manager for CTranslate2/faster-whisper models.
 
     This manager handles the lifecycle of Whisper models, including:
-    - Automatic model downloading from HuggingFace Hub
+    - Automatic model downloading via MultiSourceModelStorage
     - Device and compute type configuration
     - TTL-based eviction for idle models
     - LRU eviction when at capacity
@@ -65,37 +64,16 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
         device: Device for inference ("cuda" or "cpu")
         compute_type: Compute precision ("float16", "int8", "float32")
         download_root: Directory to cache downloaded models
+        model_storage: MultiSourceModelStorage for model downloads
         **kwargs: Passed to ModelManager (ttl_seconds, max_loaded, preload)
     """
-
-    # Valid model identifiers that can be loaded
-    SUPPORTED_MODELS = frozenset(
-        {
-            "tiny",
-            "tiny.en",
-            "base",
-            "base.en",
-            "small",
-            "small.en",
-            "medium",
-            "medium.en",
-            "large-v1",
-            "large-v2",
-            "large-v3",
-            "large-v3-turbo",
-            "distil-large-v2",
-            "distil-large-v3",
-            "distil-medium.en",
-            "distil-small.en",
-        }
-    )
 
     def __init__(
         self,
         device: str = "cuda",
         compute_type: str = "float16",
         download_root: str | None = None,
-        model_storage: S3ModelStorage | None = None,
+        model_storage: MultiSourceModelStorage | None = None,
         **kwargs,
     ) -> None:
         self.device = device
@@ -113,7 +91,7 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
             device=self.device,
             compute_type=self.compute_type,
             download_root=self.download_root,
-            s3_storage_enabled=model_storage is not None,
+            storage_enabled=model_storage is not None,
         )
 
         super().__init__(**kwargs)
@@ -121,43 +99,32 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
     def _load_model(self, model_id: str) -> WhisperModel:
         """Load a faster-whisper model.
 
-        If S3ModelStorage is configured, models are downloaded from S3.
-        Otherwise, models are downloaded from HuggingFace Hub directly.
+        If MultiSourceModelStorage is configured, models are downloaded via
+        the configured source (S3, HF, or auto). Otherwise, models are
+        downloaded by faster-whisper directly (uses HF Hub internally).
 
         Args:
-            model_id: Model identifier (e.g., "large-v3-turbo" or HF model ID)
+            model_id: Model identifier — full HF repo ID
+                (e.g., "Systran/faster-whisper-large-v3") or short name
+                that faster-whisper accepts (e.g., "large-v3-turbo")
 
         Returns:
             Loaded WhisperModel instance
-
-        Raises:
-            ValueError: If model_id is not supported
-            ModelNotInS3Error: If S3 storage is enabled but model is not in S3
-            Exception: If model loading fails
         """
         # Import here to avoid import errors if faster-whisper not installed
         from faster_whisper import WhisperModel
 
-        # Validate model ID for standard models
-        if model_id not in self.SUPPORTED_MODELS:
-            # Allow HuggingFace model IDs (contain "/")
-            if "/" not in model_id:
-                raise ValueError(
-                    f"Unknown model: {model_id}. "
-                    f"Supported: {sorted(self.SUPPORTED_MODELS)} or HuggingFace model IDs"
-                )
-
-        # If S3 storage is configured, download from S3 first
+        # If storage is configured, download from configured source first
         model_path: str = model_id
         if self.model_storage is not None:
             logger.info(
-                "ensuring_model_from_s3",
+                "ensuring_model_from_storage",
                 model_id=model_id,
             )
             local_path = self.model_storage.ensure_local(model_id)
             model_path = str(local_path)
             logger.info(
-                "model_ready_from_s3",
+                "model_ready_from_storage",
                 model_id=model_id,
                 local_path=model_path,
             )
@@ -186,19 +153,14 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
         return model
 
     def _unload_model(self, model: WhisperModel) -> None:
-        """Unload a faster-whisper model.
-
-        Args:
-            model: The WhisperModel to unload
-        """
-        # WhisperModel doesn't have explicit cleanup, just delete reference
+        """Unload a faster-whisper model."""
         del model
 
     def get_local_cache_stats(self) -> dict | None:
-        """Get local model cache statistics from S3ModelStorage.
+        """Get local model cache statistics.
 
         Returns:
-            Dictionary with cache stats if S3 storage is configured,
+            Dictionary with cache stats if storage is configured,
             None otherwise.
         """
         if self.model_storage is not None:
@@ -215,27 +177,19 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
             DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
             DALSTON_MODEL_PRELOAD: Model to preload (optional)
             WHISPER_MODELS_DIR: Download directory (optional)
-            DALSTON_S3_BUCKET: S3 bucket for models (enables S3 storage)
+            DALSTON_MODEL_SOURCE: Source mode ("s3", "hf", "auto")
+            DALSTON_S3_BUCKET: S3 bucket (used when source includes S3)
 
         Returns:
             Configured FasterWhisperModelManager instance
         """
         from dalston.engine_sdk.device import detect_device
+        from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
         device = detect_device(include_mps=False)
         compute_type = "float16" if device == "cuda" else "int8"
 
-        # Configure S3 storage if bucket is set
-        model_storage = None
-        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-        if s3_bucket:
-            from dalston.engine_sdk.model_storage import S3ModelStorage
-
-            model_storage = S3ModelStorage.from_env()
-            logger.info(
-                "s3_model_storage_enabled",
-                bucket=s3_bucket,
-            )
+        model_storage = MultiSourceModelStorage.from_env()
 
         return cls(
             device=device,

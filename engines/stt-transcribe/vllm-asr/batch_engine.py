@@ -37,7 +37,7 @@ import structlog
 import torch
 
 if TYPE_CHECKING:
-    from dalston.engine_sdk.model_storage import S3ModelStorage
+    from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
 from dalston.common.pipeline_types import (
     Transcript,
@@ -88,7 +88,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._loaded_model_id: str | None = None
         self._loaded_model_path: str | None = None
         self._tokenizer = None
-        self._model_storage: S3ModelStorage | None = None
+        self._model_storage: MultiSourceModelStorage | None = None
 
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
@@ -101,13 +101,10 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         )
         self._max_model_len = int(os.environ.get("DALSTON_VLLM_MAX_MODEL_LEN", "4096"))
 
-        # Configure S3 model storage if bucket is set
-        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-        if s3_bucket:
-            from dalston.engine_sdk.model_storage import S3ModelStorage
+        # Configure model storage from environment
+        from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
-            self._model_storage = S3ModelStorage.from_env()
-            self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+        self._model_storage = MultiSourceModelStorage.from_env()
 
         # Verify CUDA is available
         if not torch.cuda.is_available():
@@ -170,17 +167,17 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
             self.logger.info("model_unloaded")
 
-        # Determine model path - either from S3 cache or HuggingFace ID
+        # Determine model path - either from storage or HuggingFace ID
         model_path: str = loaded_model_id
         if self._model_storage is not None:
             self.logger.info(
-                "ensuring_model_from_s3",
+                "ensuring_model_from_storage",
                 loaded_model_id=loaded_model_id,
             )
             local_path = self._model_storage.ensure_local(loaded_model_id)
             model_path = str(local_path)
             self.logger.info(
-                "model_ready_from_s3",
+                "model_ready_from_storage",
                 loaded_model_id=loaded_model_id,
                 local_path=model_path,
             )

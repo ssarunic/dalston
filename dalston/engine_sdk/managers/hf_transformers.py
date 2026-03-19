@@ -7,8 +7,8 @@ Supports any model on HuggingFace Hub with pipeline_tag=automatic-speech-recogni
 including Whisper, Wav2Vec2, HuBERT, MMS, and community fine-tunes.
 
 Example usage:
-    # With S3 storage (production):
-    storage = S3ModelStorage.from_env()
+    # With multi-source storage (production):
+    storage = MultiSourceModelStorage.from_env()
     manager = HFTransformersModelManager(
         device="cuda",
         torch_dtype=torch.float16,
@@ -17,7 +17,7 @@ Example usage:
         max_loaded=2,
     )
 
-    # Without S3 (local development):
+    # Without storage (local development):
     manager = HFTransformersModelManager(
         device="cuda",
         torch_dtype=torch.float16,
@@ -35,7 +35,8 @@ Example usage:
 Environment variables:
     DALSTON_MODEL_TTL_SECONDS: Default TTL (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Max models to keep loaded (default: 2)
-    DALSTON_S3_BUCKET: S3 bucket for models (enables S3 storage)
+    DALSTON_MODEL_SOURCE: Model source ("s3", "hf", "auto"; default: "s3")
+    DALSTON_S3_BUCKET: S3 bucket for models (used when source includes S3)
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from dalston.engine_sdk.model_manager import ModelManager
 if TYPE_CHECKING:
     import torch
 
-    from dalston.engine_sdk.model_storage import S3ModelStorage
+    from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
 logger = structlog.get_logger()
 
@@ -58,7 +59,7 @@ class HFTransformersModelManager(ModelManager[Any]):
     """Model manager for HuggingFace Transformers ASR pipelines.
 
     This manager handles the lifecycle of HuggingFace ASR pipelines, including:
-    - Automatic model downloading from HuggingFace Hub (or S3 if configured)
+    - Automatic model downloading via MultiSourceModelStorage
     - Device and dtype configuration
     - TTL-based eviction for idle models
     - LRU eviction when at capacity
@@ -69,7 +70,7 @@ class HFTransformersModelManager(ModelManager[Any]):
     Args:
         device: Device for inference ("cuda", "cpu", or device index)
         torch_dtype: PyTorch dtype for model weights
-        model_storage: Optional S3ModelStorage for model caching
+        model_storage: Optional MultiSourceModelStorage for model downloads
         **kwargs: Passed to ModelManager (ttl_seconds, max_loaded, preload)
     """
 
@@ -77,7 +78,7 @@ class HFTransformersModelManager(ModelManager[Any]):
         self,
         device: str = "cuda",
         torch_dtype: torch.dtype | None = None,
-        model_storage: S3ModelStorage | None = None,
+        model_storage: MultiSourceModelStorage | None = None,
         **kwargs: Any,
     ) -> None:
         self.device = device
@@ -88,7 +89,7 @@ class HFTransformersModelManager(ModelManager[Any]):
             "hf_transformers_manager_init",
             device=self.device,
             torch_dtype=str(self.torch_dtype),
-            s3_storage_enabled=model_storage is not None,
+            storage_enabled=model_storage is not None,
         )
 
         super().__init__(**kwargs)
@@ -96,32 +97,28 @@ class HFTransformersModelManager(ModelManager[Any]):
     def _load_model(self, model_id: str) -> Any:
         """Load a HuggingFace ASR pipeline.
 
-        If S3ModelStorage is configured, models are downloaded from S3.
-        Otherwise, models are downloaded from HuggingFace Hub directly.
+        If MultiSourceModelStorage is configured, models are downloaded via
+        the configured source. Otherwise, HuggingFace downloads directly.
 
         Args:
             model_id: HuggingFace model ID (e.g., "openai/whisper-large-v3")
 
         Returns:
             Loaded transformers pipeline instance
-
-        Raises:
-            ModelNotInS3Error: If S3 storage is enabled but model is not in S3
-            Exception: If model loading fails
         """
         from transformers import pipeline
 
-        # If S3 storage is configured, download from S3 first
+        # If storage is configured, download from configured source first
         model_path: str = model_id
         if self.model_storage is not None:
             logger.info(
-                "ensuring_model_from_s3",
+                "ensuring_model_from_storage",
                 model_id=model_id,
             )
             local_path = self.model_storage.ensure_local(model_id)
             model_path = str(local_path)
             logger.info(
-                "model_ready_from_s3",
+                "model_ready_from_storage",
                 model_id=model_id,
                 local_path=model_path,
             )
@@ -158,18 +155,14 @@ class HFTransformersModelManager(ModelManager[Any]):
         return pipe
 
     def _unload_model(self, model: Any) -> None:
-        """Unload a HuggingFace ASR pipeline.
-
-        Args:
-            model: The pipeline to unload
-        """
+        """Unload a HuggingFace ASR pipeline."""
         del model
 
     def get_local_cache_stats(self) -> dict | None:
-        """Get local model cache statistics from S3ModelStorage.
+        """Get local model cache statistics.
 
         Returns:
-            Dictionary with cache stats if S3 storage is configured,
+            Dictionary with cache stats if storage is configured,
             None otherwise.
         """
         if self.model_storage is not None:

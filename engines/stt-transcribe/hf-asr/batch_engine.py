@@ -82,14 +82,9 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             # Auto-detect device and dtype
             self._device, self._torch_dtype = self._detect_device()
 
-            # Configure S3 storage if bucket is set
-            model_storage = None
-            s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-            if s3_bucket:
-                from dalston.engine_sdk.model_storage import S3ModelStorage
+            from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
-                model_storage = S3ModelStorage.from_env()
-                self.logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+            model_storage = MultiSourceModelStorage.from_env()
 
             # Initialize model manager with TTL eviction
             self._manager = HFTransformersModelManager(
