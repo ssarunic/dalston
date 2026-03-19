@@ -216,13 +216,13 @@ class TestProcessing:
         """Test full processing with a mocked NeMo model."""
         engine = engine_module.NemoSortformerEngine()
 
-        # Mock model that returns (start, end, speaker_idx) tuples
+        # Mock model that returns "start end speaker_N" strings
         mock_model = MagicMock()
         mock_model.diarize.return_value = [
             [
-                (0.0, 2.5, 0),
-                (2.5, 5.0, 1),
-                (4.8, 7.0, 0),
+                "0.0 2.5 speaker_0",
+                "2.5 5.0 speaker_1",
+                "4.8 7.0 speaker_0",
             ]
         ]
         mock_model.eval.return_value = mock_model
