@@ -4,6 +4,7 @@ GET /api/console/dashboard - Aggregated dashboard data
 GET /api/console/metrics - Key operational metrics for dashboard charts
 GET /api/console/jobs/{job_id}/tasks - Get task DAG for a job
 GET /api/console/engines - Get batch and realtime engine status
+GET /api/console/nodes - Infrastructure topology (engines grouped by node)
 DELETE /api/console/jobs/{job_id} - Delete a job and its artifacts (admin)
 GET /api/console/settings - List setting namespaces
 GET /api/console/settings/{namespace} - Get settings in a namespace
@@ -12,6 +13,7 @@ POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
 import os
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -28,6 +30,8 @@ from dalston.common.models import JobStatus
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
+    _parse_datetime,
+    _parse_json_list,
 )
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.db.session import DEFAULT_TENANT_ID
@@ -574,6 +578,156 @@ async def get_engines(
         batch_engines=batch_engines,
         realtime_engines=realtime_engines,
     )
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure topology (M78)
+# ---------------------------------------------------------------------------
+
+
+def _safe_int(value: str | None, default: int) -> int:
+    """Parse an integer string, returning *default* on any failure."""
+    try:
+        return int(value or default)
+    except (ValueError, TypeError):
+        return default
+
+
+_GB_PATTERN = re.compile(r"([\d.]+)\s*GB", re.IGNORECASE)
+
+
+def _parse_gb(value: str) -> float:
+    """Parse a GPU memory string like "4.2GB" to a float. Returns 0.0 on failure."""
+    m = _GB_PATTERN.match(value.strip())
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+    return 0.0
+
+
+class NodeEngine(BaseModel):
+    """Engine instance on a node."""
+
+    instance: str
+    engine_id: str
+    stage: str
+    status: str
+    capacity: int
+    active_batch: int
+    active_realtime: int
+    gpu_memory_used: str
+    gpu_memory_total: str
+    interfaces: list[str]
+    loaded_model: str | None
+    is_healthy: bool
+
+
+class NodeView(BaseModel):
+    """A compute node hosting one or more engine instances."""
+
+    node_id: str
+    hostname: str
+    deploy_env: str
+    aws_az: str | None
+    aws_instance_type: str | None
+    engine_count: int
+    engines: list[NodeEngine]
+    gpu_memory_used_gb: float
+    gpu_memory_total_gb: float
+
+
+class NodesResponse(BaseModel):
+    """Response for infrastructure topology endpoint."""
+
+    nodes: list[NodeView]
+
+
+@router.get(
+    "/nodes",
+    response_model=NodesResponse,
+    summary="Get infrastructure topology",
+    description="Engine instances grouped by compute node.",
+)
+async def get_nodes(
+    principal: Annotated[Principal, Depends(get_principal)],
+    redis: Redis = Depends(get_redis),
+) -> NodesResponse:
+    """Get infrastructure topology — engines grouped by node."""
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
+
+    all_instance_ids = await redis.smembers(UNIFIED_INSTANCE_SET_KEY)
+    nodes: dict[str, dict[str, Any]] = {}
+    now = datetime.now(UTC)
+
+    for instance_id in all_instance_ids:
+        data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+        if not data or "engine_id" not in data:
+            continue
+
+        node_id = data.get("node_id")
+        if not node_id:
+            continue  # skip pre-M78 engines without node identity
+
+        # Determine health from heartbeat freshness
+        is_healthy = False
+        parsed_hb = _parse_datetime(data.get("last_heartbeat"))
+        if parsed_hb:
+            is_healthy = (now - parsed_hb).total_seconds() < HEARTBEAT_STALE_THRESHOLD
+
+        interfaces = _parse_json_list(data.get("interfaces")) or ["batch"]
+
+        engine = NodeEngine(
+            instance=data.get("instance", instance_id),
+            engine_id=data["engine_id"],
+            stage=data.get("stage", "unknown"),
+            status=data.get("status", "offline"),
+            capacity=_safe_int(data.get("capacity", "1"), 1),
+            active_batch=_safe_int(data.get("active_batch", "0"), 0),
+            active_realtime=_safe_int(data.get("active_realtime", "0"), 0),
+            gpu_memory_used=data.get("gpu_memory_used", "0GB"),
+            gpu_memory_total=data.get("gpu_memory_total", "0GB"),
+            interfaces=interfaces,
+            loaded_model=data.get("loaded_model") or None,
+            is_healthy=is_healthy,
+        )
+
+        if node_id not in nodes:
+            nodes[node_id] = {
+                "node_id": node_id,
+                "hostname": data.get("hostname", ""),
+                "deploy_env": data.get("deploy_env", "local"),
+                "aws_az": data.get("aws_az") or None,
+                "aws_instance_type": data.get("aws_instance_type") or None,
+                "engines": [],
+            }
+        nodes[node_id]["engines"].append(engine)
+
+    node_views = []
+    for node_data in nodes.values():
+        engines: list[NodeEngine] = node_data["engines"]
+        used_gb = sum(_parse_gb(e.gpu_memory_used) for e in engines)
+        total_gb = max((_parse_gb(e.gpu_memory_total) for e in engines), default=0.0)
+        node_views.append(
+            NodeView(
+                node_id=node_data["node_id"],
+                hostname=node_data["hostname"],
+                deploy_env=node_data["deploy_env"],
+                aws_az=node_data["aws_az"],
+                aws_instance_type=node_data["aws_instance_type"],
+                engine_count=len(engines),
+                engines=engines,
+                gpu_memory_used_gb=round(used_gb, 2),
+                gpu_memory_total_gb=round(total_gb, 2),
+            )
+        )
+
+    # Sort: AWS nodes first, then by hostname
+    node_views.sort(key=lambda n: (0 if n.deploy_env == "aws" else 1, n.hostname))
+
+    return NodesResponse(nodes=node_views)
 
 
 # Job listing for console

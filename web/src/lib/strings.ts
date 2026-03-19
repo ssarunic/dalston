@@ -304,6 +304,19 @@ const models = {
   noModelsHint: 'Add a model from HuggingFace or sync with disk',
 } as const
 
+const infrastructure = {
+  title: 'Infrastructure',
+  subtitle: 'Compute nodes and engine topology',
+  noNodes: 'No nodes registered',
+  noNodesHint: 'Start engines with make dev to see nodes appear',
+  engines: 'engines',
+  gpu: 'GPU',
+  gpuMemory: 'GPU Memory',
+  localDev: 'Local dev',
+  aws: 'AWS',
+  cpuOnly: 'CPU only',
+} as const
+
 const engines = {
   title: 'Engines',
   subtitle: 'Pipeline stages and processing capacity',
@@ -716,6 +729,7 @@ export const S = {
   jobDetail,
   taskDetail,
   models,
+  infrastructure,
   engines,
   engineDetail,
   apiKeys,

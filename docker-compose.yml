@@ -34,6 +34,10 @@ x-common-env: &common-env
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
   DALSTON_LOG_LEVEL: ${DALSTON_LOG_LEVEL:-INFO}
   DALSTON_LOG_FORMAT: ${DALSTON_LOG_FORMAT:-json}
+  # M78: Host machine hostname for infrastructure topology grouping.
+  # In Docker, socket.gethostname() returns the container ID. This passes
+  # the host's real hostname so engines on the same machine group together.
+  DALSTON_HOST_HOSTNAME: ${HOSTNAME:-localhost}
 
 # Observability environment variables
 x-observability-env: &observability-env

@@ -27,6 +27,7 @@ import type {
   ModelFilters,
   ModelListResponse,
   ModelRegistryEntry,
+  NodesResponse,
   ModelRegistryListResponse,
   NamespaceSettings,
   PullModelResponse,
@@ -209,6 +210,10 @@ export const apiClient = {
   // Engines (admin required) - console endpoint for dashboard
   getEngines: () =>
     currentClient.get('api/console/engines').json<EnginesResponse>(),
+
+  // Infrastructure topology (M78)
+  getNodes: () =>
+    currentClient.get('api/console/nodes').json<NodesResponse>(),
 
   // Engine discovery API (v1/engines)
   getEnginesList: () =>

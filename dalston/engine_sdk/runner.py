@@ -102,6 +102,9 @@ class EngineRunner:
         self._stage: str = "unknown"  # Pipeline stage from capabilities
         self._execution_profile = "container"
         self._supports_realtime = bool(os.environ.get("DALSTON_WORKER_PORT"))
+        self._node_hostname: str = ""
+        self._node_id: str = ""
+        self._deploy_env: str = "local"
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
 
@@ -178,16 +181,23 @@ class EngineRunner:
         # Get stage from capabilities (derived from engine.yaml) or fallback to "unknown"
         self._stage = capabilities.stages[0] if capabilities.stages else "unknown"
 
-        # Detect realtime capability: unified engines set DALSTON_WORKER_PORT
-        # for the WebSocket server that runs alongside the batch queue poller.
-        worker_port = os.environ.get("DALSTON_WORKER_PORT")
-        if worker_port:
-            interfaces = ["batch", "realtime"]
-            instance_host = os.environ.get("DALSTON_INSTANCE", self.instance)
-            endpoint = f"ws://{instance_host}:{worker_port}"
-        else:
-            interfaces = ["batch"]
-            endpoint = None
+        # Batch runner always registers as batch-only. In unified engines
+        # the realtime runner registers separately with ["realtime"] and its
+        # own capacity — keeping them separate avoids double-counting.
+        interfaces = ["batch"]
+        endpoint = None
+
+        # M78: Detect node identity and GPU total for infrastructure topology
+        from dalston.common.node_identity import (
+            detect_node_identity,
+            get_gpu_memory_total,
+        )
+
+        node = detect_node_identity()
+        gpu_total = get_gpu_memory_total()
+        self._node_hostname = node.hostname
+        self._node_id = node.node_id
+        self._deploy_env = node.deploy_env
 
         # Register with unified engine registry
         self._unified_writer = UnifiedRegistryWriter(self.redis_url)
@@ -210,6 +220,12 @@ class EngineRunner:
                     capabilities.includes_diarization if capabilities else False
                 ),
                 schema_version=PIPELINE_SCHEMA_VERSION,
+                hostname=node.hostname,
+                node_id=node.node_id,
+                deploy_env=node.deploy_env,
+                aws_az=node.region,
+                aws_instance_type=node.instance_type,
+                gpu_memory_total=gpu_total,
             )
         )
         logger.info("engine_registered", instance=self.instance)
@@ -352,6 +368,9 @@ class EngineRunner:
                             loaded_model=loaded_model,
                             engine_id=self.engine_id,
                             stage=self._stage,
+                            hostname=self._node_hostname,
+                            node_id=self._node_id,
+                            deploy_env=self._deploy_env,
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))

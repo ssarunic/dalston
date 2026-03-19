@@ -99,6 +99,12 @@ class EngineRecord:
     execution_profile: str = "container"
     vocabulary_support: VocabularySupport | None = None
     schema_version: str | None = None
+    # M78: Node identity fields for infrastructure topology
+    hostname: str = ""
+    node_id: str = ""
+    deploy_env: str = "local"
+    aws_az: str | None = None
+    aws_instance_type: str | None = None
 
     @property
     def available_capacity(self) -> int:
@@ -162,8 +168,15 @@ def _record_to_mapping(record: EngineRecord) -> dict[str, str]:
         else "false",
         "includes_diarization": "true" if record.includes_diarization else "false",
         "execution_profile": record.execution_profile,
+        "hostname": record.hostname,
+        "node_id": record.node_id,
+        "deploy_env": record.deploy_env,
     }
 
+    if record.aws_az is not None:
+        mapping["aws_az"] = record.aws_az
+    if record.aws_instance_type is not None:
+        mapping["aws_instance_type"] = record.aws_instance_type
     if record.models_loaded is not None:
         mapping["models_loaded"] = json.dumps(record.models_loaded)
     if record.endpoint is not None:
@@ -272,6 +285,11 @@ def _mapping_to_record(instance: str, data: dict[str, str]) -> EngineRecord | No
         execution_profile=data.get("execution_profile", "container"),
         vocabulary_support=vocabulary_support,
         schema_version=data.get("schema_version"),
+        hostname=data.get("hostname", ""),
+        node_id=data.get("node_id", ""),
+        deploy_env=data.get("deploy_env", "local"),
+        aws_az=data.get("aws_az"),
+        aws_instance_type=data.get("aws_instance_type"),
     )
 
 
@@ -356,10 +374,14 @@ class UnifiedEngineRegistry:
         loaded_model: str | None = None,
         models_loaded: list[str] | None = None,
         gpu_memory_used: str | None = None,
+        hostname: str | None = None,
+        node_id: str | None = None,
+        deploy_env: str | None = None,
     ) -> None:
         """Update heartbeat and dynamic fields.
 
-        Only updates fields that are provided (not None).
+        Only updates fields that are provided (not None). Node identity
+        fields are static but included so re-created keys survive expiry.
         """
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
@@ -378,6 +400,12 @@ class UnifiedEngineRegistry:
             mapping["models_loaded"] = json.dumps(models_loaded)
         if gpu_memory_used is not None:
             mapping["gpu_memory_used"] = gpu_memory_used
+        if hostname is not None:
+            mapping["hostname"] = hostname
+        if node_id is not None:
+            mapping["node_id"] = node_id
+        if deploy_env is not None:
+            mapping["deploy_env"] = deploy_env
 
         await self._redis.hset(instance_key, mapping=mapping)
         await self._redis.expire(instance_key, HEARTBEAT_TTL)
@@ -581,12 +609,16 @@ class UnifiedRegistryWriter:
         loaded_model: str | None = None,
         engine_id: str | None = None,
         stage: str | None = None,
+        hostname: str | None = None,
+        node_id: str | None = None,
+        deploy_env: str | None = None,
     ) -> None:
         """Update heartbeat (sync).
 
-        engine_id and stage are written on every heartbeat so that if the Redis key
-        expires and is re-created by the heartbeat, the critical static fields are
-        always present (preventing silent quarantine by _mapping_to_record).
+        engine_id, stage, and node identity fields are written on every
+        heartbeat so that if the Redis key expires and is re-created by
+        the heartbeat, the critical static fields are always present
+        (preventing silent quarantine by _mapping_to_record).
         """
         r = self._get_redis()
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
@@ -603,6 +635,12 @@ class UnifiedRegistryWriter:
             mapping["engine_id"] = engine_id
         if stage is not None:
             mapping["stage"] = stage
+        if hostname is not None:
+            mapping["hostname"] = hostname
+        if node_id is not None:
+            mapping["node_id"] = node_id
+        if deploy_env is not None:
+            mapping["deploy_env"] = deploy_env
 
         r.hset(instance_key, mapping=mapping)
         r.expire(instance_key, HEARTBEAT_TTL)

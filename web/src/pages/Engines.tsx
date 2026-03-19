@@ -14,29 +14,10 @@ import { Badge } from '@/components/ui/badge'
 import { useEngines } from '@/hooks/useEngines'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import type { EngineStatus, ModelRegistryEntry, ModelStatus, WorkerStatus } from '@/api/types'
+import { StatusDot, type DotStatus } from '@/components/StatusDot'
 import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
-
-// Sort-order hint for known stages — unknown stages appear at the end
-const STAGE_ORDER: Record<string, number> = {
-  prepare: 0,
-  transcribe: 1,
-  align: 2,
-  diarize: 3,
-  pii_detect: 4,
-  audio_redact: 5,
-  merge: 6,
-}
-
-const STAGE_LABELS: Record<string, { label: string; description: string }> = {
-  prepare: { label: 'Prepare', description: 'Audio preprocessing' },
-  transcribe: { label: 'Transcribe', description: 'Speech-to-text' },
-  align: { label: 'Align', description: 'Word-level timestamps' },
-  diarize: { label: 'Diarize', description: 'Speaker identification' },
-  pii_detect: { label: 'PII Detect', description: 'Sensitive data detection' },
-  audio_redact: { label: 'Audio Redact', description: 'PII audio masking' },
-  merge: { label: 'Merge', description: 'Final assembly' },
-}
+import { STAGE_ORDER, STAGE_LABELS } from '@/lib/stages'
 
 /** Unified engine combining batch and realtime data. */
 interface UnifiedEngine {
@@ -61,18 +42,6 @@ interface StageStatus {
   totalProcessing: number
   totalSessions: number
   totalCapacity: number
-}
-
-type DotStatus = 'healthy' | 'unhealthy' | 'warning' | 'empty'
-
-function StatusDot({ status }: { status: DotStatus }) {
-  const colors: Record<DotStatus, string> = {
-    healthy: 'bg-green-500',
-    unhealthy: 'bg-red-500',
-    warning: 'bg-yellow-500',
-    empty: 'bg-zinc-500',
-  }
-  return <span className={cn('inline-block w-2 h-2 rounded-full shrink-0', colors[status])} />
 }
 
 function engineStatusToDot(status: EngineStatus): DotStatus {

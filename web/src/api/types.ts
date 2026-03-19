@@ -304,6 +304,38 @@ export interface EnginesResponse {
   realtime_engines: WorkerStatus[]
 }
 
+// Infrastructure topology types (M78)
+export interface NodeEngine {
+  instance: string
+  engine_id: string
+  stage: string
+  status: string
+  capacity: number
+  active_batch: number
+  active_realtime: number
+  gpu_memory_used: string
+  gpu_memory_total: string
+  interfaces: string[]
+  loaded_model: string | null
+  is_healthy: boolean
+}
+
+export interface NodeView {
+  node_id: string
+  hostname: string
+  deploy_env: string
+  aws_az: string | null
+  aws_instance_type: string | null
+  engine_count: number
+  engines: NodeEngine[]
+  gpu_memory_used_gb: number
+  gpu_memory_total_gb: number
+}
+
+export interface NodesResponse {
+  nodes: NodeView[]
+}
+
 // Webhook types
 export interface WebhookEndpoint {
   id: string

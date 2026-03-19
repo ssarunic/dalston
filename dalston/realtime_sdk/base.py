@@ -145,6 +145,9 @@ class RealtimeEngine(ABC):
         self._sessions: dict[str, SessionHandler] = {}
         self._unified_registry: UnifiedEngineRegistry | None = None
         self._running = False
+        self._node_hostname: str = ""
+        self._node_id: str = ""
+        self._deploy_env: str = "local"
         self._server = None
         self._metrics_runner: web.AppRunner | None = None
 
@@ -425,6 +428,18 @@ class RealtimeEngine(ABC):
         # M50: Get structured capabilities from engine.yaml
         capabilities = self.get_capabilities()
 
+        # M78: Detect node identity and GPU total for infrastructure topology
+        from dalston.common.node_identity import (
+            detect_node_identity,
+            get_gpu_memory_total,
+        )
+
+        node = await asyncio.to_thread(detect_node_identity)
+        gpu_total = get_gpu_memory_total()
+        self._node_hostname = node.hostname
+        self._node_id = node.node_id
+        self._deploy_env = node.deploy_env
+
         # Register with unified engine registry
         import redis.asyncio as aioredis
 
@@ -447,6 +462,12 @@ class RealtimeEngine(ABC):
                 supports_word_timestamps=capabilities.supports_word_timestamps,
                 includes_diarization=capabilities.includes_diarization,
                 vocabulary_support=vocab_support,
+                hostname=node.hostname,
+                node_id=node.node_id,
+                deploy_env=node.deploy_env,
+                aws_az=node.region,
+                aws_instance_type=node.instance_type,
+                gpu_memory_total=gpu_total,
             )
         )
         logger.info("engine_registered", instance=self.instance)
@@ -545,6 +566,9 @@ class RealtimeEngine(ABC):
                             active_realtime=active,
                             models_loaded=loaded_models,
                             gpu_memory_used=gpu_mem,
+                            hostname=self._node_hostname,
+                            node_id=self._node_id,
+                            deploy_env=self._deploy_env,
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))
