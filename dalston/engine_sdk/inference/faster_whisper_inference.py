@@ -375,17 +375,11 @@ class FasterWhisperInference:
             device: Override device (None = auto-detect or from env)
             compute_type: Override compute type (None = auto-detect)
         """
-        # Configure S3 storage if bucket is set
-        model_storage = None
-        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-        if s3_bucket:
-            from dalston.engine_sdk.model_storage import S3ModelStorage
+        from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
-            model_storage = S3ModelStorage.from_env()
-            logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+        model_storage = MultiSourceModelStorage.from_env()
 
-        # Don't preload when S3 storage is enabled
-        preload = None if model_storage else os.environ.get("DALSTON_MODEL_PRELOAD")
+        preload = os.environ.get("DALSTON_MODEL_PRELOAD")
 
         return cls(
             device=device,

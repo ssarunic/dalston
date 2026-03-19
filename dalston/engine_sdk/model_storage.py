@@ -1,7 +1,15 @@
-"""S3-backed model storage for engines.
+"""Multi-source model storage for engines.
 
-Models are stored in S3 as the canonical source. Engines download models
-from S3 to local SSD cache on first use, then serve locally.
+Engines can download models from multiple sources:
+- S3 (production default): s3://{bucket}/models/{model_id}/
+- HuggingFace Hub: Uses huggingface_hub.snapshot_download() with native cache
+- NGC: NVIDIA NGC registry (stub, not yet implemented)
+
+Configure via DALSTON_MODEL_SOURCE environment variable:
+- "s3"   - S3 only (default, requires DALSTON_S3_BUCKET)
+- "hf"   - HuggingFace Hub only (requires HF_TOKEN for gated models)
+- "ngc"  - NGC only (requires NGC_API_KEY) — not yet implemented
+- "auto" - Try local cache → S3 → HF → NGC, use first that works
 
 S3 structure:
     s3://{bucket}/models/{model_id}/
@@ -10,16 +18,21 @@ S3 structure:
         ...
         .complete  # Marker file indicating upload is complete
 
-Local cache structure:
+Local cache structure (S3 backend):
     {cache_dir}/{model_id}/
         model.bin
         config.json
         ...
         .complete  # Marker file indicating download is complete
+
+HuggingFace cache structure (HF backend):
+    Uses native huggingface_hub cache at $HF_HOME/hub with
+    content-addressed blob storage and symlink deduplication.
 """
 
 from __future__ import annotations
 
+import enum
 import os
 import shutil
 import tempfile
@@ -29,9 +42,30 @@ from pathlib import Path
 import structlog
 
 from dalston.engine_sdk.io import get_s3_client
-from dalston.engine_sdk.model_paths import MODEL_BASE
+from dalston.engine_sdk.model_paths import MODEL_BASE, is_model_cached
 
 logger = structlog.get_logger()
+
+
+class ModelSource(enum.StrEnum):
+    """Model download source configuration."""
+
+    S3 = "s3"
+    HF = "hf"
+    NGC = "ngc"
+    AUTO = "auto"
+
+
+class ModelNotFoundError(Exception):
+    """Raised when a model cannot be found in any configured source."""
+
+    def __init__(self, model_id: str, sources_tried: list[str]) -> None:
+        self.model_id = model_id
+        self.sources_tried = sources_tried
+        super().__init__(
+            f"Model {model_id} not found in any source. Tried: {', '.join(sources_tried)}"
+        )
+
 
 # Marker file indicating a complete model download/upload
 COMPLETE_MARKER = ".complete"
@@ -299,3 +333,267 @@ class S3ModelStorage:
 
         logger.info("cache_cleared", models_removed=len(models))
         return len(models)
+
+
+class HFModelStorage:
+    """Downloads models from HuggingFace Hub using native cache layout.
+
+    Uses huggingface_hub.snapshot_download() which handles:
+    - Content-addressed blob storage with symlink deduplication
+    - Resumable downloads
+    - Partial download recovery
+
+    The native HF cache is used as-is — no .complete markers or custom
+    cache structure. Framework-specific managers already know how to load
+    from HF cache paths via model_paths.get_hf_model_path().
+    """
+
+    def __init__(self, token: str | None = None) -> None:
+        self.token = token or os.environ.get("HF_TOKEN")
+
+    def ensure_local(self, model_id: str) -> Path:
+        """Download model from HuggingFace Hub if not cached locally.
+
+        Args:
+            model_id: HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
+
+        Returns:
+            Path to the downloaded model snapshot directory
+        """
+        from huggingface_hub import snapshot_download
+
+        logger.info("ensuring_model_from_hf", model_id=model_id)
+        local_path = Path(snapshot_download(model_id, token=self.token))
+        logger.info(
+            "model_ready_from_hf",
+            model_id=model_id,
+            local_path=str(local_path),
+        )
+        return local_path
+
+    def is_cached_locally(self, model_id: str) -> bool:
+        """Check if model is in the local HuggingFace cache."""
+        return is_model_cached(model_id, framework="huggingface")
+
+    def get_cache_stats(self) -> dict:
+        """Get HF cache statistics (basic)."""
+        return {
+            "source": "hf",
+            "models": [],
+            "total_size_mb": 0,
+            "model_count": 0,
+        }
+
+
+class NGCModelStorage:
+    """Downloads models from NVIDIA NGC registry.
+
+    Requires NGC_API_KEY environment variable.
+    Uses NeMo cache layout at model_paths.NEMO_CACHE.
+
+    NOTE: This is a stub. Full NGC download support will be implemented
+    when NeMo engine work requires it.
+    """
+
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key or os.environ.get("NGC_API_KEY")
+
+    def ensure_local(self, model_id: str) -> Path:
+        """Download model from NGC.
+
+        Not yet implemented — raises NotImplementedError with guidance.
+        """
+        raise NotImplementedError(
+            f"NGC model download not yet implemented for '{model_id}'. "
+            "NeMo models currently download via from_pretrained() which "
+            "handles NGC downloads internally. Set DALSTON_MODEL_SOURCE=auto "
+            "to fall back to HuggingFace Hub."
+        )
+
+    def is_cached_locally(self, model_id: str) -> bool:
+        """Check if model is in the local NeMo cache."""
+        return is_model_cached(model_id, framework="nemo")
+
+    def get_cache_stats(self) -> dict:
+        """Get NGC cache statistics (basic)."""
+        return {
+            "source": "ngc",
+            "models": [],
+            "total_size_mb": 0,
+            "model_count": 0,
+        }
+
+
+class MultiSourceModelStorage:
+    """Tries model download backends in order based on DALSTON_MODEL_SOURCE.
+
+    Resolution order for 'auto':
+      1. Local cache (any backend) → use immediately
+      2. S3 (if DALSTON_S3_BUCKET set) → download + cache
+      3. HF Hub (if model_id looks like HF repo) → snapshot_download
+      4. NGC (if NGC_API_KEY set) → not yet implemented
+      5. Raise ModelNotFoundError
+    """
+
+    def __init__(
+        self,
+        source: ModelSource,
+        s3: S3ModelStorage | None = None,
+        hf: HFModelStorage | None = None,
+        ngc: NGCModelStorage | None = None,
+    ) -> None:
+        self.source = source
+        self._s3 = s3
+        self._hf = hf
+        self._ngc = ngc
+
+        logger.info(
+            "multi_source_storage_init",
+            source=source.value,
+            s3_enabled=s3 is not None,
+            hf_enabled=hf is not None,
+            ngc_enabled=ngc is not None,
+        )
+
+    @classmethod
+    def from_env(cls) -> MultiSourceModelStorage:
+        """Create storage from environment variables.
+
+        Environment variables:
+            DALSTON_MODEL_SOURCE: Source mode ("s3", "hf", "ngc", "auto")
+            DALSTON_S3_BUCKET: S3 bucket (enables S3 backend)
+            HF_TOKEN: HuggingFace token (for gated models)
+            NGC_API_KEY: NGC API key (enables NGC backend)
+        """
+        source_str = os.environ.get("DALSTON_MODEL_SOURCE", "s3").lower()
+        try:
+            source = ModelSource(source_str)
+        except ValueError:
+            logger.warning(
+                "invalid_model_source_defaulting_to_s3",
+                configured=source_str,
+                valid=list(ModelSource),
+            )
+            source = ModelSource.S3
+
+        # Build available backends
+        s3 = None
+        s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
+        if s3_bucket:
+            s3 = S3ModelStorage.from_env()
+
+        hf = HFModelStorage()
+
+        ngc = None
+        if os.environ.get("NGC_API_KEY"):
+            ngc = NGCModelStorage()
+
+        return cls(source=source, s3=s3, hf=hf, ngc=ngc)
+
+    def ensure_local(self, model_id: str) -> Path:
+        """Ensure model is available locally from the configured source.
+
+        Args:
+            model_id: Model identifier (e.g., "Systran/faster-whisper-large-v3")
+
+        Returns:
+            Path to local model directory
+
+        Raises:
+            ModelNotFoundError: If model cannot be found in any source
+            ModelNotInS3Error: If source is S3-only and model is not in S3
+        """
+        if self.source == ModelSource.S3:
+            return self._ensure_from_s3(model_id)
+        elif self.source == ModelSource.HF:
+            return self._ensure_from_hf(model_id)
+        elif self.source == ModelSource.NGC:
+            return self._ensure_from_ngc(model_id)
+        else:
+            # AUTO mode: try each source in order
+            return self._ensure_auto(model_id)
+
+    def _ensure_from_s3(self, model_id: str) -> Path:
+        """Download from S3 only."""
+        if self._s3 is None:
+            raise ValueError("DALSTON_MODEL_SOURCE=s3 but DALSTON_S3_BUCKET is not set")
+        return self._s3.ensure_local(model_id)
+
+    def _ensure_from_hf(self, model_id: str) -> Path:
+        """Download from HuggingFace Hub only."""
+        if self._hf is None:
+            raise ValueError("HuggingFace storage not available")
+        return self._hf.ensure_local(model_id)
+
+    def _ensure_from_ngc(self, model_id: str) -> Path:
+        """Download from NGC only."""
+        if self._ngc is None:
+            raise ValueError("DALSTON_MODEL_SOURCE=ngc but NGC_API_KEY is not set")
+        return self._ngc.ensure_local(model_id)
+
+    def _ensure_auto(self, model_id: str) -> Path:
+        """Try sources in order: S3 → HF → NGC."""
+        sources_tried: list[str] = []
+
+        # Try S3 first (if configured)
+        if self._s3 is not None:
+            try:
+                return self._s3.ensure_local(model_id)
+            except Exception as exc:
+                sources_tried.append("s3")
+                logger.debug(
+                    "auto_source_s3_failed",
+                    model_id=model_id,
+                    error=str(exc),
+                )
+
+        # Try HuggingFace Hub
+        if self._hf is not None:
+            try:
+                return self._hf.ensure_local(model_id)
+            except Exception as exc:
+                sources_tried.append("hf")
+                logger.debug(
+                    "auto_source_hf_failed",
+                    model_id=model_id,
+                    error=str(exc),
+                )
+
+        # Try NGC (if configured)
+        if self._ngc is not None:
+            try:
+                return self._ngc.ensure_local(model_id)
+            except Exception as exc:
+                sources_tried.append("ngc")
+                logger.debug(
+                    "auto_source_ngc_failed",
+                    model_id=model_id,
+                    error=str(exc),
+                )
+
+        raise ModelNotFoundError(model_id, sources_tried)
+
+    def is_cached_locally(self, model_id: str) -> bool:
+        """Check if model is in any local cache."""
+        if self._s3 is not None and self._s3.is_cached_locally(model_id):
+            return True
+        if self._hf is not None and self._hf.is_cached_locally(model_id):
+            return True
+        if self._ngc is not None and self._ngc.is_cached_locally(model_id):
+            return True
+        return False
+
+    def get_cache_stats(self) -> dict:
+        """Get cache statistics from the primary backend."""
+        if self.source == ModelSource.S3 and self._s3 is not None:
+            return self._s3.get_cache_stats()
+        if self.source == ModelSource.HF and self._hf is not None:
+            return self._hf.get_cache_stats()
+        if self.source == ModelSource.NGC and self._ngc is not None:
+            return self._ngc.get_cache_stats()
+        # Auto mode: prefer S3 stats if available
+        if self._s3 is not None:
+            return self._s3.get_cache_stats()
+        if self._hf is not None:
+            return self._hf.get_cache_stats()
+        return {"source": "none", "models": [], "total_size_mb": 0, "model_count": 0}

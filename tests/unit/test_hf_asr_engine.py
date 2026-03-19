@@ -574,18 +574,20 @@ class TestHFTransformersModelManager:
 class TestHFASREngineS3Storage:
     """Test HfAsrBatchEngine S3 storage integration."""
 
-    def test_engine_get_local_cache_stats_without_storage(self):
-        """Engine get_local_cache_stats returns None without S3."""
+    def test_engine_get_local_cache_stats_returns_dict(self):
+        """Engine get_local_cache_stats always returns stats dict."""
         with patch.dict(os.environ, {"DALSTON_DEVICE": "cpu"}):
             with patch("torch.cuda.is_available", return_value=False):
                 HfAsrBatchEngine = load_hf_asr_engine()
                 engine = HfAsrBatchEngine()
 
-                assert engine.get_local_cache_stats() is None
+                stats = engine.get_local_cache_stats()
+                assert stats is not None
+                assert isinstance(stats, dict)
                 engine.shutdown()
 
-    def test_engine_enables_s3_storage_from_env(self):
-        """Engine should enable S3 storage when DALSTON_S3_BUCKET is set."""
+    def test_engine_enables_storage_from_env(self):
+        """Engine should enable model storage when DALSTON_S3_BUCKET is set."""
         mock_storage_class = MagicMock()
         mock_storage_instance = MagicMock()
         mock_storage_class.from_env.return_value = mock_storage_instance
@@ -597,13 +599,13 @@ class TestHFASREngineS3Storage:
         ):
             with patch("torch.cuda.is_available", return_value=False):
                 with patch(
-                    "dalston.engine_sdk.model_storage.S3ModelStorage",
+                    "dalston.engine_sdk.model_storage.MultiSourceModelStorage",
                     mock_storage_class,
                 ):
                     HfAsrBatchEngine = load_hf_asr_engine()
                     engine = HfAsrBatchEngine()
 
-                    # S3ModelStorage should have been initialized
+                    # MultiSourceModelStorage should have been initialized
                     mock_storage_class.from_env.assert_called_once()
 
                     # get_local_cache_stats should return storage stats

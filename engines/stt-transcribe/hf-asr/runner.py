@@ -53,13 +53,9 @@ def _create_shared_manager() -> HFTransformersModelManager:
     device = detect_device(include_mps=False)
     torch_dtype = torch.float16 if device == "cuda" else torch.float32
 
-    model_storage = None
-    s3_bucket = os.environ.get("DALSTON_S3_BUCKET")
-    if s3_bucket:
-        from dalston.engine_sdk.model_storage import S3ModelStorage
+    from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
-        model_storage = S3ModelStorage.from_env()
-        logger.info("s3_model_storage_enabled", bucket=s3_bucket)
+    model_storage = MultiSourceModelStorage.from_env()
 
     manager = HFTransformersModelManager(
         device=device,
