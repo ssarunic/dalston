@@ -24,35 +24,23 @@ scrape_configs:
       - targets: ['metrics-exporter:9100']
     metrics_path: /metrics
 
-  # Batch STT engine metrics (M20)
+  # STT engine metrics (M20)
   # Engines expose /metrics on port 9100 via lightweight HTTP server
-  - job_name: 'dalston-batch-stt'
+  - job_name: 'dalston-stt-engines'
     static_configs:
       - targets:
           - 'stt-prepare:9100'
-          - 'stt-transcribe-whisper:9100'
-          - 'stt-transcribe-whisper-cpu:9100'
-          - 'stt-transcribe-parakeet:9100'
-          - 'stt-transcribe-parakeet-cpu:9100'
-          - 'stt-align-whisperx:9100'
-          - 'stt-align-whisperx-cpu:9100'
-          - 'stt-diarize-pyannote-v31:9100'
-          - 'stt-diarize-pyannote-v31-cpu:9100'
-          - 'stt-diarize-pyannote-v40:9100'
-          - 'stt-diarize-pyannote-v40-cpu:9100'
+          - 'stt-transcribe-faster-whisper:9100'
+          - 'stt-transcribe-nemo:9100'
+          - 'stt-transcribe-onnx:9100'
+          - 'stt-transcribe-hf-asr:9100'
+          - 'stt-transcribe-vllm-asr:9100'
+          - 'stt-transcribe-riva:9100'
+          - 'stt-align-phoneme:9100'
+          - 'stt-diarize-pyannote-4.0:9100'
+          - 'stt-diarize-nemo-msdd:9100'
+          - 'stt-diarize-nemo-sortformer:9100'
+          - 'stt-combo-whisper-align-pyannote:9100'
           - 'stt-pii-detect-presidio:9100'
           - 'stt-audio-redact-audio:9100'
-          - 'stt-merge:9100'
-    metrics_path: /metrics
-
-  # Realtime STT worker metrics (M20)
-  # Workers expose /metrics on port 9100 via aiohttp HTTP server
-  # Note: Scaled workers are discovered via docker-compose service names
-  - job_name: 'dalston-rt-stt'
-    static_configs:
-      - targets:
-          - 'stt-rt-transcribe-parakeet-cpu:9100'  # Default (local dev)
-          - 'stt-rt-transcribe-parakeet:9100'      # GPU
-          - 'stt-rt-transcribe-whisper-cpu:9100'   # Whisper CPU
-          - 'stt-rt-transcribe-whisper:9100'       # Whisper GPU
     metrics_path: /metrics

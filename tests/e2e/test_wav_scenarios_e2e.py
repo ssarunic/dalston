@@ -7,7 +7,7 @@ default pytest run.  Execute with:
 
 Required stack (minimal for basic tests):
     docker compose up -d gateway orchestrator redis postgres minio minio-init \
-        stt-prepare stt-transcribe-parakeet-tdt-0.6b-v3-cpu stt-merge
+        stt-prepare stt-transcribe-onnx stt-combo-whisper-align-pyannote
 
 For diarization tests, also start:
     stt-diarize-nemo-msdd-cpu

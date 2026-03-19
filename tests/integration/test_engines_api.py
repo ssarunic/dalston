@@ -45,12 +45,12 @@ def mock_catalog() -> EngineCatalog:
                 max_concurrency=None,
             ),
         ),
-        "parakeet": CatalogEntry(
-            engine_id="parakeet",
-            image="dalston/stt-transcribe-parakeet:1.0.0",
-            execution_profile="venv",
+        "nemo": CatalogEntry(
+            engine_id="nemo",
+            image="dalston/stt-transcribe-nemo:1.0.0",
+            execution_profile="container",
             capabilities=EngineCapabilities(
-                engine_id="parakeet",
+                engine_id="nemo",
                 version="1.0.0",
                 stages=["transcribe"],
                 supports_word_timestamps=True,
@@ -201,9 +201,9 @@ class TestListEngines:
             assert engines_by_id["faster-whisper"]["stage"] == "transcribe"
             assert engines_by_id["faster-whisper"]["execution_profile"] == "container"
 
-            # parakeet is not running (available)
-            assert engines_by_id["parakeet"]["status"] == "available"
-            assert engines_by_id["parakeet"]["execution_profile"] == "venv"
+            # nemo is not running (available)
+            assert engines_by_id["nemo"]["status"] == "available"
+            assert engines_by_id["nemo"]["execution_profile"] == "container"
 
             # pyannote is not running (available)
             assert engines_by_id["pyannote-4.0"]["status"] == "available"
@@ -270,10 +270,10 @@ class TestListEngines:
             data = response.json()
             engines_by_id = {e["id"]: e for e in data["engines"]}
 
-            parakeet = engines_by_id["parakeet"]
-            assert parakeet["hardware"]["gpu_required"] is True
-            assert parakeet["hardware"]["supports_cpu"] is False
-            assert parakeet["performance"]["rtf_gpu"] == 0.02
+            nemo = engines_by_id["nemo"]
+            assert nemo["hardware"]["gpu_required"] is True
+            assert nemo["hardware"]["supports_cpu"] is False
+            assert nemo["performance"]["rtf_gpu"] == 0.02
 
 
 class TestGetCapabilities:
