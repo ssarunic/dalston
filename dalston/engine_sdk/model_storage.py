@@ -543,12 +543,21 @@ class MultiSourceModelStorage:
         else:
             result = self._ensure_auto(model_id)
 
-        # Trigger eviction after a fresh download (not cache hits)
+        # Trigger eviction after a fresh download (not cache hits).
+        # Run on a background thread to avoid blocking the caller — this
+        # code path runs under ModelManager._lock during _load_model().
         if not was_cached and self._disk_evictor is not None:
-            try:
-                self._disk_evictor.scan_and_evict()
-            except Exception:
-                logger.exception("post_download_eviction_error")
+            import threading
+
+            def _evict() -> None:
+                try:
+                    self._disk_evictor.scan_and_evict()  # type: ignore[union-attr]
+                except Exception:
+                    logger.exception("post_download_eviction_error")
+
+            threading.Thread(
+                target=_evict, daemon=True, name="post-download-eviction"
+            ).start()
 
         return result
 

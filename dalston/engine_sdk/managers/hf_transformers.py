@@ -169,8 +169,48 @@ class HFTransformersModelManager(ModelManager[Any]):
             return self.model_storage.get_cache_stats()
         return None
 
-    def start_disk_evictor(self) -> None:
-        """Start the disk cache evictor if cache limits are configured."""
-        from dalston.engine_sdk.disk_cache import start_disk_evictor
+    @classmethod
+    def from_env(cls) -> HFTransformersModelManager:
+        """Create a manager configured from environment variables.
 
-        self._disk_evictor = start_disk_evictor(self, self.model_storage)
+        Environment variables:
+            DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)
+            DALSTON_MODEL_TTL_SECONDS: TTL in seconds (default: 3600)
+            DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
+            DALSTON_MODEL_PRELOAD: Model to preload (optional)
+            DALSTON_MODEL_SOURCE: Source mode ("s3", "hf", "auto")
+            DALSTON_S3_BUCKET: S3 bucket (used when source includes S3)
+            DALSTON_MODEL_CACHE_MAX_GB: Max disk cache in GB (0 = unlimited)
+            DALSTON_MODEL_CACHE_TTL_HOURS: Max hours since last access (0 = unlimited)
+
+        Returns:
+            Configured HFTransformersModelManager instance
+        """
+        import os
+
+        from dalston.engine_sdk.device import detect_device
+        from dalston.engine_sdk.disk_cache import start_disk_evictor
+        from dalston.engine_sdk.model_storage import MultiSourceModelStorage
+
+        device = detect_device(include_mps=False)
+
+        torch_dtype = None
+        if device == "cuda":
+            import torch
+
+            torch_dtype = torch.float16
+
+        model_storage = MultiSourceModelStorage.from_env()
+
+        manager = cls(
+            device=device,
+            torch_dtype=torch_dtype,
+            model_storage=model_storage,
+            ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
+            max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
+            preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
+        )
+
+        manager._disk_evictor = start_disk_evictor(manager, model_storage)
+
+        return manager
