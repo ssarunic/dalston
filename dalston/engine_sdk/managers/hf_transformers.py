@@ -168,3 +168,9 @@ class HFTransformersModelManager(ModelManager[Any]):
         if self.model_storage is not None:
             return self.model_storage.get_cache_stats()
         return None
+
+    def start_disk_evictor(self) -> None:
+        """Start the disk cache evictor if cache limits are configured."""
+        from dalston.engine_sdk.disk_cache import start_disk_evictor
+
+        self._disk_evictor = start_disk_evictor(self, self.model_storage)

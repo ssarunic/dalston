@@ -179,6 +179,8 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
             WHISPER_MODELS_DIR: Download directory (optional)
             DALSTON_MODEL_SOURCE: Source mode ("s3", "hf", "auto")
             DALSTON_S3_BUCKET: S3 bucket (used when source includes S3)
+            DALSTON_MODEL_CACHE_MAX_GB: Max disk cache in GB (0 = unlimited)
+            DALSTON_MODEL_CACHE_TTL_HOURS: Max hours since last access (0 = unlimited)
 
         Returns:
             Configured FasterWhisperModelManager instance
@@ -191,7 +193,7 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
 
         model_storage = MultiSourceModelStorage.from_env()
 
-        return cls(
+        manager = cls(
             device=device,
             compute_type=compute_type,
             model_storage=model_storage,
@@ -199,3 +201,10 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
             max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
         )
+
+        # Start disk cache evictor if limits are configured
+        from dalston.engine_sdk.disk_cache import start_disk_evictor
+
+        manager._disk_evictor = start_disk_evictor(manager, model_storage)
+
+        return manager
