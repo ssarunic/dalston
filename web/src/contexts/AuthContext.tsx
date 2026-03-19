@@ -14,17 +14,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Initialize from sessionStorage synchronously (avoids effect setState)
+// Initialize from localStorage synchronously (avoids effect setState)
 function getInitialApiKey(): string | null {
   if (typeof window === 'undefined') return null
-  const key = sessionStorage.getItem(API_KEY_STORAGE_KEY)
+  const key = localStorage.getItem(API_KEY_STORAGE_KEY)
   // Also initialize the API client synchronously
   if (key) setClientApiKey(key)
   return key
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Initialize state synchronously from sessionStorage - no loading needed
+  // Initialize state synchronously from localStorage - no loading needed
   const [apiKey, setApiKey] = useState<string | null>(getInitialApiKey)
   // isLoading is always false since we initialize synchronously
   const isLoading = false
@@ -42,14 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Store key and update state
-    sessionStorage.setItem(API_KEY_STORAGE_KEY, key)
+    localStorage.setItem(API_KEY_STORAGE_KEY, key)
     setApiKey(key)
     setClientApiKey(key)
     return { success: true }
   }, [])
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(API_KEY_STORAGE_KEY)
+    localStorage.removeItem(API_KEY_STORAGE_KEY)
     setApiKey(null)
     setClientApiKey(null)
   }, [])
