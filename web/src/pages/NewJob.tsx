@@ -17,6 +17,7 @@ import { ModelCompatibilityWarning } from '@/components/ModelCompatibilityWarnin
 import { useCreateJob } from '@/hooks/useCreateJob'
 
 import { useModelRegistry } from '@/hooks/useModelRegistry'
+import { useCapabilities } from '@/hooks/useCapabilities'
 import type {
   SpeakerDetection,
   TimestampsGranularity,
@@ -211,6 +212,9 @@ export function NewJob() {
   // Fetch models for dynamic options
   const { data: modelsResponse } = useModelRegistry({ stage: 'transcribe' })
 
+  // Fetch capabilities to populate diarizer selector
+  const { data: capabilitiesData } = useCapabilities()
+
   // Source
   const [sourceType, setSourceType] = useState<SourceType>('file')
   const [file, setFile] = useState<File | null>(null)
@@ -220,6 +224,7 @@ export function NewJob() {
   // Basic settings
   const [language, setLanguage] = useState('auto')
   const [speakerDetection, setSpeakerDetection] = useState<SpeakerDetection>('none')
+  const [diarizer, setDiarizer] = useState('auto')
   const [numSpeakers, setNumSpeakers] = useState<string>('')
   const [timestampsGranularity, setTimestampsGranularity] = useState<TimestampsGranularity>('segment')
 
@@ -269,6 +274,18 @@ export function NewJob() {
         .map((code) => ({ value: code, label: getLanguageLabel(code) })),
     ]
   }, [model, availableModels])
+
+  // Compute available diarizer engines from capabilities
+  const diarizerOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [
+      { value: 'auto', label: 'Auto' },
+    ]
+    const engines = capabilitiesData?.stages?.diarize?.engines ?? []
+    for (const engineId of engines) {
+      options.push({ value: engineId, label: engineId })
+    }
+    return options
+  }, [capabilitiesData])
 
   // PII settings
   const [piiDetection, setPiiDetection] = useState(false)
@@ -417,6 +434,7 @@ export function NewJob() {
         audio_url: sourceType === 'url' ? audioUrl.trim() : undefined,
         language: language !== 'auto' ? language : undefined,
         speaker_detection: speakerDetection,
+        model_diarize: speakerDetection === 'diarize' && diarizer !== 'auto' ? diarizer : undefined,
         num_speakers: numSpeakers ? parseInt(numSpeakers, 10) : undefined,
         min_speakers: minSpeakers ? parseInt(minSpeakers, 10) : undefined,
         max_speakers: maxSpeakers ? parseInt(maxSpeakers, 10) : undefined,
@@ -675,12 +693,32 @@ export function NewJob() {
                   </div>
                 </div>
 
-                {/* Number of Speakers (conditional) */}
+                {/* Diarization options (conditional) */}
                 {showSpeakerOptions && (
-                  <div className="pt-2">
-                    <div className="space-y-2 w-full sm:max-w-[200px]">
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    {/* Diarizer Engine */}
+                    {speakerDetection === 'diarize' && diarizerOptions.length > 1 && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Diarizer</label>
+                        <Select value={diarizer} onValueChange={setDiarizer}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select diarizer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {diarizerOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Number of Speakers */}
+                    <div className="space-y-2">
                       <label htmlFor="numSpeakers" className="text-sm font-medium">
-                        Number of Speakers
+                        Speakers
                       </label>
                       <input
                         id="numSpeakers"
@@ -692,11 +730,48 @@ export function NewJob() {
                         placeholder="Auto-detect"
                         className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
                       />
-                      <p className="text-xs text-muted-foreground">
-                        Leave empty to auto-detect, or set exact count (1-32).
-                      </p>
                       {fieldErrors.numSpeakers && (
                         <p className="text-xs text-destructive">{fieldErrors.numSpeakers}</p>
+                      )}
+                    </div>
+
+                    {/* Min Speakers */}
+                    <div className="space-y-2">
+                      <label htmlFor="minSpeakers" className="text-sm font-medium">
+                        Min Speakers
+                      </label>
+                      <input
+                        id="minSpeakers"
+                        type="number"
+                        min="1"
+                        max="32"
+                        value={minSpeakers}
+                        onChange={(e) => setMinSpeakers(e.target.value)}
+                        placeholder="Optional"
+                        className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
+                      />
+                      {fieldErrors.minSpeakers && (
+                        <p className="text-xs text-destructive">{fieldErrors.minSpeakers}</p>
+                      )}
+                    </div>
+
+                    {/* Max Speakers */}
+                    <div className="space-y-2">
+                      <label htmlFor="maxSpeakers" className="text-sm font-medium">
+                        Max Speakers
+                      </label>
+                      <input
+                        id="maxSpeakers"
+                        type="number"
+                        min="1"
+                        max="32"
+                        value={maxSpeakers}
+                        onChange={(e) => setMaxSpeakers(e.target.value)}
+                        placeholder="Optional"
+                        className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
+                      />
+                      {fieldErrors.maxSpeakers && (
+                        <p className="text-xs text-destructive">{fieldErrors.maxSpeakers}</p>
                       )}
                     </div>
                   </div>
@@ -762,48 +837,6 @@ export function NewJob() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Speaker Range (for diarization) */}
-                  {showSpeakerOptions && (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <label htmlFor="minSpeakers" className="text-sm font-medium">
-                          Min Speakers
-                        </label>
-                        <input
-                          id="minSpeakers"
-                          type="number"
-                          min="1"
-                          max="32"
-                          value={minSpeakers}
-                          onChange={(e) => setMinSpeakers(e.target.value)}
-                          placeholder="Optional"
-                          className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
-                        />
-                        {fieldErrors.minSpeakers && (
-                          <p className="text-xs text-destructive">{fieldErrors.minSpeakers}</p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="maxSpeakers" className="text-sm font-medium">
-                          Max Speakers
-                        </label>
-                        <input
-                          id="maxSpeakers"
-                          type="number"
-                          min="1"
-                          max="32"
-                          value={maxSpeakers}
-                          onChange={(e) => setMaxSpeakers(e.target.value)}
-                          placeholder="Optional"
-                          className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm"
-                        />
-                        {fieldErrors.maxSpeakers && (
-                          <p className="text-xs text-destructive">{fieldErrors.maxSpeakers}</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Vocabulary */}
                   <div className="space-y-2">
@@ -1051,6 +1084,12 @@ export function NewJob() {
                     {SPEAKER_DETECTION_OPTIONS.find((s) => s.value === speakerDetection)?.label}
                   </span>
                 </div>
+                {speakerDetection === 'diarize' && diarizer !== 'auto' && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Diarizer</span>
+                    <span>{diarizer}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Timestamps</span>
                   <span>

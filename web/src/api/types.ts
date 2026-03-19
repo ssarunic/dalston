@@ -611,6 +611,7 @@ export interface CreateJobRequest {
   timestamps_granularity?: TimestampsGranularity
   // Advanced settings
   model?: string
+  model_diarize?: string
   vocabulary?: string[]
   retention?: string
   // PII settings

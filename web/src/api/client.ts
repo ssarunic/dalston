@@ -171,6 +171,9 @@ export const apiClient = {
     if (request.model) {
       formData.append('model', request.model)
     }
+    if (request.model_diarize) {
+      formData.append('model_diarize', request.model_diarize)
+    }
     if (request.vocabulary && request.vocabulary.length > 0) {
       formData.append('vocabulary', JSON.stringify(request.vocabulary))
     }

@@ -853,7 +853,7 @@ async def select_pipeline_engines(
                 catalog,
                 user_preference=effective_parameters.get(MODEL_PARAM_DIARIZE),
                 db=db,
-                user_preference_is_model=True,
+                user_preference_is_model=False,
             )
 
         # PII detection (conditional on parameters)

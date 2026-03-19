@@ -203,17 +203,24 @@ class NemoSortformerEngine(Engine):
             self.logger.info("running_sortformer_diarization")
             segments = model.diarize(audio=[str(audio_path)], batch_size=1)[0]
 
-            # Convert (start, end, speaker_index) tuples to SpeakerTurn
+            # Parse diarize() output: each segment is a string "start end speaker_N"
             speakers_set: set[str] = set()
             turns: list[SpeakerTurn] = []
 
-            for start, end, spk_idx in segments:
-                speaker = f"SPEAKER_{int(spk_idx):02d}"
+            for seg_str in segments:
+                parts = seg_str.split()
+                if len(parts) != 3:
+                    raise ValueError(
+                        f"Unexpected NeMo segment format (expected 3 fields): {seg_str!r}"
+                    )
+                start_s, end_s, spk_label = parts
+                spk_idx = int(spk_label.split("_")[-1])
+                speaker = f"SPEAKER_{spk_idx:02d}"
                 speakers_set.add(speaker)
                 turns.append(
                     SpeakerTurn(
-                        start=round(float(start), 3),
-                        end=round(float(end), 3),
+                        start=round(float(start_s), 3),
+                        end=round(float(end_s), 3),
                         speaker=speaker,
                     )
                 )
