@@ -6,7 +6,7 @@
 | **Duration**       | 1–2 days                                                     |
 | **Dependencies**   | M39 (Unified Model Cache), M82 (Multi-Source Model Download) |
 | **Deliverable**    | `DiskCacheEvictor` class, `.last_accessed` marker tracking, `DALSTON_MODEL_CACHE_MAX_GB` / `DALSTON_MODEL_CACHE_TTL_HOURS` env vars |
-| **Status**         | Not Started                                                  |
+| **Status**         | Done                                                         |
 
 ## User Story
 
@@ -236,12 +236,12 @@ docker logs fw-cache-test 2>&1 | grep -i "cache_miss\|ensuring_model"
 
 ## Checkpoint
 
-- [ ] `.last_accessed` marker written on every `ensure_local()` call
-- [ ] `DiskCacheEvictor` scans cache dirs on configurable interval
-- [ ] TTL eviction removes models not accessed within `DALSTON_MODEL_CACHE_TTL_HOURS`
-- [ ] Budget eviction removes LRU models when total exceeds `DALSTON_MODEL_CACHE_MAX_GB`
-- [ ] Models currently loaded in `ModelManager` are never evicted from disk
-- [ ] HF cache eviction uses `scan_cache_dir()` / `delete_revisions()` (not raw rmtree)
-- [ ] S3 cache eviction uses `shutil.rmtree()`
-- [ ] No eviction overhead when both limits are 0 (default)
-- [ ] Unit tests for scan_and_evict with mock filesystem
+- [x] `.last_accessed` marker written on every `ensure_local()` call
+- [x] `DiskCacheEvictor` scans cache dirs on configurable interval
+- [x] TTL eviction removes models not accessed within `DALSTON_MODEL_CACHE_TTL_HOURS`
+- [x] Budget eviction removes LRU models when total exceeds `DALSTON_MODEL_CACHE_MAX_GB`
+- [x] Models currently loaded in `ModelManager` are never evicted from disk
+- [x] HF cache eviction uses `scan_cache_dir()` / `delete_revisions()` (not raw rmtree)
+- [x] S3 cache eviction uses `shutil.rmtree()`
+- [x] No eviction overhead when both limits are 0 (default)
+- [x] Unit tests for scan_and_evict with mock filesystem
