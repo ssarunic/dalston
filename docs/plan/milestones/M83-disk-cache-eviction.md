@@ -142,6 +142,8 @@ Eviction logic:
 4. **TTL pass**: remove dirs where `now - last_accessed > max_age_hours`
 5. **Budget pass**: if total remaining size > `max_gb`, sort by last_accessed ascending, remove oldest until under budget
 
+Additionally, `ensure_local()` triggers `scan_and_evict()` after a fresh download (not on cache hits) so that budget enforcement happens immediately rather than waiting for the next periodic scan.
+
 For HF cache, use `huggingface_hub.scan_cache_dir()` and `delete_revisions()` instead of raw `rmtree`. This respects HF's content-addressed blob deduplication — blobs shared between model revisions are only deleted when no snapshot references them.
 
 For S3 cache, `shutil.rmtree()` is safe since each model dir is self-contained.
@@ -175,7 +177,7 @@ evictor.start()
 ## Non-Goals
 
 - **Cross-engine coordination** — each engine manages its own cache independently. If two engines share a volume, they may both keep a model alive if either is using it, but eviction is not coordinated between them. This is fine because shared models are rare (only wav2vec2 for align+diarize) and the cost of a redundant download is low.
-- **Preemptive download management** — this milestone doesn't prevent downloading models that would exceed the budget. It cleans up after the fact. A download-time check ("will this model fit?") would require knowing model size before download, which is a separate concern.
+- **Preemptive download blocking** — this milestone doesn't prevent downloading models that would exceed the budget. An eviction pass runs after each fresh download to reclaim space, but there's no pre-download check ("will this model fit?") since that would require knowing model size before download.
 - **Remote cache invalidation** — the gateway/orchestrator don't tell engines to drop cached models. Engines manage their own disk autonomously.
 
 ---
