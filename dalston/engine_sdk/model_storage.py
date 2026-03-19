@@ -36,13 +36,18 @@ import enum
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from dalston.engine_sdk.io import get_s3_client
 from dalston.engine_sdk.model_paths import MODEL_BASE, is_model_cached
+
+if TYPE_CHECKING:
+    from dalston.engine_sdk.disk_cache import DiskCacheEvictor
 
 logger = structlog.get_logger()
 
@@ -69,6 +74,19 @@ class ModelNotFoundError(Exception):
 
 # Marker file indicating a complete model download/upload
 COMPLETE_MARKER = ".complete"
+
+# Marker file recording last access time for disk cache eviction
+ACCESS_MARKER = ".last_accessed"
+
+
+def _touch_access_marker(path: Path) -> None:
+    """Record last access time for disk cache eviction."""
+    try:
+        marker = path / ACCESS_MARKER
+        marker.write_text(str(time.time()))
+    except OSError:
+        pass
+
 
 # Default S3 prefix for models
 MODELS_PREFIX = "models"
@@ -195,11 +213,13 @@ class S3ModelStorage:
         # Check if already cached
         if self.is_cached_locally(model_id):
             logger.debug("model_cache_hit", model_id=model_id, path=str(local_path))
+            _touch_access_marker(local_path)
             return local_path
 
         # Download from S3
         logger.info("model_cache_miss", model_id=model_id, downloading_from="s3")
         self._download_from_s3(model_id, local_path)
+        _touch_access_marker(local_path)
 
         return local_path
 
@@ -369,6 +389,10 @@ class HFModelStorage:
             model_id=model_id,
             local_path=str(local_path),
         )
+        # Touch access marker on the top-level model dir (not the snapshot)
+        # e.g., models--Systran--faster-whisper-base/ (parent of snapshots/)
+        model_dir = local_path.parent.parent  # snapshot → snapshots → model dir
+        _touch_access_marker(model_dir)
         return local_path
 
     def is_cached_locally(self, model_id: str) -> bool:
@@ -446,6 +470,7 @@ class MultiSourceModelStorage:
         self._s3 = s3
         self._hf = hf
         self._ngc = ngc
+        self._disk_evictor: DiskCacheEvictor | None = None
 
         logger.info(
             "multi_source_storage_init",
@@ -490,6 +515,10 @@ class MultiSourceModelStorage:
 
         return cls(source=source, s3=s3, hf=hf, ngc=ngc)
 
+    def set_disk_evictor(self, evictor: DiskCacheEvictor) -> None:
+        """Attach a disk cache evictor for post-download eviction."""
+        self._disk_evictor = evictor
+
     def ensure_local(self, model_id: str) -> Path:
         """Ensure model is available locally from the configured source.
 
@@ -503,15 +532,34 @@ class MultiSourceModelStorage:
             ModelNotFoundError: If model cannot be found in any source
             ModelNotInS3Error: If source is S3-only and model is not in S3
         """
+        was_cached = self.is_cached_locally(model_id)
+
         if self.source == ModelSource.S3:
-            return self._ensure_from_s3(model_id)
+            result = self._ensure_from_s3(model_id)
         elif self.source == ModelSource.HF:
-            return self._ensure_from_hf(model_id)
+            result = self._ensure_from_hf(model_id)
         elif self.source == ModelSource.NGC:
-            return self._ensure_from_ngc(model_id)
+            result = self._ensure_from_ngc(model_id)
         else:
-            # AUTO mode: try each source in order
-            return self._ensure_auto(model_id)
+            result = self._ensure_auto(model_id)
+
+        # Trigger eviction after a fresh download (not cache hits).
+        # Run on a background thread to avoid blocking the caller — this
+        # code path runs under ModelManager._lock during _load_model().
+        if not was_cached and self._disk_evictor is not None:
+            import threading
+
+            def _evict() -> None:
+                try:
+                    self._disk_evictor.scan_and_evict()  # type: ignore[union-attr]
+                except Exception:
+                    logger.exception("post_download_eviction_error")
+
+            threading.Thread(
+                target=_evict, daemon=True, name="post-download-eviction"
+            ).start()
+
+        return result
 
     def _ensure_from_s3(self, model_id: str) -> Path:
         """Download from S3 only."""

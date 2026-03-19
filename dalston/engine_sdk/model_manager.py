@@ -47,6 +47,8 @@ import dalston.telemetry
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from dalston.engine_sdk.disk_cache import DiskCacheEvictor
+
 T = TypeVar("T")  # Model type
 
 logger = structlog.get_logger()
@@ -126,6 +128,7 @@ class ModelManager(ABC, Generic[T]):
         self._lock = threading.RLock()
         self._shutdown = threading.Event()
         self._eviction_thread: threading.Thread | None = None
+        self._disk_evictor: DiskCacheEvictor | None = None
 
         # Callbacks for monitoring (optional)
         self._on_load: Callable[[str], None] | None = None
@@ -336,6 +339,9 @@ class ModelManager(ABC, Generic[T]):
 
         if self._eviction_thread and self._eviction_thread.is_alive():
             self._eviction_thread.join(timeout=5)
+
+        if self._disk_evictor is not None:
+            self._disk_evictor.stop()
 
         with self._lock:
             for model_id in list(self._models.keys()):
