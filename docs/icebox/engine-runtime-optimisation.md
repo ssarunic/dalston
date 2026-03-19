@@ -1,120 +1,172 @@
 # Engine Runtime Optimisation
 
-|              |                                                                                   |
-| ------------ | --------------------------------------------------------------------------------- |
-| **Idea**     | Background-optimise ONNX inference sessions per GPU, cache artefacts to S3        |
-| **Priority** | Medium — meaningful latency wins, no blocking deployment changes                  |
-| **Status**   | Icebox                                                                            |
+|              |                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------ |
+| **Idea**     | Background-optimise inference sessions across all engine runtimes, cache to S3        |
+| **Priority** | Medium — meaningful latency wins, no blocking deployment changes                     |
+| **Status**   | Icebox                                                                               |
 
 ## Thesis
 
-Dalston's ONNX Runtime path gives us portable, good-enough inference out of
-the box — no TensorRT build step, no GPU-locked artefacts, fast cold starts.
-But we're leaving performance on the table. ONNX Runtime has optimisation
-capabilities (graph fusion, INT8 quantisation, IO binding, TensorRT backend)
-that we don't currently exploit, and the gap widens on high-throughput
-deployments where per-request latency compounds.
+Dalston runs four distinct ML runtimes — ONNX Runtime, CTranslate2
+(faster-whisper), NeMo/PyTorch, and HuggingFace Transformers — plus PyTorch
+for diarisation and alignment. Each loads models with safe defaults and serves
+immediately. But every runtime has hardware-specific optimisation capabilities
+we don't currently exploit, and the performance gap compounds on
+high-throughput deployments.
 
-The core idea: **start serving immediately with generic ONNX, then
-background-optimise for the specific GPU and hot-swap the inference session**.
-This gives us NVIDIA NIM-class performance without NIM's 30-minute blocking
-cold starts or combinatorial prebuilt-engine problem.
+The core idea: **start serving immediately with generic settings, then
+background-optimise for the specific hardware and hot-swap the model session**.
+This applies uniformly across runtimes. A shared `ModelOptimiser` protocol in
+the base `ModelManager` drives it, with runtime-specific strategies plugged in.
 
 ## Problem
 
-Today, `OnnxModelManager._load_model()` loads a model with default ONNX
-Runtime settings (CUDAExecutionProvider or CPUExecutionProvider), optional INT8
-quantisation via `DALSTON_QUANTIZATION`, and that's it. Every request on every
-GPU gets the same inference path.
+Today, each model manager loads models with static configuration:
 
-This means:
+- **OnnxModelManager** — CUDAExecutionProvider or CPUExecutionProvider, optional
+  INT8 via `DALSTON_QUANTIZATION`. No graph fusion, no IO binding, no
+  TensorRT backend, no GPU-architecture-specific tuning.
+- **FasterWhisperModelManager** — `compute_type` (float16/int8/float32) set at
+  init. No flash attention, no batched decoding, no CTranslate2 quantisation
+  calibration.
+- **NeMoModelManager** — vanilla PyTorch eager mode. No `torch.compile`, no
+  CUDA graphs, no flash attention opt-in, no TorchScript export.
+- **HFTransformersModelManager** — default pipeline. No BetterTransformer,
+  no flash attention 2, no `torch.compile`, no quantisation (bitsandbytes,
+  GPTQ, AWQ).
+- **Diarisation engines** (pyannote, NeMo MSDD/Sortformer) — same PyTorch
+  eager mode as NeMo transcription.
+- **Alignment engine** (phoneme-align, wav2vec2) — unoptimised torchaudio CTC
+  forced alignment.
 
-- No graph-level optimisation (attention fusion, constant folding beyond
-  defaults, node elimination)
-- No hardware-specific tuning (TensorRT acceleration on NVIDIA, execution
-  provider configuration per GPU arch)
-- CPU↔GPU memory copies between pipeline stages that could be avoided
-- Same precision for all workloads regardless of accuracy requirements
+Every request on every GPU gets the same inference path regardless of hardware.
 
 ## Proposed Approach
 
-### Two-Phase Startup
+### Two-Phase Startup (All Runtimes)
 
-**Phase 1 — Generic (current behaviour, immediate):** Engine starts, loads ONNX
-model with CUDAExecutionProvider, declares itself ready. Serves traffic within
-seconds. This is what we do today.
+The pattern is runtime-agnostic:
+
+**Phase 1 — Generic (current behaviour, immediate):** Engine starts, loads
+model with safe defaults, declares itself ready. Serves traffic within seconds.
 
 **Phase 2 — Background optimisation (new):** While serving traffic, a background
-task:
-
-1. Profiles the GPU (architecture, VRAM, driver version)
-2. Runs ONNX graph optimisation (attention fusion, constant folding, node
-   elimination)
-3. Optionally builds a TensorRT engine for the detected GPU
-4. Hot-swaps the `InferenceSession` behind the model handle
-5. Persists optimised artefacts to S3, keyed by GPU architecture
-
-Subsequent requests use the faster session. Next cold start on the same GPU
-type skips straight to the optimised path.
-
-### Optimisation Techniques
-
-**Graph optimisation** — Run `onnxruntime.transformers.optimizer` or `onnxsim`
-as a pre-processing step on Parakeet TDT/CTC models. Fuses attention layers,
-eliminates redundant ops, shrinks the graph. Could be baked into model
-preparation (one-time cost) or done per-engine at startup.
-
-**Precision calibration** — Beyond the existing `DALSTON_QUANTIZATION=int8` env
-var, support calibrated INT8 quantisation using a representative audio dataset.
-Expose as capability profiles: e.g., `fast-english-int8` vs
-`accurate-english-fp16`. Maps naturally to engine variant YAML.
-
-**IO binding** — ONNX Runtime's `IOBinding` API pre-allocates GPU tensors and
-avoids CPU↔GPU copies between pipeline stages. If preparation → transcription →
-alignment currently bounces tensors through CPU memory, pinning them on-device
-is a meaningful latency win.
-
-**FusedAttention for FastConformer** — Parakeet uses FastConformer with local
-attention. ONNX Runtime has a `FusedAttention` operator that can exploit this,
-but the exported ONNX graph may fall back to the generic path. Worth verifying
-and fixing the export if needed.
-
-**TensorRT backend** — ONNX Runtime's `TensorrtExecutionProvider` can be used
-as an optional acceleration layer. Start serving with CUDA EP, build TensorRT
-engines in background, switch over when ready. The model stays portable.
-
-### S3 Artefact Cache
-
-Persist optimised sessions to S3 keyed by GPU architecture:
-
-```
-models/parakeet-tdt-v3/optimised/sm_75/   # T4 (Turing)
-models/parakeet-tdt-v3/optimised/sm_80/   # A100 (Ampere)
-models/parakeet-tdt-v3/optimised/sm_86/   # A10G (Ampere)
-models/parakeet-tdt-v3/optimised/sm_89/   # L4 (Ada Lovelace)
-models/parakeet-tdt-v3/optimised/sm_90/   # H100 (Hopper)
-```
-
-On startup, check S3 for a cached artefact matching the detected GPU. If found,
-load directly (skip Phase 2). If not, run Phase 2 and upload the result.
-
-This avoids the combinatorial explosion that forces NVIDIA to build on-device:
-we only build for GPU architectures we actually deploy to, and the cache grows
-organically.
-
-### Engine Card Extension
-
-Extend engine status reporting with optimisation state:
+task profiles the hardware, applies runtime-specific optimisations, and
+hot-swaps the model session. Persists optimised artefacts to S3.
 
 ```python
 class OptimisationStatus(str, Enum):
-    GENERIC = "generic"       # Phase 1 — default ONNX session
+    GENERIC = "generic"       # Phase 1 — default session
     OPTIMISING = "optimising" # Phase 2 — background work in progress
     OPTIMISED = "optimised"   # Phase 2 complete — fast path active
+
+class ModelOptimiser(Protocol):
+    """Each model manager implements this to provide runtime-specific optimisation."""
+    def can_optimise(self, model_id: str, device: str) -> bool: ...
+    def optimise(self, model_id: str, model: T) -> T: ...
+    def cache_key(self, model_id: str) -> str: ...
 ```
 
-The orchestrator could use this for routing — preferring optimised engines for
+The base `ModelManager` orchestrates the lifecycle (background thread, S3
+cache check, hot-swap with reference counting). Each manager implements the
+runtime-specific `optimise()` strategy.
+
+### Per-Runtime Optimisation Strategies
+
+#### ONNX Runtime (OnnxModelManager)
+
+| Technique | What it does | Expected impact |
+|-----------|-------------|-----------------|
+| Graph optimisation | `onnxruntime.transformers.optimizer` or `onnxsim` — fuses attention layers, eliminates redundant ops, constant folding | 10–20% latency reduction |
+| IO binding | `IOBinding` API — pre-allocates GPU tensors, avoids CPU↔GPU copies | Significant for multi-stage pipelines |
+| FusedAttention | Exploit FastConformer's local attention via ONNX RT's `FusedAttention` operator | Model-specific, verify export |
+| TensorRT EP | `TensorrtExecutionProvider` as optional backend — build TRT engines in background, swap from CUDA EP | 20–40% on NVIDIA GPUs |
+| Calibrated INT8 | INT8 quantisation with calibration dataset (vs current uncalibrated flag) | Better accuracy/speed tradeoff |
+
+#### CTranslate2 / faster-whisper (FasterWhisperModelManager)
+
+| Technique | What it does | Expected impact |
+|-----------|-------------|-----------------|
+| Flash attention | CTranslate2 supports flash attention on Ampere+ GPUs — currently not explicitly enabled | 15–30% on long sequences |
+| INT8 with calibration | CTranslate2's `quantize` tool with calibration data vs static quantisation | Better accuracy at INT8 |
+| Compute type auto-select | Auto-detect optimal compute type per GPU arch (float16 on Ampere+, int8_float16 on Turing) | Always-optimal precision |
+| CUDA graphs | CTranslate2 supports CUDA graph capture for fixed-size inputs — reduces kernel launch overhead | 5–10% on short audio |
+
+#### NeMo / PyTorch (NeMoModelManager + diarisation + alignment)
+
+| Technique | What it does | Expected impact |
+|-----------|-------------|-----------------|
+| `torch.compile` | PyTorch 2.x compilation with inductor backend — fuses ops, optimises memory access patterns | 15–40% depending on model |
+| CUDA graphs | Capture and replay fixed computation graphs — eliminates kernel launch overhead | 10–20% on repeated inference |
+| Flash attention 2 | `torch.nn.functional.scaled_dot_product_attention` with flash backend | 20–30% on long sequences |
+| Mixed precision | `torch.autocast` with hardware-appropriate dtype | 10–20% on Ampere+ |
+| TorchScript export | Script the model for graph-mode execution — one-time cost, persistent benefit | 10–15% |
+
+Applies equally to:
+- Parakeet transcription (FastConformer)
+- Pyannote 4.0 diarisation
+- NeMo MSDD / Sortformer diarisation
+- Wav2Vec2 phoneme alignment
+
+#### HuggingFace Transformers (HFTransformersModelManager)
+
+| Technique | What it does | Expected impact |
+|-----------|-------------|-----------------|
+| BetterTransformer | `model.to_bettertransformer()` — fused attention kernels, no model change | 10–20% |
+| Flash attention 2 | `model = AutoModel.from_pretrained(..., attn_implementation="flash_attention_2")` | 20–30% on long audio |
+| `torch.compile` | Same as NeMo — compile the underlying model | 15–30% |
+| bitsandbytes INT8/INT4 | Post-training quantisation via `BitsAndBytesConfig` | 2x memory reduction, modest speed gain |
+| ONNX export + ORT | Export to ONNX and switch to OnnxModelManager path | Converges with ONNX optimisations above |
+
+#### vLLM (already optimised)
+
+vLLM engines already use PagedAttention, continuous batching, and CUDA graphs
+internally. Phase 2 for vLLM is likely limited to:
+
+- Tensor parallelism configuration based on detected GPU count
+- Quantisation profiles (AWQ, GPTQ) selected per GPU VRAM
+- Speculative decoding configuration
+
+Low priority — vLLM's own optimisation loop handles most of this.
+
+### S3 Artefact Cache
+
+Persist optimised artefacts to S3, keyed by runtime + model + hardware:
+
+```
+optimised/{runtime}/{model_id}/{hardware_key}/
+    onnx/parakeet-tdt-v3/sm_86/           # ONNX + A10G
+    ctranslate2/large-v3/sm_75-int8/      # CTranslate2 + T4 + INT8
+    pytorch/parakeet-rnnt-0.6b/sm_80/     # torch.compile cache + A100
+    pytorch/pyannote-4.0/sm_89/           # Pyannote + L4
+```
+
+On startup, check S3 for a cached artefact matching the detected hardware. If
+found, load directly (skip Phase 2). If not, run Phase 2 and upload the result.
+
+For `torch.compile`, this means persisting the inductor cache directory. For
+CTranslate2, the quantised model files. For ONNX, the optimised graph (and
+optional TRT engine). Each runtime has different artefact shapes, but the S3
+cache lifecycle is the same.
+
+### Engine Card Extension
+
+The optimisation status is runtime-agnostic and lives on every engine:
+
+```python
+class EngineOptimisationInfo(BaseModel):
+    status: OptimisationStatus          # generic | optimising | optimised
+    runtime: str                        # onnx | ctranslate2 | pytorch | transformers
+    techniques_applied: list[str]       # ["graph_fusion", "tensorrt_ep", ...]
+    latency_improvement_pct: float | None  # measured improvement vs generic
+    cached: bool                        # whether artefact was loaded from S3
+```
+
+The orchestrator uses `status` for routing — preferring optimised engines for
 latency-sensitive work, or spreading load to generic engines during warm-up.
+The `techniques_applied` list is informational, surfaced in the console and
+engine status API.
 
 ## Why Not Just Use TensorRT / NIM Directly?
 
@@ -134,21 +186,37 @@ The real matrix is "5 models × 6 GPUs × 3 precisions × 2 modes × N batch
 profiles × M driver versions" — hundreds of artefacts to build, test, and
 distribute. NVIDIA chose to build on-device rather than maintain that build farm.
 
-Dalston's ONNX-first approach sidesteps this entirely. ONNX models are portable
-across all these dimensions by default. We get 80–90% of peak performance
-without any combinatorial headache, and close the remaining gap
-opportunistically through background optimisation.
+Dalston's multi-runtime approach sidesteps this. Each runtime provides portable
+defaults, and we close the performance gap opportunistically through background
+optimisation rather than requiring it upfront.
+
+## Implementation Priority
+
+Not all runtimes are equally impactful. Suggested order:
+
+1. **ONNX Runtime** — largest gap between default and optimised, most
+   techniques available, broadest model coverage (Parakeet CTC/TDT/RNNT +
+   Whisper + arbitrary models)
+2. **NeMo / PyTorch** — `torch.compile` alone is a significant win for
+   Parakeet RNNT and diarisation engines. Applies to 5 engines (nemo
+   transcribe, pyannote, nemo-msdd, nemo-sortformer, phoneme-align)
+3. **CTranslate2** — flash attention and auto compute-type selection.
+   faster-whisper is our most used engine
+4. **HF Transformers** — BetterTransformer and flash attention 2 are low-effort
+   wins. Lower priority because HF ASR pipeline is our slowest transcription
+   path (RTF 0.1 vs 0.03 for others)
 
 ## Where This Fits
 
 This builds on existing work:
 
 - **M36 (Runtime Model Management)** — model lifecycle, TTL eviction, the
-  `OnnxModelManager` that would gain the optimisation layer
+  `ModelManager` base class that would gain the `ModelOptimiser` protocol
 - **M32 (Engine Variant Structure)** — variant YAML could express optimisation
-  profiles (e.g., `precision: int8`, `graph_optimised: true`)
+  profiles (e.g., `precision: int8`, `torch_compile: true`)
 - **Engine SDK device detection** — `detect_device()` already handles CUDA
   auto-detection; would be extended with GPU architecture profiling
+  (compute capability, VRAM, driver version)
 
 No dependency on specific milestone completion — this is additive to the current
 architecture.
@@ -158,13 +226,19 @@ architecture.
 - **Calibration dataset**: What representative audio samples should we use for
   INT8 calibration? A standard benchmark (LibriSpeech test-clean) or
   production-representative data?
-- **Hot-swap safety**: How do we atomically swap the inference session without
+- **Hot-swap safety**: How do we atomically swap the model session without
   dropping in-flight requests? Reference counting on the model handle
   (already in `ModelManager`) may be sufficient.
+- **torch.compile cold start**: First `torch.compile` call is slow (30–120s).
+  Can we pre-compile in a background thread without blocking the generic path?
+  The inductor cache persistence to S3 should make this a one-time cost.
 - **TensorRT optional**: Should TensorRT EP be a hard dependency in GPU
   containers, or a soft optional that activates if present? Leaning toward
   soft — keeps CPU-only and non-NVIDIA paths clean.
 - **Cache invalidation**: When a model version bumps, how do we invalidate
-  cached optimised artefacts? Key by model hash + GPU arch?
+  cached optimised artefacts? Key by model hash + GPU arch + runtime version?
 - **Accuracy validation**: After optimisation (especially INT8), should we run
   a quick sanity check (WER on a few samples) before activating the fast path?
+- **Non-GPU hardware**: Should this extend to CPU-specific optimisations
+  (AVX-512 detection, OpenVINO EP for Intel, CoreML for Apple Silicon)?
+  Low priority but architecturally clean if the protocol supports it.
