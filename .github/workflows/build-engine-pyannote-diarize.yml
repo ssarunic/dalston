@@ -22,6 +22,7 @@ on:
       - 'engines/stt-diarize/pyannote-4.0/**'
       - 'dalston/**'
       - 'pyproject.toml'
+      - 'docker/Dockerfile.base-pyannote'
   workflow_dispatch:  # manual trigger
 
 env:
@@ -50,12 +51,19 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push
+      - name: Build base-pyannote and engine
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Build with CUDA support for GPU deployment
+          # Build base-pyannote first (engine depends on it)
+          docker build \
+            --build-arg DEVICE=cuda \
+            -t dalston/base-pyannote:latest \
+            -f docker/Dockerfile.base-pyannote \
+            .
+
+          # Build engine on top of base-pyannote
           docker build \
             --build-arg DEVICE=cuda \
             -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
