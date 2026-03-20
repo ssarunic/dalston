@@ -95,6 +95,18 @@ apt-get install -y nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker
 systemctl restart docker
 
+# Mount instance store NVMe for model cache (free 125 GB on g4dn)
+NVME_DEV="/dev/nvme1n1"
+if [ -b "$NVME_DEV" ]; then
+  mkfs.xfs "$NVME_DEV"
+  mkdir -p /data/models
+  mount "$NVME_DEV" /data/models
+  echo "Mounted instance store NVMe at /data/models"
+else
+  echo "WARNING: No instance store NVMe found, using root volume"
+  mkdir -p /data/models
+fi
+
 aws ecr get-login-password --region DALSTON_REGION | docker login --username AWS --password-stdin DALSTON_ECR
 HEADER
 }
@@ -115,7 +127,7 @@ launch_spot_instance() {
       --security-group-ids "$SG_ID" \
       --iam-instance-profile Name="$INSTANCE_PROFILE_NAME" \
       --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","InstanceInterruptionBehavior":"terminate"}}' \
-      --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":150,"VolumeType":"gp3"}}]' \
+      --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
       --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_TAG}]" \
       --user-data "$USER_DATA_B64" \
       --query 'Instances[0].InstanceId' --output text \

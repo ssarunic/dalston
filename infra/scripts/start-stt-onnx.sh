@@ -13,6 +13,8 @@ build_container_run_block() {
 docker pull DALSTON_ECR/dalston/stt-onnx:DALSTON_TAG
 docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -p 9000:9000 \
+  -v /data/models:/models \
+  -e HF_HOME=/models/huggingface \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \
   -e REDIS_URL=redis://DALSTON_MAC_TS_IP:6379 \

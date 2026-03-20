@@ -27,6 +27,8 @@ docker pull DALSTON_ECR/dalston/stt-diarize-pyannote:DALSTON_PYANNOTE_TAG
 
 docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -p 9000:9000 \
+  -v /data/models:/models \
+  -e HF_HOME=/models/huggingface \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \
   -e REDIS_URL=redis://DALSTON_MAC_TS_IP:6379 \
@@ -37,6 +39,8 @@ docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   DALSTON_ECR/dalston/stt-onnx:DALSTON_ONNX_TAG
 
 docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
+  -v /data/models:/models \
+  -e HF_HOME=/models/huggingface \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-gpu-1 \
