@@ -33,7 +33,7 @@ REGION="${AWS_REGION:-eu-west-2}"
 NAME_PREFIX="dalston"
 DATA_VOLUME_SIZE=50
 ROOT_VOLUME_SIZE=30
-REPO_URL=""
+REPO_URL="https://github.com/ssarunic/dalston.git"
 REPO_BRANCH="main"
 
 # Scenario defaults
@@ -404,6 +404,8 @@ AWS_REGION="${REGION}"
 COMPOSE_PROFILE_FLAGS="${compose_profiles}"
 USE_ECR="${use_ecr}"
 ECR_REGISTRY="${account_id}.dkr.ecr.${REGION}.amazonaws.com"
+REPO_URL="${REPO_URL}"
+REPO_BRANCH="${REPO_BRANCH}"
 USERDATA_VARS
 
     # Use heredoc for the rest so variables above are expanded but
@@ -469,6 +471,12 @@ fi
 # Create data directories
 mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston"
 chown -R 1000:1000 "$DATA_MOUNT"
+
+# Clone repo (shallow — only need compose files, code runs from ECR images)
+if [ -n "$REPO_URL" ] && [ ! -f "$DATA_MOUNT/dalston/docker-compose.yml" ]; then
+  echo "Cloning $REPO_URL ($REPO_BRANCH)..."
+  git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$DATA_MOUNT/dalston"
+fi
 
 # Create .env.aws
 cat > "$DATA_MOUNT/dalston/.env.aws" << ENVEOF
