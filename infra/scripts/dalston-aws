@@ -778,7 +778,63 @@ launch_instance() {
         warn "No capacity in $az, trying next AZ..."
     done
 
-    die "Failed to launch $instance_type in any AZ. Check spot capacity or try a different instance type."
+    err "Failed to launch $instance_type in any AZ."
+    return 1
+}
+
+# List GPU instance types with current spot pricing in the region
+list_gpu_spot_instances() {
+    log "Available GPU spot instances in $REGION:"
+    echo ""
+    printf "  %-20s %-8s %-10s %-18s %s\n" "INSTANCE TYPE" "vCPUs" "RAM (GiB)" "GPUs" "SPOT \$/hr"
+    printf "  %-20s %-8s %-10s %-18s %s\n" "-------------" "-----" "---------" "----" "---------"
+
+    local types
+    types=$(aws ec2 describe-instance-types \
+        --filters "Name=processor-info.supported-architectures,Values=x86_64" \
+        --query 'InstanceTypes[?GpuInfo!=`null`].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,GpuInfo.Gpus[0].Count,GpuInfo.Gpus[0].Name]' \
+        --output text --region "$REGION" | sort)
+
+    while IFS=$'\t' read -r itype vcpus mem_mib gpus gpu_name; do
+        local mem_gib=$(( mem_mib / 1024 ))
+        local spot_price
+        spot_price=$(aws ec2 describe-spot-price-history \
+            --instance-types "$itype" \
+            --product-descriptions "Linux/UNIX" \
+            --max-items 1 \
+            --query 'SpotPriceHistory[0].SpotPrice' \
+            --output text --region "$REGION" 2>/dev/null)
+        # Skip types with no spot availability
+        [[ "$spot_price" == "None" || -z "$spot_price" ]] && continue
+        printf "  %-20s %-8s %-10s %-18s %s\n" "$itype" "$vcpus" "$mem_gib" "${gpus}x ${gpu_name}" "\$$spot_price"
+    done <<< "$types"
+    echo ""
+}
+
+# Launch GPU worker with interactive retry on capacity failure.
+# Writes instance ID to GPU_INSTANCE_ID (avoids subshell so read works).
+launch_gpu_interactive() {
+    local sg_id="$1"
+    local user_data_file="$2"
+    local name_tag="$3"
+    local use_spot="$4"
+    local gpu_type="$GPU_INSTANCE_TYPE"
+
+    while true; do
+        local iid
+        if iid=$(launch_instance "$gpu_type" "$sg_id" "$user_data_file" "$name_tag" "$use_spot"); then
+            GPU_INSTANCE_ID="$iid"
+            return 0
+        fi
+
+        echo ""
+        list_gpu_spot_instances
+
+        echo -n "Enter instance type to retry (or 'q' to quit): " </dev/tty
+        read -r choice </dev/tty
+        [[ "$choice" == "q" || -z "$choice" ]] && die "GPU worker launch aborted."
+        gpu_type="$choice"
+    done
 }
 
 create_and_attach_data_volume() {
@@ -955,11 +1011,10 @@ cmd_setup() {
             open_control_plane_ports "$SG_ID" "$GPU_SG_ID"
 
             # GPU worker
-            log "Launching GPU worker ($GPU_INSTANCE_TYPE)..."
             local gpu_user_data
             gpu_user_data=$(mktemp)
             generate_gpu_worker_user_data "$S3_BUCKET" "$ctrl_private_ip" > "$gpu_user_data"
-            GPU_INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT")
+            launch_gpu_interactive "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT"
             rm -f "$gpu_user_data"
             wait_instance_running "$GPU_INSTANCE_ID"
             # No EBS data volume for GPU — models use instance store NVMe
@@ -1116,11 +1171,10 @@ cmd_add_gpu() {
     open_control_plane_ports "$SG_ID" "$GPU_SG_ID"
 
     # Launch GPU worker
-    log "Launching GPU worker ($GPU_INSTANCE_TYPE)..."
     local gpu_user_data
     gpu_user_data=$(mktemp)
     generate_gpu_worker_user_data "$S3_BUCKET" "$ctrl_private_ip" > "$gpu_user_data"
-    GPU_INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT")
+    launch_gpu_interactive "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT"
     rm -f "$gpu_user_data"
     wait_instance_running "$GPU_INSTANCE_ID"
     # No EBS data volume for GPU — models use instance store NVMe
