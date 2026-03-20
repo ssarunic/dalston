@@ -1525,17 +1525,46 @@ def cmd_down(args: argparse.Namespace) -> None:
     )
 
 
+def _resolve_tailscale_host(base_hostname: str) -> str:
+    """Find the actual Tailscale hostname, handling -1/-2 suffixes."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            import re
+
+            status = json.loads(result.stdout)
+            pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
+            for peer in (status.get("Peer") or {}).values():
+                name = peer.get("HostName", "")
+                if pattern.match(name) and peer.get("Online"):
+                    if name != base_hostname:
+                        warn(f"Tailscale node is '{name}' (not '{base_hostname}')")
+                    return name
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        pass
+    return base_hostname
+
+
 def cmd_ssh(args: argparse.Namespace) -> None:
     st = require_state()
 
     if args.target == "gpu":
         if st.scenario != "split" or not st.gpu_instance_id:
             die("No GPU worker found. Use 'dalston-aws ssh' for the main instance.")
-        hostname = "dalston-gpu-worker"
+        base_hostname = "dalston-gpu-worker"
         user = "ubuntu"  # DL AMI is Ubuntu-based
     else:
-        hostname = "dalston-control-plane"
+        base_hostname = "dalston-control-plane"
         user = "ec2-user"  # AL2023
+
+    hostname = _resolve_tailscale_host(base_hostname)
 
     key_file = STATE_DIR / f"{st.key_name}.pem"
     ssh_args = ["ssh"]
@@ -1543,7 +1572,7 @@ def cmd_ssh(args: argparse.Namespace) -> None:
         ssh_args += ["-i", str(key_file)]
     ssh_args.append(f"{user}@{hostname}")
 
-    log(f"Connecting to {hostname} via Tailscale SSH...")
+    log(f"Connecting to {hostname}...")
     os.execvp("ssh", ssh_args)
 
 
