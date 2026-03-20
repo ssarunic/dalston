@@ -115,7 +115,7 @@ dev-observability:
 
 # Stop all services (all profiles)
 stop:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability --profile nemo-msdd down
 
 # Follow gateway logs
 logs:
@@ -369,12 +369,12 @@ docker-gc-auto:
 
 # Remove stopped containers and unused images
 clean:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down --remove-orphans
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability --profile nemo-msdd down --remove-orphans
 	docker system prune -f
 
 # Deep clean: remove all containers, images, and volumes
 clean-all:
-	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability down --remove-orphans --volumes
+	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability --profile nemo-msdd down --remove-orphans --volumes
 	docker system prune -af --volumes
 
 # Show queue depths

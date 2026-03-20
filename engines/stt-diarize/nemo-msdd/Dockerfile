@@ -57,6 +57,16 @@ print('Models downloaded successfully')"; \
 COPY engines/stt-diarize/nemo-msdd/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-diarize/nemo-msdd/engine.py .
 
+# Smoke test: verify NeMo config schema and imports work with this version
+RUN python -c "\
+from engine import DIAR_CONFIG, MODEL_COMPONENTS; \
+from omegaconf import OmegaConf; \
+from nemo.collections.asr.models.msdd_models import NeuralDiarizer; \
+cfg = OmegaConf.create(DIAR_CONFIG); \
+assert cfg.diarizer.vad.model_path is not None; \
+assert cfg.diarizer.speaker_embeddings.model_path is not None; \
+print('NeMo MSDD config schema OK')"
+
 # M39: Standardized model cache directories
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch

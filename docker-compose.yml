@@ -509,7 +509,7 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # NeMo MSDD Speaker Diarization
+  # NeMo MSDD Speaker Diarization (legacy — prefer pyannote-4.0 or sortformer)
   stt-diarize-nemo-msdd:
     image: dalston/stt-diarize-nemo-msdd:latest
     build:
@@ -527,6 +527,7 @@ services:
     shm_size: '2gb'
     tmpfs: /tmp:size=2g
     depends_on: *batch-depends
+    profiles: [nemo-msdd]
     logging: *default-logging
     restart: unless-stopped
 

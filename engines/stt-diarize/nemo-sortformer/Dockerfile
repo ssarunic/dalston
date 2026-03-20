@@ -54,6 +54,13 @@ print('Model downloaded successfully')"; \
 COPY engines/stt-diarize/nemo-sortformer/engine.yaml /etc/dalston/engine.yaml
 COPY engines/stt-diarize/nemo-sortformer/engine.py .
 
+# Smoke test: verify NeMo imports and model registry work with this version
+RUN python -c "\
+from engine import MODEL_REGISTRY; \
+from nemo.collections.asr.models import SortformerEncLabelModel; \
+assert len(MODEL_REGISTRY) > 0; \
+print('NeMo Sortformer imports OK')"
+
 # M39: Standardized model cache directories
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
