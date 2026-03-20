@@ -236,6 +236,7 @@ class AuthService:
         scopes: list[Scope] | None = None,
         rate_limit: int | None = None,
         expires_at: datetime | None = None,
+        raw_key: str | None = None,
     ) -> tuple[str, APIKey]:
         """Create a new API key.
 
@@ -245,6 +246,7 @@ class AuthService:
             scopes: Permission scopes (defaults to DEFAULT_SCOPES)
             rate_limit: Requests per minute limit (None = unlimited)
             expires_at: Expiration date (defaults to DEFAULT_EXPIRES_AT)
+            raw_key: Pre-defined key value (for seeding from DALSTON_API_KEY)
 
         Returns:
             Tuple of (raw_key, APIKey object)
@@ -255,8 +257,9 @@ class AuthService:
         if expires_at is None:
             expires_at = DEFAULT_EXPIRES_AT
 
-        # Generate key
-        raw_key = generate_api_key()
+        # Generate key or use provided one
+        if raw_key is None:
+            raw_key = generate_api_key()
         key_hash = hash_api_key(raw_key)
         prefix = get_key_prefix(raw_key)
 

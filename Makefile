@@ -376,8 +376,11 @@ clean:
 	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability --profile nemo-msdd down --remove-orphans
 	docker system prune -f
 
-# Deep clean: remove all containers, images, and volumes
+# Deep clean: remove all containers, images, and volumes (DESTROYS DATABASE)
 clean-all:
+	@echo "WARNING: This will destroy the Postgres database and all volumes!"
+	@echo "Press Ctrl+C to abort, or wait 5 seconds to continue..."
+	@sleep 5
 	docker compose --profile local-infra --profile local-object-storage --profile gpu --profile riva --profile observability --profile nemo-msdd down --remove-orphans --volumes
 	docker system prune -af --volumes
 

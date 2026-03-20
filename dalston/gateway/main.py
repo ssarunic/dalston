@@ -1,5 +1,6 @@
 """FastAPI Gateway application entry point."""
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -87,31 +88,48 @@ async def _ensure_admin_key_exists() -> None:
                 logger.info("API keys already exist, skipping auto-bootstrap")
                 return
 
-            # Create admin key
-            raw_key, api_key = await auth_service.create_api_key(
-                name="Auto-generated Admin Key",
-                tenant_id=DEFAULT_TENANT_ID,
-                scopes=[Scope.ADMIN],
-                rate_limit=None,
-            )
+            # If DALSTON_API_KEY is set, seed that exact key so .env stays valid
+            # even after DB recreation.
+            seed_key = os.environ.get("DALSTON_API_KEY")
+            if seed_key:
+                raw_key, api_key = await auth_service.create_api_key(
+                    name="Seeded Admin Key",
+                    tenant_id=DEFAULT_TENANT_ID,
+                    scopes=[Scope.ADMIN],
+                    rate_limit=None,
+                    raw_key=seed_key,
+                )
+                logger.info(
+                    "Admin API key seeded from DALSTON_API_KEY environment variable"
+                )
+            else:
+                # Create admin key
+                raw_key, api_key = await auth_service.create_api_key(
+                    name="Auto-generated Admin Key",
+                    tenant_id=DEFAULT_TENANT_ID,
+                    scopes=[Scope.ADMIN],
+                    rate_limit=None,
+                )
 
-        # Print key prominently
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("FIRST RUN: Admin API key auto-generated")
-        logger.info("=" * 70)
-        logger.info("")
-        logger.info("API Key: %s", raw_key)
-        logger.info("")
-        logger.info("IMPORTANT: Store this key securely! It will not be shown again.")
-        logger.info("")
-        logger.info("Set as environment variable:")
-        logger.info('  export DALSTON_API_KEY="%s"', raw_key)
-        logger.info("")
-        logger.info("Or use with curl:")
-        logger.info('  curl -H "Authorization: Bearer %s" ...', raw_key)
-        logger.info("")
-        logger.info("=" * 70)
+                # Print key prominently
+                logger.info("")
+                logger.info("=" * 70)
+                logger.info("FIRST RUN: Admin API key auto-generated")
+                logger.info("=" * 70)
+                logger.info("")
+                logger.info("API Key: %s", raw_key)
+                logger.info("")
+                logger.info(
+                    "IMPORTANT: Store this key securely! It will not be shown again."
+                )
+                logger.info("")
+                logger.info("Set as environment variable:")
+                logger.info('  export DALSTON_API_KEY="%s"', raw_key)
+                logger.info("")
+                logger.info("Or use with curl:")
+                logger.info('  curl -H "Authorization: Bearer %s" ...', raw_key)
+                logger.info("")
+                logger.info("=" * 70)
 
     except Exception as e:
         logger.error("Could not auto-bootstrap admin key: %s", e)
