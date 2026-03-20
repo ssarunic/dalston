@@ -1,0 +1,40 @@
+# Docker Compose override to pull pre-built images from ECR instead of building locally.
+#
+# Usage (CPU control plane):
+#   docker compose -f docker-compose.yml \
+#     -f infra/docker/docker-compose.aws.yml \
+#     -f infra/docker/docker-compose.ecr.yml \
+#     --env-file .env.aws \
+#     --profile local-infra pull
+#   docker compose -f docker-compose.yml \
+#     -f infra/docker/docker-compose.aws.yml \
+#     -f infra/docker/docker-compose.ecr.yml \
+#     --env-file .env.aws \
+#     --profile local-infra up -d --no-build
+#
+# Requires .env.aws to contain:
+#   ECR_REGISTRY=<account>.dkr.ecr.<region>.amazonaws.com
+#   IMAGE_TAG=latest  (or a specific commit SHA)
+#
+# Images must exist in ECR (pushed by GitHub Actions or `make push-ecr`).
+
+services:
+  gateway:
+    image: ${ECR_REGISTRY}/dalston/gateway:${IMAGE_TAG:-latest}
+
+  orchestrator:
+    image: ${ECR_REGISTRY}/dalston/orchestrator:${IMAGE_TAG:-latest}
+
+  stt-prepare:
+    image: ${ECR_REGISTRY}/dalston/stt-prepare:${IMAGE_TAG:-latest}
+
+  # metrics-exporter reuses the gateway image
+  metrics-exporter:
+    image: ${ECR_REGISTRY}/dalston/gateway:${IMAGE_TAG:-latest}
+
+  # GPU engines (used by GPU worker in split mode)
+  stt-transcribe-onnx:
+    image: ${ECR_REGISTRY}/dalston/stt-onnx:${IMAGE_TAG:-latest}
+
+  stt-diarize-pyannote-4.0:
+    image: ${ECR_REGISTRY}/dalston/stt-diarize-pyannote:${IMAGE_TAG:-latest}

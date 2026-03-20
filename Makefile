@@ -37,7 +37,9 @@ help:
 	@echo "  make build-engine ENGINE=<name> - Build a specific engine"
 	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
-	@echo "AWS Deployment:"
+	@echo "ECR & AWS Deployment:"
+	@echo "  make ecr-login       - Login to ECR"
+	@echo "  make push-ecr        - Build and push all CPU images to ECR"
 	@echo "  make aws-start       - Start on AWS with local infra + GPU"
 	@echo "  make aws-stop        - Stop AWS services"
 	@echo "  make aws-logs        - Follow logs on AWS"
@@ -157,6 +159,37 @@ deploy-web:
 	docker compose build gateway
 	@DALSTON_RUNTIME_REVISION=$$(git rev-parse HEAD) \
 		docker compose up -d gateway
+
+# ============================================================
+# ECR BUILD & PUSH
+# ============================================================
+
+ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-west-2.amazonaws.com
+IMAGE_TAG ?= latest
+
+# Login to ECR
+ecr-login:
+	aws ecr get-login-password --region eu-west-2 | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+# Build and push all CPU service images to ECR
+push-ecr: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare
+	@echo "All CPU images pushed to ECR."
+
+# Build and push gateway
+push-ecr-gateway:
+	docker build -f docker/Dockerfile.gateway -t $(ECR_REGISTRY)/dalston/gateway:$(IMAGE_TAG) .
+	docker push $(ECR_REGISTRY)/dalston/gateway:$(IMAGE_TAG)
+
+# Build and push orchestrator
+push-ecr-orchestrator:
+	docker build -f docker/Dockerfile.orchestrator -t $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG) .
+	docker push $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG)
+
+# Build and push stt-prepare (requires engine-base)
+push-ecr-prepare:
+	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build -f engines/stt-prepare/audio-prepare/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG) .
+	docker push $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG)
 
 # ============================================================
 # AWS DEPLOYMENT
