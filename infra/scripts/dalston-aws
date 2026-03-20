@@ -802,13 +802,18 @@ HF_TOKEN="{hf_token}"
 """
 
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
+    # NOTE: GPU worker uses Ubuntu-based Deep Learning AMI (has NVIDIA drivers + Docker pre-installed)
     body = r"""
-# Install Docker
-dnf update -y
-dnf install -y docker pciutils
+# Wait for any unattended-upgrades to finish
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  echo "Waiting for dpkg lock (unattended-upgrades)..."
+  sleep 5
+done
+
+# Ensure Docker is running (pre-installed on DL AMI)
 systemctl start docker
 systemctl enable docker
-usermod -aG docker ec2-user
+usermod -aG docker ubuntu
 
 # Install and auto-join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -824,15 +829,12 @@ else
   echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
 fi
 
-# NVIDIA runtime
-if lspci | grep -qi nvidia; then
-  curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
-    -o /etc/yum.repos.d/nvidia-container-toolkit.repo
-  dnf install -y nvidia-container-toolkit || true
-  if command -v nvidia-ctk >/dev/null 2>&1; then
-    nvidia-ctk runtime configure --runtime=docker
-    systemctl restart docker
-  fi
+# Configure NVIDIA Container Toolkit for Docker
+apt-get update
+apt-get install -y nvidia-container-toolkit || true
+if command -v nvidia-ctk >/dev/null 2>&1; then
+  nvidia-ctk runtime configure --runtime=docker
+  systemctl restart docker
 fi
 
 # Mount instance store NVMe for model cache (free 125 GB on g4dn)
@@ -961,6 +963,15 @@ def get_latest_ami(region: str) -> str:
     return images[-1]["ImageId"]
 
 
+def get_gpu_ami(region: str) -> str:
+    """Get the Deep Learning Base AMI with NVIDIA drivers pre-installed."""
+    ssm = boto3.client("ssm", region_name=region)
+    resp = ssm.get_parameter(
+        Name="/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id"
+    )
+    return resp["Parameter"]["Value"]
+
+
 # ---------------------------------------------------------------------------
 # Instance launch
 # ---------------------------------------------------------------------------
@@ -975,13 +986,15 @@ def launch_instance(
     use_spot: bool,
     key_name: str,
     instance_profile: str,
+    ami_id: str | None = None,
 ) -> str:
     """Launch an EC2 instance, trying each AZ in the default VPC.
 
     Returns the instance ID on success or raises on failure.
     """
     ec2 = ec2_client(region)
-    ami_id = get_latest_ami(region)
+    if ami_id is None:
+        ami_id = get_latest_ami(region)
     vpc_id = get_default_vpc(region)
 
     resp = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
@@ -1133,6 +1146,8 @@ def launch_gpu_interactive(
     gpu_type: str,
 ) -> str:
     """Launch GPU worker with interactive retry on capacity failure."""
+    gpu_ami = get_gpu_ami(region)
+    log(f"Using Deep Learning AMI: {gpu_ami}")
     while True:
         try:
             return launch_instance(
@@ -1144,6 +1159,7 @@ def launch_gpu_interactive(
                 use_spot,
                 key_name,
                 instance_profile,
+                ami_id=gpu_ami,
             )
         except RuntimeError:
             print()
@@ -1455,14 +1471,16 @@ def cmd_ssh(args: argparse.Namespace) -> None:
         if st.scenario != "split" or not st.gpu_instance_id:
             die("No GPU worker found. Use 'dalston-aws ssh' for the main instance.")
         hostname = "dalston-gpu-worker"
+        user = "ubuntu"  # DL AMI is Ubuntu-based
     else:
         hostname = "dalston-control-plane"
+        user = "ec2-user"  # AL2023
 
     key_file = STATE_DIR / f"{st.key_name}.pem"
     ssh_args = ["ssh"]
     if key_file.exists():
         ssh_args += ["-i", str(key_file)]
-    ssh_args.append(f"ec2-user@{hostname}")
+    ssh_args.append(f"{user}@{hostname}")
 
     log(f"Connecting to {hostname} via Tailscale SSH...")
     os.execvp("ssh", ssh_args)
