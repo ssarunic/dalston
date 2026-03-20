@@ -45,7 +45,7 @@ REPO_BRANCH = "main"
 DEFAULT_REGION = "eu-west-2"
 GPU_INSTANCE_TYPE = "g4dn.xlarge"
 CPU_INSTANCE_TYPE = "t3.xlarge"
-CTRL_INSTANCE_TYPE = "t3.medium"
+CTRL_INSTANCE_TYPE = "t3.large"
 
 # ---------------------------------------------------------------------------
 # Colored output helpers
@@ -548,6 +548,95 @@ def ensure_key_pair(region: str, key_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Tailscale cloud-init block (shared by CPU and GPU)
+# ---------------------------------------------------------------------------
+
+
+def _tailscale_cloud_init_block(hostname: str) -> str:
+    """Return shell snippet that installs a Tailscale auto-join systemd service.
+
+    The join script runs on every boot: skips if already connected, otherwise
+    cleans up stale nodes and re-joins via auth key from SSM.
+    """
+    return f"""\
+# Install and auto-join Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Create Tailscale join script that runs on every boot
+cat > /usr/local/bin/dalston-tailscale-join.sh << 'TSEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Skip if Tailscale is already connected (normal reboot)
+if tailscale status --json 2>/dev/null | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin).get('BackendState')=='Running' else 1)" 2>/dev/null; then
+  echo "Tailscale already connected, skipping re-join"
+  exit 0
+fi
+
+# Region via IMDS v2 (works on both Amazon Linux and Ubuntu)
+IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+REGION=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+TS_HOSTNAME="{hostname}"
+
+# Remove stale Tailscale node with same hostname to avoid -1 suffix
+TS_API_KEY=$(aws ssm get-parameter \\
+  --name "/dalston/tailscale-api-key" \\
+  --with-decryption \\
+  --query "Parameter.Value" \\
+  --output text --region "$REGION" 2>/dev/null) || true
+if [ -n "$TS_API_KEY" ]; then
+  curl -s -H "Authorization: Bearer $TS_API_KEY" \\
+    "https://api.tailscale.com/api/v2/tailnet/-/devices" | \\
+    python3 -c "
+import sys, json
+for d in json.load(sys.stdin).get('devices', []):
+    if d.get('hostname') == '$TS_HOSTNAME' and not d.get('online', False):
+        print(d['nodeId'])
+" | while read -r node_id; do
+    curl -s -X DELETE -H "Authorization: Bearer $TS_API_KEY" \\
+      "https://api.tailscale.com/api/v2/device/$node_id"
+    echo "Removed stale Tailscale node: $node_id ($TS_HOSTNAME)"
+  done
+fi
+
+TS_AUTH_KEY=$(aws ssm get-parameter \\
+  --name "/dalston/tailscale-auth-key" \\
+  --with-decryption \\
+  --query "Parameter.Value" \\
+  --output text --region "$REGION") || true
+if [ -n "$TS_AUTH_KEY" ]; then
+  tailscale up --authkey="$TS_AUTH_KEY" --hostname="$TS_HOSTNAME"
+  echo "Tailscale joined as $TS_HOSTNAME"
+else
+  echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
+fi
+TSEOF
+chmod +x /usr/local/bin/dalston-tailscale-join.sh
+
+# Install systemd service to re-join Tailscale on every boot
+cat > /etc/systemd/system/dalston-tailscale.service << 'SVCEOF'
+[Unit]
+Description=Dalston Tailscale auto-join
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dalston-tailscale-join.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+systemctl daemon-reload
+systemctl enable dalston-tailscale.service
+
+# Run it now for first boot
+/usr/local/bin/dalston-tailscale-join.sh
+"""
+
+
+# ---------------------------------------------------------------------------
 # User-data generation
 # ---------------------------------------------------------------------------
 
@@ -584,51 +673,19 @@ HF_TOKEN="{hf_token}"
 REPO_BRANCH="{REPO_BRANCH}"
 """
 
+    tailscale_block = _tailscale_cloud_init_block("dalston-control-plane")
+
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
-    body = r"""
+    body = (
+        r"""
 # Install Docker
 echo "Installing Docker..."
 dnf update -y
 dnf install -y docker git pciutils
 
-# Install and auto-join Tailscale
-echo "Installing Tailscale..."
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Remove stale Tailscale node with same hostname to avoid -1 suffix
-TS_API_KEY=$(aws ssm get-parameter \
-  --name "/dalston/tailscale-api-key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text --region "$AWS_REGION" 2>/dev/null) || true
-TS_HOSTNAME="dalston-control-plane"
-if [ -n "$TS_API_KEY" ]; then
-  curl -s -H "Authorization: Bearer $TS_API_KEY" \
-    "https://api.tailscale.com/api/v2/tailnet/-/devices" | \
-    python3 -c "
-import sys, json
-for d in json.load(sys.stdin).get('devices', []):
-    if d.get('hostname') == '$TS_HOSTNAME':
-        print(d['nodeId'])
-" | while read -r node_id; do
-    curl -s -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
-      "https://api.tailscale.com/api/v2/device/$node_id"
-    echo "Removed stale Tailscale node: $node_id ($TS_HOSTNAME)"
-  done
-fi
-
-TS_AUTH_KEY=$(aws ssm get-parameter \
-  --name "/dalston/tailscale-auth-key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text --region "$AWS_REGION") || true
-if [ -n "$TS_AUTH_KEY" ]; then
-  tailscale up --authkey="$TS_AUTH_KEY" --hostname="$TS_HOSTNAME"
-  echo "Tailscale joined as $TS_HOSTNAME"
-else
-  echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
-fi
-
+"""
+        + tailscale_block
+        + r"""
 # Start Docker
 systemctl start docker
 systemctl enable docker
@@ -772,7 +829,7 @@ WantedBy=multi-user.target
 SVCEOF
 
 systemctl daemon-reload
-systemctl enable dalston.service
+systemctl enable --now dalston.service
 
 echo ""
 echo "=========================================="
@@ -786,6 +843,7 @@ echo "3. sudo systemctl start dalston"
 echo ""
 echo "To redeploy: sudo /data/dalston/deploy.sh"
 """
+    )
 
     return header + variables + body
 
@@ -818,7 +876,8 @@ HF_TOKEN="{hf_token}"
 
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
     # NOTE: GPU worker uses Ubuntu-based Deep Learning AMI (has NVIDIA drivers + Docker pre-installed)
-    body = r"""
+    body = (
+        r"""
 # Wait for any unattended-upgrades to finish
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
   echo "Waiting for dpkg lock (unattended-upgrades)..."
@@ -830,43 +889,9 @@ systemctl start docker
 systemctl enable docker
 usermod -aG docker ubuntu
 
-# Install and auto-join Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Remove stale Tailscale node with same hostname to avoid -1 suffix
-TS_API_KEY=$(aws ssm get-parameter \
-  --name "/dalston/tailscale-api-key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text --region "$AWS_REGION" 2>/dev/null) || true
-TS_HOSTNAME="dalston-gpu-worker"
-if [ -n "$TS_API_KEY" ]; then
-  curl -s -H "Authorization: Bearer $TS_API_KEY" \
-    "https://api.tailscale.com/api/v2/tailnet/-/devices" | \
-    python3 -c "
-import sys, json
-for d in json.load(sys.stdin).get('devices', []):
-    if d.get('hostname') == '$TS_HOSTNAME':
-        print(d['nodeId'])
-" | while read -r node_id; do
-    curl -s -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
-      "https://api.tailscale.com/api/v2/device/$node_id"
-    echo "Removed stale Tailscale node: $node_id ($TS_HOSTNAME)"
-  done
-fi
-
-TS_AUTH_KEY=$(aws ssm get-parameter \
-  --name "/dalston/tailscale-auth-key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text --region "$AWS_REGION") || true
-if [ -n "$TS_AUTH_KEY" ]; then
-  tailscale up --authkey="$TS_AUTH_KEY" --hostname="$TS_HOSTNAME"
-  echo "Tailscale joined as $TS_HOSTNAME"
-else
-  echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
-fi
-
+"""
+        + _tailscale_cloud_init_block("dalston-gpu-worker")
+        + r"""
 # Configure NVIDIA Container Toolkit for Docker
 apt-get update
 apt-get install -y nvidia-container-toolkit || true
@@ -897,6 +922,15 @@ docker pull "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
 
 mkdir -p /opt/dalston
 
+# Save env for the start script (must exist before gpu-start.sh runs)
+cat > /opt/dalston/gpu-env.sh << ENVEOF
+S3_BUCKET="${S3_BUCKET}"
+AWS_REGION="${AWS_REGION}"
+CTRL_PLANE_IP="${CTRL_PLANE_IP}"
+ECR_REGISTRY="${ECR_REGISTRY}"
+HF_TOKEN="${HF_TOKEN}"
+ENVEOF
+
 # GPU worker start script
 cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 #!/bin/bash
@@ -911,10 +945,14 @@ docker pull "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
 # Stop existing containers if running
 docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0 2>/dev/null || true
 
+HOST_HOSTNAME=$(hostname)
+
 docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -v /data/models:/data/models \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \
+  -e DALSTON_DEPLOY_ENV=aws \
+  -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \
   -e REDIS_URL="redis://${CTRL_PLANE_IP}:6379" \
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \
   -e DALSTON_S3_REGION="$AWS_REGION" \
@@ -927,6 +965,8 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-gpu-1 \
+  -e DALSTON_DEPLOY_ENV=aws \
+  -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \
   -e HF_TOKEN="$HF_TOKEN" \
   -e REDIS_URL="redis://${CTRL_PLANE_IP}:6379" \
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \
@@ -938,15 +978,6 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
 echo "GPU engines started at $(date)"
 STARTEOF
 chmod +x /opt/dalston/gpu-start.sh
-
-# Save env for the start script
-cat > /opt/dalston/gpu-env.sh << ENVEOF
-S3_BUCKET="${S3_BUCKET}"
-AWS_REGION="${AWS_REGION}"
-CTRL_PLANE_IP="${CTRL_PLANE_IP}"
-ECR_REGISTRY="${ECR_REGISTRY}"
-HF_TOKEN="${HF_TOKEN}"
-ENVEOF
 
 # GPU worker systemd service
 cat > /etc/systemd/system/dalston-gpu.service << SVCEOF
@@ -967,7 +998,7 @@ WantedBy=multi-user.target
 SVCEOF
 
 systemctl daemon-reload
-systemctl enable dalston-gpu.service
+systemctl enable --now dalston-gpu.service
 
 echo ""
 echo "=========================================="
@@ -978,6 +1009,7 @@ echo "Next steps:"
 echo "1. sudo tailscale up"
 echo "2. sudo systemctl start dalston-gpu"
 """
+    )
 
     return header + variables + body
 
@@ -1488,7 +1520,18 @@ def cmd_up(args: argparse.Namespace) -> None:
     ec2 = ec2_client(st.region)
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
     if st.scenario == "split" and st.gpu_instance_id:
-        retry_aws(ec2.start_instances, InstanceIds=[st.gpu_instance_id])
+        # Check if the GPU spot instance was terminated (can't be restarted)
+        resp = ec2.describe_instances(InstanceIds=[st.gpu_instance_id])
+        state = resp["Reservations"][0]["Instances"][0]["State"]["Name"]
+        if state == "terminated":
+            warn(
+                f"GPU spot instance {st.gpu_instance_id} was terminated. Clearing from state."
+            )
+            warn("Run 'dalston-aws add-gpu --spot' to launch a new one.")
+            st.gpu_instance_id = ""
+            save_state(st)
+        else:
+            retry_aws(ec2.start_instances, InstanceIds=[st.gpu_instance_id])
     log("Start command sent. Instances booting...")
 
 

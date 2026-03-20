@@ -1,24 +1,32 @@
 # Docker Compose override for AWS deployment
 # Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f infra/docker/docker-compose.aws.yml up -d --profile local-infra --profile gpu
 
+x-aws-s3: &aws-s3
+  DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
+  DALSTON_S3_REGION: ${DALSTON_S3_REGION}
+  DALSTON_S3_ENDPOINT_URL: ""
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
+  AWS_REGION: ${AWS_REGION}
+
 services:
+  # Disable MinIO — using real S3 on AWS
+  minio:
+    profiles: [disabled]
+  minio-init:
+    profiles: [disabled]
+
   gateway:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       DALSTON_S3_PUBLIC_ENDPOINT_URL: ${DALSTON_S3_PUBLIC_ENDPOINT_URL:-}
-      # No S3_ENDPOINT - SDK auto-detects on EC2
-      # No credentials - uses IAM instance role
     # Bind to all interfaces for Tailscale access
     ports:
       - "8000:8000"
 
   orchestrator:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
 
   postgres:
     volumes:
@@ -30,24 +38,18 @@ services:
 
   stt-prepare:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
 
   stt-transcribe-faster-whisper:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-transcribe-nemo:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
       NEMO_CACHE: /data/models
     volumes:
@@ -55,45 +57,35 @@ services:
 
   stt-transcribe-onnx:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-align-phoneme:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-pii-detect-presidio:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-diarize-pyannote-4.0:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       HF_HOME: /data/models
     volumes:
       - /data/models:/data/models
 
   stt-diarize-nemo-msdd:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       NEMO_CACHE: /data/models
     volumes:
       - /data/models:/data/models
@@ -101,9 +93,7 @@ services:
   # NeMo Sortformer diarization (GPU)
   stt-diarize-nemo-sortformer:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       NEMO_CACHE: /data/models
     volumes:
       - /data/models:/data/models
@@ -111,9 +101,7 @@ services:
   # NeMo Sortformer diarization (CPU)
   stt-diarize-nemo-sortformer-cpu:
     environment:
-      DALSTON_S3_BUCKET: ${DALSTON_S3_BUCKET}
-      DALSTON_S3_REGION: ${DALSTON_S3_REGION}
-      AWS_REGION: ${AWS_REGION}
+      <<: *aws-s3
       NEMO_CACHE: /data/models
     volumes:
       - /data/models:/data/models
