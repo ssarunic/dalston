@@ -724,38 +724,61 @@ launch_instance() {
     local ami_id
     ami_id=$(get_latest_ami)
 
-    # Get default VPC + subnet
-    local vpc_id subnet_id
+    # Collect all subnets in the default VPC (one per AZ)
+    local vpc_id
     vpc_id=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" \
         --query 'Vpcs[0].VpcId' --output text --region "$REGION")
-    subnet_id=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc_id" \
-        --query 'Subnets[0].SubnetId' --output text --region "$REGION")
 
-    local run_args=(
-        ec2 run-instances
-        --image-id "$ami_id"
-        --instance-type "$instance_type"
-        --key-name "$KEY_NAME"
-        --security-group-ids "$sg_id"
-        --subnet-id "$subnet_id"
-        --iam-instance-profile "Name=${INSTANCE_PROFILE}"
-        --user-data "file://${user_data_file}"
-        --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":${ROOT_VOLUME_SIZE},\"VolumeType\":\"gp3\",\"Encrypted\":true,\"DeleteOnTermination\":true}}]"
-        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${name_tag}},{Key=Project,Value=dalston}]"
-        --query 'Instances[0].InstanceId'
-        --output text
-        --region "$REGION"
-    )
+    local subnet_ids=()
+    while IFS= read -r sid; do
+        [[ -n "$sid" && "$sid" != "None" ]] && subnet_ids+=("$sid")
+    done < <(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc_id" \
+        --query 'Subnets[].SubnetId' --output text --region "$REGION" | tr '\t' '\n')
 
-    if [[ "$use_spot" == "true" ]]; then
-        run_args+=(
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"persistent","InstanceInterruptionBehavior":"stop"}}'
+    [[ ${#subnet_ids[@]} -eq 0 ]] && die "No subnets found in VPC $vpc_id"
+
+    # Try each AZ until one succeeds (handles spot capacity shortages)
+    local iid=""
+    for subnet_id in "${subnet_ids[@]}"; do
+        local az
+        az=$(aws ec2 describe-subnets --subnet-ids "$subnet_id" \
+            --query 'Subnets[0].AvailabilityZone' --output text --region "$REGION")
+
+        local run_args=(
+            ec2 run-instances
+            --image-id "$ami_id"
+            --instance-type "$instance_type"
+            --key-name "$KEY_NAME"
+            --security-group-ids "$sg_id"
+            --subnet-id "$subnet_id"
+            --iam-instance-profile "Name=${INSTANCE_PROFILE}"
+            --user-data "file://${user_data_file}"
+            --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":${ROOT_VOLUME_SIZE},\"VolumeType\":\"gp3\",\"Encrypted\":true,\"DeleteOnTermination\":true}}]"
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${name_tag}},{Key=Project,Value=dalston}]"
+            --query 'Instances[0].InstanceId'
+            --output text
+            --region "$REGION"
         )
-    fi
 
-    local iid
-    iid=$(aws "${run_args[@]}")
-    echo "$iid"
+        if [[ "$use_spot" == "true" ]]; then
+            run_args+=(
+                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"persistent","InstanceInterruptionBehavior":"stop"}}'
+            )
+        fi
+
+        log "Trying AZ $az (subnet $subnet_id)..."
+        if iid=$(aws "${run_args[@]}" 2>&1); then
+            # Verify we got a valid instance ID
+            if [[ "$iid" == i-* ]]; then
+                log "Launched in $az: $iid"
+                echo "$iid"
+                return 0
+            fi
+        fi
+        warn "No capacity in $az, trying next AZ..."
+    done
+
+    die "Failed to launch $instance_type in any AZ. Check spot capacity or try a different instance type."
 }
 
 create_and_attach_data_volume() {
