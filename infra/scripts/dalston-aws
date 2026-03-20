@@ -1454,14 +1454,29 @@ def cmd_up(args: argparse.Namespace) -> None:
     log("Start command sent. Instances booting...")
 
 
+def _stop_instance(ec2, region: str, instance_id: str) -> None:
+    """Stop an instance, terminating instead if it's a one-time spot."""
+    try:
+        ec2.stop_instances(InstanceIds=[instance_id])
+        log(f"  {instance_id}: stop requested")
+    except ClientError as e:
+        if "UnsupportedOperation" in str(e) and "Spot" in str(e):
+            warn(f"  {instance_id}: one-time spot instance — terminating instead")
+            ec2.terminate_instances(InstanceIds=[instance_id])
+        else:
+            raise
+
+
 def cmd_down(args: argparse.Namespace) -> None:
     st = require_state()
     log("Stopping instance(s)...")
     ec2 = ec2_client(st.region)
-    ec2.stop_instances(InstanceIds=[st.instance_id])
+    _stop_instance(ec2, st.region, st.instance_id)
     if st.scenario == "split" and st.gpu_instance_id:
-        ec2.stop_instances(InstanceIds=[st.gpu_instance_id])
-    log("Stop command sent.")
+        _stop_instance(ec2, st.region, st.gpu_instance_id)
+    log(
+        "Done. Use 'dalston-aws up' to restart (add-gpu again for terminated spot workers)."
+    )
 
 
 def cmd_ssh(args: argparse.Namespace) -> None:
