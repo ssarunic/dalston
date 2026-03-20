@@ -766,16 +766,16 @@ launch_instance() {
             )
         fi
 
-        log "Trying AZ $az (subnet $subnet_id)..."
+        log "Trying AZ $az (subnet $subnet_id)..." >&2
         if iid=$(aws "${run_args[@]}" 2>&1); then
             # Verify we got a valid instance ID
             if [[ "$iid" == i-* ]]; then
-                log "Launched in $az: $iid"
+                log "Launched in $az: $iid" >&2
                 echo "$iid"
                 return 0
             fi
         fi
-        warn "No capacity in $az, trying next AZ..."
+        warn "No capacity in $az, trying next AZ..." >&2
     done
 
     err "Failed to launch $instance_type in any AZ."
