@@ -3,74 +3,30 @@
 # Detects PII entities in transcripts using Microsoft Presidio
 # and optionally GLiNER for ML-based entity recognition.
 #
+# Requires base image: dalston/base-pytorch:latest
+#   docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+#
 # Build from repo root:
 #   docker compose build stt-pii-detect-presidio
 
-# Build argument to select device (cuda or cpu)
-ARG DEVICE=cpu
+FROM dalston/base-pytorch:latest
 
-# Base images for each device type
-FROM nvidia/cuda:12.1.1-cudnn8-engine_id-ubuntu22.04 AS base-cuda
-FROM python:3.13-slim AS base-cpu
-
-# Select the appropriate base image
-FROM base-${DEVICE} AS base
-
-# Re-declare args after FROM (they get reset)
-ARG DEVICE=cpu
 ARG SKIP_MODEL_DOWNLOAD=false
 
-# Install system dependencies
-RUN if [ "$DEVICE" = "cuda" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends \
-            build-essential \
-            python3.11 \
-            python3.11-venv \
-            python3.11-dev \
-            python3-pip \
-            git; \
-        ln -s /usr/bin/python3.11 /usr/bin/python; \
-    else \
-        apt-get update && apt-get install -y --no-install-recommends \
-            build-essential \
-            git; \
-    fi \
-    && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip
-RUN python -m pip install --no-cache-dir --upgrade pip
-
-# Install Dalston engine SDK
+# Dalston SDK
 WORKDIR /opt/dalston
 COPY pyproject.toml .
 COPY dalston/ dalston/
-RUN python -m pip install --no-cache-dir -e ".[engine-sdk]"
+RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk]"
 
-# Set working directory for engine code
+# Engine code and dependencies
 WORKDIR /engine
-
-# Copy engine files
 COPY engines/stt-detect/pii-presidio/requirements.txt .
 COPY engines/stt-detect/pii-presidio/engine.yaml .
 COPY engines/stt-detect/pii-presidio/engine.py .
 COPY engines/stt-detect/pii-presidio/recognizers/ ./recognizers/
 
-# Install torch variant matching target device
-RUN if [ "$DEVICE" = "cuda" ]; then \
-        python -m pip install --no-cache-dir \
-            torch --index-url https://download.pytorch.org/whl/cu121; \
-    else \
-        python -m pip install --no-cache-dir \
-            torch --index-url https://download.pytorch.org/whl/cpu; \
-    fi
-
-# Install dependencies
-RUN python -m pip install --no-cache-dir -r requirements.txt
-
-# M39: Standardized model cache directories
-ENV HF_HOME=/models/huggingface
-ENV TORCH_HOME=/models/torch
-RUN mkdir -p /models/huggingface /models/torch
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Pre-download spaCy + GLiNER models for faster startup
 RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \

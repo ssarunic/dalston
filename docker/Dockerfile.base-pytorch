@@ -1,0 +1,60 @@
+# Base image for PyTorch-based engines
+#
+# Contains: PyTorch + torchaudio + Silero VAD + common audio deps
+# Rebuild: only when PyTorch version changes (rare)
+#
+# Used by: faster-whisper, phoneme-align, hf-asr, pii-presidio
+#
+# Build from repo root:
+#   CPU:  docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+#   GPU:  docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+
+ARG DEVICE=cpu
+
+# --- CPU base ---
+FROM python:3.13-slim AS base-cpu
+
+# --- GPU base ---
+FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-dev python3-pip \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Common ---
+FROM base-${DEVICE} AS base
+ARG DEVICE=cpu
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch (the heavy part — ~800MB CPU, ~2GB CUDA)
+RUN if [ "$DEVICE" = "cuda" ]; then \
+        pip install --no-cache-dir --break-system-packages \
+            torch torchaudio; \
+    else \
+        pip install --no-cache-dir --break-system-packages \
+            torch torchaudio --index-url https://download.pytorch.org/whl/cpu; \
+    fi
+
+# Common audio processing deps shared across PyTorch engines
+RUN pip install --no-cache-dir --break-system-packages \
+    "soundfile>=0.12.0" \
+    "numpy>=1.24.0,<3.0.0"
+
+# Silero VAD model — baked in to eliminate runtime download
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
+# Model cache
+ENV HF_HOME=/models/huggingface
+ENV TORCH_HOME=/models/torch
+RUN mkdir -p /models/huggingface /models/torch
+
+ENV NVIDIA_VISIBLE_DEVICES=all

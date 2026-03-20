@@ -9,7 +9,7 @@
 # Build from repo root:
 #   docker compose build stt-merge
 
-FROM dalston/engine-base:latest
+FROM dalston/base-engine:latest
 
 # Install FFmpeg for stereo audio assembly
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -3,48 +3,32 @@
 # CTC forced alignment using wav2vec2 models for word-level timestamps.
 # Supports both GPU (CUDA) and CPU modes with automatic detection.
 #
+# Requires base image: dalston/base-pytorch:latest
+#   docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+#
 # Build from repo root:
 #   docker compose build stt-align-phoneme-cpu
 #
 # For GPU support, use docker compose --profile gpu
 
-FROM python:3.13-slim
+FROM dalston/base-pytorch:latest
 
-# Install system dependencies (ffmpeg for audio processing)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory for dalston package
+# Dalston SDK
 WORKDIR /opt/dalston
-
-# Copy the dalston package source
 COPY pyproject.toml .
 COPY dalston/ dalston/
+RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk]"
 
-# Install the dalston engine SDK
-RUN pip install --no-cache-dir -e ".[engine-sdk]"
-
-# Set working directory for engine
+# Engine dependencies
 WORKDIR /engine
-
-# Copy engine requirements first for better caching
 COPY engines/stt-align/phoneme-align/requirements.txt .
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy engine files
+# Engine code
 COPY engines/stt-align/phoneme-align/engine.yaml .
 COPY engines/stt-align/phoneme-align/engine.py .
 COPY engines/stt-align/phoneme-align/align.py .
 COPY engines/stt-align/phoneme-align/ctc_forced_align.py .
 COPY engines/stt-align/phoneme-align/model_loader.py .
-
-# M39: Standardized model cache directories
-ENV HF_HOME=/models/huggingface
-ENV TORCH_HOME=/models/torch
-RUN mkdir -p /models/huggingface /models/torch
 
 CMD ["python", "engine.py"]

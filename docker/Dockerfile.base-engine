@@ -4,7 +4,7 @@
 # All batch engines should extend this image.
 #
 # Build from repo root:
-#   docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+#   docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 
 FROM python:3.13-slim
 

@@ -12,8 +12,8 @@
 #   2. IAM role and OIDC provider (shared with engine workflows)
 #   3. Set repository variable: AWS_ACCOUNT_ID
 #
-# Note: stt-prepare depends on dalston/engine-base:latest which is built
-# locally. The workflow builds engine-base first, then stt-prepare on top.
+# Note: stt-prepare depends on dalston/base-engine:latest which is built
+# locally. The workflow builds base-engine first, then stt-prepare on top.
 
 name: Build Audio Prepare Engine
 
@@ -24,7 +24,7 @@ on:
       - 'engines/stt-prepare/audio-prepare/**'
       - 'dalston/**'
       - 'pyproject.toml'
-      - 'docker/Dockerfile.engine-base'
+      - 'docker/Dockerfile.base-engine'
   workflow_dispatch:
 
 env:
@@ -52,18 +52,18 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build engine-base and stt-prepare
+      - name: Build base-engine and stt-prepare
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Build engine-base first (stt-prepare depends on it)
+          # Build base-engine first (stt-prepare depends on it)
           docker build \
-            -t dalston/engine-base:latest \
-            -f docker/Dockerfile.engine-base \
+            -t dalston/base-engine:latest \
+            -f docker/Dockerfile.base-engine \
             .
 
-          # Build stt-prepare on top of engine-base
+          # Build stt-prepare on top of base-engine
           docker build \
             -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPO:latest \

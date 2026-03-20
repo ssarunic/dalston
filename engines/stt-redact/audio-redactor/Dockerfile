@@ -6,7 +6,7 @@
 # Build from repo root:
 #   docker compose build stt-audio-redact-audio
 
-FROM dalston/engine-base:latest
+FROM dalston/base-engine:latest
 
 # Install FFmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \

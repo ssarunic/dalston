@@ -6,7 +6,7 @@
 # Build from repo root:
 #   docker compose build stt-prepare
 
-FROM dalston/engine-base:latest
+FROM dalston/base-engine:latest
 
 # Install ffmpeg (includes ffprobe)
 RUN apt-get update && \

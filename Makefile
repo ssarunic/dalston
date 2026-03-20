@@ -35,8 +35,8 @@ help:
 	@echo "  make build-cpu       - Build all engine images (CPU)"
 	@echo "  make build-gpu       - Build all engine images (GPU/CUDA)"
 	@echo "  make build-engine ENGINE=<name> - Build a specific engine"
-	@echo "  make build-bases     - Build ML base images (onnx + pyannote, CPU)"
-	@echo "  make build-bases-gpu - Build ML base images (onnx + pyannote, GPU/CUDA)"
+	@echo "  make build-bases     - Build all base images (CPU)"
+	@echo "  make build-bases-gpu - Build all base images (GPU/CUDA)"
 	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
 	@echo "ECR & AWS Deployment:"
@@ -133,17 +133,21 @@ ps:
 # BUILDING
 # ============================================================
 
-# Build ML base images (CPU — for local dev)
+# Build all base images (CPU — for local dev)
 build-bases:
-	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 	docker build -f docker/Dockerfile.base-onnx -t dalston/base-onnx:latest .
 	docker build -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
+	docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+	docker build -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
 
-# Build ML base images (GPU/CUDA — for AWS deployment)
+# Build all base images (GPU/CUDA — for AWS deployment)
 build-bases-gpu:
-	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-onnx -t dalston/base-onnx:latest .
 	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
+	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
+	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
 
 # Build all engine images (CPU — default)
 build-cpu: build-bases
@@ -209,9 +213,9 @@ push-ecr-orchestrator:
 	docker build -f docker/Dockerfile.orchestrator -t $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG) .
 	docker push $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG)
 
-# Build and push stt-prepare (requires engine-base)
+# Build and push stt-prepare (requires base-engine)
 push-ecr-prepare:
-	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 	docker build -f engines/stt-prepare/audio-prepare/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG) .
 	docker push $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG)
 
