@@ -35,11 +35,15 @@ help:
 	@echo "  make build-cpu       - Build all engine images (CPU)"
 	@echo "  make build-gpu       - Build all engine images (GPU/CUDA)"
 	@echo "  make build-engine ENGINE=<name> - Build a specific engine"
+	@echo "  make build-bases     - Build ML base images (onnx + pyannote, CPU)"
+	@echo "  make build-bases-gpu - Build ML base images (onnx + pyannote, GPU/CUDA)"
 	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
 	@echo "ECR & AWS Deployment:"
 	@echo "  make ecr-login       - Login to ECR"
-	@echo "  make push-ecr        - Build and push all CPU images to ECR"
+	@echo "  make push-ecr        - Build and push all images to ECR"
+	@echo "  make push-ecr-cpu    - Build and push CPU service images only"
+	@echo "  make push-ecr-gpu    - Build and push GPU engine images only"
 	@echo "  make aws-start       - Start on AWS with local infra + GPU"
 	@echo "  make aws-stop        - Stop AWS services"
 	@echo "  make aws-logs        - Follow logs on AWS"
@@ -129,8 +133,20 @@ ps:
 # BUILDING
 # ============================================================
 
+# Build ML base images (CPU — for local dev)
+build-bases:
+	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build -f docker/Dockerfile.base-onnx -t dalston/base-onnx:latest .
+	docker build -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
+
+# Build ML base images (GPU/CUDA — for AWS deployment)
+build-bases-gpu:
+	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-onnx -t dalston/base-onnx:latest .
+	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
+
 # Build all engine images (CPU — default)
-build-cpu:
+build-cpu: build-bases
 	docker compose build
 
 # Build all engine images (GPU/CUDA — layers docker-compose.gpu.yml)
@@ -171,9 +187,17 @@ IMAGE_TAG ?= latest
 ecr-login:
 	aws ecr get-login-password --region eu-west-2 | docker login --username AWS --password-stdin $(ECR_REGISTRY)
 
-# Build and push all CPU service images to ECR
-push-ecr: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare
-	@echo "All CPU images pushed to ECR."
+# Build and push all images to ECR (CPU services + GPU engines)
+push-ecr: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare push-ecr-onnx push-ecr-pyannote
+	@echo "All images pushed to ECR."
+
+# Build and push only CPU service images
+push-ecr-cpu: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare
+	@echo "CPU images pushed to ECR."
+
+# Build and push only GPU engine images (requires base images built with DEVICE=cuda)
+push-ecr-gpu: ecr-login push-ecr-onnx push-ecr-pyannote
+	@echo "GPU engine images pushed to ECR."
 
 # Build and push gateway
 push-ecr-gateway:
@@ -190,6 +214,16 @@ push-ecr-prepare:
 	docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
 	docker build -f engines/stt-prepare/audio-prepare/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG) .
 	docker push $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG)
+
+# Build and push ONNX engine (requires base-onnx built with DEVICE=cuda)
+push-ecr-onnx:
+	docker build -f engines/stt-transcribe/onnx/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-onnx:$(IMAGE_TAG) .
+	docker push $(ECR_REGISTRY)/dalston/stt-onnx:$(IMAGE_TAG)
+
+# Build and push pyannote engine (requires base-pyannote built with DEVICE=cuda)
+push-ecr-pyannote:
+	docker build -f engines/stt-diarize/pyannote-4.0/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-diarize-pyannote:$(IMAGE_TAG) .
+	docker push $(ECR_REGISTRY)/dalston/stt-diarize-pyannote:$(IMAGE_TAG)
 
 # ============================================================
 # AWS DEPLOYMENT
