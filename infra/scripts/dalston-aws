@@ -570,8 +570,6 @@ echo "Starting Dalston GPU worker bootstrap at $(date)"
 USERDATA_HEADER
 
     cat << USERDATA_VARS
-DATA_DEVICE="/dev/xvdf"
-DATA_MOUNT="/data"
 S3_BUCKET="${s3_bucket}"
 AWS_REGION="${REGION}"
 CTRL_PLANE_IP="${ctrl_plane_ip}"
@@ -602,18 +600,18 @@ if lspci | grep -qi nvidia; then
   fi
 fi
 
-# Data volume
-while [ ! -e "$DATA_DEVICE" ]; do sleep 5; done
-if ! blkid "$DATA_DEVICE" | grep -q ext4; then
-  mkfs.ext4 -L dalston-data "$DATA_DEVICE"
+# Mount instance store NVMe for model cache (free 125 GB on g4dn)
+NVME_DEV="/dev/nvme1n1"
+if [ -b "$NVME_DEV" ]; then
+  echo "Mounting instance store NVMe at /data/models..."
+  mkfs.xfs "$NVME_DEV"
+  mkdir -p /data/models
+  mount "$NVME_DEV" /data/models
+else
+  echo "No instance store NVMe found, using root volume for models"
+  mkdir -p /data/models
 fi
-mkdir -p "$DATA_MOUNT"
-mount "$DATA_DEVICE" "$DATA_MOUNT"
-if ! grep -q "$DATA_MOUNT" /etc/fstab; then
-  echo "LABEL=dalston-data $DATA_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
-fi
-mkdir -p "$DATA_MOUNT/models"
-chown -R 1000:1000 "$DATA_MOUNT"
+chown -R 1000:1000 /data/models
 
 # ECR login
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
@@ -622,11 +620,13 @@ aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS 
 docker pull "$ECR_REGISTRY/dalston/stt-onnx:latest"
 docker pull "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
 
+mkdir -p /opt/dalston
+
 # GPU worker start script
-cat > /data/gpu-start.sh << 'STARTEOF'
+cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 #!/bin/bash
 set -euo pipefail
-source /data/gpu-env.sh
+source /opt/dalston/gpu-env.sh
 
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
@@ -662,10 +662,10 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
 
 echo "GPU engines started at $(date)"
 STARTEOF
-chmod +x /data/gpu-start.sh
+chmod +x /opt/dalston/gpu-start.sh
 
 # Save env for the start script
-cat > /data/gpu-env.sh << ENVEOF
+cat > /opt/dalston/gpu-env.sh << ENVEOF
 S3_BUCKET="${S3_BUCKET}"
 AWS_REGION="${AWS_REGION}"
 CTRL_PLANE_IP="${CTRL_PLANE_IP}"
@@ -683,7 +683,7 @@ After=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/data/gpu-start.sh
+ExecStart=/opt/dalston/gpu-start.sh
 ExecStop=/usr/bin/docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0
 TimeoutStartSec=600
 
@@ -939,7 +939,8 @@ cmd_setup() {
             GPU_INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT")
             rm -f "$gpu_user_data"
             wait_instance_running "$GPU_INSTANCE_ID"
-            GPU_DATA_VOLUME_ID=$(create_and_attach_data_volume "$GPU_INSTANCE_ID")
+            # No EBS data volume for GPU — models use instance store NVMe
+            GPU_DATA_VOLUME_ID=""
             ;;
     esac
 
@@ -1099,7 +1100,8 @@ cmd_add_gpu() {
     GPU_INSTANCE_ID=$(launch_instance "$GPU_INSTANCE_TYPE" "$GPU_SG_ID" "$gpu_user_data" "${NAME_PREFIX}-gpu-worker" "$USE_SPOT")
     rm -f "$gpu_user_data"
     wait_instance_running "$GPU_INSTANCE_ID"
-    GPU_DATA_VOLUME_ID=$(create_and_attach_data_volume "$GPU_INSTANCE_ID")
+    # No EBS data volume for GPU — models use instance store NVMe
+    GPU_DATA_VOLUME_ID=""
 
     # Update scenario to split
     SCENARIO="split"
