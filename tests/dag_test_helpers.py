@@ -71,7 +71,10 @@ def build_task_dag_for_test(
         "parakeet-onnx-tdt-0.6b-v3": ("onnx", "parakeet-onnx-tdt-0.6b-v3"),
         "parakeet-onnx-rnnt-0.6b": ("onnx", "parakeet-onnx-rnnt-0.6b"),
         # Faster Whisper models
-        "Systran/faster-whisper-large-v3-turbo": ("faster-whisper", "large-v3-turbo"),
+        "Systran/faster-distil-whisper-large-v3": (
+            "faster-whisper",
+            "Systran/faster-distil-whisper-large-v3",
+        ),
         "Systran/faster-whisper-base": ("faster-whisper", "base"),
     }
 

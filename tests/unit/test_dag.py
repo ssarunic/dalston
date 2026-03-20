@@ -330,7 +330,7 @@ class TestBuildTaskDagNemo:
     def test_whisper_still_has_align_stage(self, job_id: UUID, audio_uri: str):
         """Test that Whisper (faster-whisper) still uses the ALIGN stage."""
         parameters = {
-            "model_transcribe": "Systran/faster-whisper-large-v3-turbo",  # MODEL_REGISTRY key
+            "model_transcribe": "Systran/faster-distil-whisper-large-v3",  # MODEL_REGISTRY key
             "timestamps_granularity": "word",
         }
 
