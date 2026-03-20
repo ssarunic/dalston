@@ -165,7 +165,7 @@ New fields in worker registration:
   "worker_id": "rt-fw-1",
   "engine_id": "faster-whisper",
   "capabilities": { "languages": null, "streaming": true, ... },
-  "loaded_models": ["Systran/faster-whisper-large-v3-turbo"],
+  "loaded_models": ["Systran/faster-distil-whisper-large-v3"],
   "active_sessions": 2
 }
 ```

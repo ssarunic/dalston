@@ -564,7 +564,7 @@ stt-transcribe-faster-whisper:
     - REDIS_URL=redis://redis:6379
     - DALSTON_ENGINE_ID=faster-whisper
     - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
-    - DALSTON_DEFAULT_MODEL_ID=Systran/faster-whisper-large-v3-turbo
+    - DALSTON_DEFAULT_MODEL_ID=Systran/faster-distil-whisper-large-v3
     - DALSTON_MAX_LOADED_MODELS=2
     - DALSTON_MODEL_TTL_SECONDS=3600
   tmpfs:
@@ -625,7 +625,7 @@ CTranslate2-optimized Whisper for fast multilingual transcription.
 | `Systran/faster-whisper-small` | 244M | 99 | Yes |
 | `Systran/faster-whisper-medium` | 769M | 99 | Yes |
 | `Systran/faster-whisper-large-v3` | 1.5G | 99 | Yes |
-| `Systran/faster-whisper-large-v3-turbo` | 809M | 99 | Yes |
+| `Systran/faster-distil-whisper-large-v3` | 809M | 99 | Yes |
 
 **Config Parameters**:
 

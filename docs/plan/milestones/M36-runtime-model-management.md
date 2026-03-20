@@ -171,7 +171,7 @@ API request (model="nvidia/parakeet-tdt-1.1b")
 
 4. **Runtime-specific cache directories**: `/models/s3-cache/{engine_id}/` prevents cross-contamination
 
-5. **Default model is multilingual + CPU-capable**: `Systran/faster-whisper-large-v3-turbo` for "just works" experience
+5. **Default model is multilingual + CPU-capable**: `Systran/faster-distil-whisper-large-v3` for "just works" experience
 
 ---
 

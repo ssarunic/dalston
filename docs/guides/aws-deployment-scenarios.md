@@ -679,7 +679,7 @@ Pre-pull models so the first transcription doesn't wait for download:
 ```bash
 # Via the model registry API
 curl -X POST http://localhost:8000/v1/models/nvidia/parakeet-tdt-1.1b/pull
-curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-large-v3-turbo/pull
+curl -X POST http://localhost:8000/v1/models/Systran/faster-distil-whisper-large-v3/pull
 
 # Check download status
 curl http://localhost:8000/v1/models | jq '.models[] | {id, status, size_bytes}'
@@ -833,7 +833,7 @@ The `/data/models` volume needs enough space for downloaded weights. Sizes from 
 
 | Model | Size | Notes |
 |-------|------|-------|
-| Systran/faster-whisper-large-v3-turbo | 1.6 GB | Default multilingual |
+| Systran/faster-distil-whisper-large-v3 | 1.6 GB | Default multilingual |
 | Systran/faster-whisper-large-v3 | 3.0 GB | Best Whisper accuracy |
 | Systran/faster-whisper-medium | 1.5 GB | Good mid-range option |
 | Systran/faster-whisper-small | 0.5 GB | Resource-constrained |

@@ -111,7 +111,7 @@ The batch and real-time subsystems are **cleanly separated** at every level:
 
 2. **No model catalog for RT:** A user requesting `model=parakeet-tdt-1.1b` in a batch job gets catalog resolution to the correct engine_id. The same model name in a real-time request is treated as an opaque string matched against `models_loaded` — a list of arbitrary names each RT engine publishes.
 
-3. **No standardized model names:** Batch engines use catalog-defined names (`Systran/faster-whisper-large-v3-turbo`). RT engines use ad-hoc names (`faster-whisper-large-v3`, `faster-whisper-distil-large-v3`). The same underlying model has different identifiers depending on whether it's accessed via batch or real-time.
+3. **No standardized model names:** Batch engines use catalog-defined names (`Systran/faster-distil-whisper-large-v3`). RT engines use ad-hoc names (`faster-whisper-large-v3`, `faster-whisper-distil-large-v3`). The same underlying model has different identifiers depending on whether it's accessed via batch or real-time.
 
 4. **No engine_id model swapping for RT:** Batch engines can load any model variant at engine_id via `ModelManager.acquire()`. RT engines load a fixed set at startup. To change models, you must redeploy the container.
 
@@ -198,7 +198,7 @@ Batch heartbeats include `loaded_model` and `local_cache`. RT heartbeats would a
 
 #### A. Shared model catalog and naming (Low effort, high impact)
 
-**Current state:** Batch models use catalog IDs (`Systran/faster-whisper-large-v3-turbo`), RT models use ad-hoc names (`faster-whisper-large-v3`).
+**Current state:** Batch models use catalog IDs (`Systran/faster-distil-whisper-large-v3`), RT models use ad-hoc names (`faster-whisper-large-v3`).
 
 **Proposal:** RT engines publish catalog model IDs in their `models_loaded` heartbeat. The Session Router resolves incoming `model=X` through the catalog, same as the orchestrator.
 
