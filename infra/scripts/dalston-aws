@@ -249,6 +249,20 @@ create_iam_role() {
             ]
         }"
 
+    # ECR pull access policy
+    local account_id
+    account_id=$(aws_account_id)
+    aws iam put-role-policy \
+        --role-name "$IAM_ROLE" \
+        --policy-name "${NAME_PREFIX}-ecr-access" \
+        --policy-document "{
+            \"Version\":\"2012-10-17\",
+            \"Statement\":[
+                {\"Effect\":\"Allow\",\"Action\":[\"ecr:GetAuthorizationToken\"],\"Resource\":\"*\"},
+                {\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\",\"ecr:BatchCheckLayerAvailability\"],\"Resource\":\"arn:aws:ecr:${REGION}:${account_id}:repository/dalston/*\"}
+            ]
+        }"
+
     # Instance profile — check independently (role may exist but profile may not)
     if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" --no-cli-pager 2>/dev/null; then
         log "Instance profile $INSTANCE_PROFILE already exists"
@@ -426,13 +440,13 @@ systemctl start docker
 systemctl enable docker
 usermod -aG docker ec2-user
 
-# Install Docker Compose
+# Install Docker Compose plugin
 echo "Installing Docker Compose..."
-DOCKER_COMPOSE_VERSION="v2.24.0"
+mkdir -p /usr/local/lib/docker/cli-plugins
+DOCKER_COMPOSE_VERSION="v2.34.0"
 curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64" \
-  -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 # GPU detection and NVIDIA runtime setup
 if lspci | grep -qi nvidia; then
@@ -518,10 +532,10 @@ git pull --ff-only
 
 if [ "$USE_ECR" = "true" ]; then
   ./ecr-login.sh
-  docker-compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} pull gateway orchestrator stt-prepare
+  docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} pull gateway orchestrator stt-prepare
 fi
 
-docker-compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}
+docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}
 echo "Deploy complete at \$(date)"
 DEPLOYEOF
 chmod +x "$DATA_MOUNT/dalston/deploy.sh"
@@ -539,8 +553,8 @@ RemainAfterExit=yes
 WorkingDirectory=/data/dalston
 EnvironmentFile=/data/dalston/.env.aws
 ExecStartPre=/bin/bash -c '[ "$USE_ECR" != "true" ] || /data/dalston/ecr-login.sh'
-ExecStart=/usr/bin/docker-compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}
-ExecStop=/usr/bin/docker-compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down
+ExecStart=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}'
+ExecStop=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down'
 TimeoutStartSec=600
 
 [Install]
