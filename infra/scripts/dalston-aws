@@ -263,6 +263,17 @@ create_iam_role() {
             ]
         }"
 
+    # SSM read access (for Tailscale auth key)
+    aws iam put-role-policy \
+        --role-name "$IAM_ROLE" \
+        --policy-name "${NAME_PREFIX}-ssm-access" \
+        --policy-document "{
+            \"Version\":\"2012-10-17\",
+            \"Statement\":[
+                {\"Effect\":\"Allow\",\"Action\":[\"ssm:GetParameter\"],\"Resource\":\"arn:aws:ssm:${REGION}:${account_id}:parameter/dalston/*\"}
+            ]
+        }"
+
     # Instance profile — check independently (role may exist but profile may not)
     if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" --no-cli-pager 2>/dev/null; then
         log "Instance profile $INSTANCE_PROFILE already exists"
@@ -419,6 +430,7 @@ COMPOSE_PROFILE_FLAGS="${compose_profiles}"
 USE_ECR="${use_ecr}"
 ECR_REGISTRY="${account_id}.dkr.ecr.${REGION}.amazonaws.com"
 REPO_URL="${REPO_URL}"
+HF_TOKEN="${HF_TOKEN:-}"
 REPO_BRANCH="${REPO_BRANCH}"
 USERDATA_VARS
 
@@ -431,9 +443,20 @@ echo "Installing Docker..."
 dnf update -y
 dnf install -y docker git pciutils
 
-# Install Tailscale
+# Install and auto-join Tailscale
 echo "Installing Tailscale..."
 curl -fsSL https://tailscale.com/install.sh | sh
+TS_AUTH_KEY=$(aws ssm get-parameter \
+  --name "/dalston/tailscale-auth-key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text --region "$AWS_REGION") || true
+if [ -n "$TS_AUTH_KEY" ]; then
+  tailscale up --authkey="$TS_AUTH_KEY" --hostname="dalston-control-plane"
+  echo "Tailscale joined as dalston-control-plane"
+else
+  echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
+fi
 
 # Start Docker
 systemctl start docker
@@ -492,17 +515,8 @@ if [ -n "$REPO_URL" ] && [ ! -f "$DATA_MOUNT/dalston/docker-compose.yml" ]; then
   git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$DATA_MOUNT/dalston"
 fi
 
-# Create .env.aws
-cat > "$DATA_MOUNT/dalston/.env.aws" << ENVEOF
-DALSTON_S3_BUCKET=${S3_BUCKET}
-DALSTON_S3_REGION=${AWS_REGION}
-AWS_REGION=${AWS_REGION}
-REDIS_URL=redis://redis:6379
-DATABASE_URL=postgresql+asyncpg://dalston:password@postgres:5432/dalston
-HF_HOME=/data/models
-ECR_REGISTRY=${ECR_REGISTRY}
-IMAGE_TAG=latest
-ENVEOF
+# Control plane services (only these start on the CPU instance)
+CTRL_SERVICES="postgres redis gateway orchestrator stt-prepare"
 
 # ECR-based deployment: login and build compose command with ECR overlay
 if [ "$USE_ECR" = "true" ]; then
@@ -512,12 +526,37 @@ if [ "$USE_ECR" = "true" ]; then
   # ECR login helper script (used by systemd and manual redeploy)
   cat > "$DATA_MOUNT/dalston/ecr-login.sh" << 'ECREOF'
 #!/bin/bash
+source /data/dalston/.env.aws
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 ECREOF
   chmod +x "$DATA_MOUNT/dalston/ecr-login.sh"
 else
   COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml"
   COMPOSE_UP_FLAGS=""
+fi
+
+# Create .env.aws (includes compose vars for systemd)
+cat > "$DATA_MOUNT/dalston/.env.aws" << ENVEOF
+DALSTON_S3_BUCKET=${S3_BUCKET}
+DALSTON_S3_REGION=${AWS_REGION}
+AWS_REGION=${AWS_REGION}
+REDIS_URL=redis://redis:6379
+DATABASE_URL=postgresql+asyncpg://dalston:password@postgres:5432/dalston
+HF_HOME=/data/models
+ECR_REGISTRY=${ECR_REGISTRY}
+IMAGE_TAG=latest
+USE_ECR=${USE_ECR}
+COMPOSE_FILES=${COMPOSE_FILES}
+COMPOSE_UP_FLAGS=${COMPOSE_UP_FLAGS}
+CTRL_SERVICES=${CTRL_SERVICES}
+ENVEOF
+
+# Create .env with secrets (only if it doesn't already exist — preserves manual edits)
+if [ ! -f "$DATA_MOUNT/dalston/.env" ]; then
+  cat > "$DATA_MOUNT/dalston/.env" << DOTENVEOF
+HF_TOKEN=${HF_TOKEN}
+POSTGRES_PASSWORD=password
+DOTENVEOF
 fi
 
 # Create deploy script for easy redeploys
@@ -532,10 +571,10 @@ git pull --ff-only
 
 if [ "$USE_ECR" = "true" ]; then
   ./ecr-login.sh
-  docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} pull gateway orchestrator stt-prepare
+  docker compose ${COMPOSE_FILES} --env-file .env.aws pull ${CTRL_SERVICES}
 fi
 
-docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}
+docker compose ${COMPOSE_FILES} --env-file .env.aws up -d ${COMPOSE_UP_FLAGS} ${CTRL_SERVICES}
 echo "Deploy complete at \$(date)"
 DEPLOYEOF
 chmod +x "$DATA_MOUNT/dalston/deploy.sh"
@@ -552,9 +591,9 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
 EnvironmentFile=/data/dalston/.env.aws
-ExecStartPre=/bin/bash -c '[ "$USE_ECR" != "true" ] || /data/dalston/ecr-login.sh'
-ExecStart=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} up -d ${COMPOSE_UP_FLAGS}'
-ExecStop=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws ${COMPOSE_PROFILE_FLAGS} down'
+ExecStartPre=/data/dalston/ecr-login.sh
+ExecStart=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws up -d ${COMPOSE_UP_FLAGS} ${CTRL_SERVICES}'
+ExecStop=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws down'
 TimeoutStartSec=600
 
 [Install]
@@ -608,8 +647,19 @@ systemctl start docker
 systemctl enable docker
 usermod -aG docker ec2-user
 
-# Tailscale
+# Install and auto-join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
+TS_AUTH_KEY=$(aws ssm get-parameter \
+  --name "/dalston/tailscale-auth-key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text --region "$AWS_REGION") || true
+if [ -n "$TS_AUTH_KEY" ]; then
+  tailscale up --authkey="$TS_AUTH_KEY" --hostname="dalston-gpu-worker"
+  echo "Tailscale joined as dalston-gpu-worker"
+else
+  echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
+fi
 
 # NVIDIA runtime
 if lspci | grep -qi nvidia; then
@@ -881,7 +931,7 @@ create_and_attach_data_volume() {
         --output text \
         --region "$REGION")
 
-    log "Waiting for volume $vol_id to be available..."
+    log "Waiting for volume $vol_id to be available..." >&2
     aws ec2 wait volume-available --volume-ids "$vol_id" --region "$REGION"
 
     aws ec2 attach-volume \
@@ -889,7 +939,7 @@ create_and_attach_data_volume() {
         --instance-id "$instance_id" \
         --device /dev/xvdf \
         --region "$REGION" \
-        --no-cli-pager
+        --no-cli-pager >&2
 
     echo "$vol_id"
 }

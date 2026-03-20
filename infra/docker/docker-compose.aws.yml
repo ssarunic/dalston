@@ -22,7 +22,7 @@ services:
 
   postgres:
     volumes:
-      - /data/postgres:/var/lib/postgresql/data
+      - /data/postgres:/var/lib/postgresql
 
   redis:
     volumes:
