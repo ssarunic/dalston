@@ -7,7 +7,7 @@
 #   docker compose build stt-diarize-nemo-msdd
 
 # Use plain Python to avoid NGC container version conflicts
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -33,7 +33,7 @@ WORKDIR /engine
 COPY engines/stt-diarize/nemo-msdd/requirements.txt .
 
 # Install PyTorch CPU first (for CPU testing), then NeMo
-# For GPU, the CUDA version will be used at engine_id
+# For GPU, the CUDA version will be used at runtime
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Install NeMo and dependencies
@@ -44,14 +44,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG SKIP_MODEL_DOWNLOAD=false
 RUN if [ "$SKIP_MODEL_DOWNLOAD" = "false" ]; then \
     python -c "\
-from nemo.collections.asr.models import EncDecClassificationModel, EncDecSpeakerLabelModel; \
+from nemo.collections.asr.models import EncDecFrameClassificationModel, EncDecSpeakerLabelModel; \
 from nemo.collections.asr.models.msdd_models import NeuralDiarizer; \
 print('Downloading VAD model...'); \
-EncDecClassificationModel.from_pretrained('vad_multilingual_marblenet'); \
+EncDecFrameClassificationModel.from_pretrained('nvidia/frame_vad_multilingual_marblenet_v2.0'); \
 print('Downloading TitaNet speaker embedding model...'); \
-EncDecSpeakerLabelModel.from_pretrained('titanet_large'); \
+EncDecSpeakerLabelModel.from_pretrained('nvidia/speakerverification_en_titanet_large'); \
 print('Models downloaded successfully')"; \
-    else echo "Skipping model download (will download at engine_id)"; fi
+    else echo "Skipping model download (will download at runtime)"; fi
 
 # Copy engine files
 COPY engines/stt-diarize/nemo-msdd/engine.yaml /etc/dalston/engine.yaml

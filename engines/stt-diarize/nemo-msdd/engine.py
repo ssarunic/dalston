@@ -44,7 +44,7 @@ diarizer:
   ignore_overlap: True
 
   vad:
-    model_path: vad_multilingual_marblenet
+    model_path: nvidia/frame_vad_multilingual_marblenet_v2.0
     external_vad_manifest: null
     parameters:
       window_length_in_sec: 0.15
@@ -60,7 +60,7 @@ diarizer:
       filter_speech_first: True
 
   speaker_embeddings:
-    model_path: titanet_large
+    model_path: nvidia/speakerverification_en_titanet_large
     parameters:
       window_length_in_sec: [1.5, 1.25, 1.0, 0.75, 0.5]
       shift_length_in_sec: [0.75, 0.625, 0.5, 0.375, 0.25]
@@ -97,8 +97,8 @@ diarizer:
 # Each loaded_model_id maps to the component model paths used by NeuralDiarizer.
 MODEL_COMPONENTS = {
     "nvidia/diar-msdd-telephonic": {
-        "vad_model_path": "vad_multilingual_marblenet",
-        "speaker_embeddings_model_path": "titanet_large",
+        "vad_model_path": "nvidia/frame_vad_multilingual_marblenet_v2.0",
+        "speaker_embeddings_model_path": "nvidia/speakerverification_en_titanet_large",
         "msdd_model_path": "diar_msdd_telephonic",
     },
 }
