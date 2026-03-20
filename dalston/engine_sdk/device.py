@@ -43,6 +43,17 @@ def detect_device(*, include_mps: bool = True) -> str:
     except ImportError:
         pass
 
+    # Fallback: check onnxruntime CUDA support (for engines without PyTorch)
+    if not cuda_available:
+        try:
+            import onnxruntime
+
+            cuda_available = (
+                "CUDAExecutionProvider" in onnxruntime.get_available_providers()
+            )
+        except ImportError:
+            pass
+
     if requested == "cpu":
         logger.info("device_forced_cpu")
         return "cpu"
