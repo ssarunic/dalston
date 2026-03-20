@@ -6,7 +6,7 @@
 # Build from repo root:
 #   docker build -t dalston/stt-riva:latest -f engines/stt-transcribe/riva/Dockerfile .
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -8,7 +8,7 @@
 #
 # For GPU support, use docker compose --profile gpu
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Install system dependencies (ffmpeg for audio processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
