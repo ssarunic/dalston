@@ -1458,8 +1458,14 @@ def cmd_ssh(args: argparse.Namespace) -> None:
     else:
         hostname = "dalston-control-plane"
 
+    key_file = STATE_DIR / f"{st.key_name}.pem"
+    ssh_args = ["ssh"]
+    if key_file.exists():
+        ssh_args += ["-i", str(key_file)]
+    ssh_args.append(f"ec2-user@{hostname}")
+
     log(f"Connecting to {hostname} via Tailscale SSH...")
-    os.execvp("ssh", ["ssh", f"ec2-user@{hostname}"])
+    os.execvp("ssh", ssh_args)
 
 
 def cmd_add_gpu(args: argparse.Namespace) -> None:
