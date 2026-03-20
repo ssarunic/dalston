@@ -26,7 +26,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import boto3
 from botocore.exceptions import ClientError, WaiterError
@@ -91,7 +91,7 @@ class DeploymentState:
     instance_id: str = ""
     data_volume_id: str = ""
     gpu_instance_id: str = ""
-    gpu_data_volume_id: str = ""
+    gpu_data_volume_id: str = ""  # unused — GPU uses NVMe; kept for state compat
     gpu_sg_id: str = ""
     key_name: str = ""
 
@@ -121,66 +121,84 @@ def require_state() -> DeploymentState:
 # ---------------------------------------------------------------------------
 
 
+_clients: dict[str, Any] = {}
+
+
 def ec2_client(region: str):
-    return boto3.client("ec2", region_name=region)
+    key = f"ec2:{region}"
+    if key not in _clients:
+        _clients[key] = boto3.client("ec2", region_name=region)
+    return _clients[key]
 
 
 def iam_client():
-    return boto3.client("iam")
+    if "iam" not in _clients:
+        _clients["iam"] = boto3.client("iam")
+    return _clients["iam"]
 
 
 def s3_client(region: str):
-    return boto3.client("s3", region_name=region)
+    key = f"s3:{region}"
+    if key not in _clients:
+        _clients[key] = boto3.client("s3", region_name=region)
+    return _clients[key]
 
 
 def sts_client(region: str):
-    return boto3.client("sts", region_name=region)
+    key = f"sts:{region}"
+    if key not in _clients:
+        _clients[key] = boto3.client("sts", region_name=region)
+    return _clients[key]
 
 
 # ---------------------------------------------------------------------------
 # AWS helpers
 # ---------------------------------------------------------------------------
 
+_account_id_cache: str | None = None
+
 
 def aws_account_id(region: str) -> str:
-    return sts_client(region).get_caller_identity()["Account"]
+    global _account_id_cache
+    if _account_id_cache is None:
+        _account_id_cache = sts_client(region).get_caller_identity()["Account"]
+    return _account_id_cache
+
+
+def describe_instance(region: str, instance_id: str) -> dict | None:
+    """Single describe_instances call — returns the instance dict or None."""
+    try:
+        resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
+        return resp["Reservations"][0]["Instances"][0]
+    except (ClientError, IndexError, KeyError):
+        return None
 
 
 def get_instance_state(region: str, instance_id: str) -> str:
-    try:
-        resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
-        return resp["Reservations"][0]["Instances"][0]["State"]["Name"]
-    except (ClientError, IndexError, KeyError):
-        return "terminated"
+    inst = describe_instance(region, instance_id)
+    return inst["State"]["Name"] if inst else "terminated"
 
 
 def get_instance_ip(region: str, instance_id: str) -> str:
-    try:
-        resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
-        return resp["Reservations"][0]["Instances"][0].get("PublicIpAddress", "") or ""
-    except (ClientError, IndexError, KeyError):
-        return ""
+    inst = describe_instance(region, instance_id)
+    return (inst.get("PublicIpAddress", "") or "") if inst else ""
 
 
 def get_instance_private_ip(region: str, instance_id: str) -> str:
-    try:
-        resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
-        return resp["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "") or ""
-    except (ClientError, IndexError, KeyError):
-        return ""
+    inst = describe_instance(region, instance_id)
+    return (inst.get("PrivateIpAddress", "") or "") if inst else ""
 
 
 def get_instance_vpc(region: str, instance_id: str) -> str:
-    resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
-    return resp["Reservations"][0]["Instances"][0]["VpcId"]
+    inst = describe_instance(region, instance_id)
+    if not inst:
+        die(f"Instance {instance_id} not found")
+    return inst["VpcId"]
 
 
 def get_instance_type(region: str, instance_id: str) -> str:
-    try:
-        resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
-        return resp["Reservations"][0]["Instances"][0]["InstanceType"]
-    except (ClientError, IndexError, KeyError):
-        return ""
+    inst = describe_instance(region, instance_id)
+    return inst.get("InstanceType", "") if inst else ""
 
 
 def wait_instance_running(region: str, instance_id: str) -> None:
@@ -431,8 +449,7 @@ def _find_sg(region: str, name: str, vpc_id: str) -> str | None:
     return None
 
 
-def create_security_group(region: str, vpc_id: str) -> str:
-    name = f"{NAME_PREFIX}-sg"
+def _create_sg(region: str, vpc_id: str, name: str, description: str) -> str:
     existing = _find_sg(region, name, vpc_id)
     if existing:
         log(f"Security group {existing} already exists")
@@ -442,7 +459,7 @@ def create_security_group(region: str, vpc_id: str) -> str:
     ec2 = ec2_client(region)
     resp = ec2.create_security_group(
         GroupName=name,
-        Description="Dalston EC2 - SSH from Tailscale",
+        Description=description,
         VpcId=vpc_id,
     )
     sg_id = resp["GroupId"]
@@ -467,48 +484,23 @@ def create_security_group(region: str, vpc_id: str) -> str:
         ],
     )
 
-    log(f"Security group {sg_id} created (SSH from Tailscale)")
+    log(f"Security group {sg_id} created")
     return sg_id
 
 
+def create_security_group(region: str, vpc_id: str) -> str:
+    return _create_sg(
+        region, vpc_id, f"{NAME_PREFIX}-sg", "Dalston EC2 - SSH from Tailscale"
+    )
+
+
 def create_gpu_worker_security_group(region: str, vpc_id: str) -> str:
-    name = f"{NAME_PREFIX}-gpu-sg"
-    existing = _find_sg(region, name, vpc_id)
-    if existing:
-        log(f"GPU security group {existing} already exists")
-        return existing
-
-    log(f"Creating GPU worker security group: {name}")
-    ec2 = ec2_client(region)
-    resp = ec2.create_security_group(
-        GroupName=name,
-        Description="Dalston GPU worker - SSH from Tailscale",
-        VpcId=vpc_id,
+    return _create_sg(
+        region,
+        vpc_id,
+        f"{NAME_PREFIX}-gpu-sg",
+        "Dalston GPU worker - SSH from Tailscale",
     )
-    gpu_sg_id = resp["GroupId"]
-
-    ec2.authorize_security_group_ingress(
-        GroupId=gpu_sg_id,
-        IpPermissions=[
-            {
-                "IpProtocol": "tcp",
-                "FromPort": 22,
-                "ToPort": 22,
-                "IpRanges": [{"CidrIp": "100.64.0.0/10"}],
-            }
-        ],
-    )
-
-    ec2.create_tags(
-        Resources=[gpu_sg_id],
-        Tags=[
-            {"Key": "Name", "Value": name},
-            {"Key": "Project", "Value": "dalston"},
-        ],
-    )
-
-    log(f"GPU security group {gpu_sg_id} created")
-    return gpu_sg_id
 
 
 def open_control_plane_ports(region: str, ctrl_sg_id: str, gpu_sg_id: str) -> None:
@@ -1044,16 +1036,15 @@ def launch_instance(
     vpc_id = get_default_vpc(region)
 
     resp = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-    subnets = [s["SubnetId"] for s in resp.get("Subnets", [])]
-    if not subnets:
+    subnet_list = [
+        (s["SubnetId"], s["AvailabilityZone"]) for s in resp.get("Subnets", [])
+    ]
+    if not subnet_list:
         die(f"No subnets found in VPC {vpc_id}")
 
     encoded_user_data = base64.b64encode(user_data.encode()).decode()
 
-    for subnet_id in subnets:
-        sub_resp = ec2.describe_subnets(SubnetIds=[subnet_id])
-        az = sub_resp["Subnets"][0]["AvailabilityZone"]
-
+    for subnet_id, az in subnet_list:
         run_kwargs: dict = {
             "ImageId": ami_id,
             "InstanceType": instance_type,
@@ -1440,14 +1431,13 @@ def cmd_setup(args: argparse.Namespace) -> None:
     log("Setup complete!")
     print("==========================================")
     print()
-    log(f"Instance: {st.instance_id} ({get_instance_ip(region, st.instance_id)})")
+    ip = get_instance_ip(region, st.instance_id)
+    log(f"Instance: {st.instance_id} ({ip})")
     if scenario == "split":
-        log(
-            f"GPU worker: {st.gpu_instance_id} ({get_instance_ip(region, st.gpu_instance_id)})"
-        )
+        gpu_ip = get_instance_ip(region, st.gpu_instance_id)
+        log(f"GPU worker: {st.gpu_instance_id} ({gpu_ip})")
     print()
     log("Next steps:")
-    ip = get_instance_ip(region, st.instance_id)
     print("  1. SSH to the instance:")
     print(f"     ssh -i {STATE_DIR / st.key_name}.pem ec2-user@{ip}")
     print("  2. Set up Tailscale:")
@@ -1471,14 +1461,16 @@ def cmd_status_impl(st: DeploymentState) -> None:
     log(f"  S3:       {st.s3_bucket}")
     print()
 
-    state = get_instance_state(st.region, st.instance_id)
-    ip = get_instance_ip(st.region, st.instance_id)
+    inst = describe_instance(st.region, st.instance_id)
+    state = inst["State"]["Name"] if inst else "terminated"
+    ip = (inst.get("PublicIpAddress", "") or "") if inst else ""
     label = "Control plane" if st.scenario == "split" else "Instance"
     log(f"  {label}: {st.instance_id}  state={state}  ip={ip or 'none'}")
 
     if st.scenario == "split" and st.gpu_instance_id:
-        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
-        gpu_ip = get_instance_ip(st.region, st.gpu_instance_id)
+        gpu_inst = describe_instance(st.region, st.gpu_instance_id)
+        gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
+        gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
         log(
             f"  GPU worker:     {st.gpu_instance_id}  state={gpu_state}  ip={gpu_ip or 'none'}"
         )
