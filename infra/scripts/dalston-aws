@@ -602,14 +602,37 @@ dnf install -y docker git pciutils
 # Install and auto-join Tailscale
 echo "Installing Tailscale..."
 curl -fsSL https://tailscale.com/install.sh | sh
+
+# Remove stale Tailscale node with same hostname to avoid -1 suffix
+TS_API_KEY=$(aws ssm get-parameter \
+  --name "/dalston/tailscale-api-key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text --region "$AWS_REGION" 2>/dev/null) || true
+TS_HOSTNAME="dalston-control-plane"
+if [ -n "$TS_API_KEY" ]; then
+  curl -s -H "Authorization: Bearer $TS_API_KEY" \
+    "https://api.tailscale.com/api/v2/tailnet/-/devices" | \
+    python3 -c "
+import sys, json
+for d in json.load(sys.stdin).get('devices', []):
+    if d.get('hostname') == '$TS_HOSTNAME':
+        print(d['nodeId'])
+" | while read -r node_id; do
+    curl -s -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
+      "https://api.tailscale.com/api/v2/device/$node_id"
+    echo "Removed stale Tailscale node: $node_id ($TS_HOSTNAME)"
+  done
+fi
+
 TS_AUTH_KEY=$(aws ssm get-parameter \
   --name "/dalston/tailscale-auth-key" \
   --with-decryption \
   --query "Parameter.Value" \
   --output text --region "$AWS_REGION") || true
 if [ -n "$TS_AUTH_KEY" ]; then
-  tailscale up --authkey="$TS_AUTH_KEY" --hostname="dalston-control-plane"
-  echo "Tailscale joined as dalston-control-plane"
+  tailscale up --authkey="$TS_AUTH_KEY" --hostname="$TS_HOSTNAME"
+  echo "Tailscale joined as $TS_HOSTNAME"
 else
   echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
 fi
@@ -817,14 +840,37 @@ usermod -aG docker ubuntu
 
 # Install and auto-join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
+
+# Remove stale Tailscale node with same hostname to avoid -1 suffix
+TS_API_KEY=$(aws ssm get-parameter \
+  --name "/dalston/tailscale-api-key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text --region "$AWS_REGION" 2>/dev/null) || true
+TS_HOSTNAME="dalston-gpu-worker"
+if [ -n "$TS_API_KEY" ]; then
+  curl -s -H "Authorization: Bearer $TS_API_KEY" \
+    "https://api.tailscale.com/api/v2/tailnet/-/devices" | \
+    python3 -c "
+import sys, json
+for d in json.load(sys.stdin).get('devices', []):
+    if d.get('hostname') == '$TS_HOSTNAME':
+        print(d['nodeId'])
+" | while read -r node_id; do
+    curl -s -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
+      "https://api.tailscale.com/api/v2/device/$node_id"
+    echo "Removed stale Tailscale node: $node_id ($TS_HOSTNAME)"
+  done
+fi
+
 TS_AUTH_KEY=$(aws ssm get-parameter \
   --name "/dalston/tailscale-auth-key" \
   --with-decryption \
   --query "Parameter.Value" \
   --output text --region "$AWS_REGION") || true
 if [ -n "$TS_AUTH_KEY" ]; then
-  tailscale up --authkey="$TS_AUTH_KEY" --hostname="dalston-gpu-worker"
-  echo "Tailscale joined as dalston-gpu-worker"
+  tailscale up --authkey="$TS_AUTH_KEY" --hostname="$TS_HOSTNAME"
+  echo "Tailscale joined as $TS_HOSTNAME"
 else
   echo "WARNING: No Tailscale auth key in SSM. Run 'sudo tailscale up' manually."
 fi
