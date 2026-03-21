@@ -722,14 +722,7 @@ CTRL_SERVICES="postgres redis gateway orchestrator stt-prepare"
 if [ "$USE_GHCR" = "true" ]; then
   COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml -f infra/docker/docker-compose.ghcr.yml"
   COMPOSE_UP_FLAGS="--no-build"
-
-  # GHCR login helper script (used by systemd and manual redeploy)
-  cat > "$DATA_MOUNT/dalston/ghcr-login.sh" << 'GHCREOF'
-#!/bin/bash
-source /data/dalston/.env.aws
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-GHCREOF
-  chmod +x "$DATA_MOUNT/dalston/ghcr-login.sh"
+  # No login helper needed — public repo images are pullable without auth
 else
   COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml"
   COMPOSE_UP_FLAGS=""
@@ -770,7 +763,6 @@ export DALSTON_S3_BUCKET DALSTON_S3_REGION AWS_REGION REDIS_URL DATABASE_URL HF_
 git pull --ff-only
 
 if [ "$USE_GHCR" = "true" ]; then
-  ./ghcr-login.sh
   docker compose ${COMPOSE_FILES} --env-file .env.aws pull ${CTRL_SERVICES}
 fi
 
@@ -791,7 +783,6 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
 EnvironmentFile=/data/dalston/.env.aws
-ExecStartPre=/data/dalston/ghcr-login.sh
 ExecStart=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws up -d ${COMPOSE_UP_FLAGS} ${CTRL_SERVICES}'
 ExecStop=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws down'
 TimeoutStartSec=600
@@ -884,10 +875,7 @@ else
 fi
 chown -R 1000:1000 /data/models
 
-# GHCR login
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
-# Pull images
+# Pull images (no login needed — public repo)
 docker pull "$GHCR_REGISTRY/stt-onnx:latest"
 docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 
@@ -899,8 +887,6 @@ S3_BUCKET="${S3_BUCKET}"
 AWS_REGION="${AWS_REGION}"
 CTRL_PLANE_IP="${CTRL_PLANE_IP}"
 GHCR_REGISTRY="${GHCR_REGISTRY}"
-GHCR_USER="${GHCR_USER}"
-GHCR_TOKEN="${GHCR_TOKEN}"
 HF_TOKEN="${HF_TOKEN}"
 ENVEOF
 
@@ -910,8 +896,7 @@ cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 set -euo pipefail
 source /opt/dalston/gpu-env.sh
 
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
+# Pull images (no login needed — public repo)
 docker pull "$GHCR_REGISTRY/stt-onnx:latest"
 docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 

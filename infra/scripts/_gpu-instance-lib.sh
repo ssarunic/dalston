@@ -106,7 +106,7 @@ else
   mkdir -p /data/models
 fi
 
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+# No login needed — repo is public, GHCR images are publicly pullable
 HEADER
 }
 
