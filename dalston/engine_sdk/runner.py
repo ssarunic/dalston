@@ -107,7 +107,7 @@ class EngineRunner:
         self._deploy_env: str = "local"
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
-        self._device: str = os.environ.get("DALSTON_DEVICE", "cpu")
+        self._device: str = "cpu"
 
         # Load configuration from environment
         self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
@@ -795,17 +795,18 @@ class EngineRunner:
                         self.redis_client,
                         holder=self.instance,
                         device=self._device,
+                        host_id=self._node_id,
                         timeout=task_timeout,
-                    ):
+                    ) as remaining_timeout:
                         with concurrent.futures.ThreadPoolExecutor(
                             max_workers=1
                         ) as executor:
                             future = executor.submit(_run_with_context)
                             try:
-                                output = future.result(timeout=task_timeout)
+                                output = future.result(timeout=remaining_timeout)
                             except concurrent.futures.TimeoutError as exc:
                                 raise TimeoutError(
-                                    f"Task processing exceeded {task_timeout:.0f}s timeout"
+                                    f"Task processing exceeded {remaining_timeout:.0f}s timeout"
                                 ) from exc
                 process_time = time.time() - process_start
 

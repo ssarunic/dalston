@@ -1,10 +1,10 @@
 """Per-host GPU lock using Redis.
 
 When multiple GPU engines share the same physical GPU (identified by
-``DALSTON_HOST_HOSTNAME``), only one engine can run inference at a time.
-This module provides a simple Redis-based lock that serializes GPU access
-across co-located containers while allowing true parallelism when engines
-are on separate hosts.
+``node_id``), only one engine can run inference at a time. This module
+provides a simple Redis-based lock that serializes GPU access across
+co-located containers while allowing true parallelism when engines are
+on separate hosts.
 
 CPU-only engines skip the lock entirely.
 
@@ -15,8 +15,6 @@ lock auto-expires in ≤30s.
 
 from __future__ import annotations
 
-import os
-import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -31,15 +29,16 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 LOCK_TTL_SECONDS = 30
-HEARTBEAT_INTERVAL = 10.0  # extend TTL every 10s
+HEARTBEAT_INTERVAL = 10.0
 LOCK_RETRY_INTERVAL = 2.0
 
 KEY_PREFIX = "dalston:gpu_lock:"
 
+# Lua script: atomically extend TTL only if we still own the lock.
+_EXTEND_SCRIPT = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end"
 
-def _host_id() -> str:
-    """Return the host identifier for lock scoping."""
-    return os.environ.get("DALSTON_HOST_HOSTNAME") or socket.gethostname()
+# Lua script: atomically delete only if we still own the lock.
+_RELEASE_SCRIPT = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end"
 
 
 def _heartbeat_loop(
@@ -51,9 +50,7 @@ def _heartbeat_loop(
     """Extend lock TTL periodically until stop is set."""
     while not stop.wait(HEARTBEAT_INTERVAL):
         try:
-            # Only extend if we still own the lock
-            if redis_client.get(key) == holder:
-                redis_client.expire(key, LOCK_TTL_SECONDS)
+            redis_client.eval(_EXTEND_SCRIPT, 1, key, holder, str(LOCK_TTL_SECONDS))
         except Exception:
             logger.warning("gpu_lock_heartbeat_error", lock_key=key, exc_info=True)
 
@@ -63,23 +60,30 @@ def gpu_lock(
     redis_client: redis.Redis,
     holder: str,
     device: str,
+    host_id: str,
     timeout: float = 600.0,
-) -> Iterator[None]:
-    """Acquire the per-host GPU lock, yield, then release.
+) -> Iterator[float]:
+    """Acquire the per-host GPU lock, yield remaining time, then release.
 
     Args:
         redis_client: Redis connection (sync).
         holder: Unique identifier for this engine instance (used as lock value).
         device: The inference device ("cuda", "cpu", "mps").
             Lock is only acquired for "cuda".
+        host_id: Host identifier for scoping the lock (from node_identity).
         timeout: Max seconds to wait for the lock before raising TimeoutError.
+
+    Yields:
+        Remaining seconds after lock acquisition (timeout minus wait time).
+        For non-CUDA devices, yields the full timeout unchanged.
     """
     if device != "cuda":
-        yield
+        yield timeout
         return
 
-    key = f"{KEY_PREFIX}{_host_id()}"
-    deadline = time.monotonic() + timeout
+    key = f"{KEY_PREFIX}{host_id}"
+    start = time.monotonic()
+    deadline = start + timeout
     acquired = False
     stop_heartbeat = threading.Event()
 
@@ -95,7 +99,6 @@ def gpu_lock(
                 f"Could not acquire GPU lock {key} within {timeout:.0f}s"
             )
 
-        # Start heartbeat to keep the lock alive
         heartbeat = threading.Thread(
             target=_heartbeat_loop,
             args=(redis_client, key, holder, stop_heartbeat),
@@ -103,14 +106,16 @@ def gpu_lock(
         )
         heartbeat.start()
 
-        yield
+        remaining = deadline - time.monotonic()
+        yield max(remaining, 1.0)
     finally:
         stop_heartbeat.set()
         if acquired:
-            # Only release if we still own the lock
             try:
-                if redis_client.get(key) == holder:
-                    redis_client.delete(key)
+                released = redis_client.eval(_RELEASE_SCRIPT, 1, key, holder)
+                if released:
                     logger.info("gpu_lock_released", lock_key=key, holder=holder)
+                else:
+                    logger.warning("gpu_lock_expired_before_release", lock_key=key)
             except Exception:
                 logger.warning("gpu_lock_release_error", lock_key=key, exc_info=True)
