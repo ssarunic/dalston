@@ -1074,6 +1074,25 @@ def launch_instance(
     if not subnet_list:
         die(f"No subnets found in VPC {vpc_id}")
 
+    # Sort AZs by current spot price (cheapest first)
+    if use_spot:
+        try:
+            prices_resp = ec2.describe_spot_price_history(
+                InstanceTypes=[instance_type],
+                ProductDescriptions=["Linux/UNIX"],
+                MaxResults=len(subnet_list),
+            )
+            az_prices = {
+                p["AvailabilityZone"]: float(p["SpotPrice"])
+                for p in prices_resp.get("SpotPriceHistory", [])
+            }
+            subnet_list.sort(key=lambda s: az_prices.get(s[1], 999))
+            cheapest_az = subnet_list[0][1]
+            cheapest_price = az_prices.get(cheapest_az, 0)
+            log(f"Cheapest AZ: {cheapest_az} (${cheapest_price:.4f}/hr)")
+        except Exception:
+            pass  # Fall back to arbitrary order
+
     encoded_user_data = base64.b64encode(user_data.encode()).decode()
 
     for subnet_id, az in subnet_list:
@@ -1522,7 +1541,12 @@ def cmd_up(args: argparse.Namespace) -> None:
     if st.scenario == "split" and st.gpu_instance_id:
         # Check if the GPU spot instance was terminated (can't be restarted)
         resp = ec2.describe_instances(InstanceIds=[st.gpu_instance_id])
-        state = resp["Reservations"][0]["Instances"][0]["State"]["Name"]
+        reservations = resp.get("Reservations", [])
+        state = (
+            reservations[0]["Instances"][0]["State"]["Name"]
+            if reservations and reservations[0].get("Instances")
+            else "terminated"
+        )
         if state == "terminated":
             warn(
                 f"GPU spot instance {st.gpu_instance_id} was terminated. Clearing from state."
