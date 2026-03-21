@@ -365,33 +365,6 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
         ),
     )
 
-    # ECR pull access policy
-    iam.put_role_policy(
-        RoleName=role_name,
-        PolicyName=f"{NAME_PREFIX}-ecr-access",
-        PolicyDocument=json.dumps(
-            {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": ["ecr:GetAuthorizationToken"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "ecr:BatchGetImage",
-                            "ecr:GetDownloadUrlForLayer",
-                            "ecr:BatchCheckLayerAvailability",
-                        ],
-                        "Resource": f"arn:aws:ecr:{region}:{account_id}:repository/dalston/*",
-                    },
-                ],
-            }
-        ),
-    )
-
     # SSM read access (for Tailscale auth key)
     iam.put_role_policy(
         RoleName=role_name,
@@ -645,10 +618,9 @@ def generate_user_data(
     s3_bucket: str,
     region: str,
     compose_profiles: str,
-    use_ecr: bool = False,
+    use_ghcr: bool = False,
 ) -> str:
-    account_id = aws_account_id(region)
-    ecr_registry = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+    ghcr_registry = os.environ.get("GHCR_REGISTRY", "ghcr.io/ssarunic/dalston")
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header
@@ -666,8 +638,8 @@ DATA_MOUNT="/data"
 S3_BUCKET="{s3_bucket}"
 AWS_REGION="{region}"
 COMPOSE_PROFILE_FLAGS="{compose_profiles}"
-USE_ECR="{"true" if use_ecr else "false"}"
-ECR_REGISTRY="{ecr_registry}"
+USE_GHCR="{"true" if use_ghcr else "false"}"
+GHCR_REGISTRY="{ghcr_registry}"
 REPO_URL="{REPO_URL}"
 HF_TOKEN="{hf_token}"
 REPO_BRANCH="{REPO_BRANCH}"
@@ -737,7 +709,7 @@ fi
 mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston"
 chown -R 1000:1000 "$DATA_MOUNT"
 
-# Clone repo (shallow — only need compose files, code runs from ECR images)
+# Clone repo (shallow — only need compose files, code runs from GHCR images)
 if [ -n "$REPO_URL" ] && [ ! -f "$DATA_MOUNT/dalston/docker-compose.yml" ]; then
   echo "Cloning $REPO_URL ($REPO_BRANCH)..."
   git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$DATA_MOUNT/dalston"
@@ -746,18 +718,18 @@ fi
 # Control plane services (only these start on the CPU instance)
 CTRL_SERVICES="postgres redis gateway orchestrator stt-prepare"
 
-# ECR-based deployment: login and build compose command with ECR overlay
-if [ "$USE_ECR" = "true" ]; then
-  COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml -f infra/docker/docker-compose.ecr.yml"
+# GHCR-based deployment: login and build compose command with GHCR overlay
+if [ "$USE_GHCR" = "true" ]; then
+  COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml -f infra/docker/docker-compose.ghcr.yml"
   COMPOSE_UP_FLAGS="--no-build"
 
-  # ECR login helper script (used by systemd and manual redeploy)
-  cat > "$DATA_MOUNT/dalston/ecr-login.sh" << 'ECREOF'
+  # GHCR login helper script (used by systemd and manual redeploy)
+  cat > "$DATA_MOUNT/dalston/ghcr-login.sh" << 'GHCREOF'
 #!/bin/bash
 source /data/dalston/.env.aws
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-ECREOF
-  chmod +x "$DATA_MOUNT/dalston/ecr-login.sh"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+GHCREOF
+  chmod +x "$DATA_MOUNT/dalston/ghcr-login.sh"
 else
   COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml"
   COMPOSE_UP_FLAGS=""
@@ -771,9 +743,9 @@ AWS_REGION=${AWS_REGION}
 REDIS_URL=redis://redis:6379
 DATABASE_URL=postgresql+asyncpg://dalston:password@postgres:5432/dalston
 HF_HOME=/data/models
-ECR_REGISTRY=${ECR_REGISTRY}
+GHCR_REGISTRY=${GHCR_REGISTRY}
 IMAGE_TAG=latest
-USE_ECR=${USE_ECR}
+USE_GHCR=${USE_GHCR}
 COMPOSE_FILES=${COMPOSE_FILES}
 COMPOSE_UP_FLAGS=${COMPOSE_UP_FLAGS}
 CTRL_SERVICES=${CTRL_SERVICES}
@@ -793,12 +765,12 @@ cat > "$DATA_MOUNT/dalston/deploy.sh" << DEPLOYEOF
 set -euo pipefail
 cd /data/dalston
 source .env.aws
-export DALSTON_S3_BUCKET DALSTON_S3_REGION AWS_REGION REDIS_URL DATABASE_URL HF_HOME ECR_REGISTRY IMAGE_TAG
+export DALSTON_S3_BUCKET DALSTON_S3_REGION AWS_REGION REDIS_URL DATABASE_URL HF_HOME GHCR_REGISTRY IMAGE_TAG
 
 git pull --ff-only
 
-if [ "$USE_ECR" = "true" ]; then
-  ./ecr-login.sh
+if [ "$USE_GHCR" = "true" ]; then
+  ./ghcr-login.sh
   docker compose ${COMPOSE_FILES} --env-file .env.aws pull ${CTRL_SERVICES}
 fi
 
@@ -819,7 +791,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/data/dalston
 EnvironmentFile=/data/dalston/.env.aws
-ExecStartPre=/data/dalston/ecr-login.sh
+ExecStartPre=/data/dalston/ghcr-login.sh
 ExecStart=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws up -d ${COMPOSE_UP_FLAGS} ${CTRL_SERVICES}'
 ExecStop=/bin/bash -c 'cd /data/dalston && docker compose ${COMPOSE_FILES} --env-file .env.aws down'
 TimeoutStartSec=600
@@ -853,8 +825,7 @@ def generate_gpu_worker_user_data(
     region: str,
     ctrl_plane_ip: str,
 ) -> str:
-    account_id = aws_account_id(region)
-    ecr_registry = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+    ghcr_registry = os.environ.get("GHCR_REGISTRY", "ghcr.io/ssarunic/dalston")
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header
@@ -870,7 +841,7 @@ echo "Starting Dalston GPU worker bootstrap at $(date)"
 S3_BUCKET="{s3_bucket}"
 AWS_REGION="{region}"
 CTRL_PLANE_IP="{ctrl_plane_ip}"
-ECR_REGISTRY="{ecr_registry}"
+GHCR_REGISTRY="{ghcr_registry}"
 HF_TOKEN="{hf_token}"
 """
 
@@ -913,12 +884,12 @@ else
 fi
 chown -R 1000:1000 /data/models
 
-# ECR login
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+# GHCR login
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
 # Pull images
-docker pull "$ECR_REGISTRY/dalston/stt-onnx:latest"
-docker pull "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
+docker pull "$GHCR_REGISTRY/stt-onnx:latest"
+docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 
 mkdir -p /opt/dalston
 
@@ -927,7 +898,9 @@ cat > /opt/dalston/gpu-env.sh << ENVEOF
 S3_BUCKET="${S3_BUCKET}"
 AWS_REGION="${AWS_REGION}"
 CTRL_PLANE_IP="${CTRL_PLANE_IP}"
-ECR_REGISTRY="${ECR_REGISTRY}"
+GHCR_REGISTRY="${GHCR_REGISTRY}"
+GHCR_USER="${GHCR_USER}"
+GHCR_TOKEN="${GHCR_TOKEN}"
 HF_TOKEN="${HF_TOKEN}"
 ENVEOF
 
@@ -937,10 +910,10 @@ cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 set -euo pipefail
 source /opt/dalston/gpu-env.sh
 
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
-docker pull "$ECR_REGISTRY/dalston/stt-onnx:latest"
-docker pull "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
+docker pull "$GHCR_REGISTRY/stt-onnx:latest"
+docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 
 # Stop existing containers if running
 docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0 2>/dev/null || true
@@ -958,7 +931,7 @@ docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -e DALSTON_S3_REGION="$AWS_REGION" \
   -e AWS_REGION="$AWS_REGION" \
   -e HF_HOME=/data/models \
-  "$ECR_REGISTRY/dalston/stt-onnx:latest"
+  "$GHCR_REGISTRY/stt-onnx:latest"
 
 docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
   -v /data/models:/data/models \
@@ -973,7 +946,7 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
   -e DALSTON_S3_REGION="$AWS_REGION" \
   -e AWS_REGION="$AWS_REGION" \
   -e HF_HOME=/data/models \
-  "$ECR_REGISTRY/dalston/stt-diarize-pyannote:latest"
+  "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 
 echo "GPU engines started at $(date)"
 STARTEOF
@@ -1435,10 +1408,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
         st.data_volume_id = create_and_attach_data_volume(region, st.instance_id)
 
     elif scenario == "split":
-        # Control plane — always on-demand, uses ECR images
+        # Control plane — always on-demand, uses GHCR images
         log(f"Launching control plane ({CTRL_INSTANCE_TYPE})...")
         ctrl_ud = generate_user_data(
-            st.s3_bucket, region, "--profile local-infra", use_ecr=True
+            st.s3_bucket, region, "--profile local-infra", use_ghcr=True
         )
         st.instance_id = launch_instance(
             region,
@@ -1857,7 +1830,6 @@ def cmd_teardown(args: argparse.Namespace) -> None:
         pass
     for policy_name in (
         f"{NAME_PREFIX}-s3-access",
-        f"{NAME_PREFIX}-ecr-access",
         f"{NAME_PREFIX}-ssm-access",
     ):
         try:

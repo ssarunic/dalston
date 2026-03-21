@@ -39,11 +39,11 @@ help:
 	@echo "  make build-bases-gpu - Build all base images (GPU/CUDA)"
 	@echo "  make deploy-web      - Rebuild gateway with latest web console changes"
 	@echo ""
-	@echo "ECR & AWS Deployment:"
-	@echo "  make ecr-login       - Login to ECR"
-	@echo "  make push-ecr        - Build and push all images to ECR"
-	@echo "  make push-ecr-cpu    - Build and push CPU service images only"
-	@echo "  make push-ecr-gpu    - Build and push GPU engine images only"
+	@echo "GHCR & AWS Deployment:"
+	@echo "  make ghcr-login      - Login to GHCR"
+	@echo "  make push-ghcr       - Build and push all images to GHCR"
+	@echo "  make push-ghcr-cpu   - Build and push CPU service images only"
+	@echo "  make push-ghcr-gpu   - Build and push GPU engine images only"
 	@echo "  make aws-start       - Start on AWS with local infra + GPU"
 	@echo "  make aws-stop        - Stop AWS services"
 	@echo "  make aws-logs        - Follow logs on AWS"
@@ -181,53 +181,53 @@ deploy-web:
 		docker compose up -d gateway
 
 # ============================================================
-# ECR BUILD & PUSH
+# GHCR BUILD & PUSH
 # ============================================================
 
-ECR_REGISTRY ?= $(shell aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-west-2.amazonaws.com
+GHCR_REGISTRY ?= ghcr.io/$(shell git remote get-url origin | sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$$|\1|' | tr '[:upper:]' '[:lower:]')
 IMAGE_TAG ?= latest
 
-# Login to ECR
-ecr-login:
-	aws ecr get-login-password --region eu-west-2 | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+# Login to GHCR (requires GITHUB_TOKEN or gh CLI auth)
+ghcr-login:
+	@echo $(GITHUB_TOKEN) | docker login ghcr.io -u $(GITHUB_USER) --password-stdin
 
-# Build and push all images to ECR (CPU services + GPU engines)
-push-ecr: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare push-ecr-onnx push-ecr-pyannote
-	@echo "All images pushed to ECR."
+# Build and push all images to GHCR (CPU services + GPU engines)
+push-ghcr: push-ghcr-gateway push-ghcr-orchestrator push-ghcr-prepare push-ghcr-onnx push-ghcr-pyannote
+	@echo "All images pushed to GHCR."
 
 # Build and push only CPU service images
-push-ecr-cpu: ecr-login push-ecr-gateway push-ecr-orchestrator push-ecr-prepare
-	@echo "CPU images pushed to ECR."
+push-ghcr-cpu: push-ghcr-gateway push-ghcr-orchestrator push-ghcr-prepare
+	@echo "CPU images pushed to GHCR."
 
 # Build and push only GPU engine images (requires base images built with DEVICE=cuda)
-push-ecr-gpu: ecr-login push-ecr-onnx push-ecr-pyannote
-	@echo "GPU engine images pushed to ECR."
+push-ghcr-gpu: push-ghcr-onnx push-ghcr-pyannote
+	@echo "GPU engine images pushed to GHCR."
 
 # Build and push gateway
-push-ecr-gateway:
-	docker build -f docker/Dockerfile.gateway -t $(ECR_REGISTRY)/dalston/gateway:$(IMAGE_TAG) .
-	docker push $(ECR_REGISTRY)/dalston/gateway:$(IMAGE_TAG)
+push-ghcr-gateway: ghcr-login
+	docker build -f docker/Dockerfile.gateway -t $(GHCR_REGISTRY)/gateway:$(IMAGE_TAG) .
+	docker push $(GHCR_REGISTRY)/gateway:$(IMAGE_TAG)
 
 # Build and push orchestrator
-push-ecr-orchestrator:
-	docker build -f docker/Dockerfile.orchestrator -t $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG) .
-	docker push $(ECR_REGISTRY)/dalston/orchestrator:$(IMAGE_TAG)
+push-ghcr-orchestrator: ghcr-login
+	docker build -f docker/Dockerfile.orchestrator -t $(GHCR_REGISTRY)/orchestrator:$(IMAGE_TAG) .
+	docker push $(GHCR_REGISTRY)/orchestrator:$(IMAGE_TAG)
 
 # Build and push stt-prepare (requires base-engine)
-push-ecr-prepare:
+push-ghcr-prepare: ghcr-login
 	docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
-	docker build -f engines/stt-prepare/audio-prepare/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG) .
-	docker push $(ECR_REGISTRY)/dalston/stt-prepare:$(IMAGE_TAG)
+	docker build -f engines/stt-prepare/audio-prepare/Dockerfile -t $(GHCR_REGISTRY)/stt-prepare:$(IMAGE_TAG) .
+	docker push $(GHCR_REGISTRY)/stt-prepare:$(IMAGE_TAG)
 
 # Build and push ONNX engine (requires base-onnx built with DEVICE=cuda)
-push-ecr-onnx:
-	docker build -f engines/stt-transcribe/onnx/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-onnx:$(IMAGE_TAG) .
-	docker push $(ECR_REGISTRY)/dalston/stt-onnx:$(IMAGE_TAG)
+push-ghcr-onnx: ghcr-login
+	docker build -f engines/stt-transcribe/onnx/Dockerfile -t $(GHCR_REGISTRY)/stt-onnx:$(IMAGE_TAG) .
+	docker push $(GHCR_REGISTRY)/stt-onnx:$(IMAGE_TAG)
 
 # Build and push pyannote engine (requires base-pyannote built with DEVICE=cuda)
-push-ecr-pyannote:
-	docker build -f engines/stt-diarize/pyannote-4.0/Dockerfile -t $(ECR_REGISTRY)/dalston/stt-diarize-pyannote:$(IMAGE_TAG) .
-	docker push $(ECR_REGISTRY)/dalston/stt-diarize-pyannote:$(IMAGE_TAG)
+push-ghcr-pyannote: ghcr-login
+	docker build -f engines/stt-diarize/pyannote-4.0/Dockerfile -t $(GHCR_REGISTRY)/stt-diarize-pyannote:$(IMAGE_TAG) .
+	docker push $(GHCR_REGISTRY)/stt-diarize-pyannote:$(IMAGE_TAG)
 
 # ============================================================
 # AWS DEPLOYMENT

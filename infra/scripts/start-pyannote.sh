@@ -14,7 +14,7 @@ prereq_check() {
 
 build_container_run_block() {
   cat <<'BLOCK'
-docker pull DALSTON_ECR/dalston/stt-diarize-pyannote:DALSTON_TAG
+docker pull DALSTON_GHCR/dalston/stt-diarize-pyannote:DALSTON_TAG
 docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
   -v /data/models:/models \
   -e HF_HOME=/models/huggingface \
@@ -27,7 +27,7 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
   -e DALSTON_S3_ENDPOINT_URL=http://DALSTON_MAC_TS_IP:9000 \
   -e AWS_ACCESS_KEY_ID=minioadmin \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
-  DALSTON_ECR/dalston/stt-diarize-pyannote:DALSTON_TAG
+  DALSTON_GHCR/dalston/stt-diarize-pyannote:DALSTON_TAG
 BLOCK
 }
 

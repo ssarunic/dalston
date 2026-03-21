@@ -1,6 +1,6 @@
 # .github/workflows/build-gateway.yml
 #
-# Builds the Gateway image (with web console) and pushes to ECR.
+# Builds the Gateway image (with web console) and pushes to GHCR.
 # Runs natively on x86 — no QEMU needed.
 #
 # Triggers:
@@ -8,9 +8,7 @@
 #   - Manual dispatch (for rebuilding without code changes)
 #
 # Prerequisites (one-time setup):
-#   1. Create ECR repository: dalston/gateway
-#   2. IAM role and OIDC provider (shared with engine workflows)
-#   3. Set repository variable: AWS_ACCOUNT_ID
+#   - Repository must have packages write permission enabled for GitHub Actions
 
 name: Build Gateway
 
@@ -27,12 +25,12 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: eu-west-2
-  ECR_REPO: dalston/gateway
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/gateway
 
 permissions:
-  id-token: write
   contents: read
+  packages: write
 
 jobs:
   build-and-push:
@@ -41,30 +39,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-ecr-push
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
-            -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_REPO:latest \
+            -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
+            -t $REGISTRY/$IMAGE_NAME:latest \
             -f docker/Dockerfile.gateway \
             .
 
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPO:latest
+          docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
+          docker push $REGISTRY/$IMAGE_NAME:latest
 
           echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$ECR_REGISTRY/$ECR_REPO:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$REGISTRY/$IMAGE_NAME:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$REGISTRY/$IMAGE_NAME:latest\`" >> $GITHUB_STEP_SUMMARY

@@ -26,8 +26,7 @@ apply_extra_substitutions() { :; }
 
 # --- Infrastructure resolution ---
 resolve_infra() {
-  ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-  ECR="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
+  GHCR="${GHCR_REGISTRY:-ghcr.io/ssarunic/dalston}"
 
   MAC_TS_IP=$(tailscale ip -4)
   [[ -z "$MAC_TS_IP" ]] && { echo "ERROR: Could not get Tailscale IPv4. Is Tailscale running?"; exit 1; }
@@ -69,8 +68,8 @@ resolve_infra() {
     { echo "ERROR: No instance profile found for role $ROLE_NAME"; exit 1; }
 }
 
-# --- User-data header (Tailscale + NVIDIA + ECR login) ---
-# Uses DALSTON_REGION, DALSTON_ECR, DALSTON_HOSTNAME placeholders — substituted by main().
+# --- User-data header (Tailscale + NVIDIA + GHCR login) ---
+# Uses DALSTON_REGION, DALSTON_GHCR, DALSTON_HOSTNAME placeholders — substituted by main().
 userdata_header() {
   cat <<'HEADER'
 #!/bin/bash
@@ -107,7 +106,7 @@ else
   mkdir -p /data/models
 fi
 
-aws ecr get-login-password --region DALSTON_REGION | docker login --username AWS --password-stdin DALSTON_ECR
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 HEADER
 }
 
@@ -224,7 +223,7 @@ $(build_container_run_block)"
 
   # Common placeholder substitution
   USER_DATA="${USER_DATA//DALSTON_REGION/$REGION}"
-  USER_DATA="${USER_DATA//DALSTON_ECR/$ECR}"
+  USER_DATA="${USER_DATA//DALSTON_GHCR/$GHCR}"
   USER_DATA="${USER_DATA//DALSTON_MAC_TS_IP/$MAC_TS_IP}"
   USER_DATA="${USER_DATA//DALSTON_HOSTNAME/$INSTANCE_TAG}"
 
