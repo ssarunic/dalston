@@ -93,8 +93,8 @@ class TestPipelineNoMerge:
 class TestSequentialDiarize:
     """Tests that diarize runs sequentially after transcribe/align."""
 
-    def test_diarize_depends_on_align(self, job_id, audio_uri):
-        """Diarize depends on prepare and align."""
+    def test_diarize_depends_only_on_prepare(self, job_id, audio_uri):
+        """Diarize depends only on prepare — runs in parallel with transcribe/align."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -102,14 +102,10 @@ class TestSequentialDiarize:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        diarize_deps = set(by_stage["diarize"].dependencies)
+        assert by_stage["diarize"].dependencies == [by_stage["prepare"].id]
 
-        assert by_stage["prepare"].id in diarize_deps
-        assert by_stage["align"].id in diarize_deps
-        assert len(diarize_deps) == 2
-
-    def test_diarize_depends_on_transcribe_when_no_align(self, job_id, audio_uri):
-        """Without alignment, diarize depends on prepare and transcribe."""
+    def test_diarize_depends_only_on_prepare_without_align(self, job_id, audio_uri):
+        """Without alignment, diarize still depends only on prepare."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -120,11 +116,7 @@ class TestSequentialDiarize:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        diarize_deps = set(by_stage["diarize"].dependencies)
-
-        assert by_stage["prepare"].id in diarize_deps
-        assert by_stage["transcribe"].id in diarize_deps
-        assert len(diarize_deps) == 2
+        assert by_stage["diarize"].dependencies == [by_stage["prepare"].id]
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +206,7 @@ class TestDependencyChain:
     """Tests correct dependency wiring."""
 
     def test_full_chain_dependencies(self, job_id, audio_uri):
-        """Verify full dependency chain: prepare → transcribe → align → diarize."""
+        """Verify dependency graph: prepare → transcribe → align, prepare → diarize."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -226,10 +218,7 @@ class TestDependencyChain:
         assert by_stage["prepare"].dependencies == []
         assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
         assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
-
-        diarize_deps = set(by_stage["diarize"].dependencies)
-        assert by_stage["prepare"].id in diarize_deps
-        assert by_stage["align"].id in diarize_deps
+        assert by_stage["diarize"].dependencies == [by_stage["prepare"].id]
 
     def test_prepare_always_first(self, job_id, audio_uri):
         """Prepare is always the first task with no dependencies."""
