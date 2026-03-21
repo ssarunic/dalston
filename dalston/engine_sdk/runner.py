@@ -107,7 +107,6 @@ class EngineRunner:
         self._deploy_env: str = "local"
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
-        self._device: str = "cpu"
 
         # Load configuration from environment
         self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
@@ -193,15 +192,12 @@ class EngineRunner:
             detect_node_identity,
             get_gpu_memory_total,
         )
-        from dalston.engine_sdk.device import detect_device
 
         node = detect_node_identity()
         gpu_total = get_gpu_memory_total()
         self._node_hostname = node.hostname
         self._node_id = node.node_id
         self._deploy_env = node.deploy_env
-        self._device = detect_device()
-        logger.info("gpu_lock_device", device=self._device)
 
         # Register with unified engine registry
         self._unified_writer = UnifiedRegistryWriter(self.redis_url)
@@ -780,8 +776,6 @@ class EngineRunner:
                     # appear as children rather than orphan traces.
                     from opentelemetry import context as otel_context
 
-                    from dalston.engine_sdk.gpu_lock import gpu_lock
-
                     parent_ctx = otel_context.get_current()
 
                     def _run_with_context():
@@ -791,23 +785,16 @@ class EngineRunner:
                         finally:
                             otel_context.detach(token)
 
-                    with gpu_lock(
-                        self.redis_client,
-                        holder=self.instance,
-                        device=self._device,
-                        host_id=self._node_id,
-                        timeout=task_timeout,
-                    ) as remaining_timeout:
-                        with concurrent.futures.ThreadPoolExecutor(
-                            max_workers=1
-                        ) as executor:
-                            future = executor.submit(_run_with_context)
-                            try:
-                                output = future.result(timeout=remaining_timeout)
-                            except concurrent.futures.TimeoutError as exc:
-                                raise TimeoutError(
-                                    f"Task processing exceeded {remaining_timeout:.0f}s timeout"
-                                ) from exc
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=1
+                    ) as executor:
+                        future = executor.submit(_run_with_context)
+                        try:
+                            output = future.result(timeout=task_timeout)
+                        except concurrent.futures.TimeoutError as exc:
+                            raise TimeoutError(
+                                f"Task processing exceeded {task_timeout:.0f}s timeout"
+                            ) from exc
                 process_time = time.time() - process_start
 
                 # Boundary validation: validate transcribe outputs against
