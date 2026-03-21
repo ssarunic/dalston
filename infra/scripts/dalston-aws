@@ -42,6 +42,9 @@ DATA_VOLUME_SIZE = 50
 ROOT_VOLUME_SIZE = 30
 REPO_URL = "https://github.com/ssarunic/dalston.git"
 REPO_BRANCH = "main"
+DEFAULT_GHCR_REGISTRY = (
+    "ghcr.io/" + REPO_URL.split("github.com/")[-1].removesuffix(".git").lower()
+)
 DEFAULT_REGION = "eu-west-2"
 GPU_INSTANCE_TYPE = "g4dn.xlarge"
 CPU_INSTANCE_TYPE = "t3.xlarge"
@@ -620,7 +623,7 @@ def generate_user_data(
     compose_profiles: str,
     use_ghcr: bool = False,
 ) -> str:
-    ghcr_registry = os.environ.get("GHCR_REGISTRY", "ghcr.io/ssarunic/dalston")
+    ghcr_registry = os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header
@@ -816,7 +819,7 @@ def generate_gpu_worker_user_data(
     region: str,
     ctrl_plane_ip: str,
 ) -> str:
-    ghcr_registry = os.environ.get("GHCR_REGISTRY", "ghcr.io/ssarunic/dalston")
+    ghcr_registry = os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header

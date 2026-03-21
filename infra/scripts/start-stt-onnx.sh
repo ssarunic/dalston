@@ -10,7 +10,7 @@ CONTAINERS_TO_WAIT=("stt-transcribe-onnx")
 
 build_container_run_block() {
   cat <<'BLOCK'
-docker pull DALSTON_GHCR/dalston/stt-onnx:DALSTON_TAG
+docker pull DALSTON_GHCR/stt-onnx:DALSTON_TAG
 docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -p 9000:9000 \
   -v /data/models:/models \
@@ -22,7 +22,7 @@ docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -e DALSTON_S3_ENDPOINT_URL=http://DALSTON_MAC_TS_IP:9000 \
   -e AWS_ACCESS_KEY_ID=minioadmin \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
-  DALSTON_GHCR/dalston/stt-onnx:DALSTON_TAG
+  DALSTON_GHCR/stt-onnx:DALSTON_TAG
 BLOCK
 }
 

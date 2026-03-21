@@ -184,7 +184,7 @@ deploy-web:
 # GHCR BUILD & PUSH
 # ============================================================
 
-GHCR_REGISTRY ?= ghcr.io/$(shell git remote get-url origin | sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$$|\1|' | tr '[:upper:]' '[:lower:]')
+GHCR_REGISTRY ?= ghcr.io/$(shell git remote get-url origin | sed -E 's|.*[:/]([^/]+/[^.]+)(\.git)?$$|\1|' | tr '[:upper:]' '[:lower:]')
 IMAGE_TAG ?= latest
 
 # Login to GHCR (requires GITHUB_TOKEN or gh CLI auth)

@@ -26,7 +26,9 @@ apply_extra_substitutions() { :; }
 
 # --- Infrastructure resolution ---
 resolve_infra() {
-  GHCR="${GHCR_REGISTRY:-ghcr.io/ssarunic/dalston}"
+  # Derive default from git remote (matches Makefile convention)
+  _default_ghcr="ghcr.io/$(git remote get-url origin | sed -E 's|.*[:/]([^/]+/[^.]+)(\.git)?$|\1|' | tr '[:upper:]' '[:lower:]')"
+  GHCR="${GHCR_REGISTRY:-$_default_ghcr}"
 
   MAC_TS_IP=$(tailscale ip -4)
   [[ -z "$MAC_TS_IP" ]] && { echo "ERROR: Could not get Tailscale IPv4. Is Tailscale running?"; exit 1; }
