@@ -1726,14 +1726,21 @@ def cmd_up(args: argparse.Namespace) -> None:
 
 
 def _stop_instance(ec2, region: str, instance_id: str) -> None:
-    """Stop an instance, terminating instead if it's a one-time spot."""
+    """Stop an instance, handling spot and already-terminated cases."""
+    state = get_instance_state(region, instance_id)
+    if state in ("terminated", "shutting-down"):
+        log(f"  {instance_id}: already {state}, skipping")
+        return
     try:
         ec2.stop_instances(InstanceIds=[instance_id])
         log(f"  {instance_id}: stop requested")
     except ClientError as e:
-        if "UnsupportedOperation" in str(e) and "Spot" in str(e):
+        err_str = str(e)
+        if "UnsupportedOperation" in err_str and "Spot" in err_str:
             warn(f"  {instance_id}: one-time spot instance — terminating instead")
             ec2.terminate_instances(InstanceIds=[instance_id])
+        elif "IncorrectInstanceState" in err_str:
+            log(f"  {instance_id}: cannot stop (state may have changed), skipping")
         else:
             raise
 

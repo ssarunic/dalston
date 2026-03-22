@@ -548,8 +548,9 @@ class TestDagDependencies:
         by_stage = {t.stage: t for t in tasks}
         diarize_deps = set(by_stage["diarize"].dependencies)
 
-        # Diarize runs in parallel — depends only on prepare
-        assert diarize_deps == {by_stage["prepare"].id}
+        # Diarize depends on prepare (audio) and align (last transcription stage)
+        assert by_stage["prepare"].id in diarize_deps
+        assert by_stage["align"].id in diarize_deps
         assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
 
 

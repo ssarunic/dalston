@@ -93,8 +93,8 @@ class TestPipelineNoMerge:
 class TestSequentialDiarize:
     """Tests that diarize runs sequentially after transcribe/align."""
 
-    def test_diarize_runs_parallel_with_align(self, job_id, audio_uri):
-        """Diarize depends only on prepare (parallel with transcribe/align)."""
+    def test_diarize_depends_on_align(self, job_id, audio_uri):
+        """Diarize depends on prepare and align."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -105,10 +105,11 @@ class TestSequentialDiarize:
         diarize_deps = set(by_stage["diarize"].dependencies)
 
         assert by_stage["prepare"].id in diarize_deps
-        assert len(diarize_deps) == 1
+        assert by_stage["align"].id in diarize_deps
+        assert len(diarize_deps) == 2
 
-    def test_diarize_runs_parallel_with_transcribe(self, job_id, audio_uri):
-        """Without alignment, diarize still depends only on prepare."""
+    def test_diarize_depends_on_transcribe_when_no_align(self, job_id, audio_uri):
+        """Without alignment, diarize depends on prepare and transcribe."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -122,7 +123,8 @@ class TestSequentialDiarize:
         diarize_deps = set(by_stage["diarize"].dependencies)
 
         assert by_stage["prepare"].id in diarize_deps
-        assert len(diarize_deps) == 1
+        assert by_stage["transcribe"].id in diarize_deps
+        assert len(diarize_deps) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +227,9 @@ class TestDependencyChain:
         assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
         assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
 
-        # Diarize runs in parallel — depends only on prepare
         diarize_deps = set(by_stage["diarize"].dependencies)
-        assert diarize_deps == {by_stage["prepare"].id}
+        assert by_stage["prepare"].id in diarize_deps
+        assert by_stage["align"].id in diarize_deps
 
     def test_prepare_always_first(self, job_id, audio_uri):
         """Prepare is always the first task with no dependencies."""
