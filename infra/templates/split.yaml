@@ -1,0 +1,16 @@
+# Dalston AWS — split mode (CPU control plane + optional GPU worker)
+scenario: split
+
+region: eu-west-2
+registry: ghcr.io/ssarunic/dalston
+
+control_plane:
+  instance_type: t3.large
+  spot: false
+  compose_profiles:
+    - local-infra
+  data_volume_gb: 50
+
+gpu_worker:
+  instance_type: g6.xlarge
+  spot: true

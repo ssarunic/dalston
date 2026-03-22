@@ -1,0 +1,13 @@
+# Dalston AWS — single GPU instance (all services + GPU engines on one box)
+scenario: gpu
+
+region: eu-west-2
+registry: ghcr.io/ssarunic/dalston
+
+control_plane:
+  instance_type: g4dn.xlarge
+  spot: true
+  compose_profiles:
+    - local-infra
+    - gpu
+  data_volume_gb: 50

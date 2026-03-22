@@ -2,18 +2,19 @@
 """dalston-aws — provision and manage Dalston on AWS without Terraform.
 
 Usage:
-    dalston-aws setup [--cpu|--gpu|--split] [--spot] [--region R] [--gpu-type T]
-    dalston-aws teardown
-    dalston-aws status
-    dalston-aws up
-    dalston-aws down
-    dalston-aws ssh [gpu]
-    dalston-aws add-gpu [--spot] [--gpu-type T]
-    dalston-aws remove-gpu
+    dalston-aws setup -t TEMPLATE [--region R]     # provision infra (S3, IAM, SG)
+    dalston-aws launch [control-plane|gpu]          # launch instances
+    dalston-aws terminate [control-plane|gpu]       # terminate instances
+    dalston-aws up / down                           # start/stop without terminating
+    dalston-aws status / ssh [main|gpu] / teardown
+
+Templates:
+    YAML files in infra/templates/ define instance types, spot preferences,
+    and compose profiles. Presets: cpu, split, gpu.
 
 Prerequisites:
     - AWS credentials configured (boto3 must be able to call sts:GetCallerIdentity)
-    - pip install boto3
+    - pip install boto3 pyyaml
 """
 
 from __future__ import annotations
@@ -25,10 +26,12 @@ import os
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
 import boto3
+import yaml
 from botocore.exceptions import ClientError, WaiterError
 
 # ---------------------------------------------------------------------------
@@ -36,7 +39,9 @@ from botocore.exceptions import ClientError, WaiterError
 # ---------------------------------------------------------------------------
 
 STATE_DIR = Path.home() / ".dalston"
-STATE_FILE = STATE_DIR / "aws-state.json"
+STATE_FILE = STATE_DIR / "aws-state.yaml"
+AUDIT_LOG = STATE_DIR / "audit.log"
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 NAME_PREFIX = "dalston"
 DATA_VOLUME_SIZE = 50
 ROOT_VOLUME_SIZE = 30
@@ -65,6 +70,15 @@ def log(msg: str) -> None:
     print(f"{_GREEN}[dalston-aws]{_NC} {msg}")
 
 
+def audit(action: str, **details: Any) -> None:
+    """Append a line to the audit log."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = {"ts": ts, "action": action, **details}
+    with AUDIT_LOG.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def warn(msg: str) -> None:
     print(f"{_YELLOW}[dalston-aws]{_NC} {msg}")
 
@@ -79,6 +93,53 @@ def die(msg: str) -> NoReturn:
 
 
 # ---------------------------------------------------------------------------
+# Deployment template
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ControlPlaneConfig:
+    instance_type: str = CPU_INSTANCE_TYPE
+    spot: bool = False
+    compose_profiles: list[str] | None = None
+    data_volume_gb: int = DATA_VOLUME_SIZE
+
+
+@dataclass
+class GpuWorkerConfig:
+    instance_type: str = GPU_INSTANCE_TYPE
+    spot: bool = True
+
+
+@dataclass
+class DeploymentTemplate:
+    scenario: str = "split"
+    region: str = DEFAULT_REGION
+    registry: str = DEFAULT_GHCR_REGISTRY
+    control_plane: ControlPlaneConfig | None = None
+    gpu_worker: GpuWorkerConfig | None = None
+
+
+def load_template(path: str | Path) -> DeploymentTemplate:
+    """Load a deployment template from a YAML file."""
+    p = Path(path)
+    if not p.exists():
+        # Try as a preset name: "split" -> infra/templates/split.yaml
+        preset = TEMPLATES_DIR / f"{path}.yaml"
+        if preset.exists():
+            p = preset
+        else:
+            die(f"Template not found: {path}")
+    data = yaml.safe_load(p.read_text())
+    cp = data.pop("control_plane", None) or {}
+    gw = data.pop("gpu_worker", None)
+    tmpl = DeploymentTemplate(**data)
+    tmpl.control_plane = ControlPlaneConfig(**cp)
+    tmpl.gpu_worker = GpuWorkerConfig(**gw) if gw else None
+    return tmpl
+
+
+# ---------------------------------------------------------------------------
 # State dataclass
 # ---------------------------------------------------------------------------
 
@@ -87,6 +148,7 @@ def die(msg: str) -> NoReturn:
 class DeploymentState:
     region: str = DEFAULT_REGION
     scenario: str = "gpu"
+    template: str = ""
     s3_bucket: str = ""
     iam_role: str = ""
     instance_profile: str = ""
@@ -101,15 +163,18 @@ class DeploymentState:
 
 def save_state(state: DeploymentState) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(asdict(state), indent=2) + "\n")
+    STATE_FILE.write_text(
+        yaml.dump(asdict(state), default_flow_style=False, sort_keys=False)
+    )
     log(f"State saved to {STATE_FILE}")
 
 
 def load_state() -> DeploymentState | None:
     if not STATE_FILE.exists():
         return None
-    data = json.loads(STATE_FILE.read_text())
-    return DeploymentState(**data)
+    data = yaml.safe_load(STATE_FILE.read_text())
+    known = set(DeploymentState.__dataclass_fields__)
+    return DeploymentState(**{k: v for k, v in data.items() if k in known})
 
 
 def require_state() -> DeploymentState:
@@ -211,6 +276,8 @@ def wait_instance_running(region: str, instance_id: str) -> None:
 
 
 def wait_instance_terminated(region: str, instance_id: str) -> None:
+    if get_instance_state(region, instance_id) == "terminated":
+        return
     try:
         waiter = ec2_client(region).get_waiter("instance_terminated")
         waiter.wait(InstanceIds=[instance_id])
@@ -622,8 +689,9 @@ def generate_user_data(
     region: str,
     compose_profiles: str,
     use_ghcr: bool = False,
+    registry: str | None = None,
 ) -> str:
-    ghcr_registry = os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
+    ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header
@@ -818,8 +886,9 @@ def generate_gpu_worker_user_data(
     s3_bucket: str,
     region: str,
     ctrl_plane_ip: str,
+    registry: str | None = None,
 ) -> str:
-    ghcr_registry = os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
+    ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
 
     # Part 1: static header
@@ -1229,7 +1298,9 @@ def launch_gpu_interactive(
 # ---------------------------------------------------------------------------
 
 
-def create_and_attach_data_volume(region: str, instance_id: str) -> str:
+def create_and_attach_data_volume(
+    region: str, instance_id: str, size_gb: int = DATA_VOLUME_SIZE
+) -> str:
     ec2 = ec2_client(region)
 
     resp = ec2.describe_instances(InstanceIds=[instance_id])
@@ -1237,7 +1308,7 @@ def create_and_attach_data_volume(region: str, instance_id: str) -> str:
 
     vol_resp = ec2.create_volume(
         AvailabilityZone=az,
-        Size=DATA_VOLUME_SIZE,
+        Size=size_gb,
         VolumeType="gp3",
         Encrypted=True,
         TagSpecifications=[
@@ -1295,11 +1366,16 @@ def cancel_spot_requests_for_instances(region: str, instance_ids: list[str]) -> 
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
-    region = args.region
-    scenario = args.scenario
-    use_spot = args.spot
-    gpu_type = args.gpu_type
+    tmpl = load_template(args.template)
+
+    # CLI overrides on top of template
+    region = args.region or tmpl.region
+    tmpl.region = region
+
+    scenario = tmpl.scenario
     key_name = args.key or f"{NAME_PREFIX}-key"
+
+    audit("setup", scenario=scenario, region=region, template=args.template)
 
     # Check AWS credentials
     try:
@@ -1309,44 +1385,45 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
     # Idempotency check
     existing = load_state()
-    if existing and existing.instance_id:
-        state = get_instance_state(existing.region, existing.instance_id)
-        if state in ("running", "stopped"):
-            log(f"Existing deployment found: {existing.instance_id} (state={state})")
-            log("Infrastructure resources (S3, IAM, SG) will be verified.")
-            log(
-                "Instance will NOT be re-created. Use 'dalston-aws teardown' first to start fresh."
-            )
-            print()
-
-            vpc_id = get_instance_vpc(existing.region, existing.instance_id)
-            existing.s3_bucket = create_s3_bucket(existing.region)
-            existing.iam_role, existing.instance_profile = create_iam_role(
-                existing.region, existing.s3_bucket
-            )
-            existing.key_name = ensure_key_pair(
-                existing.region, existing.key_name or key_name
-            )
-            existing.sg_id = create_security_group(existing.region, vpc_id)
-            save_state(existing)
-            cmd_status_impl(existing)
-            return
-        log(
-            f"Previous instance {existing.instance_id} is {state}. Will create a new one."
+    if existing:
+        log("Existing deployment found. Verifying infrastructure...")
+        vpc_id = get_default_vpc(existing.region)
+        existing.s3_bucket = create_s3_bucket(existing.region)
+        existing.iam_role, existing.instance_profile = create_iam_role(
+            existing.region, existing.s3_bucket
         )
+        existing.key_name = ensure_key_pair(
+            existing.region, existing.key_name or key_name
+        )
+        existing.sg_id = create_security_group(existing.region, vpc_id)
+        if tmpl.gpu_worker and not existing.gpu_sg_id:
+            existing.gpu_sg_id = create_gpu_worker_security_group(
+                existing.region, vpc_id
+            )
+            open_control_plane_ports(
+                existing.region, existing.sg_id, existing.gpu_sg_id
+            )
+        save_state(existing)
+        cmd_status_impl(existing)
+        return
 
     account_id = aws_account_id(region)
     vpc_id = get_default_vpc(region)
 
     print()
     log("Setting up Dalston on AWS")
+    log(f"  Template: {args.template}")
     log(f"  Region:   {region}")
     log(f"  Scenario: {scenario}")
-    log(f"  Spot:     {use_spot}")
     log(f"  Account:  {account_id}")
     print()
 
-    st = DeploymentState(region=region, scenario=scenario, key_name=key_name)
+    st = DeploymentState(
+        region=region,
+        scenario=scenario,
+        template=args.template,
+        key_name=key_name,
+    )
 
     # 1. S3 bucket
     st.s3_bucket = create_s3_bucket(region)
@@ -1357,118 +1434,27 @@ def cmd_setup(args: argparse.Namespace) -> None:
     # 3. Key pair
     st.key_name = ensure_key_pair(region, key_name)
 
-    # 4. Security group
+    # 4. Security groups
     st.sg_id = create_security_group(region, vpc_id)
-
-    # 5. Launch instances
-    if scenario == "cpu":
-        log(f"Launching CPU instance ({CPU_INSTANCE_TYPE})...")
-        ud = generate_user_data(st.s3_bucket, region, "--profile local-infra")
-        st.instance_id = launch_instance(
-            region,
-            CPU_INSTANCE_TYPE,
-            st.sg_id,
-            ud,
-            f"{NAME_PREFIX}-server",
-            use_spot,
-            st.key_name,
-            st.instance_profile,
-        )
-        wait_instance_running(region, st.instance_id)
-        st.data_volume_id = create_and_attach_data_volume(region, st.instance_id)
-
-    elif scenario == "gpu":
-        log(f"Launching GPU instance ({gpu_type})...")
-        ud = generate_user_data(
-            st.s3_bucket, region, "--profile local-infra --profile gpu"
-        )
-        st.instance_id = launch_instance(
-            region,
-            gpu_type,
-            st.sg_id,
-            ud,
-            f"{NAME_PREFIX}-server",
-            use_spot,
-            st.key_name,
-            st.instance_profile,
-        )
-        wait_instance_running(region, st.instance_id)
-        st.data_volume_id = create_and_attach_data_volume(region, st.instance_id)
-
-    elif scenario == "split":
-        # Control plane — always on-demand, uses GHCR images
-        log(f"Launching control plane ({CTRL_INSTANCE_TYPE})...")
-        ctrl_ud = generate_user_data(
-            st.s3_bucket, region, "--profile local-infra", use_ghcr=True
-        )
-        st.instance_id = launch_instance(
-            region,
-            CTRL_INSTANCE_TYPE,
-            st.sg_id,
-            ctrl_ud,
-            f"{NAME_PREFIX}-control-plane",
-            False,  # always on-demand
-            st.key_name,
-            st.instance_profile,
-        )
-        wait_instance_running(region, st.instance_id)
-        st.data_volume_id = create_and_attach_data_volume(region, st.instance_id)
-
-        ctrl_private_ip = get_instance_private_ip(region, st.instance_id)
-
-        # GPU worker security group
+    if tmpl.gpu_worker:
         st.gpu_sg_id = create_gpu_worker_security_group(region, vpc_id)
         open_control_plane_ports(region, st.sg_id, st.gpu_sg_id)
 
-        # GPU worker
-        gpu_ud = generate_gpu_worker_user_data(st.s3_bucket, region, ctrl_private_ip)
-        st.gpu_instance_id = launch_gpu_interactive(
-            region,
-            st.gpu_sg_id,
-            gpu_ud,
-            f"{NAME_PREFIX}-gpu-worker",
-            use_spot,
-            st.key_name,
-            st.instance_profile,
-            gpu_type,
-        )
-        wait_instance_running(region, st.gpu_instance_id)
-        st.gpu_data_volume_id = ""  # GPU uses NVMe instance store
-
     save_state(st)
+    audit("setup.done", scenario=scenario)
 
-    # Summary
     print()
-    print("==========================================")
-    log("Setup complete!")
-    print("==========================================")
-    print()
-    ip = get_instance_ip(region, st.instance_id)
-    log(f"Instance: {st.instance_id} ({ip})")
-    if scenario == "split":
-        gpu_ip = get_instance_ip(region, st.gpu_instance_id)
-        log(f"GPU worker: {st.gpu_instance_id} ({gpu_ip})")
-    print()
-    log("Next steps:")
-    print("  1. SSH to the instance:")
-    print(f"     ssh -i {STATE_DIR / st.key_name}.pem ec2-user@{ip}")
-    print("  2. Set up Tailscale:")
-    print("     sudo tailscale up")
-    print("  3. Clone your repo to /data/dalston and start:")
-    print("     sudo systemctl start dalston")
-    print()
-    log("Management commands:")
-    print("  dalston-aws status   # Check instance state")
-    print("  dalston-aws up       # Start instance(s)")
-    print("  dalston-aws down     # Stop instance(s)")
-    print("  dalston-aws ssh      # SSH via Tailscale")
-    print("  dalston-aws teardown # Remove everything")
+    log("Infrastructure ready.")
+    log("Next: dalston-aws launch control-plane")
+    cmd_status_impl(st)
 
 
 def cmd_status_impl(st: DeploymentState) -> None:
     print()
     log("Dalston AWS Deployment")
     log(f"  Scenario: {st.scenario}")
+    if st.template:
+        log(f"  Template: {st.template}")
     log(f"  Region:   {st.region}")
     log(f"  S3:       {st.s3_bucket}")
     print()
@@ -1494,27 +1480,239 @@ def cmd_status(args: argparse.Namespace) -> None:
     cmd_status_impl(st)
 
 
+def _launch_control_plane(st: DeploymentState, tmpl: DeploymentTemplate) -> None:
+    """Launch the control plane instance."""
+    if st.instance_id:
+        state = get_instance_state(st.region, st.instance_id)
+        if state in ("running", "stopped"):
+            die(f"Control plane already exists ({st.instance_id}, state={state}).")
+
+    cp = tmpl.control_plane
+    compose_profiles = " ".join(f"--profile {p}" for p in (cp.compose_profiles or []))
+    tag = (
+        f"{NAME_PREFIX}-control-plane"
+        if tmpl.scenario == "split"
+        else f"{NAME_PREFIX}-server"
+    )
+
+    log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot})...")
+    ud = generate_user_data(
+        st.s3_bucket, st.region, compose_profiles, use_ghcr=True, registry=tmpl.registry
+    )
+    st.instance_id = launch_instance(
+        st.region,
+        cp.instance_type,
+        st.sg_id,
+        ud,
+        tag,
+        cp.spot,
+        st.key_name,
+        st.instance_profile,
+    )
+    wait_instance_running(st.region, st.instance_id)
+    st.data_volume_id = create_and_attach_data_volume(
+        st.region, st.instance_id, cp.data_volume_gb
+    )
+    save_state(st)
+
+    ip = get_instance_ip(st.region, st.instance_id)
+    audit("launch.control-plane", instance=st.instance_id, ip=ip)
+    log(f"Control plane running: {st.instance_id} ({ip})")
+
+
+def _launch_gpu(
+    st: DeploymentState,
+    tmpl: DeploymentTemplate,
+    *,
+    spot: bool | None = None,
+    gpu_type: str | None = None,
+) -> None:
+    """Launch the GPU worker instance."""
+    gw = tmpl.gpu_worker
+    if not gw:
+        die("Template has no gpu_worker config.")
+
+    use_spot = spot if spot is not None else gw.spot
+    gpu_type = gpu_type or gw.instance_type
+
+    if st.gpu_instance_id:
+        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
+        if gpu_state != "terminated":
+            die(f"GPU worker already exists ({st.gpu_instance_id}, state={gpu_state}).")
+
+    if not st.instance_id:
+        die("Control plane not launched. Run 'dalston-aws launch control-plane' first.")
+    main_state = get_instance_state(st.region, st.instance_id)
+    if main_state != "running":
+        die(f"Control plane is {main_state}. Run 'dalston-aws up' first.")
+
+    ctrl_private_ip = get_instance_private_ip(st.region, st.instance_id)
+
+    if not st.gpu_sg_id:
+        die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
+
+    log(f"Launching GPU worker ({gpu_type}, spot={use_spot})...")
+
+    gpu_ud = generate_gpu_worker_user_data(
+        st.s3_bucket, st.region, ctrl_private_ip, registry=tmpl.registry
+    )
+    st.gpu_instance_id = launch_gpu_interactive(
+        st.region,
+        st.gpu_sg_id,
+        gpu_ud,
+        f"{NAME_PREFIX}-gpu-worker",
+        use_spot,
+        st.key_name,
+        st.instance_profile,
+        gpu_type,
+    )
+    wait_instance_running(st.region, st.gpu_instance_id)
+    st.gpu_data_volume_id = ""
+    save_state(st)
+
+    gpu_ip = get_instance_ip(st.region, st.gpu_instance_id)
+    audit("launch.gpu", gpu_instance=st.gpu_instance_id, gpu_type=gpu_type, ip=gpu_ip)
+    log(f"GPU worker running: {st.gpu_instance_id} ({gpu_ip})")
+
+
+def cmd_launch(args: argparse.Namespace) -> None:
+    st = require_state()
+    if not st.template:
+        die("No template recorded in state. Re-run 'dalston-aws setup -t TEMPLATE'.")
+    tmpl = load_template(st.template)
+    target = args.target
+
+    if target in ("control-plane", None):
+        _launch_control_plane(st, tmpl)
+    if target in ("gpu", None):
+        if tmpl.gpu_worker:
+            _launch_gpu(
+                st,
+                tmpl,
+                spot=args.spot or None,
+                gpu_type=args.gpu_type,
+            )
+        elif target == "gpu":
+            die("Template has no gpu_worker config.")
+
+    cmd_status_impl(st)
+
+
+def _terminate_gpu(st: DeploymentState) -> None:
+    """Terminate the GPU worker and clean up its resources."""
+    if not st.gpu_instance_id:
+        log("No GPU worker to terminate.")
+        return
+
+    ec2 = ec2_client(st.region)
+
+    if get_instance_state(st.region, st.gpu_instance_id) != "terminated":
+        audit("terminate.gpu", gpu_instance=st.gpu_instance_id)
+        cancel_spot_requests_for_instances(st.region, [st.gpu_instance_id])
+        log(f"Terminating GPU worker {st.gpu_instance_id}...")
+        try:
+            ec2.terminate_instances(InstanceIds=[st.gpu_instance_id])
+        except ClientError:
+            pass
+        wait_instance_terminated(st.region, st.gpu_instance_id)
+
+    if st.gpu_data_volume_id:
+        log(f"Deleting GPU data volume {st.gpu_data_volume_id}...")
+        try:
+            ec2.delete_volume(VolumeId=st.gpu_data_volume_id)
+        except ClientError:
+            pass
+
+    st.gpu_instance_id = ""
+    st.gpu_data_volume_id = ""
+    save_state(st)
+    log("GPU worker terminated.")
+
+
+def _terminate_control_plane(st: DeploymentState) -> None:
+    """Terminate the control plane and clean up its resources."""
+    if not st.instance_id:
+        log("No control plane to terminate.")
+        return
+
+    ec2 = ec2_client(st.region)
+
+    if get_instance_state(st.region, st.instance_id) != "terminated":
+        audit("terminate.control-plane", instance=st.instance_id)
+        cancel_spot_requests_for_instances(st.region, [st.instance_id])
+        log(f"Terminating control plane {st.instance_id}...")
+        try:
+            ec2.terminate_instances(InstanceIds=[st.instance_id])
+        except ClientError:
+            pass
+        wait_instance_terminated(st.region, st.instance_id)
+
+    if st.data_volume_id:
+        log(f"Deleting data volume {st.data_volume_id}...")
+        try:
+            ec2.delete_volume(VolumeId=st.data_volume_id)
+        except ClientError:
+            pass
+
+    # Delete security groups (GPU SG first since control plane SG may reference it)
+    time.sleep(3)
+    for sg_attr in ("gpu_sg_id", "sg_id"):
+        sg_id = getattr(st, sg_attr)
+        if sg_id:
+            log(f"Deleting security group {sg_id}...")
+            try:
+                ec2.delete_security_group(GroupId=sg_id)
+            except ClientError:
+                pass
+
+    st.instance_id = ""
+    st.data_volume_id = ""
+    st.sg_id = ""
+    st.gpu_sg_id = ""
+    save_state(st)
+    log("Control plane terminated.")
+
+
+def cmd_terminate(args: argparse.Namespace) -> None:
+    st = require_state()
+    target = args.target
+
+    if target is None:
+        warn("This will terminate ALL instances.")
+        confirm = input("Type 'yes' to confirm: ").strip()
+        if confirm != "yes":
+            die("Aborted.")
+
+    # GPU first, then control plane
+    if target in ("gpu", None):
+        _terminate_gpu(st)
+    if target in ("control-plane", None):
+        _terminate_control_plane(st)
+
+    cmd_status_impl(st)
+
+
 def cmd_up(args: argparse.Namespace) -> None:
     st = require_state()
+    if not st.instance_id:
+        die("No instances to start. Run 'dalston-aws launch control-plane' first.")
+    audit("up", instance=st.instance_id, gpu_instance=st.gpu_instance_id or None)
     log("Starting instance(s)...")
     ec2 = ec2_client(st.region)
+
+    cp_state = get_instance_state(st.region, st.instance_id)
+    if cp_state == "terminated":
+        warn(f"Control plane {st.instance_id} was terminated.")
+        _terminate_control_plane(st)
+        die("Run 'dalston-aws launch control-plane' to launch a new one.")
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
-    if st.scenario == "split" and st.gpu_instance_id:
-        # Check if the GPU spot instance was terminated (can't be restarted)
-        resp = ec2.describe_instances(InstanceIds=[st.gpu_instance_id])
-        reservations = resp.get("Reservations", [])
-        state = (
-            reservations[0]["Instances"][0]["State"]["Name"]
-            if reservations and reservations[0].get("Instances")
-            else "terminated"
-        )
-        if state == "terminated":
-            warn(
-                f"GPU spot instance {st.gpu_instance_id} was terminated. Clearing from state."
-            )
-            warn("Run 'dalston-aws add-gpu --spot' to launch a new one.")
-            st.gpu_instance_id = ""
-            save_state(st)
+
+    if st.gpu_instance_id:
+        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
+        if gpu_state == "terminated":
+            warn(f"GPU instance {st.gpu_instance_id} was terminated.")
+            _terminate_gpu(st)
+            warn("Run 'dalston-aws launch gpu' to launch a new one.")
         else:
             retry_aws(ec2.start_instances, InstanceIds=[st.gpu_instance_id])
     log("Start command sent. Instances booting...")
@@ -1535,14 +1733,15 @@ def _stop_instance(ec2, region: str, instance_id: str) -> None:
 
 def cmd_down(args: argparse.Namespace) -> None:
     st = require_state()
+    if not st.instance_id:
+        die("No instances to stop. Run 'dalston-aws launch control-plane' first.")
+    audit("down", instance=st.instance_id, gpu_instance=st.gpu_instance_id or None)
     log("Stopping instance(s)...")
     ec2 = ec2_client(st.region)
     _stop_instance(ec2, st.region, st.instance_id)
-    if st.scenario == "split" and st.gpu_instance_id:
+    if st.gpu_instance_id:
         _stop_instance(ec2, st.region, st.gpu_instance_id)
-    log(
-        "Done. Use 'dalston-aws up' to restart (add-gpu again for terminated spot workers)."
-    )
+    log("Done. Use 'dalston-aws up' to restart.")
 
 
 def _resolve_tailscale_host(base_hostname: str) -> str:
@@ -1596,136 +1795,14 @@ def cmd_ssh(args: argparse.Namespace) -> None:
     os.execvp("ssh", ssh_args)
 
 
-def cmd_add_gpu(args: argparse.Namespace) -> None:
-    st = require_state()
-    use_spot = args.spot
-    gpu_type = args.gpu_type
-
-    if st.gpu_instance_id:
-        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
-        if gpu_state != "terminated":
-            die(
-                f"GPU worker already exists ({st.gpu_instance_id}, state={gpu_state}). "
-                "Use 'dalston-aws remove-gpu' first."
-            )
-
-    main_state = get_instance_state(st.region, st.instance_id)
-    if main_state != "running":
-        die(
-            f"Main instance {st.instance_id} is {main_state}. Run 'dalston-aws up' first."
-        )
-
-    ctrl_private_ip = get_instance_private_ip(st.region, st.instance_id)
-    vpc_id = get_instance_vpc(st.region, st.instance_id)
-
-    log("Adding GPU worker to existing deployment")
-    log(f"  Main instance: {st.instance_id} ({ctrl_private_ip})")
-    log(f"  GPU type:      {gpu_type}")
-    log(f"  Spot:          {use_spot}")
-    print()
-
-    # GPU worker security group
-    st.gpu_sg_id = create_gpu_worker_security_group(st.region, vpc_id)
-    open_control_plane_ports(st.region, st.sg_id, st.gpu_sg_id)
-
-    # Launch GPU worker
-    gpu_ud = generate_gpu_worker_user_data(st.s3_bucket, st.region, ctrl_private_ip)
-    st.gpu_instance_id = launch_gpu_interactive(
-        st.region,
-        st.gpu_sg_id,
-        gpu_ud,
-        f"{NAME_PREFIX}-gpu-worker",
-        use_spot,
-        st.key_name,
-        st.instance_profile,
-        gpu_type,
-    )
-    wait_instance_running(st.region, st.gpu_instance_id)
-    st.gpu_data_volume_id = ""  # GPU uses NVMe instance store
-
-    st.scenario = "split"
-    save_state(st)
-
-    print()
-    print("==========================================")
-    log("GPU worker added!")
-    print("==========================================")
-    print()
-    log(
-        f"GPU worker: {st.gpu_instance_id} ({get_instance_ip(st.region, st.gpu_instance_id)})"
-    )
-    print()
-    log("Next steps on the GPU worker:")
-    print("  1. SSH: dalston-aws ssh gpu")
-    print("  2. sudo tailscale up")
-    print("  3. Update .env.gpu REDIS_URL/DATABASE_URL with control plane Tailscale IP")
-    print("  4. sudo systemctl start dalston-gpu")
-
-
-def cmd_remove_gpu(args: argparse.Namespace) -> None:
-    st = require_state()
-
-    if not st.gpu_instance_id:
-        die("No GPU worker found. Nothing to remove.")
-
-    gpu_state = get_instance_state(st.region, st.gpu_instance_id)
-    if gpu_state == "terminated":
-        log("GPU worker already terminated. Cleaning up state...")
-        st.gpu_instance_id = ""
-        st.gpu_data_volume_id = ""
-        st.gpu_sg_id = ""
-        main_type = get_instance_type(st.region, st.instance_id)
-        st.scenario = "gpu" if main_type.startswith(("g", "p")) else "cpu"
-        save_state(st)
-        log("State cleaned up.")
-        return
-
-    warn(
-        f"This will terminate GPU worker {st.gpu_instance_id} and delete its data volume."
-    )
-    confirm = input("Type 'yes' to confirm: ").strip()
-    if confirm != "yes":
-        die("Aborted.")
-
-    ec2 = ec2_client(st.region)
-
-    # Cancel spot requests before terminating
-    cancel_spot_requests_for_instances(st.region, [st.gpu_instance_id])
-
-    log(f"Terminating GPU worker {st.gpu_instance_id}...")
-    try:
-        ec2.terminate_instances(InstanceIds=[st.gpu_instance_id])
-    except ClientError:
-        pass
-    wait_instance_terminated(st.region, st.gpu_instance_id)
-
-    if st.gpu_data_volume_id:
-        log(f"Deleting GPU data volume {st.gpu_data_volume_id}...")
-        try:
-            ec2.delete_volume(VolumeId=st.gpu_data_volume_id)
-        except ClientError:
-            pass
-
-    if st.gpu_sg_id:
-        log(f"Deleting GPU security group {st.gpu_sg_id}...")
-        time.sleep(3)
-        try:
-            ec2.delete_security_group(GroupId=st.gpu_sg_id)
-        except ClientError:
-            pass
-
-    main_type = get_instance_type(st.region, st.instance_id)
-    st.scenario = "gpu" if main_type.startswith(("g", "p")) else "cpu"
-    st.gpu_instance_id = ""
-    st.gpu_data_volume_id = ""
-    st.gpu_sg_id = ""
-    save_state(st)
-
-    log(f"GPU worker removed. Deployment is now single-instance ({st.scenario}).")
-
-
 def cmd_teardown(args: argparse.Namespace) -> None:
     st = require_state()
+    audit(
+        "teardown",
+        instance=st.instance_id,
+        gpu_instance=st.gpu_instance_id or None,
+        s3_bucket=st.s3_bucket,
+    )
 
     print()
     warn("This will PERMANENTLY DELETE all Dalston AWS resources:")
@@ -1748,60 +1825,12 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     if confirm != "yes":
         die("Aborted.")
 
-    ec2 = ec2_client(st.region)
-    iam = iam_client()
-
-    # Cancel spot requests before terminating
-    ids_to_cancel = [st.instance_id]
-    if st.gpu_instance_id:
-        ids_to_cancel.append(st.gpu_instance_id)
-    cancel_spot_requests_for_instances(st.region, ids_to_cancel)
-
-    # Terminate instances
-    log("Terminating instances...")
-    try:
-        ec2.terminate_instances(InstanceIds=[st.instance_id])
-    except ClientError:
-        pass
-    if st.gpu_instance_id:
-        try:
-            ec2.terminate_instances(InstanceIds=[st.gpu_instance_id])
-        except ClientError:
-            pass
-
-    log("Waiting for termination...")
-    wait_instance_terminated(st.region, st.instance_id)
-    if st.gpu_instance_id:
-        wait_instance_terminated(st.region, st.gpu_instance_id)
-
-    # Delete data volumes
-    log("Deleting data volumes...")
-    if st.data_volume_id:
-        try:
-            ec2.delete_volume(VolumeId=st.data_volume_id)
-        except ClientError:
-            pass
-    if st.gpu_data_volume_id:
-        try:
-            ec2.delete_volume(VolumeId=st.gpu_data_volume_id)
-        except ClientError:
-            pass
-
-    # Delete security groups
-    log("Deleting security groups...")
-    time.sleep(5)
-    if st.sg_id:
-        try:
-            ec2.delete_security_group(GroupId=st.sg_id)
-        except ClientError:
-            pass
-    if st.gpu_sg_id:
-        try:
-            ec2.delete_security_group(GroupId=st.gpu_sg_id)
-        except ClientError:
-            pass
+    # Terminate instances and clean up volumes/SGs
+    _terminate_gpu(st)
+    _terminate_control_plane(st)
 
     # Delete IAM resources
+    iam = iam_client()
     log("Deleting IAM role...")
     profile_name = st.instance_profile or f"{NAME_PREFIX}-instance-profile"
     role_name = st.iam_role or f"{NAME_PREFIX}-ec2-role"
@@ -1851,27 +1880,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # setup
     p_setup = sub.add_parser(
-        "setup", help="Provision AWS resources and launch instance(s)"
+        "setup", help="Provision AWS infrastructure (S3, IAM, SG, keypair)"
     )
-    scenario_group = p_setup.add_mutually_exclusive_group()
-    scenario_group.add_argument(
-        "--cpu", dest="scenario", action="store_const", const="cpu"
+    p_setup.add_argument(
+        "--template",
+        "-t",
+        required=True,
+        help="Template name (cpu, split, gpu) or path to YAML file",
     )
-    scenario_group.add_argument(
-        "--gpu", dest="scenario", action="store_const", const="gpu"
-    )
-    scenario_group.add_argument(
-        "--split", dest="scenario", action="store_const", const="split"
-    )
-    p_setup.set_defaults(scenario="gpu")
-    p_setup.add_argument("--spot", action="store_true", help="Use spot pricing")
     p_setup.add_argument(
         "--region", default=os.environ.get("AWS_REGION", DEFAULT_REGION)
     )
     p_setup.add_argument("--key", default=None, help="Existing SSH key pair name")
-    p_setup.add_argument(
-        "--gpu-type", default=GPU_INSTANCE_TYPE, help="GPU instance type"
-    )
     p_setup.set_defaults(func=cmd_setup)
 
     # teardown
@@ -1901,17 +1921,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ssh.set_defaults(func=cmd_ssh)
 
-    # add-gpu
-    p_add = sub.add_parser("add-gpu", help="Add a GPU worker to existing deployment")
-    p_add.add_argument("--spot", action="store_true", help="Use spot pricing")
-    p_add.add_argument(
-        "--gpu-type", default=GPU_INSTANCE_TYPE, help="GPU instance type"
+    # launch
+    p_launch = sub.add_parser(
+        "launch", help="Launch instance(s) (control-plane, gpu, or all)"
     )
-    p_add.set_defaults(func=cmd_add_gpu)
+    p_launch.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        choices=["control-plane", "gpu"],
+        help="Component to launch (default: all from template)",
+    )
+    p_launch.add_argument("--spot", action="store_true", help="Use spot pricing")
+    p_launch.add_argument(
+        "--gpu-type", default=None, help="GPU instance type (overrides template)"
+    )
+    p_launch.set_defaults(func=cmd_launch)
 
-    # remove-gpu
-    p_remove = sub.add_parser("remove-gpu", help="Remove the GPU worker")
-    p_remove.set_defaults(func=cmd_remove_gpu)
+    # terminate
+    p_term = sub.add_parser(
+        "terminate", help="Terminate instance(s) (control-plane, gpu, or all)"
+    )
+    p_term.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        choices=["control-plane", "gpu"],
+        help="Component to terminate (default: all, requires confirmation)",
+    )
+    p_term.set_defaults(func=cmd_terminate)
 
     return parser
 

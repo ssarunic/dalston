@@ -1,0 +1,12 @@
+# Dalston AWS — single CPU instance (all services on one box)
+scenario: cpu
+
+region: eu-west-2
+registry: ghcr.io/ssarunic/dalston
+
+control_plane:
+  instance_type: t3.xlarge
+  spot: false
+  compose_profiles:
+    - local-infra
+  data_volume_gb: 50
