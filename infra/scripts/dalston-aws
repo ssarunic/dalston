@@ -1201,17 +1201,21 @@ def list_gpu_spot_instances(region: str) -> None:
 
     ec2 = ec2_client(region)
 
-    # Paginate through all instance types with GPU
-    paginator = ec2.get_paginator("describe_instance_types")
+    # Query known GPU instance families directly
+    gpu_families = [
+        f"{fam}.{sz}"
+        for fam in ("g4dn", "g5", "g6", "g6e", "p3", "p4d", "p5")
+        for sz in ("xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge")
+    ]
     gpu_types: list[dict] = []
-    for page in paginator.paginate(
-        Filters=[
-            {"Name": "processor-info.supported-architectures", "Values": ["x86_64"]}
-        ]
-    ):
-        for it in page["InstanceTypes"]:
-            if it.get("GpuInfo"):
-                gpu_types.append(it)
+    # Query in batches (API limit is 100 per call)
+    for i in range(0, len(gpu_families), 100):
+        batch = gpu_families[i : i + 100]
+        try:
+            resp = ec2.describe_instance_types(InstanceTypes=batch)
+            gpu_types.extend(resp.get("InstanceTypes", []))
+        except ClientError:
+            pass
 
     gpu_types.sort(key=lambda t: t["InstanceType"])
 
@@ -1582,6 +1586,9 @@ def cmd_launch(args: argparse.Namespace) -> None:
     tmpl = load_template(st.template)
     target = args.target
 
+    # Resolve spot override: --spot → True, --on-demand → False, neither → None (use template)
+    spot_override = True if args.spot else (False if args.on_demand else None)
+
     if target in ("control-plane", None):
         _launch_control_plane(st, tmpl)
     if target in ("gpu", None):
@@ -1589,7 +1596,7 @@ def cmd_launch(args: argparse.Namespace) -> None:
             _launch_gpu(
                 st,
                 tmpl,
-                spot=args.spot or None,
+                spot=spot_override,
                 gpu_type=args.gpu_type,
             )
         elif target == "gpu":
@@ -1932,7 +1939,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["control-plane", "gpu"],
         help="Component to launch (default: all from template)",
     )
-    p_launch.add_argument("--spot", action="store_true", help="Use spot pricing")
+    spot_group = p_launch.add_mutually_exclusive_group()
+    spot_group.add_argument("--spot", action="store_true", help="Force spot pricing")
+    spot_group.add_argument(
+        "--on-demand", action="store_true", help="Force on-demand pricing"
+    )
     p_launch.add_argument(
         "--gpu-type", default=None, help="GPU instance type (overrides template)"
     )
