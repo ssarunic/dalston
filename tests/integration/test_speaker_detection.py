@@ -78,7 +78,8 @@ class TestDiarizeDAG:
         align_id = by_stage["align"].id
 
         assert prepare_id in by_stage["diarize"].dependencies
-        assert align_id in by_stage["diarize"].dependencies
+        # Diarize runs in parallel with transcribe/align — no dependency on align
+        assert align_id not in by_stage["diarize"].dependencies
 
     def test_align_depends_on_transcribe(self, job_id, audio_uri):
         """Align stage depends on transcribe."""
@@ -91,10 +92,8 @@ class TestDiarizeDAG:
         by_stage = {t.stage: t for t in tasks}
         assert by_stage["transcribe"].id in by_stage["align"].dependencies
 
-    def test_diarize_without_align_depends_on_prepare_and_transcribe(
-        self, job_id, audio_uri
-    ):
-        """Without alignment, diarize depends on prepare and transcribe."""
+    def test_diarize_without_align_depends_only_on_prepare(self, job_id, audio_uri):
+        """Without alignment, diarize depends only on prepare (parallel with transcribe)."""
         tasks = build_task_dag_for_test(
             job_id=job_id,
             audio_uri=audio_uri,
@@ -108,8 +107,8 @@ class TestDiarizeDAG:
         diarize_deps = set(by_stage["diarize"].dependencies)
 
         assert by_stage["prepare"].id in diarize_deps
-        assert by_stage["transcribe"].id in diarize_deps
-        assert len(diarize_deps) == 2
+        assert by_stage["transcribe"].id not in diarize_deps
+        assert len(diarize_deps) == 1
 
     def test_diarize_uses_correct_engine(self, job_id, audio_uri):
         """Diarize task uses the pyannote engine."""
