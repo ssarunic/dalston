@@ -4,6 +4,7 @@ Uses pyannote-audio 4.0 with the new Community-1 pipeline featuring
 VBx clustering for improved speaker counting and assignment.
 
 Requires HuggingFace token for accessing gated models.
+Automatically chunks long audio files to avoid GPU OOM (see M84).
 """
 
 import os
@@ -17,6 +18,12 @@ from dalston.engine_sdk import (
     TaskRequest,
     TaskResponse,
     detect_device,
+)
+from dalston.engine_sdk.diarize_chunking import (
+    DEFAULT_MAX_CHUNK_S,
+    get_audio_duration,
+    overlap_stats_from_turns,
+    run_chunked_diarization,
 )
 
 
@@ -41,7 +48,14 @@ class PyannoteEngine(Engine):
         self._pipelines: dict[str, Any] = {}
         self._active_model_id: str | None = None
         self._device = detect_device()
-        self.logger.info("pyannote_4_0_engine_initialized", device=self._device)
+        self._max_chunk_s = float(
+            os.environ.get("DALSTON_MAX_DIARIZE_CHUNK_S", DEFAULT_MAX_CHUNK_S)
+        )
+        self.logger.info(
+            "pyannote_4_0_engine_initialized",
+            device=self._device,
+            max_chunk_s=self._max_chunk_s,
+        )
 
     def _get_hf_token(self, config: dict[str, Any]) -> str:
         """Get HuggingFace token from config or environment.
@@ -115,6 +129,8 @@ class PyannoteEngine(Engine):
             TaskResponse with DiarizationResponse containing speakers and turns
         """
         audio_path = task_request.audio_path
+        if audio_path is None:
+            raise ValueError("audio_path is required for diarization")
         params = task_request.get_diarize_params()
 
         self.logger.info("processing_diarization", audio_path=str(audio_path))
@@ -145,25 +161,40 @@ class PyannoteEngine(Engine):
         self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
         try:
             # Build diarization parameters
-            diarization_params = {}
+            diarization_params: dict[str, Any] = {}
             if min_speakers is not None:
                 diarization_params["min_speakers"] = min_speakers
             if max_speakers is not None:
                 diarization_params["max_speakers"] = max_speakers
 
-            self.logger.info("running_diarization")
-            diarization = pipeline(str(audio_path), **diarization_params)
+            # Check duration and branch to chunked path if needed
+            duration = get_audio_duration(audio_path)
 
-            # Apply exclusive mode if requested (new in pyannote 4.0)
-            # This provides single-speaker output per segment for easier Whisper alignment
-            if exclusive and hasattr(diarization, "exclusive_speaker_diarization"):
-                diarization = diarization.exclusive_speaker_diarization
+            if duration > self._max_chunk_s:
+                speakers, turns = run_chunked_diarization(
+                    pipeline,
+                    audio_path,
+                    diarization_params,
+                    hf_token=hf_token,
+                    device=self._device,
+                    convert_annotation=self._convert_annotation,
+                    exclusive=bool(exclusive),
+                    max_chunk_s=self._max_chunk_s,
+                    log=self.logger,
+                )
+                overlap_duration, overlap_ratio = overlap_stats_from_turns(turns)
+            else:
+                self.logger.info("running_diarization")
+                diarization = pipeline(str(audio_path), **diarization_params)
 
-            # Convert pyannote output to our format
-            speakers, turns = self._convert_annotation(diarization)
+                # Apply exclusive mode if requested (new in pyannote 4.0)
+                if exclusive and hasattr(diarization, "exclusive_speaker_diarization"):
+                    diarization = diarization.exclusive_speaker_diarization
 
-            # Calculate overlap statistics using pyannote's native overlap detection
-            overlap_duration, overlap_ratio = self._calculate_overlap_stats(diarization)
+                speakers, turns = self._convert_annotation(diarization)
+                overlap_duration, overlap_ratio = self._calculate_overlap_stats(
+                    diarization
+                )
 
             self.logger.info(
                 "diarization_complete",
