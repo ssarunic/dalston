@@ -23,6 +23,8 @@ import argparse
 import base64
 import json
 import os
+import shlex
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -54,6 +56,7 @@ DEFAULT_REGION = "eu-west-2"
 GPU_INSTANCE_TYPE = "g4dn.xlarge"
 CPU_INSTANCE_TYPE = "t3.xlarge"
 CTRL_INSTANCE_TYPE = "t3.large"
+LOKI_DRIVER_VERSION = "3.6.7"
 
 # ---------------------------------------------------------------------------
 # Colored output helpers
@@ -159,6 +162,7 @@ class DeploymentState:
     gpu_data_volume_id: str = ""  # unused — GPU uses NVMe; kept for state compat
     gpu_sg_id: str = ""
     key_name: str = ""
+    observability: bool = False
 
 
 def save_state(state: DeploymentState) -> None:
@@ -515,7 +519,21 @@ def _create_sg(region: str, vpc_id: str, name: str, description: str) -> str:
                 "FromPort": 22,
                 "ToPort": 22,
                 "IpRanges": [{"CidrIp": "100.64.0.0/10"}],
-            }
+            },
+            # Grafana dashboard (observability)
+            {
+                "IpProtocol": "tcp",
+                "FromPort": 3001,
+                "ToPort": 3001,
+                "IpRanges": [{"CidrIp": "100.64.0.0/10"}],
+            },
+            # Jaeger UI (observability)
+            {
+                "IpProtocol": "tcp",
+                "FromPort": 16686,
+                "ToPort": 16686,
+                "IpRanges": [{"CidrIp": "100.64.0.0/10"}],
+            },
         ],
     )
 
@@ -546,24 +564,53 @@ def create_gpu_worker_security_group(region: str, vpc_id: str) -> str:
     )
 
 
-def open_control_plane_ports(region: str, ctrl_sg_id: str, gpu_sg_id: str) -> None:
+def _open_sg_ports(
+    region: str,
+    target_sg: str,
+    source_sg: str,
+    ports: list[tuple[int, int]],
+) -> None:
+    """Allow TCP traffic on *ports* from *source_sg* into *target_sg*.
+
+    Each entry in *ports* is (from_port, to_port). Duplicate rules are ignored.
+    """
     ec2 = ec2_client(region)
-    for port in (6379, 5432):
-        try:
-            ec2.authorize_security_group_ingress(
-                GroupId=ctrl_sg_id,
-                IpPermissions=[
-                    {
-                        "IpProtocol": "tcp",
-                        "FromPort": port,
-                        "ToPort": port,
-                        "UserIdGroupPairs": [{"GroupId": gpu_sg_id}],
-                    }
-                ],
-            )
-        except ClientError:
-            pass  # rule already exists
+    perms = [
+        {
+            "IpProtocol": "tcp",
+            "FromPort": lo,
+            "ToPort": hi,
+            "UserIdGroupPairs": [{"GroupId": source_sg}],
+        }
+        for lo, hi in ports
+    ]
+    try:
+        ec2.authorize_security_group_ingress(GroupId=target_sg, IpPermissions=perms)
+    except ClientError:
+        # Batch call fails if *any* rule exists; fall back to per-rule
+        for perm in perms:
+            try:
+                ec2.authorize_security_group_ingress(
+                    GroupId=target_sg, IpPermissions=[perm]
+                )
+            except ClientError:
+                pass  # rule already exists
+
+
+def open_control_plane_ports(region: str, ctrl_sg_id: str, gpu_sg_id: str) -> None:
+    _open_sg_ports(region, ctrl_sg_id, gpu_sg_id, [(6379, 6379), (5432, 5432)])
     log("Control plane ports 6379,5432 open to GPU worker")
+
+
+def open_observability_ports(region: str, ctrl_sg_id: str, gpu_sg_id: str) -> None:
+    """Open observability ports between control plane and GPU worker."""
+    # GPU → control plane: Loki + Jaeger OTLP
+    _open_sg_ports(region, ctrl_sg_id, gpu_sg_id, [(3100, 3100), (4317, 4317)])
+    # Control plane → GPU: Prometheus scraping
+    _open_sg_ports(region, gpu_sg_id, ctrl_sg_id, [(9100, 9101)])
+    log(
+        "Observability ports open: Loki(3100),Jaeger(4317) on ctrl; metrics(9100-9101) on GPU"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +640,17 @@ def ensure_key_pair(region: str, key_name: str) -> str:
 # ---------------------------------------------------------------------------
 # Tailscale cloud-init block (shared by CPU and GPU)
 # ---------------------------------------------------------------------------
+
+
+def _loki_driver_cloud_init_block() -> str:
+    """Return shell snippet that installs the Loki Docker log driver plugin."""
+    return f"""\
+# Install Loki Docker log driver if observability is enabled
+if [ "$OBSERVABILITY" = "true" ]; then
+  echo "Installing Loki Docker log driver..."
+  docker plugin install grafana/loki-docker-driver:{LOKI_DRIVER_VERSION} --alias loki --grant-all-permissions || true
+fi
+"""
 
 
 def _tailscale_cloud_init_block(hostname: str) -> str:
@@ -690,9 +748,26 @@ def generate_user_data(
     compose_profiles: str,
     use_ghcr: bool = False,
     registry: str | None = None,
+    observability: bool = False,
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
+
+    # Build compose files and services list (controlled here, used as bash vars)
+    ctrl_services = "postgres redis gateway orchestrator stt-prepare"
+    if use_ghcr:
+        compose_files = "-f docker-compose.yml -f infra/docker/docker-compose.aws.yml -f infra/docker/docker-compose.ghcr.yml"
+        compose_up_flags = "--no-build"
+    else:
+        compose_files = "-f docker-compose.yml -f infra/docker/docker-compose.aws.yml"
+        compose_up_flags = ""
+
+    if observability:
+        compose_files += " -f infra/docker/docker-compose.observability.aws.yml"
+        compose_profiles += " --profile observability"
+        ctrl_services += " jaeger prometheus grafana loki metrics-exporter"
+
+    otel_enabled = "true" if observability else "false"
 
     # Part 1: static header
     header = """\
@@ -714,9 +789,15 @@ GHCR_REGISTRY="{ghcr_registry}"
 REPO_URL="{REPO_URL}"
 HF_TOKEN="{hf_token}"
 REPO_BRANCH="{REPO_BRANCH}"
+OBSERVABILITY="{"true" if observability else "false"}"
+OTEL_ENABLED="{otel_enabled}"
+CTRL_SERVICES="{ctrl_services}"
+COMPOSE_FILES="{compose_files}"
+COMPOSE_UP_FLAGS="{compose_up_flags}"
 """
 
     tailscale_block = _tailscale_cloud_init_block("dalston-control-plane")
+    loki_driver_block = _loki_driver_cloud_init_block()
 
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
     body = (
@@ -778,6 +859,9 @@ fi
 
 # Create data directories
 mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston"
+if [ "$OBSERVABILITY" = "true" ]; then
+  mkdir -p "$DATA_MOUNT/prometheus" "$DATA_MOUNT/loki" "$DATA_MOUNT/grafana"
+fi
 chown -R 1000:1000 "$DATA_MOUNT"
 
 # Clone repo (shallow — only need compose files, code runs from GHCR images)
@@ -786,19 +870,9 @@ if [ -n "$REPO_URL" ] && [ ! -f "$DATA_MOUNT/dalston/docker-compose.yml" ]; then
   git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$DATA_MOUNT/dalston"
 fi
 
-# Control plane services (only these start on the CPU instance)
-CTRL_SERVICES="postgres redis gateway orchestrator stt-prepare"
-
-# GHCR-based deployment: login and build compose command with GHCR overlay
-if [ "$USE_GHCR" = "true" ]; then
-  COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml -f infra/docker/docker-compose.ghcr.yml"
-  COMPOSE_UP_FLAGS="--no-build"
-  # No login helper needed — public repo images are pullable without auth
-else
-  COMPOSE_FILES="-f docker-compose.yml -f infra/docker/docker-compose.aws.yml"
-  COMPOSE_UP_FLAGS=""
-fi
-
+"""
+        + loki_driver_block
+        + r"""
 # Create .env.aws (includes compose vars for systemd)
 cat > "$DATA_MOUNT/dalston/.env.aws" << ENVEOF
 DALSTON_S3_BUCKET=${S3_BUCKET}
@@ -813,6 +887,7 @@ USE_GHCR=${USE_GHCR}
 COMPOSE_FILES=${COMPOSE_FILES}
 COMPOSE_UP_FLAGS=${COMPOSE_UP_FLAGS}
 CTRL_SERVICES=${CTRL_SERVICES}
+OTEL_ENABLED=${OTEL_ENABLED}
 ENVEOF
 
 # Create .env with secrets (only if it doesn't already exist — preserves manual edits)
@@ -887,6 +962,7 @@ def generate_gpu_worker_user_data(
     region: str,
     ctrl_plane_ip: str,
     registry: str | None = None,
+    observability: bool = False,
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -906,6 +982,7 @@ AWS_REGION="{region}"
 CTRL_PLANE_IP="{ctrl_plane_ip}"
 GHCR_REGISTRY="{ghcr_registry}"
 HF_TOKEN="{hf_token}"
+OBSERVABILITY="{"true" if observability else "false"}"
 """
 
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
@@ -947,6 +1024,9 @@ else
 fi
 chown -R 1000:1000 /data/models
 
+"""
+        + _loki_driver_cloud_init_block()
+        + r"""
 # Pull images (no login needed — public repo)
 docker pull "$GHCR_REGISTRY/stt-onnx:latest"
 docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
@@ -960,6 +1040,7 @@ AWS_REGION="${AWS_REGION}"
 CTRL_PLANE_IP="${CTRL_PLANE_IP}"
 GHCR_REGISTRY="${GHCR_REGISTRY}"
 HF_TOKEN="${HF_TOKEN}"
+OBSERVABILITY="${OBSERVABILITY}"
 ENVEOF
 
 # GPU worker start script
@@ -977,8 +1058,17 @@ docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0 2>/dev/null || true
 
 HOST_HOSTNAME=$(hostname)
 
+# Build observability flags for docker run
+OTEL_FLAGS=""
+LOG_FLAGS=""
+if [ "$OBSERVABILITY" = "true" ]; then
+  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${CTRL_PLANE_IP}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
+  LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${CTRL_PLANE_IP}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
+fi
+
 docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -v /data/models:/data/models \
+  -p 9100:9100 \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=onnx \
   -e DALSTON_DEPLOY_ENV=aws \
@@ -988,10 +1078,12 @@ docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
   -e DALSTON_S3_REGION="$AWS_REGION" \
   -e AWS_REGION="$AWS_REGION" \
   -e HF_HOME=/data/models \
+  $OTEL_FLAGS $LOG_FLAGS \
   "$GHCR_REGISTRY/stt-onnx:latest"
 
 docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
   -v /data/models:/data/models \
+  -p 9101:9100 \
   -e DALSTON_DEVICE=cuda \
   -e DALSTON_ENGINE_ID=pyannote-4.0 \
   -e DALSTON_WORKER_ID=pyannote-gpu-1 \
@@ -1003,6 +1095,7 @@ docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stoppe
   -e DALSTON_S3_REGION="$AWS_REGION" \
   -e AWS_REGION="$AWS_REGION" \
   -e HF_HOME=/data/models \
+  $OTEL_FLAGS $LOG_FLAGS \
   "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
 
 echo "GPU engines started at $(date)"
@@ -1484,7 +1577,9 @@ def cmd_status(args: argparse.Namespace) -> None:
     cmd_status_impl(st)
 
 
-def _launch_control_plane(st: DeploymentState, tmpl: DeploymentTemplate) -> None:
+def _launch_control_plane(
+    st: DeploymentState, tmpl: DeploymentTemplate, *, observability: bool = False
+) -> None:
     """Launch the control plane instance."""
     if st.instance_id:
         state = get_instance_state(st.region, st.instance_id)
@@ -1499,10 +1594,17 @@ def _launch_control_plane(st: DeploymentState, tmpl: DeploymentTemplate) -> None
         else f"{NAME_PREFIX}-server"
     )
 
-    log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot})...")
+    obs_suffix = " with observability" if observability else ""
+    log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}...")
     ud = generate_user_data(
-        st.s3_bucket, st.region, compose_profiles, use_ghcr=True, registry=tmpl.registry
+        st.s3_bucket,
+        st.region,
+        compose_profiles,
+        use_ghcr=True,
+        registry=tmpl.registry,
+        observability=observability,
     )
+    st.observability = observability
     st.instance_id = launch_instance(
         st.region,
         cp.instance_type,
@@ -1522,6 +1624,53 @@ def _launch_control_plane(st: DeploymentState, tmpl: DeploymentTemplate) -> None
     ip = get_instance_ip(st.region, st.instance_id)
     audit("launch.control-plane", instance=st.instance_id, ip=ip)
     log(f"Control plane running: {st.instance_id} ({ip})")
+
+
+def _write_gpu_prometheus_targets(gpu_private_ip: str) -> None:
+    """Write Prometheus file_sd targets for GPU worker engines on the control plane.
+
+    Uses SSH via Tailscale to write a JSON targets file that Prometheus picks up
+    via file_sd_configs. Prometheus rescans every 30s, so targets appear quickly.
+    """
+    targets_json = json.dumps(
+        [
+            {
+                "targets": [f"{gpu_private_ip}:9100", f"{gpu_private_ip}:9101"],
+                "labels": {
+                    "instance_group": "gpu-worker",
+                    "host": "dalston-gpu-worker",
+                },
+            }
+        ]
+    )
+    cmd = (
+        f"sudo mkdir -p /data/prometheus && "
+        f"echo {shlex.quote(targets_json)} > /data/prometheus/gpu-targets.json && "
+        f"sudo chown -R 65534:65534 /data/prometheus/gpu-targets.json"
+    )
+    log("Writing GPU Prometheus targets on control plane...")
+    try:
+        subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "ConnectTimeout=10",
+                "ec2-user@dalston-control-plane",
+                cmd,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        log(f"GPU targets registered: {gpu_private_ip}:9100, {gpu_private_ip}:9101")
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+        warn(f"Could not write GPU targets via SSH: {e}")
+        warn(
+            f"Manually run on control plane: echo '{targets_json}' > /data/prometheus/gpu-targets.json"
+        )
 
 
 def _launch_gpu(
@@ -1555,10 +1704,18 @@ def _launch_gpu(
     if not st.gpu_sg_id:
         die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
 
+    # Open observability ports if enabled
+    if st.observability:
+        open_observability_ports(st.region, st.sg_id, st.gpu_sg_id)
+
     log(f"Launching GPU worker ({gpu_type}, spot={use_spot})...")
 
     gpu_ud = generate_gpu_worker_user_data(
-        st.s3_bucket, st.region, ctrl_private_ip, registry=tmpl.registry
+        st.s3_bucket,
+        st.region,
+        ctrl_private_ip,
+        registry=tmpl.registry,
+        observability=st.observability,
     )
     st.gpu_instance_id = launch_gpu_interactive(
         st.region,
@@ -1574,9 +1731,15 @@ def _launch_gpu(
     st.gpu_data_volume_id = ""
     save_state(st)
 
-    gpu_ip = get_instance_ip(st.region, st.gpu_instance_id)
+    gpu_inst = describe_instance(st.region, st.gpu_instance_id)
+    gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
+    gpu_private_ip = (gpu_inst.get("PrivateIpAddress", "") or "") if gpu_inst else ""
     audit("launch.gpu", gpu_instance=st.gpu_instance_id, gpu_type=gpu_type, ip=gpu_ip)
     log(f"GPU worker running: {st.gpu_instance_id} ({gpu_ip})")
+
+    # Register GPU worker metrics with Prometheus on the control plane
+    if st.observability and gpu_private_ip:
+        _write_gpu_prometheus_targets(gpu_private_ip)
 
 
 def cmd_launch(args: argparse.Namespace) -> None:
@@ -1590,7 +1753,7 @@ def cmd_launch(args: argparse.Namespace) -> None:
     spot_override = True if args.spot else (False if args.on_demand else None)
 
     if target in ("control-plane", None):
-        _launch_control_plane(st, tmpl)
+        _launch_control_plane(st, tmpl, observability=args.observability)
     if target in ("gpu", None):
         if tmpl.gpu_worker:
             _launch_gpu(
@@ -1953,6 +2116,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_launch.add_argument(
         "--gpu-type", default=None, help="GPU instance type (overrides template)"
+    )
+    p_launch.add_argument(
+        "--observability",
+        action="store_true",
+        default=False,
+        help="Deploy observability stack (Jaeger, Prometheus, Grafana, Loki) on control plane",
     )
     p_launch.set_defaults(func=cmd_launch)
 

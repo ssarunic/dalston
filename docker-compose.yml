@@ -230,7 +230,19 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dalston-overview.json
-    depends_on: [prometheus]
+    depends_on: [prometheus, loki]
+    profiles: [observability]
+    restart: unless-stopped
+
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:3.6.7
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
     profiles: [observability]
     restart: unless-stopped
 
@@ -692,3 +704,4 @@ volumes:
   riva-model-cache:   # M70: Riva NIM model cache
   prometheus-data:
   grafana-data:
+  loki-data:

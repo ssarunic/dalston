@@ -44,3 +44,18 @@ scrape_configs:
           - 'stt-pii-detect-presidio:9100'
           - 'stt-audio-redact-audio:9100'
     metrics_path: /metrics
+
+  # Loki log ingestion metrics
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: /metrics
+
+  # GPU worker engines (AWS split mode only)
+  # Targets are auto-registered via file_sd when GPU worker launches.
+  # File is written by dalston-aws after 'launch gpu' with --observability.
+  - job_name: 'dalston-gpu-engines'
+    file_sd_configs:
+      - files: ['/prometheus/gpu-targets.json']
+        refresh_interval: 30s
+    metrics_path: /metrics
