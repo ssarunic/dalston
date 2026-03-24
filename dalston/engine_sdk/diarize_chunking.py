@@ -203,15 +203,16 @@ def load_embedding_model(hf_token: str, device: str) -> Any:
     the model cannot be loaded (embedding-based linking is then skipped).
     """
     try:
-        from pyannote.audio import Inference
+        from pyannote.audio import Inference, Model
 
-        # pyannote 4.0 Inference uses 'use_auth_token', not 'token'
-        # (Pipeline.from_pretrained uses 'token', but Inference does not)
-        model = Inference(
+        # pyannote 4.0: Inference expects a Model object, not a string.
+        # Load the model first via Model.from_pretrained (which handles
+        # HuggingFace auth), then wrap in Inference for embedding extraction.
+        embedding_model = Model.from_pretrained(
             "pyannote/wespeaker-voxceleb-resnet34-LM",
-            window="whole",
             use_auth_token=hf_token,
         )
+        model = Inference(embedding_model, window="whole")
         if device in ("cuda", "mps"):
             import torch
 
