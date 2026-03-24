@@ -138,6 +138,7 @@ class OnnxInference:
         self,
         audio: str | np.ndarray,
         model_id: str,
+        vad_batch_size: int | None = None,
     ) -> OnnxTranscriptionResult:
         """Run transcription on audio input.
 
@@ -146,6 +147,7 @@ class OnnxInference:
         Args:
             audio: File path string or numpy float32 array (mono, 16kHz)
             model_id: Model identifier (e.g. "parakeet-onnx-ctc-0.6b")
+            vad_batch_size: Override for VAD batch size (default: from env).
 
         Returns:
             OnnxTranscriptionResult with text, segments, and words.
@@ -154,7 +156,9 @@ class OnnxInference:
         self._current_model_id = model_id
         model = self._manager.acquire(model_id)
         try:
-            return self.transcribe_with_model(model, audio)
+            return self.transcribe_with_model(
+                model, audio, vad_batch_size=vad_batch_size
+            )
         finally:
             self._manager.release(model_id)
             self._current_model_id = None
@@ -163,6 +167,7 @@ class OnnxInference:
         self,
         model: Any,
         audio: str | np.ndarray,
+        vad_batch_size: int | None = None,
     ) -> OnnxTranscriptionResult:
         """Run transcription with an already-acquired model.
 
@@ -173,13 +178,16 @@ class OnnxInference:
         Args:
             model: An acquired onnx-asr model instance
             audio: File path string or numpy float32 array
+            vad_batch_size: Override for VAD batch size (default: from env).
 
         Returns:
             OnnxTranscriptionResult with text, segments, and words.
         """
         if isinstance(audio, np.ndarray):
             return self._transcribe_direct(model, audio)
-        return self._transcribe_with_vad(model, str(audio))
+        return self._transcribe_with_vad(
+            model, str(audio), vad_batch_size=vad_batch_size
+        )
 
     def _transcribe_direct(
         self,
@@ -225,6 +233,7 @@ class OnnxInference:
         self,
         model: Any,
         audio_path: str,
+        vad_batch_size: int | None = None,
     ) -> OnnxTranscriptionResult:
         """Transcribe a file using VAD segmentation for long audio safety.
 
@@ -237,9 +246,10 @@ class OnnxInference:
         max_speech_s = float(
             os.environ.get("DALSTON_VAD_MAX_SPEECH_S", _DEFAULT_MAX_SPEECH_DURATION_S)
         )
-        vad_batch_size = int(
-            os.environ.get("DALSTON_VAD_BATCH_SIZE", _DEFAULT_VAD_BATCH_SIZE)
-        )
+        if vad_batch_size is None:
+            vad_batch_size = int(
+                os.environ.get("DALSTON_VAD_BATCH_SIZE", _DEFAULT_VAD_BATCH_SIZE)
+            )
 
         # Chain: model → VAD segmentation → timestamped recognition
         vad_ts_model = model.with_vad(

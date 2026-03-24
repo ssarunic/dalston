@@ -86,6 +86,11 @@ realtime-sdk = [
 session-router = [
     "redis>=7.0.0",
 ]
+tools = [
+    "nvidia-ml-py3>=7.352.0",  # pynvml for VRAM calibration (M84)
+    "requests>=2.31.0",        # HTTP client for calibration script
+    "numpy>=1.24.0",           # Audio generation + linear regression
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

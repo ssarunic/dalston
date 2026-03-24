@@ -119,10 +119,25 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         decoder_type = self._get_decoder_type(model_id)
         alignment_method = self._alignment_method_for(decoder_type)
 
-        self.logger.info("transcribing", audio_path=str(audio_path))
+        # M84: Select adaptive vad_batch_size based on queue depth
+        vad_batch_size: int | None = None
+        if getattr(self, "_runner", None) is not None:
+            adaptive = self._runner.get_adaptive_params()
+            if adaptive is not None:
+                queue_depth = self._runner.get_queue_depth()
+                vram_params = adaptive.select(queue_depth, inflight=1)
+                vad_batch_size = vram_params.vad_batch_size
+
+        self.logger.info(
+            "transcribing",
+            audio_path=str(audio_path),
+            vad_batch_size=vad_batch_size or "env-default",
+        )
 
         # Delegate to shared core
-        core_result = self._core.transcribe(str(audio_path), model_id)
+        core_result = self._core.transcribe(
+            str(audio_path), model_id, vad_batch_size=vad_batch_size
+        )
 
         # Convert core result to Transcript
         segments: list[TranscriptSegment] = []

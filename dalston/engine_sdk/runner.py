@@ -45,6 +45,7 @@ from dalston.orchestrator.catalog import get_catalog
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.base import Engine
+    from dalston.engine_sdk.vram_budget import AdaptiveVRAMParams
 
 
 logger = structlog.get_logger()
@@ -90,6 +91,8 @@ class EngineRunner:
             engine: Engine instance to run tasks with
         """
         self.engine = engine
+        self.engine._runner = self  # Back-reference for adaptive params access
+        self._adaptive_params: AdaptiveVRAMParams | None = None
         self._redis: redis.Redis | None = None
         self._unified_writer: UnifiedRegistryWriter | None = None
         self._running = False
@@ -233,6 +236,9 @@ class EngineRunner:
         # Start heartbeat thread to advertise engine status
         self._start_heartbeat_thread()
 
+        # M84: Compute VRAM budget and set adaptive params
+        self._init_vram_budget()
+
         logger.info(
             "engine_loop_starting",
             engine_id=self.engine_id,
@@ -272,6 +278,81 @@ class EngineRunner:
             except Exception:
                 pass  # Best effort cleanup
             self._unified_writer = None
+
+    # -- M84: VRAM budget integration -----------------------------------------
+
+    def _init_vram_budget(self) -> None:
+        """Compute adaptive VRAM params at startup and apply static ones.
+
+        Reads DALSTON_VRAM_BUDGET_MB or DALSTON_VRAM_SHARE.  If neither
+        is set, this is a no-op and the engine uses existing env-var
+        defaults (full backward compatibility).
+        """
+        from dalston.engine_sdk.vram_budget import VRAMBudget, resolve_vram_budget
+
+        budget_mb = resolve_vram_budget()
+        if budget_mb is None:
+            logger.info("vram_budget_skip", reason="no budget configured")
+            return
+
+        # Determine model_id from preload env var (best guess at startup)
+        model_id = os.environ.get("DALSTON_MODEL_PRELOAD", "")
+
+        vram = VRAMBudget.load(self.engine_id, model_id)
+        adaptive = vram.compute_adaptive_params(budget_mb)
+
+        # Set static env vars that don't change per task.
+        # Only set if not already explicitly configured by the operator.
+        self._set_env_if_absent(
+            "DALSTON_BATCH_MAX_INFLIGHT",
+            str(adaptive.concurrent.batch_max_inflight),
+        )
+        self._set_env_if_absent(
+            "DALSTON_MAX_SESSIONS", str(adaptive.concurrent.max_sessions)
+        )
+        self._set_env_if_absent(
+            "DALSTON_MAX_DIARIZE_CHUNK_S",
+            str(adaptive.solo.max_diarize_chunk_s),
+        )
+
+        self._adaptive_params = adaptive
+
+        logger.info(
+            "vram_budget_computed",
+            budget_mb=budget_mb,
+            solo={
+                "vad_batch": adaptive.solo.vad_batch_size,
+                "inflight": adaptive.solo.batch_max_inflight,
+                "peak_mb": adaptive.solo.peak_estimate_mb,
+            },
+            concurrent={
+                "vad_batch": adaptive.concurrent.vad_batch_size,
+                "inflight": adaptive.concurrent.batch_max_inflight,
+                "peak_mb": adaptive.concurrent.peak_estimate_mb,
+            },
+            profile_source=adaptive.profile_source,
+        )
+
+    @staticmethod
+    def _set_env_if_absent(key: str, value: str) -> None:
+        """Set an environment variable only if not already set."""
+        if key not in os.environ:
+            os.environ[key] = value
+            logger.debug("vram_budget_set_env", key=key, value=value)
+
+    def get_queue_depth(self) -> int:
+        """Get the number of pending messages in this engine's Redis stream.
+
+        O(1) operation via XLEN.
+        """
+        try:
+            return self.redis_client.xlen(self.stream_key)
+        except Exception:
+            return 0
+
+    def get_adaptive_params(self) -> AdaptiveVRAMParams | None:
+        """Return the adaptive VRAM params, or None if not configured."""
+        return self._adaptive_params
 
     def _start_http_server(self) -> None:
         """Start the engine HTTP server in a background thread.

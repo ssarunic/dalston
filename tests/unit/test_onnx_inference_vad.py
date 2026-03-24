@@ -78,7 +78,9 @@ class TestTranscribeRouting:
             mock_vad.return_value = OnnxTranscriptionResult(text="hello")
             result = inference.transcribe_with_model(model, "/path/to/audio.wav")
 
-        mock_vad.assert_called_once_with(model, "/path/to/audio.wav")
+        mock_vad.assert_called_once_with(
+            model, "/path/to/audio.wav", vad_batch_size=None
+        )
         assert result.text == "hello"
 
     def test_numpy_array_routes_to_direct(self, inference):
