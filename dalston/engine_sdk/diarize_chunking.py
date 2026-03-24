@@ -46,7 +46,7 @@ logger = structlog.get_logger()
 DEFAULT_MAX_CHUNK_S: float = 900.0  # 15 minutes
 DEFAULT_OVERLAP_S: float = 30.0
 DEFAULT_MIN_CHUNK_S: float = 60.0
-_SPEAKER_LINK_THRESHOLD: float = 0.7  # cosine distance for agglomerative clustering
+_SPEAKER_LINK_THRESHOLD: float = 0.3  # cosine distance for agglomerative clustering
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +321,21 @@ def link_speakers(
     # Stack into matrix and cluster
     X = np.vstack(all_centroids)
 
+    # Log pairwise cosine distances for debugging threshold tuning
+    try:
+        from sklearn.metrics.pairwise import cosine_distances
+
+        dist_matrix = cosine_distances(X)
+        labels_for_log = [f"c{ci}:{sp}" for ci, sp in provenance]
+        logger.info(
+            "speaker_embedding_distances",
+            labels=labels_for_log,
+            distances=[[round(float(d), 3) for d in row] for row in dist_matrix],
+            threshold=_SPEAKER_LINK_THRESHOLD,
+        )
+    except Exception:
+        pass
+
     try:
         from sklearn.cluster import AgglomerativeClustering
 
@@ -361,6 +376,14 @@ def _identity_maps(chunk_results: list[ChunkResult]) -> dict[int, dict[str, str]
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _TaggedTurn:
+    """A speaker turn tagged with its source chunk index."""
+
+    turn: SpeakerTurn
+    chunk_idx: int
+
+
 def merge_chunks(
     chunk_results: list[ChunkResult],
     label_maps: dict[int, dict[str, str]],
@@ -370,12 +393,13 @@ def merge_chunks(
 
     For each chunk boundary, the overlap region is resolved by keeping
     turns from the earlier chunk up to the seam midpoint, and turns from
-    the later chunk after it.
+    the later chunk after it.  Each turn is tagged with its source chunk
+    so that duplicate coverage from overlapping chunks is eliminated.
 
     Returns ``(sorted_speakers, sorted_turns)`` ready for
     ``DiarizationResponse``.
     """
-    all_turns: list[SpeakerTurn] = []
+    tagged: list[_TaggedTurn] = []
 
     for chunk in chunk_results:
         offset = chunk.spec.start
@@ -386,24 +410,23 @@ def merge_chunks(
             global_end = round(turn.end + offset, 3)
             global_speaker = label_map.get(turn.speaker, turn.speaker)
 
-            all_turns.append(
-                SpeakerTurn(
-                    speaker=global_speaker,
-                    start=global_start,
-                    end=global_end,
-                    confidence=turn.confidence,
+            tagged.append(
+                _TaggedTurn(
+                    turn=SpeakerTurn(
+                        speaker=global_speaker,
+                        start=global_start,
+                        end=global_end,
+                        confidence=turn.confidence,
+                    ),
+                    chunk_idx=chunk.spec.index,
                 )
             )
 
     # Remove duplicate coverage in overlap regions.
-    # For each pair of adjacent chunks, the seam is at
-    # chunk[i].end - overlap_s/2 (midpoint of the overlap).
-    # Drop turns from the later chunk that end before the seam,
-    # and turns from the earlier chunk that start after the seam.
     if len(chunk_results) > 1 and overlap_s > 0:
-        all_turns = _resolve_overlaps(chunk_results, all_turns, overlap_s)
+        tagged = _resolve_overlaps(chunk_results, tagged, overlap_s)
 
-    # Sort and deduplicate speakers
+    all_turns = [t.turn for t in tagged]
     all_turns.sort(key=lambda t: (t.start, t.end))
     speakers = sorted({t.speaker for t in all_turns})
 
@@ -412,14 +435,16 @@ def merge_chunks(
 
 def _resolve_overlaps(
     chunk_results: list[ChunkResult],
-    turns: list[SpeakerTurn],
+    tagged_turns: list[_TaggedTurn],
     overlap_s: float,
-) -> list[SpeakerTurn]:
+) -> list[_TaggedTurn]:
     """Remove duplicate turns in overlap regions between adjacent chunks.
 
-    Strategy: for each overlap region, compute the midpoint (seam).
-    Keep turns from the earlier chunk up to the seam, and from the later
-    chunk after the seam.  Turns straddling the seam are trimmed.
+    Each turn knows which chunk it came from.  For each chunk we compute
+    a valid time range based on the seam midpoints between adjacent
+    chunks.  A turn is kept only if its midpoint falls within its OWN
+    chunk's valid range — this eliminates duplicates from overlapping
+    chunks covering the same time.
     """
     # Build seam points: the midpoint of each overlap region
     seams: list[float] = []
@@ -432,37 +457,43 @@ def _resolve_overlaps(
         seam = round((overlap_start + overlap_end) / 2, 3)
         seams.append(seam)
 
-    # For each chunk, determine the valid time range
+    # For each chunk, determine its valid time range
     # Chunk 0: [start, seam_0]
     # Chunk i: [seam_{i-1}, seam_i]
     # Chunk N: [seam_{N-1}, end]
-    chunk_ranges: list[tuple[float, float]] = []
+    chunk_range_map: dict[int, tuple[float, float]] = {}
     for i, chunk in enumerate(chunk_results):
         range_start = seams[i - 1] if i > 0 else chunk.spec.start
         range_end = seams[i] if i < len(seams) else chunk.spec.end
-        chunk_ranges.append((range_start, range_end))
+        chunk_range_map[chunk.spec.index] = (range_start, range_end)
 
-    # Filter turns: keep only those whose midpoint falls within
-    # their chunk's valid range
-    kept: list[SpeakerTurn] = []
-    for turn in turns:
-        turn_mid = (turn.start + turn.end) / 2
-        # Find which chunk's range this turn belongs to
-        for range_start, range_end in chunk_ranges:
-            if range_start <= turn_mid <= range_end:
-                # Trim turn to fit within the valid range
-                trimmed_start = max(turn.start, range_start)
-                trimmed_end = min(turn.end, range_end)
-                if trimmed_end > trimmed_start:
-                    kept.append(
-                        SpeakerTurn(
-                            speaker=turn.speaker,
+    # Filter: keep only turns whose midpoint falls within their own
+    # chunk's valid range.  Trim turns that straddle the range boundary.
+    kept: list[_TaggedTurn] = []
+    for tt in tagged_turns:
+        rng = chunk_range_map.get(tt.chunk_idx)
+        if rng is None:
+            kept.append(tt)
+            continue
+
+        range_start, range_end = rng
+        turn_mid = (tt.turn.start + tt.turn.end) / 2
+
+        if range_start <= turn_mid <= range_end:
+            trimmed_start = max(tt.turn.start, range_start)
+            trimmed_end = min(tt.turn.end, range_end)
+            if trimmed_end > trimmed_start:
+                kept.append(
+                    _TaggedTurn(
+                        turn=SpeakerTurn(
+                            speaker=tt.turn.speaker,
                             start=round(trimmed_start, 3),
                             end=round(trimmed_end, 3),
-                            confidence=turn.confidence,
-                        )
+                            confidence=tt.turn.confidence,
+                        ),
+                        chunk_idx=tt.chunk_idx,
                     )
-                break
+                )
 
     return kept
 
