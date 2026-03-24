@@ -205,10 +205,12 @@ def load_embedding_model(hf_token: str, device: str) -> Any:
     try:
         from pyannote.audio import Inference
 
+        # pyannote 4.0 Inference uses 'use_auth_token', not 'token'
+        # (Pipeline.from_pretrained uses 'token', but Inference does not)
         model = Inference(
             "pyannote/wespeaker-voxceleb-resnet34-LM",
             window="whole",
-            token=hf_token,
+            use_auth_token=hf_token,
         )
         if device in ("cuda", "mps"):
             import torch
