@@ -419,15 +419,10 @@ def _build_dag_with_engines(
         )
         tasks.append(align_task)
 
-    # Diarize runs sequentially after transcribe/align. While pyannote only needs
-    # audio, running in parallel causes GPU OOM on 24GB cards (22.4GB resident +
-    # activation memory exceeds capacity on longer files).
+    # Diarize runs in parallel with transcribe/align — pyannote only needs audio.
+    # VRAM budget calculator (M84) + chunked diarization prevent OOM.
     if speaker_detection == "diarize" and not skip_diarization:
         diarize_dependencies = [prepare_task.id]
-        if align_task is not None:
-            diarize_dependencies.append(align_task.id)
-        else:
-            diarize_dependencies.append(transcribe_task.id)
         diarize_task = _create_diarize_task(
             job_id=job_id,
             engines=engines,

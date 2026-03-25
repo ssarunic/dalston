@@ -248,8 +248,12 @@ class S3ModelStorage:
         if not files_to_download:
             raise ModelNotInS3Error(model_id, self.bucket)
 
-        # Download to temp directory first
-        temp_dir = Path(tempfile.mkdtemp(prefix="dalston-model-"))
+        # Download to temp directory on the same filesystem as the target
+        # (avoids /tmp tmpfs size limits and enables atomic rename)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_dir = Path(
+            tempfile.mkdtemp(prefix="dalston-model-", dir=str(local_path.parent))
+        )
         try:
             total_size = 0
             for s3_key, relative_path in files_to_download:

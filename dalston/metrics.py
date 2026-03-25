@@ -124,7 +124,7 @@ def _init_gateway_metrics() -> None:
 
 def _init_orchestrator_metrics() -> None:
     """Initialize Orchestrator-specific metrics."""
-    from prometheus_client import Counter, Histogram
+    from prometheus_client import Counter, Gauge, Histogram
 
     _orchestrator_metrics["jobs_total"] = Counter(
         "dalston_orchestrator_jobs_total",
@@ -132,11 +132,23 @@ def _init_orchestrator_metrics() -> None:
         ["status"],
     )
 
+    _orchestrator_metrics["jobs_in_progress"] = Gauge(
+        "dalston_orchestrator_jobs_in_progress",
+        "Number of batch jobs currently being processed",
+    )
+
     _orchestrator_metrics["job_duration_seconds"] = Histogram(
         "dalston_orchestrator_job_duration_seconds",
         "Total job duration from creation to completion",
         ["engine_id", "model"],
         buckets=(1, 5, 10, 30, 60, 120, 300, 600, 1800),
+    )
+
+    _orchestrator_metrics["audio_duration_seconds"] = Histogram(
+        "dalston_orchestrator_audio_duration_seconds",
+        "Audio duration of completed jobs (for real-time factor calculation)",
+        ["engine_id", "model"],
+        buckets=(10, 30, 60, 120, 300, 600, 1800, 3600, 7200),
     )
 
     _orchestrator_metrics["tasks_scheduled_total"] = Counter(
@@ -489,31 +501,46 @@ def inc_gateway_upload_bytes(bytes_count: int) -> None:
 
 
 def inc_orchestrator_jobs(status: str) -> None:
-    """Increment jobs counter by status.
-
-    Args:
-        status: Job status (completed, failed, cancelled)
-    """
+    """Increment jobs counter by status."""
     if not _metrics_enabled or "jobs_total" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["jobs_total"].labels(status=status).inc()
 
 
+def inc_orchestrator_jobs_in_progress() -> None:
+    """Increment in-progress jobs gauge."""
+    if not _metrics_enabled or "jobs_in_progress" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["jobs_in_progress"].inc()
+
+
+def dec_orchestrator_jobs_in_progress() -> None:
+    """Decrement in-progress jobs gauge."""
+    if not _metrics_enabled or "jobs_in_progress" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["jobs_in_progress"].dec()
+
+
 def observe_orchestrator_job_duration(
     engine_id: str, model: str, duration: float
 ) -> None:
-    """Record job duration.
-
-    Args:
-        engine_id: Runtime identifier (e.g., "faster-whisper")
-        model: Model identifier (e.g., "nvidia/parakeet-tdt-1.1b")
-        duration: Duration in seconds
-    """
+    """Record job duration."""
     if not _metrics_enabled or "job_duration_seconds" not in _orchestrator_metrics:
         return
     _orchestrator_metrics["job_duration_seconds"].labels(
         engine_id=engine_id, model=model
     ).observe(duration)
+
+
+def observe_orchestrator_audio_duration(
+    engine_id: str, model: str, audio_duration: float
+) -> None:
+    """Record audio duration of a completed job (for real-time factor)."""
+    if not _metrics_enabled or "audio_duration_seconds" not in _orchestrator_metrics:
+        return
+    _orchestrator_metrics["audio_duration_seconds"].labels(
+        engine_id=engine_id, model=model
+    ).observe(audio_duration)
 
 
 def inc_orchestrator_tasks_scheduled(

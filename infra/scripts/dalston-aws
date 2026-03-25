@@ -56,7 +56,23 @@ DEFAULT_REGION = "eu-west-2"
 GPU_INSTANCE_TYPE = "g4dn.xlarge"
 CPU_INSTANCE_TYPE = "t3.xlarge"
 CTRL_INSTANCE_TYPE = "t3.large"
-LOKI_DRIVER_VERSION = "3.6.7"
+LOKI_DRIVER_VERSION = "latest"
+
+# GPU engine presets: name → (ghcr_image_suffix, engine_id, container_name, needs_hf_token)
+GPU_ENGINE_PRESETS: dict[str, dict] = {
+    "onnx": {
+        "image": "stt-onnx",
+        "engine_id": "onnx",
+        "container": "stt-transcribe-onnx",
+    },
+    "pyannote": {
+        "image": "stt-diarize-pyannote",
+        "engine_id": "pyannote-4.0",
+        "container": "stt-diarize-pyannote-4-0",
+        "needs_hf_token": True,
+        "extra_env": {"DALSTON_WORKER_ID": "pyannote-gpu-1"},
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Colored output helpers
@@ -148,6 +164,16 @@ def load_template(path: str | Path) -> DeploymentTemplate:
 
 
 @dataclass
+class GpuWorker:
+    """State for a single GPU worker instance."""
+
+    name: str = ""  # e.g., "onnx", "pyannote"
+    instance_id: str = ""
+    instance_type: str = ""
+    engines: list[str] | None = None  # e.g., ["onnx"] or ["pyannote"]
+
+
+@dataclass
 class DeploymentState:
     region: str = DEFAULT_REGION
     scenario: str = "gpu"
@@ -158,11 +184,10 @@ class DeploymentState:
     sg_id: str = ""
     instance_id: str = ""
     data_volume_id: str = ""
-    gpu_instance_id: str = ""
-    gpu_data_volume_id: str = ""  # unused — GPU uses NVMe; kept for state compat
     gpu_sg_id: str = ""
     key_name: str = ""
     observability: bool = False
+    gpu_workers: list[dict] | None = None  # list of GpuWorker dicts
 
 
 def save_state(state: DeploymentState) -> None:
@@ -859,10 +884,13 @@ fi
 
 # Create data directories
 mkdir -p "$DATA_MOUNT/postgres" "$DATA_MOUNT/redis" "$DATA_MOUNT/models" "$DATA_MOUNT/dalston"
+chown -R 1000:1000 "$DATA_MOUNT"
 if [ "$OBSERVABILITY" = "true" ]; then
   mkdir -p "$DATA_MOUNT/prometheus" "$DATA_MOUNT/loki" "$DATA_MOUNT/grafana"
+  chown -R 65534:65534 "$DATA_MOUNT/prometheus"  # prometheus runs as nobody
+  chown -R 10001:10001 "$DATA_MOUNT/loki"         # loki runs as uid 10001
+  chown -R 472:472 "$DATA_MOUNT/grafana"           # grafana runs as uid 472
 fi
-chown -R 1000:1000 "$DATA_MOUNT"
 
 # Clone repo (shallow — only need compose files, code runs from GHCR images)
 if [ -n "$REPO_URL" ] && [ ! -f "$DATA_MOUNT/dalston/docker-compose.yml" ]; then
@@ -957,15 +985,71 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
     return header + variables + body
 
 
+def _generate_docker_run_block(engine_name: str, port: int) -> str:
+    """Generate a docker run command for a GPU engine preset."""
+    preset = GPU_ENGINE_PRESETS[engine_name]
+    container = preset["container"]
+    engine_id = preset["engine_id"]
+    image = preset["image"]
+    needs_hf = preset.get("needs_hf_token", False)
+    extra_env = preset.get("extra_env", {})
+
+    extra_lines = ""
+    if needs_hf:
+        extra_lines += '  -e HF_TOKEN="$HF_TOKEN" \\\n'
+    for k, v in extra_env.items():
+        extra_lines += f'  -e {k}="{v}" \\\n'
+
+    return f"""\
+docker run -d --name {container} --gpus all --restart unless-stopped \\
+  -v /data/models:/data/models \\
+  -p {port}:9100 \\
+  -e DALSTON_DEVICE=cuda \\
+  -e DALSTON_ENGINE_ID={engine_id} \\
+  -e DALSTON_DEPLOY_ENV=aws \\
+  -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
+  -e REDIS_URL="redis://${{CTRL_PLANE_IP}}:6379" \\
+  -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
+  -e DALSTON_S3_REGION="$AWS_REGION" \\
+  -e AWS_REGION="$AWS_REGION" \\
+  -e HF_HOME=/data/models \\
+{extra_lines}  $OTEL_FLAGS $LOG_FLAGS \\
+  "$GHCR_REGISTRY/{image}:latest"
+"""
+
+
 def generate_gpu_worker_user_data(
     s3_bucket: str,
     region: str,
     ctrl_plane_ip: str,
+    worker_name: str,
+    engines: list[str],
     registry: str | None = None,
     observability: bool = False,
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
+    ts_hostname = f"dalston-gpu-{worker_name}"
+
+    # Validate engines
+    for eng in engines:
+        if eng not in GPU_ENGINE_PRESETS:
+            raise ValueError(
+                f"Unknown engine '{eng}'. Available: {list(GPU_ENGINE_PRESETS)}"
+            )
+
+    # Build pull commands and docker run blocks
+    presets = [GPU_ENGINE_PRESETS[e] for e in engines]
+    pull_lines = "\n".join(
+        f'docker pull "$GHCR_REGISTRY/{p["image"]}:latest"' for p in presets
+    )
+    containers = [p["container"] for p in presets]
+    rm_line = "docker rm -f " + " ".join(containers) + " 2>/dev/null || true"
+
+    run_blocks = []
+    for i, eng in enumerate(engines):
+        run_blocks.append(_generate_docker_run_block(eng, 9100 + i))
+    run_section = "\n".join(run_blocks)
 
     # Part 1: static header
     header = """\
@@ -985,8 +1069,7 @@ HF_TOKEN="{hf_token}"
 OBSERVABILITY="{"true" if observability else "false"}"
 """
 
-    # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
-    # NOTE: GPU worker uses Ubuntu-based Deep Learning AMI (has NVIDIA drivers + Docker pre-installed)
+    # Part 3: body
     body = (
         r"""
 # Wait for any unattended-upgrades to finish
@@ -1001,7 +1084,7 @@ systemctl enable docker
 usermod -aG docker ubuntu
 
 """
-        + _tailscale_cloud_init_block("dalston-gpu-worker")
+        + _tailscale_cloud_init_block(ts_hostname)
         + r"""
 # Configure NVIDIA Container Toolkit for Docker
 apt-get update
@@ -1026,21 +1109,20 @@ chown -R 1000:1000 /data/models
 
 """
         + _loki_driver_cloud_init_block()
-        + r"""
+        + f"""
 # Pull images (no login needed — public repo)
-docker pull "$GHCR_REGISTRY/stt-onnx:latest"
-docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
+{pull_lines}
 
 mkdir -p /opt/dalston
 
 # Save env for the start script (must exist before gpu-start.sh runs)
 cat > /opt/dalston/gpu-env.sh << ENVEOF
-S3_BUCKET="${S3_BUCKET}"
-AWS_REGION="${AWS_REGION}"
-CTRL_PLANE_IP="${CTRL_PLANE_IP}"
-GHCR_REGISTRY="${GHCR_REGISTRY}"
-HF_TOKEN="${HF_TOKEN}"
-OBSERVABILITY="${OBSERVABILITY}"
+S3_BUCKET="${{S3_BUCKET}}"
+AWS_REGION="${{AWS_REGION}}"
+CTRL_PLANE_IP="${{CTRL_PLANE_IP}}"
+GHCR_REGISTRY="${{GHCR_REGISTRY}}"
+HF_TOKEN="${{HF_TOKEN}}"
+OBSERVABILITY="${{OBSERVABILITY}}"
 ENVEOF
 
 # GPU worker start script
@@ -1049,12 +1131,11 @@ cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 set -euo pipefail
 source /opt/dalston/gpu-env.sh
 
-# Pull images (no login needed — public repo)
-docker pull "$GHCR_REGISTRY/stt-onnx:latest"
-docker pull "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
+# Pull images
+{pull_lines}
 
 # Stop existing containers if running
-docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0 2>/dev/null || true
+{rm_line}
 
 HOST_HOSTNAME=$(hostname)
 
@@ -1062,42 +1143,11 @@ HOST_HOSTNAME=$(hostname)
 OTEL_FLAGS=""
 LOG_FLAGS=""
 if [ "$OBSERVABILITY" = "true" ]; then
-  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${CTRL_PLANE_IP}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
-  LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${CTRL_PLANE_IP}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
+  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${{CTRL_PLANE_IP}}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
+  LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${{CTRL_PLANE_IP}}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
 fi
 
-docker run -d --name stt-transcribe-onnx --gpus all --restart unless-stopped \
-  -v /data/models:/data/models \
-  -p 9100:9100 \
-  -e DALSTON_DEVICE=cuda \
-  -e DALSTON_ENGINE_ID=onnx \
-  -e DALSTON_DEPLOY_ENV=aws \
-  -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \
-  -e REDIS_URL="redis://${CTRL_PLANE_IP}:6379" \
-  -e DALSTON_S3_BUCKET="$S3_BUCKET" \
-  -e DALSTON_S3_REGION="$AWS_REGION" \
-  -e AWS_REGION="$AWS_REGION" \
-  -e HF_HOME=/data/models \
-  $OTEL_FLAGS $LOG_FLAGS \
-  "$GHCR_REGISTRY/stt-onnx:latest"
-
-docker run -d --name stt-diarize-pyannote-4-0 --gpus all --restart unless-stopped \
-  -v /data/models:/data/models \
-  -p 9101:9100 \
-  -e DALSTON_DEVICE=cuda \
-  -e DALSTON_ENGINE_ID=pyannote-4.0 \
-  -e DALSTON_WORKER_ID=pyannote-gpu-1 \
-  -e DALSTON_DEPLOY_ENV=aws \
-  -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \
-  -e HF_TOKEN="$HF_TOKEN" \
-  -e REDIS_URL="redis://${CTRL_PLANE_IP}:6379" \
-  -e DALSTON_S3_BUCKET="$S3_BUCKET" \
-  -e DALSTON_S3_REGION="$AWS_REGION" \
-  -e AWS_REGION="$AWS_REGION" \
-  -e HF_HOME=/data/models \
-  $OTEL_FLAGS $LOG_FLAGS \
-  "$GHCR_REGISTRY/stt-diarize-pyannote:latest"
-
+{run_section}
 echo "GPU engines started at $(date)"
 STARTEOF
 chmod +x /opt/dalston/gpu-start.sh
@@ -1105,7 +1155,7 @@ chmod +x /opt/dalston/gpu-start.sh
 # GPU worker systemd service
 cat > /etc/systemd/system/dalston-gpu.service << SVCEOF
 [Unit]
-Description=Dalston GPU Worker
+Description=Dalston GPU Worker ({worker_name})
 Requires=docker.service
 After=docker.service
 
@@ -1113,7 +1163,7 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/dalston/gpu-start.sh
-ExecStop=/usr/bin/docker rm -f stt-transcribe-onnx stt-diarize-pyannote-4-0
+ExecStop=/usr/bin/docker rm -f {" ".join(containers)}
 TimeoutStartSec=600
 
 [Install]
@@ -1562,13 +1612,16 @@ def cmd_status_impl(st: DeploymentState) -> None:
     label = "Control plane" if st.scenario == "split" else "Instance"
     log(f"  {label}: {st.instance_id}  state={state}  ip={ip or 'none'}")
 
-    if st.scenario == "split" and st.gpu_instance_id:
-        gpu_inst = describe_instance(st.region, st.gpu_instance_id)
-        gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
-        gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
-        log(
-            f"  GPU worker:     {st.gpu_instance_id}  state={gpu_state}  ip={gpu_ip or 'none'}"
-        )
+    if st.scenario == "split" and st.gpu_workers:
+        for w in st.gpu_workers:
+            gpu_inst = describe_instance(st.region, w["instance_id"])
+            gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
+            gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
+            engines = ",".join(w.get("engines") or [])
+            log(
+                f"  GPU '{w['name']}':  {w['instance_id']}  state={gpu_state}  "
+                f"ip={gpu_ip or 'none'}  engines={engines}"
+            )
     print()
 
 
@@ -1626,29 +1679,40 @@ def _launch_control_plane(
     log(f"Control plane running: {st.instance_id} ({ip})")
 
 
-def _write_gpu_prometheus_targets(gpu_private_ip: str) -> None:
-    """Write Prometheus file_sd targets for GPU worker engines on the control plane.
+def _write_gpu_prometheus_targets(workers: list[dict]) -> None:
+    """Write Prometheus file_sd targets for all GPU workers on the control plane.
 
     Uses SSH via Tailscale to write a JSON targets file that Prometheus picks up
     via file_sd_configs. Prometheus rescans every 30s, so targets appear quickly.
     """
-    targets_json = json.dumps(
-        [
+    # Build targets from all workers with known private IPs
+    target_groups = []
+    for w in workers:
+        ip = w.get("private_ip", "")
+        if not ip:
+            continue
+        engines = w.get("engines", [])
+        ports = [f"{ip}:{9100 + i}" for i in range(len(engines))]
+        target_groups.append(
             {
-                "targets": [f"{gpu_private_ip}:9100", f"{gpu_private_ip}:9101"],
+                "targets": ports,
                 "labels": {
                     "instance_group": "gpu-worker",
-                    "host": "dalston-gpu-worker",
+                    "host": f"dalston-gpu-{w['name']}",
+                    "worker": w["name"],
                 },
             }
-        ]
-    )
+        )
+    if not target_groups:
+        return
+    targets_json = json.dumps(target_groups)
     cmd = (
         f"sudo mkdir -p /data/prometheus && "
-        f"echo {shlex.quote(targets_json)} > /data/prometheus/gpu-targets.json && "
-        f"sudo chown -R 65534:65534 /data/prometheus/gpu-targets.json"
+        f"echo {shlex.quote(targets_json)} | sudo tee /data/prometheus/gpu-targets.json > /dev/null && "
+        f"sudo chown 65534:65534 /data/prometheus/gpu-targets.json"
     )
-    log("Writing GPU Prometheus targets on control plane...")
+    ctrl_host = _resolve_tailscale_host("dalston-control-plane")
+    log(f"Writing GPU Prometheus targets on {ctrl_host}...")
     try:
         subprocess.run(
             [
@@ -1657,7 +1721,7 @@ def _write_gpu_prometheus_targets(gpu_private_ip: str) -> None:
                 "StrictHostKeyChecking=no",
                 "-o",
                 "ConnectTimeout=10",
-                "ec2-user@dalston-control-plane",
+                f"ec2-user@{ctrl_host}",
                 cmd,
             ],
             check=True,
@@ -1665,7 +1729,7 @@ def _write_gpu_prometheus_targets(gpu_private_ip: str) -> None:
             text=True,
             timeout=30,
         )
-        log(f"GPU targets registered: {gpu_private_ip}:9100, {gpu_private_ip}:9101")
+        log("GPU Prometheus targets registered")
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
         warn(f"Could not write GPU targets via SSH: {e}")
         warn(
@@ -1679,67 +1743,105 @@ def _launch_gpu(
     *,
     spot: bool | None = None,
     gpu_type: str | None = None,
+    engines: list[str] | None = None,
 ) -> None:
-    """Launch the GPU worker instance."""
+    """Launch a GPU worker instance with specified engines."""
     gw = tmpl.gpu_worker
     if not gw:
         die("Template has no gpu_worker config.")
 
     use_spot = spot if spot is not None else gw.spot
     gpu_type = gpu_type or gw.instance_type
+    engines = engines or list(GPU_ENGINE_PRESETS.keys())
+    worker_name = "-".join(engines) if len(engines) < 3 else "combo"
 
-    if st.gpu_instance_id:
-        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
-        if gpu_state != "terminated":
-            die(f"GPU worker already exists ({st.gpu_instance_id}, state={gpu_state}).")
+    # Check for name collision with existing workers
+    if st.gpu_workers:
+        for w in st.gpu_workers:
+            if w["name"] == worker_name:
+                w_state = get_instance_state(st.region, w["instance_id"])
+                if w_state in ("terminated", "shutting-down"):
+                    log(
+                        f"Previous worker '{worker_name}' ({w['instance_id']}) is {w_state}, replacing..."
+                    )
+                    st.gpu_workers.remove(w)
+                    save_state(st)
+                    break
+                else:
+                    die(
+                        f"GPU worker '{worker_name}' already exists ({w['instance_id']}, state={w_state})."
+                    )
 
     if not st.instance_id:
         die("Control plane not launched. Run 'dalston-aws launch control-plane' first.")
-    main_state = get_instance_state(st.region, st.instance_id)
+    ctrl_inst = describe_instance(st.region, st.instance_id)
+    main_state = ctrl_inst["State"]["Name"] if ctrl_inst else "terminated"
     if main_state != "running":
         die(f"Control plane is {main_state}. Run 'dalston-aws up' first.")
-
-    ctrl_private_ip = get_instance_private_ip(st.region, st.instance_id)
+    ctrl_private_ip = (ctrl_inst.get("PrivateIpAddress", "") or "") if ctrl_inst else ""
 
     if not st.gpu_sg_id:
         die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
 
-    # Open observability ports if enabled
+    # Open observability ports if enabled (idempotent)
     if st.observability:
         open_observability_ports(st.region, st.sg_id, st.gpu_sg_id)
 
-    log(f"Launching GPU worker ({gpu_type}, spot={use_spot})...")
+    log(
+        f"Launching GPU worker '{worker_name}' ({gpu_type}, spot={use_spot}, engines={engines})..."
+    )
 
     gpu_ud = generate_gpu_worker_user_data(
         st.s3_bucket,
         st.region,
         ctrl_private_ip,
+        worker_name=worker_name,
+        engines=engines,
         registry=tmpl.registry,
         observability=st.observability,
     )
-    st.gpu_instance_id = launch_gpu_interactive(
+    instance_id = launch_gpu_interactive(
         st.region,
         st.gpu_sg_id,
         gpu_ud,
-        f"{NAME_PREFIX}-gpu-worker",
+        f"{NAME_PREFIX}-gpu-{worker_name}",
         use_spot,
         st.key_name,
         st.instance_profile,
         gpu_type,
     )
-    wait_instance_running(st.region, st.gpu_instance_id)
-    st.gpu_data_volume_id = ""
-    save_state(st)
+    wait_instance_running(st.region, instance_id)
 
-    gpu_inst = describe_instance(st.region, st.gpu_instance_id)
+    gpu_inst = describe_instance(st.region, instance_id)
     gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
     gpu_private_ip = (gpu_inst.get("PrivateIpAddress", "") or "") if gpu_inst else ""
-    audit("launch.gpu", gpu_instance=st.gpu_instance_id, gpu_type=gpu_type, ip=gpu_ip)
-    log(f"GPU worker running: {st.gpu_instance_id} ({gpu_ip})")
 
-    # Register GPU worker metrics with Prometheus on the control plane
-    if st.observability and gpu_private_ip:
-        _write_gpu_prometheus_targets(gpu_private_ip)
+    worker = asdict(
+        GpuWorker(
+            name=worker_name,
+            instance_id=instance_id,
+            instance_type=gpu_type,
+            engines=engines,
+        )
+    )
+    worker["private_ip"] = gpu_private_ip
+    if st.gpu_workers is None:
+        st.gpu_workers = []
+    st.gpu_workers.append(worker)
+    save_state(st)
+
+    audit(
+        "launch.gpu",
+        gpu_instance=instance_id,
+        gpu_type=gpu_type,
+        ip=gpu_ip,
+        worker=worker_name,
+    )
+    log(f"GPU worker '{worker_name}' running: {instance_id} ({gpu_ip})")
+
+    # Register all GPU worker metrics with Prometheus on the control plane
+    if st.observability:
+        _write_gpu_prometheus_targets(st.gpu_workers)
 
 
 def cmd_launch(args: argparse.Namespace) -> None:
@@ -1756,11 +1858,13 @@ def cmd_launch(args: argparse.Namespace) -> None:
         _launch_control_plane(st, tmpl, observability=args.observability)
     if target in ("gpu", None):
         if tmpl.gpu_worker:
+            engines = args.engines.split(",") if args.engines else None
             _launch_gpu(
                 st,
                 tmpl,
                 spot=spot_override,
                 gpu_type=args.gpu_type,
+                engines=engines,
             )
         elif target == "gpu":
             die("Template has no gpu_worker config.")
@@ -1768,35 +1872,42 @@ def cmd_launch(args: argparse.Namespace) -> None:
     cmd_status_impl(st)
 
 
-def _terminate_gpu(st: DeploymentState) -> None:
-    """Terminate the GPU worker and clean up its resources."""
-    if not st.gpu_instance_id:
-        log("No GPU worker to terminate.")
+def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
+    """Terminate GPU worker(s). If name is None, terminate all."""
+    if not st.gpu_workers:
+        log("No GPU workers to terminate.")
         return
 
     ec2 = ec2_client(st.region)
+    to_remove = []
 
-    if get_instance_state(st.region, st.gpu_instance_id) != "terminated":
-        audit("terminate.gpu", gpu_instance=st.gpu_instance_id)
-        cancel_spot_requests_for_instances(st.region, [st.gpu_instance_id])
-        log(f"Terminating GPU worker {st.gpu_instance_id}...")
+    for w in st.gpu_workers:
+        if name is not None and w["name"] != name:
+            continue
+        iid = w["instance_id"]
+        wname = w["name"]
+        state = get_instance_state(st.region, iid)
+        if state in ("terminated", "shutting-down"):
+            to_remove.append(w)
+            continue
+        audit("terminate.gpu", gpu_instance=iid, worker=wname)
+        cancel_spot_requests_for_instances(st.region, [iid])
+        log(f"Terminating GPU worker '{wname}' ({iid})...")
         try:
-            ec2.terminate_instances(InstanceIds=[st.gpu_instance_id])
-        except ClientError:
-            pass
-        wait_instance_terminated(st.region, st.gpu_instance_id)
+            ec2.terminate_instances(InstanceIds=[iid])
+            to_remove.append(w)
+        except ClientError as e:
+            warn(f"Failed to terminate '{wname}' ({iid}): {e}")
 
-    if st.gpu_data_volume_id:
-        log(f"Deleting GPU data volume {st.gpu_data_volume_id}...")
-        try:
-            ec2.delete_volume(VolumeId=st.gpu_data_volume_id)
-        except ClientError:
-            pass
-
-    st.gpu_instance_id = ""
-    st.gpu_data_volume_id = ""
+    for w in to_remove:
+        st.gpu_workers.remove(w)
+    if not st.gpu_workers:
+        st.gpu_workers = None
     save_state(st)
-    log("GPU worker terminated.")
+    if name:
+        log(f"GPU worker '{name}' terminated.")
+    else:
+        log("All GPU workers terminated.")
 
 
 def _terminate_control_plane(st: DeploymentState) -> None:
@@ -1824,21 +1935,8 @@ def _terminate_control_plane(st: DeploymentState) -> None:
         except ClientError:
             pass
 
-    # Delete security groups (GPU SG first since control plane SG may reference it)
-    time.sleep(3)
-    for sg_attr in ("gpu_sg_id", "sg_id"):
-        sg_id = getattr(st, sg_attr)
-        if sg_id:
-            log(f"Deleting security group {sg_id}...")
-            try:
-                ec2.delete_security_group(GroupId=sg_id)
-            except ClientError:
-                pass
-
     st.instance_id = ""
     st.data_volume_id = ""
-    st.sg_id = ""
-    st.gpu_sg_id = ""
     save_state(st)
     log("Control plane terminated.")
 
@@ -1855,7 +1953,8 @@ def cmd_terminate(args: argparse.Namespace) -> None:
 
     # GPU first, then control plane
     if target in ("gpu", None):
-        _terminate_gpu(st)
+        gpu_name = getattr(args, "name", None)
+        _terminate_gpu(st, name=gpu_name)
     if target in ("control-plane", None):
         _terminate_control_plane(st)
 
@@ -1866,7 +1965,7 @@ def cmd_up(args: argparse.Namespace) -> None:
     st = require_state()
     if not st.instance_id:
         die("No instances to start. Run 'dalston-aws launch control-plane' first.")
-    audit("up", instance=st.instance_id, gpu_instance=st.gpu_instance_id or None)
+    audit("up", instance=st.instance_id)
     log("Starting instance(s)...")
     ec2 = ec2_client(st.region)
 
@@ -1877,14 +1976,12 @@ def cmd_up(args: argparse.Namespace) -> None:
         die("Run 'dalston-aws launch control-plane' to launch a new one.")
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
 
-    if st.gpu_instance_id:
-        gpu_state = get_instance_state(st.region, st.gpu_instance_id)
+    for w in st.gpu_workers or []:
+        gpu_state = get_instance_state(st.region, w["instance_id"])
         if gpu_state == "terminated":
-            warn(f"GPU instance {st.gpu_instance_id} was terminated.")
-            _terminate_gpu(st)
-            warn("Run 'dalston-aws launch gpu' to launch a new one.")
+            warn(f"GPU worker '{w['name']}' ({w['instance_id']}) was terminated.")
         else:
-            retry_aws(ec2.start_instances, InstanceIds=[st.gpu_instance_id])
+            retry_aws(ec2.start_instances, InstanceIds=[w["instance_id"]])
     log("Start command sent. Instances booting...")
 
 
@@ -1912,12 +2009,12 @@ def cmd_down(args: argparse.Namespace) -> None:
     st = require_state()
     if not st.instance_id:
         die("No instances to stop. Run 'dalston-aws launch control-plane' first.")
-    audit("down", instance=st.instance_id, gpu_instance=st.gpu_instance_id or None)
+    audit("down", instance=st.instance_id)
     log("Stopping instance(s)...")
     ec2 = ec2_client(st.region)
     _stop_instance(ec2, st.region, st.instance_id)
-    if st.gpu_instance_id:
-        _stop_instance(ec2, st.region, st.gpu_instance_id)
+    for w in st.gpu_workers or []:
+        _stop_instance(ec2, st.region, w["instance_id"])
     log("Done. Use 'dalston-aws up' to restart.")
 
 
@@ -1952,9 +2049,23 @@ def cmd_ssh(args: argparse.Namespace) -> None:
     st = require_state()
 
     if args.target == "gpu":
-        if st.scenario != "split" or not st.gpu_instance_id:
-            die("No GPU worker found. Use 'dalston-aws ssh' for the main instance.")
-        base_hostname = "dalston-gpu-worker"
+        if not st.gpu_workers:
+            die("No GPU workers found. Use 'dalston-aws ssh' for the main instance.")
+        # If multiple workers, pick by --name or default to first
+        gpu_name = getattr(args, "name", None)
+        if gpu_name:
+            worker = next((w for w in st.gpu_workers if w["name"] == gpu_name), None)
+            if not worker:
+                names = [w["name"] for w in st.gpu_workers]
+                die(f"GPU worker '{gpu_name}' not found. Available: {names}")
+        else:
+            worker = st.gpu_workers[0]
+            if len(st.gpu_workers) > 1:
+                names = [w["name"] for w in st.gpu_workers]
+                warn(
+                    f"Multiple GPU workers: {names}. Connecting to '{worker['name']}'. Use --name to choose."
+                )
+        base_hostname = f"dalston-gpu-{worker['name']}"
         user = "ubuntu"  # DL AMI is Ubuntu-based
     else:
         base_hostname = "dalston-control-plane"
@@ -1974,22 +2085,21 @@ def cmd_ssh(args: argparse.Namespace) -> None:
 
 def cmd_teardown(args: argparse.Namespace) -> None:
     st = require_state()
+    gpu_ids = [w["instance_id"] for w in (st.gpu_workers or [])]
     audit(
         "teardown",
         instance=st.instance_id,
-        gpu_instance=st.gpu_instance_id or None,
+        gpu_instances=gpu_ids or None,
         s3_bucket=st.s3_bucket,
     )
 
     print()
     warn("This will PERMANENTLY DELETE all Dalston AWS resources:")
     instance_list = st.instance_id
-    if st.gpu_instance_id:
-        instance_list += f" {st.gpu_instance_id}"
+    for gid in gpu_ids:
+        instance_list += f" {gid}"
     warn(f"  - EC2 instance(s): {instance_list}")
     volume_list = st.data_volume_id
-    if st.gpu_data_volume_id:
-        volume_list += f" {st.gpu_data_volume_id}"
     warn(f"  - EBS volumes: {volume_list}")
     warn(f"  - S3 bucket: {st.s3_bucket} (contents preserved -- delete manually)")
     warn(f"  - IAM role: {st.iam_role}")
@@ -2002,9 +2112,24 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     if confirm != "yes":
         die("Aborted.")
 
-    # Terminate instances and clean up volumes/SGs
+    # Terminate instances and clean up volumes
     _terminate_gpu(st)
     _terminate_control_plane(st)
+
+    # Delete security groups (GPU SG first since control plane SG may reference it)
+    ec2 = ec2_client(st.region)
+    time.sleep(3)
+    for sg_attr in ("gpu_sg_id", "sg_id"):
+        sg_id = getattr(st, sg_attr)
+        if sg_id:
+            log(f"Deleting security group {sg_id}...")
+            try:
+                ec2.delete_security_group(GroupId=sg_id)
+            except ClientError:
+                pass
+    st.sg_id = ""
+    st.gpu_sg_id = ""
+    save_state(st)
 
     # Delete IAM resources
     iam = iam_client()
@@ -2096,6 +2221,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["main", "gpu"],
         help="Which instance to connect to (default: main)",
     )
+    p_ssh.add_argument(
+        "--name",
+        default=None,
+        help="GPU worker name (e.g., 'onnx', 'pyannote') when target=gpu",
+    )
     p_ssh.set_defaults(func=cmd_ssh)
 
     # launch
@@ -2118,6 +2248,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--gpu-type", default=None, help="GPU instance type (overrides template)"
     )
     p_launch.add_argument(
+        "--engines",
+        default=None,
+        help="Comma-separated engines to run (e.g., 'onnx', 'pyannote', 'onnx,pyannote')",
+    )
+    p_launch.add_argument(
         "--observability",
         action="store_true",
         default=False,
@@ -2135,6 +2270,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=["control-plane", "gpu"],
         help="Component to terminate (default: all, requires confirmation)",
+    )
+    p_term.add_argument(
+        "--name",
+        default=None,
+        help="Terminate specific GPU worker by name (e.g., 'onnx', 'pyannote')",
     )
     p_term.set_defaults(func=cmd_terminate)
 

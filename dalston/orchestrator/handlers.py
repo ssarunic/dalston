@@ -292,6 +292,7 @@ async def handle_job_created(
 
         await db.commit()
 
+        dalston.metrics.inc_orchestrator_jobs_in_progress()
         log.info("saved_tasks_and_updated_job", status="running")
 
     except IntegrityError as e:
@@ -353,6 +354,8 @@ async def handle_job_created(
                 job.completed_at = datetime.now(UTC)
                 await db.commit()
                 await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
+                dalston.metrics.dec_orchestrator_jobs_in_progress()
+                dalston.metrics.inc_orchestrator_jobs("failed")
                 await publish_job_failed(redis, job_id, error_str)
                 log.error(
                     "job_failed_engine_error",
@@ -1290,9 +1293,13 @@ async def _check_job_completion(
     if job is None:
         return
 
-    # If job is already completed (e.g. post-processing tasks finishing),
-    # just check post-processing completion status
-    if job.status == JobStatus.COMPLETED.value:
+    # If job is already in a terminal state (e.g. duplicate task.completed events
+    # or post-processing tasks finishing), skip final-metrics side effects.
+    if job.status in (
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    ):
         if post_proc_tasks:
             log.debug("post_processing_task_completed_checking_enrichments")
         return
@@ -1318,6 +1325,10 @@ async def _check_job_completion(
             job.error = f"Transcript assembly failed: {e}"
 
     # Record final outcome metrics after all status mutations (including assembly).
+    # Only decrement the gauge if the job was actually running (started_at is set
+    # alongside the increment in handle_job_created after DAG commit).
+    if job.started_at:
+        dalston.metrics.dec_orchestrator_jobs_in_progress()
     if job.status == JobStatus.FAILED.value:
         dalston.metrics.inc_orchestrator_jobs("failed")
     else:
@@ -1333,6 +1344,11 @@ async def _check_job_completion(
             dalston.metrics.observe_orchestrator_job_duration(
                 job_engine_id, job_model, duration
             )
+            # Record audio duration for real-time factor calculation
+            if job.audio_duration and job.audio_duration > 0:
+                dalston.metrics.observe_orchestrator_audio_duration(
+                    job_engine_id, job_model, job.audio_duration
+                )
 
         # Extract and store result stats from transcript
         await _populate_job_result_stats(job, log)
@@ -1474,6 +1490,8 @@ async def _check_job_cancellation_complete(
 
     # Record job cancellation metric (M20)
     dalston.metrics.inc_orchestrator_jobs("cancelled")
+    if job.started_at:
+        dalston.metrics.dec_orchestrator_jobs_in_progress()
 
     log.info("job_cancelled")
 
