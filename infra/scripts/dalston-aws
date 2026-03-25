@@ -170,6 +170,7 @@ class GpuWorker:
     name: str = ""  # e.g., "onnx", "pyannote"
     instance_id: str = ""
     instance_type: str = ""
+    spot: bool = True
     engines: list[str] | None = None  # e.g., ["onnx"] or ["pyannote"]
 
 
@@ -1001,14 +1002,14 @@ def _generate_docker_run_block(engine_name: str, port: int) -> str:
         extra_lines += f'  -e {k}="{v}" \\\n'
 
     return f"""\
-docker run -d --name {container} --gpus all --restart unless-stopped \\
+docker run -d --name {container} --gpus all --network host --restart unless-stopped \\
   -v /data/models:/data/models \\
-  -p {port}:9100 \\
+  -e DALSTON_METRICS_PORT={port} \\
   -e DALSTON_DEVICE=cuda \\
   -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
-  -e REDIS_URL="redis://${{CTRL_PLANE_IP}}:6379" \\
+  -e REDIS_URL="redis://${{CTRL_PLANE_HOST}}:6379" \\
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
   -e DALSTON_S3_REGION="$AWS_REGION" \\
   -e AWS_REGION="$AWS_REGION" \\
@@ -1021,7 +1022,6 @@ docker run -d --name {container} --gpus all --restart unless-stopped \\
 def generate_gpu_worker_user_data(
     s3_bucket: str,
     region: str,
-    ctrl_plane_ip: str,
     worker_name: str,
     engines: list[str],
     registry: str | None = None,
@@ -1063,7 +1063,7 @@ echo "Starting Dalston GPU worker bootstrap at $(date)"
     variables = f"""\
 S3_BUCKET="{s3_bucket}"
 AWS_REGION="{region}"
-CTRL_PLANE_IP="{ctrl_plane_ip}"
+CTRL_PLANE_HOST="dalston-control-plane"
 GHCR_REGISTRY="{ghcr_registry}"
 HF_TOKEN="{hf_token}"
 OBSERVABILITY="{"true" if observability else "false"}"
@@ -1119,7 +1119,7 @@ mkdir -p /opt/dalston
 cat > /opt/dalston/gpu-env.sh << ENVEOF
 S3_BUCKET="${{S3_BUCKET}}"
 AWS_REGION="${{AWS_REGION}}"
-CTRL_PLANE_IP="${{CTRL_PLANE_IP}}"
+CTRL_PLANE_HOST="${{CTRL_PLANE_HOST}}"
 GHCR_REGISTRY="${{GHCR_REGISTRY}}"
 HF_TOKEN="${{HF_TOKEN}}"
 OBSERVABILITY="${{OBSERVABILITY}}"
@@ -1143,8 +1143,8 @@ HOST_HOSTNAME=$(hostname)
 OTEL_FLAGS=""
 LOG_FLAGS=""
 if [ "$OBSERVABILITY" = "true" ]; then
-  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${{CTRL_PLANE_IP}}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
-  LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${{CTRL_PLANE_IP}}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
+  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${{CTRL_PLANE_HOST}}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
+  LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${{CTRL_PLANE_HOST}}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
 fi
 
 {run_section}
@@ -1344,21 +1344,23 @@ def list_gpu_spot_instances(region: str) -> None:
 
     ec2 = ec2_client(region)
 
-    # Query known GPU instance families directly
-    gpu_families = [
-        f"{fam}.{sz}"
-        for fam in ("g4dn", "g5", "g6", "g6e", "p3", "p4d", "p5")
-        for sz in ("xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge")
-    ]
     gpu_types: list[dict] = []
-    # Query in batches (API limit is 100 per call)
-    for i in range(0, len(gpu_families), 100):
-        batch = gpu_families[i : i + 100]
-        try:
-            resp = ec2.describe_instance_types(InstanceTypes=batch)
-            gpu_types.extend(resp.get("InstanceTypes", []))
-        except ClientError:
-            pass
+    # Use filter instead of InstanceTypes list — avoids failure on types
+    # that don't exist in the region, and returns all matches in one call.
+    try:
+        paginator = ec2.get_paginator("describe_instance_types")
+        for page in paginator.paginate(
+            Filters=[
+                {
+                    "Name": "instance-type",
+                    "Values": [f"{fam}.*" for fam in ("g4dn", "g5", "g6", "g6e")],
+                },
+                {"Name": "processor-info.supported-architecture", "Values": ["x86_64"]},
+            ],
+        ):
+            gpu_types.extend(page.get("InstanceTypes", []))
+    except ClientError:
+        pass
 
     gpu_types.sort(key=lambda t: t["InstanceType"])
 
@@ -1618,9 +1620,11 @@ def cmd_status_impl(st: DeploymentState) -> None:
             gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
             gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
             engines = ",".join(w.get("engines") or [])
+            pricing = "spot" if w.get("spot", True) else "on-demand"
+            itype = w.get("instance_type", "")
             log(
                 f"  GPU '{w['name']}':  {w['instance_id']}  state={gpu_state}  "
-                f"ip={gpu_ip or 'none'}  engines={engines}"
+                f"ip={gpu_ip or 'none'}  {itype} ({pricing})  engines={engines}"
             )
     print()
 
@@ -1688,17 +1692,15 @@ def _write_gpu_prometheus_targets(workers: list[dict]) -> None:
     # Build targets from all workers with known private IPs
     target_groups = []
     for w in workers:
-        ip = w.get("private_ip", "")
-        if not ip:
-            continue
+        ts_host = f"dalston-gpu-{w['name']}"
         engines = w.get("engines", [])
-        ports = [f"{ip}:{9100 + i}" for i in range(len(engines))]
+        ports = [f"{ts_host}:{9100 + i}" for i in range(len(engines))]
         target_groups.append(
             {
                 "targets": ports,
                 "labels": {
                     "instance_group": "gpu-worker",
-                    "host": f"dalston-gpu-{w['name']}",
+                    "host": ts_host,
                     "worker": w["name"],
                 },
             }
@@ -1778,7 +1780,6 @@ def _launch_gpu(
     main_state = ctrl_inst["State"]["Name"] if ctrl_inst else "terminated"
     if main_state != "running":
         die(f"Control plane is {main_state}. Run 'dalston-aws up' first.")
-    ctrl_private_ip = (ctrl_inst.get("PrivateIpAddress", "") or "") if ctrl_inst else ""
 
     if not st.gpu_sg_id:
         die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
@@ -1794,7 +1795,6 @@ def _launch_gpu(
     gpu_ud = generate_gpu_worker_user_data(
         st.s3_bucket,
         st.region,
-        ctrl_private_ip,
         worker_name=worker_name,
         engines=engines,
         registry=tmpl.registry,
@@ -1814,17 +1814,16 @@ def _launch_gpu(
 
     gpu_inst = describe_instance(st.region, instance_id)
     gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
-    gpu_private_ip = (gpu_inst.get("PrivateIpAddress", "") or "") if gpu_inst else ""
 
     worker = asdict(
         GpuWorker(
             name=worker_name,
             instance_id=instance_id,
             instance_type=gpu_type,
+            spot=use_spot,
             engines=engines,
         )
     )
-    worker["private_ip"] = gpu_private_ip
     if st.gpu_workers is None:
         st.gpu_workers = []
     st.gpu_workers.append(worker)
