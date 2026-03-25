@@ -24,6 +24,9 @@ x-loki-logging: &loki-logging
 
 services:
   prometheus:
+    # Use Tailscale DNS so Prometheus can resolve GPU worker hostnames
+    # (dalston-gpu-onnx, dalston-gpu-pyannote) for file_sd scrape targets.
+    dns: 100.100.100.100
     volumes:
       - /data/prometheus:/prometheus
     command:
