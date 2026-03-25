@@ -523,8 +523,10 @@ class TestDagDependencies:
         assert by_stage["align"].dependencies == [by_stage["transcribe"].id]
 
     @pytest.mark.asyncio
-    async def test_diarize_depends_on_align(self, job_id, audio_uri, mock_catalog):
-        """Diarize runs sequentially after transcribe/align."""
+    async def test_diarize_parallel_with_transcribe(
+        self, job_id, audio_uri, mock_catalog
+    ):
+        """Diarize runs in parallel — depends only on prepare."""
         registry = create_mock_registry(
             {
                 "prepare": {"engine_id": "audio-prepare"},
@@ -546,11 +548,8 @@ class TestDagDependencies:
         )
 
         by_stage = {t.stage: t for t in tasks}
-        diarize_deps = set(by_stage["diarize"].dependencies)
 
-        # Diarize depends on prepare (audio) and align (last transcription stage)
-        assert by_stage["prepare"].id in diarize_deps
-        assert by_stage["align"].id in diarize_deps
+        assert by_stage["diarize"].dependencies == [by_stage["prepare"].id]
         assert by_stage["transcribe"].dependencies == [by_stage["prepare"].id]
 
 
