@@ -128,12 +128,14 @@ function NodeCard({ node }: { node: NodeView }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
-            <Server className="h-4 w-4 text-muted-foreground" />
-            {node.node_id}
-          </CardTitle>
-          <DeployBadge node={node} />
+        <div className="flex items-center gap-2">
+          <Server className="h-4 w-4 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <CardTitle className="text-base font-medium truncate">
+              {node.node_id}
+            </CardTitle>
+            <DeployBadge node={node} />
+          </div>
         </div>
         {!hasGpu && (
           <span className="text-xs text-muted-foreground">{S.infrastructure.cpuOnly}</span>
