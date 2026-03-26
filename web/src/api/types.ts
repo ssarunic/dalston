@@ -475,6 +475,7 @@ export interface LiveSessionConfig {
   enableVad: boolean
   interimResults: boolean
   vocabulary?: string[]
+  deviceId?: string
 }
 
 export type LiveSessionState = 'idle' | 'connecting' | 'recording' | 'stopping' | 'completed' | 'error'

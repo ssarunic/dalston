@@ -434,6 +434,8 @@ const realtimeLive = {
   languageLabel: 'Language',
   modelLabel: 'Model',
   anyAvailable: 'Any available',
+  microphoneLabel: 'Microphone',
+  defaultMicrophone: 'Default microphone',
   vocabularyLabel: 'Vocabulary (comma-separated terms to boost recognition)',
   vocabularyPlaceholder: 'e.g., Kubernetes, CrewAI, Bizzon',
   noModelsWarning:

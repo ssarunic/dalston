@@ -26,6 +26,7 @@ import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
+import { useAudioDevices } from '@/hooks/useAudioDevices'
 import type { LiveSessionConfig } from '@/api/types'
 
 const LANGUAGES = [
@@ -64,6 +65,7 @@ export function RealtimeLive() {
   const [language, setLanguage] = useState('auto')
   const [model, setModel] = useState('')
   const [vocabularyText, setVocabularyText] = useState('')
+  const [selectedDeviceId, setSelectedDeviceId] = useState('')
 
   const {
     state,
@@ -82,6 +84,7 @@ export function RealtimeLive() {
   const { data: enginesData } = useEngines()
   const { data: statusData } = useRealtimeStatus()
   const { data: registryData } = useModelRegistry({ stage: 'transcribe' })
+  const { devices: audioDevices, error: audioDevicesError } = useAudioDevices()
 
   // Get engine_ids from available RT workers
   const rtRuntimes = useMemo(() => {
@@ -186,6 +189,7 @@ export function RealtimeLive() {
       enableVad: true,
       interimResults: true,
       vocabulary: vocabulary.length > 0 ? vocabulary : undefined,
+      deviceId: selectedDeviceId || undefined,
     }
     await start(config)
   }
@@ -263,6 +267,27 @@ export function RealtimeLive() {
                   <p className="text-xs text-amber-500 mt-1">
                     {S.realtimeLive.noModelsWarning}
                   </p>
+                )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  {S.realtimeLive.microphoneLabel}
+                </label>
+                <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={S.realtimeLive.defaultMicrophone} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">{S.realtimeLive.defaultMicrophone}</SelectItem>
+                    {audioDevices.map((d) => (
+                      <SelectItem key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {audioDevicesError && (
+                  <p className="text-xs text-amber-500 mt-1">{audioDevicesError}</p>
                 )}
               </div>
               <div className="sm:col-span-2">
