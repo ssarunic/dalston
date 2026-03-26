@@ -87,6 +87,37 @@ class EngineHTTPServer:
             caps = engine.get_capabilities()
             return caps.model_dump(mode="json")
 
+        @app.get("/debug/status")
+        async def debug_status() -> dict[str, Any]:
+            import gc
+            import threading
+
+            result: dict[str, Any] = {
+                "thread_count": threading.active_count(),
+                "gc_counts": list(gc.get_count()),
+            }
+            try:
+                import pynvml
+
+                pynvml.nvmlInit()
+                try:
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    result["gpu_used_mb"] = int(info.used // (1024 * 1024))
+                    result["gpu_total_mb"] = int(info.total // (1024 * 1024))
+                finally:
+                    pynvml.nvmlShutdown()
+            except Exception:
+                pass
+            try:
+                import psutil
+
+                proc = psutil.Process()
+                result["rss_mb"] = int(proc.memory_info().rss // (1024 * 1024))
+            except Exception:
+                pass
+            return result
+
         self._register_stage_endpoints(app)
 
         return app
