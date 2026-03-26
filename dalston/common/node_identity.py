@@ -70,12 +70,28 @@ def _probe_imds() -> dict | None:
 @functools.lru_cache(maxsize=1)
 def get_gpu_memory_total() -> str:
     """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available."""
+    # Try torch first (available in PyTorch-based engines)
     try:
         import torch
 
         if torch.cuda.is_available():
             total_gb = torch.cuda.get_device_properties(0).total_mem / 1e9
             return f"{total_gb:.1f}GB"
+    except Exception:
+        pass
+    # Fallback to nvidia-smi (available in any container with --gpus)
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            total_mib = float(result.stdout.split("\n")[0])
+            return f"{total_mib / 1024:.1f}GB"
     except Exception:
         pass
     return "0GB"

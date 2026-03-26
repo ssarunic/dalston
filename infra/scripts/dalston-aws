@@ -1877,11 +1877,15 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
         log("No GPU workers to terminate.")
         return
 
+    names: set[str] | None = None
+    if name is not None:
+        names = {n.strip() for n in name.split(",")}
+
     ec2 = ec2_client(st.region)
     to_remove = []
 
     for w in st.gpu_workers:
-        if name is not None and w["name"] != name:
+        if names is not None and w["name"] not in names:
             continue
         iid = w["instance_id"]
         wname = w["name"]
@@ -1903,8 +1907,8 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     if not st.gpu_workers:
         st.gpu_workers = None
     save_state(st)
-    if name:
-        log(f"GPU worker '{name}' terminated.")
+    if names:
+        log(f"GPU worker(s) {', '.join(sorted(names))} terminated.")
     else:
         log("All GPU workers terminated.")
 
@@ -2273,7 +2277,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_term.add_argument(
         "--name",
         default=None,
-        help="Terminate specific GPU worker by name (e.g., 'onnx', 'pyannote')",
+        help="Terminate specific GPU worker(s) by name, comma-separated (e.g., 'onnx,pyannote')",
     )
     p_term.set_defaults(func=cmd_terminate)
 
