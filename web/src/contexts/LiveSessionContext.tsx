@@ -131,14 +131,25 @@ export function LiveSessionProvider({ children }: { children: ReactNode }) {
       setState('connecting')
 
       try {
+        // Guard: mediaDevices requires a secure context (HTTPS)
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error(
+            'Microphone access requires HTTPS. Please access this page over a secure connection.'
+          )
+        }
+
         // Request microphone access
+        const audioConstraints: MediaTrackConstraints = {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        }
+        if (config.deviceId) {
+          audioConstraints.deviceId = { exact: config.deviceId }
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            sampleRate: 16000,
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
+          audio: audioConstraints,
         })
         mediaStreamRef.current = stream
 
