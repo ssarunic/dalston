@@ -15,6 +15,8 @@ import functools
 import json
 import os
 import socket
+import subprocess
+import types
 import urllib.request
 from dataclasses import dataclass
 
@@ -67,34 +69,61 @@ def _probe_imds() -> dict | None:
         return None
 
 
-@functools.lru_cache(maxsize=1)
-def get_gpu_memory_total() -> str:
-    """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available."""
-    # Try torch first (available in PyTorch-based engines)
-    try:
-        import torch
+_nvidia_smi_available: bool | None = None
 
-        if torch.cuda.is_available():
-            total_gb = torch.cuda.get_device_properties(0).total_mem / 1e9
-            return f"{total_gb:.1f}GB"
-    except Exception:
-        pass
-    # Fallback to nvidia-smi (available in any container with --gpus)
-    try:
-        import subprocess
 
+def _query_nvidia_smi_gb(field: str) -> str | None:
+    """Query nvidia-smi for a memory field (MiB) and return as 'X.YGB'."""
+    global _nvidia_smi_available
+    if _nvidia_smi_available is False:
+        return None
+    try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", f"--query-gpu={field}", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
-            total_mib = float(result.stdout.split("\n")[0])
-            return f"{total_mib / 1024:.1f}GB"
+            _nvidia_smi_available = True
+            mib = float(result.stdout.split("\n")[0])
+            return f"{mib / 1024:.1f}GB"
+    except FileNotFoundError:
+        _nvidia_smi_available = False
     except Exception:
         pass
-    return "0GB"
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _get_torch() -> types.ModuleType | None:
+    """Return the torch module if CUDA is available, else None. Probed once."""
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return torch
+    except Exception:
+        pass
+    return None
+
+
+def get_gpu_memory_used() -> str:
+    """Probe current GPU VRAM usage. Returns "0GB" if no GPU available."""
+    torch = _get_torch()
+    if torch is not None:
+        return f"{torch.cuda.memory_allocated() / 1e9:.1f}GB"
+    return _query_nvidia_smi_gb("memory.used") or "0GB"
+
+
+@functools.lru_cache(maxsize=1)
+def get_gpu_memory_total() -> str:
+    """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available."""
+    torch = _get_torch()
+    if torch is not None:
+        return f"{torch.cuda.get_device_properties(0).total_mem / 1e9:.1f}GB"
+    return _query_nvidia_smi_gb("memory.total") or "0GB"
 
 
 @functools.lru_cache(maxsize=1)
