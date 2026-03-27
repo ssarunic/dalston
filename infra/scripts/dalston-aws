@@ -928,21 +928,25 @@ DOTENVEOF
 fi
 
 # Create deploy script for easy redeploys
-cat > "$DATA_MOUNT/dalston/deploy.sh" << DEPLOYEOF
+cat > "$DATA_MOUNT/dalston/deploy.sh" << 'DEPLOYEOF'
 #!/bin/bash
 set -euo pipefail
 cd /data/dalston
-source .env.aws
-export DALSTON_S3_BUCKET DALSTON_S3_REGION AWS_REGION REDIS_URL DATABASE_URL HF_HOME GHCR_REGISTRY IMAGE_TAG
+
+# Read .env.aws safely (values may contain spaces/flags)
+while IFS='=' read -r key value; do
+  [[ -z "$key" || "$key" =~ ^# ]] && continue
+  export "$key=$value"
+done < .env.aws
 
 git pull --ff-only
 
 if [ "$USE_GHCR" = "true" ]; then
-  docker compose ${COMPOSE_FILES} --env-file .env.aws pull ${CTRL_SERVICES}
+  docker compose $COMPOSE_FILES --env-file .env.aws pull $CTRL_SERVICES
 fi
 
-docker compose ${COMPOSE_FILES} --env-file .env.aws up -d ${COMPOSE_UP_FLAGS} ${CTRL_SERVICES}
-echo "Deploy complete at \$(date)"
+docker compose $COMPOSE_FILES --env-file .env.aws up -d $COMPOSE_UP_FLAGS $CTRL_SERVICES
+echo "Deploy complete at $(date)"
 DEPLOYEOF
 chmod +x "$DATA_MOUNT/dalston/deploy.sh"
 
@@ -1156,8 +1160,8 @@ chmod +x /opt/dalston/gpu-start.sh
 cat > /etc/systemd/system/dalston-gpu.service << SVCEOF
 [Unit]
 Description=Dalston GPU Worker ({worker_name})
-Requires=docker.service
-After=docker.service
+Requires=docker.service dalston-tailscale.service
+After=docker.service dalston-tailscale.service
 
 [Service]
 Type=oneshot
@@ -1964,6 +1968,43 @@ def cmd_terminate(args: argparse.Namespace) -> None:
     cmd_status_impl(st)
 
 
+def _ssh_base_args(
+    host: str, user: str, key_file: Path, connect_timeout: int = 10
+) -> list[str]:
+    """Build common SSH command prefix."""
+    args = [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        f"ConnectTimeout={connect_timeout}",
+    ]
+    if key_file.exists():
+        args += ["-i", str(key_file)]
+    args.append(f"{user}@{host}")
+    return args
+
+
+def _wait_for_ssh(host: str, user: str, key_file: Path, timeout: int = 120) -> bool:
+    """Wait until SSH is reachable, returning True on success."""
+    ssh_cmd = _ssh_base_args(host, user, key_file, connect_timeout=5) + [
+        "-o",
+        "BatchMode=yes",
+        "true",
+    ]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if subprocess.run(ssh_cmd, capture_output=True).returncode == 0:
+            return True
+        time.sleep(5)
+    return False
+
+
+def _ssh_run(host: str, user: str, key_file: Path, command: str) -> int:
+    """Run a command over SSH and stream output. Returns exit code."""
+    return subprocess.call(_ssh_base_args(host, user, key_file) + [command])
+
+
 def cmd_up(args: argparse.Namespace) -> None:
     st = require_state()
     if not st.instance_id:
@@ -1986,6 +2027,22 @@ def cmd_up(args: argparse.Namespace) -> None:
         else:
             retry_aws(ec2.start_instances, InstanceIds=[w["instance_id"]])
     log("Start command sent. Instances booting...")
+
+    if args.pull:
+        key_file = STATE_DIR / f"{st.key_name}.pem"
+        host = _resolve_tailscale_host("dalston-control-plane")
+        log(f"Waiting for SSH on {host}...")
+        if not _wait_for_ssh(host, "ec2-user", key_file):
+            warn(
+                "SSH not reachable after timeout. Run deploy manually: sudo /data/dalston/deploy.sh"
+            )
+            return
+        log("Pulling latest images and redeploying...")
+        rc = _ssh_run(host, "ec2-user", key_file, "sudo /data/dalston/deploy.sh")
+        if rc != 0:
+            warn(f"Deploy script exited with code {rc}")
+        else:
+            log("Deploy complete.")
 
 
 def _stop_instance(ec2, region: str, instance_id: str) -> None:
@@ -2209,6 +2266,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # up
     p_up = sub.add_parser("up", help="Start instance(s)")
+    p_up.add_argument(
+        "--pull",
+        action="store_true",
+        help="Pull latest GHCR images and redeploy after boot",
+    )
     p_up.set_defaults(func=cmd_up)
 
     # down
