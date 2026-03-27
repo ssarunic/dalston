@@ -45,14 +45,25 @@ export function useAudioDevices() {
   }, [])
 
   useEffect(() => {
-    enumerate()
+    // Use flag to avoid updating state after unmount
+    let cancelled = false
+
+    async function init() {
+      await enumerate()
+      if (cancelled) return
+    }
+    init()
 
     // Re-enumerate when devices change (plug/unplug)
     if (navigator.mediaDevices?.addEventListener) {
       navigator.mediaDevices.addEventListener('devicechange', enumerate)
       return () => {
+        cancelled = true
         navigator.mediaDevices.removeEventListener('devicechange', enumerate)
       }
+    }
+    return () => {
+      cancelled = true
     }
   }, [enumerate])
 
