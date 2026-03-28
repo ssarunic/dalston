@@ -65,6 +65,12 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "onnx",
         "container": "stt-transcribe-onnx",
     },
+    "faster-whisper": {
+        "image": "stt-transcribe-faster-whisper",
+        "engine_id": "faster-whisper",
+        "container": "stt-transcribe-faster-whisper",
+        "extra_env": {"DALSTON_DEFAULT_MODEL_ID": "large-v3-turbo"},
+    },
     "pyannote": {
         "image": "stt-diarize-pyannote",
         "engine_id": "pyannote-4.0",

@@ -241,12 +241,17 @@ class VRAMBudget:
             return self._compute_defaults(budget_mb)
 
         alpha_batch = p.coefficients.get("alpha_batch", 55.0)
+        alpha_beam = p.coefficients.get("alpha_beam", 0.0)
         S = p.coefficients.get("S", 0.0)
 
+        # For faster-whisper profiles with alpha_beam, hold beam_size at
+        # the default (5) and optimise batch_size within the remaining budget.
+        default_beam_size = 5
+        beam_cost = alpha_beam * default_beam_size
+
         # Solo: maximize vad_batch_size, inflight=1
-        # Peak = S + alpha_batch * batch_size  (must fit in available)
-        # Solve: alpha_batch * batch_size <= available - S
-        solo_headroom_for_batch = available - S
+        # Peak = S + alpha_batch * batch_size + beam_cost  (must fit in available)
+        solo_headroom_for_batch = available - S - beam_cost
         if solo_headroom_for_batch > 0 and alpha_batch > 0:
             solo_batch = max(1, int(solo_headroom_for_batch / alpha_batch))
         else:
@@ -255,14 +260,15 @@ class VRAMBudget:
         solo_peak = int(
             S
             + alpha_batch * solo_batch
+            + beam_cost
             + p.cuda_overhead_mb
             + p.weights_mb
             + p.framework_overhead_mb
         )
 
         # Concurrent: vad_batch_size=1, maximize inflight
-        # Each inflight request uses: S + alpha_batch * 1
-        activation_per_request = S + alpha_batch
+        # Each inflight request uses: S + alpha_batch * 1 + beam_cost
+        activation_per_request = S + alpha_batch + beam_cost
         if activation_per_request > 0:
             concurrent_inflight = max(1, int(available / activation_per_request))
         else:

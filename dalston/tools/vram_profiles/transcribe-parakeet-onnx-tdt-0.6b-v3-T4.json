@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "engine_id": "onnx",
+  "model_id": "parakeet-onnx-tdt-0.6b-v3",
+  "stage": "transcribe",
+  "gpu": "Tesla T4",
+  "gpu_vram_mb": 15360,
+  "cuda_overhead_mb": 448,
+  "calibrated_at": "2026-03-26T16:54:16.201883+00:00",
+  "measurements": [
+    {
+      "params": {
+        "audio_s": 15
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 3547,
+      "elapsed_s": 10.95
+    },
+    {
+      "params": {
+        "audio_s": 15
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.26
+    },
+    {
+      "params": {
+        "audio_s": 15
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.26
+    },
+    {
+      "params": {
+        "audio_s": 30
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.51
+    },
+    {
+      "params": {
+        "audio_s": 30
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.51
+    },
+    {
+      "params": {
+        "audio_s": 30
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.5
+    },
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 1.01
+    },
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 1.0
+    },
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 0.99
+    },
+    {
+      "params": {
+        "audio_s": 120
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 1.98
+    },
+    {
+      "params": {
+        "audio_s": 120
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 2.0
+    },
+    {
+      "params": {
+        "audio_s": 120
+      },
+      "peak_vram_mb": 3995,
+      "delta_mb": 0,
+      "elapsed_s": 2.02
+    }
+  ],
+  "model": {
+    "weights_mb": 448,
+    "formula": "S + alpha_batch * vad_batch_size",
+    "coefficients": {
+      "S": 3995.0,
+      "alpha_batch": 55.0
+    },
+    "r_squared": 1.0,
+    "safety_margin": 0.15
+  }
+}

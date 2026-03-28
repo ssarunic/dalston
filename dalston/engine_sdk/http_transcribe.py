@@ -52,6 +52,13 @@ class TranscribeHTTPServer(EngineHTTPServer):
             channel: Annotated[
                 int | None, Form(description="Audio channel to transcribe")
             ] = None,
+            vad_batch_size: Annotated[
+                int | None,
+                Form(description="VAD batch size (number of speech chunks per batch)"),
+            ] = None,
+            beam_size: Annotated[
+                int | None, Form(description="Beam size for decoding")
+            ] = None,
         ) -> dict:
             audio_path = await resolve_audio(file, audio_url)
 
@@ -65,6 +72,10 @@ class TranscribeHTTPServer(EngineHTTPServer):
                 config["vocabulary"] = [v.strip() for v in vocabulary.split(",")]
             if channel is not None:
                 config["channel"] = channel
+            if vad_batch_size is not None:
+                config["vad_batch_size"] = vad_batch_size
+            if beam_size is not None:
+                config["beam_size"] = beam_size
 
             task_id = str(uuid4())
             task_request = TaskRequest(

@@ -477,6 +477,11 @@ class TranscriptionRequest(StageInput):
         default=0.0, description="Decoding temperature(s)"
     )
     beam_size: int | None = Field(default=None, description="Beam search width")
+    vad_batch_size: int | None = Field(
+        default=None,
+        ge=1,
+        description="VAD batch size (speech chunks per encoder batch)",
+    )
     best_of: int | None = Field(default=None, description="Number of candidates")
 
 

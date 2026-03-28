@@ -85,6 +85,7 @@ class FasterWhisperConfig:
 
     language: str | None = None
     beam_size: int = 5
+    vad_batch_size: int = 1
     vad_filter: bool = True
     word_timestamps: bool = True
     temperature: float | list[float] = 0.0
@@ -223,7 +224,17 @@ class FasterWhisperInference:
         audio: str | Path | np.ndarray,
         config: FasterWhisperConfig,
     ) -> TranscriptionResult:
-        """Execute transcription with an already-acquired model."""
+        """Execute transcription with an already-acquired model.
+
+        When ``vad_batch_size > 1``, runs Silero VAD to segment the audio
+        into speech chunks, groups them into batches of up to
+        ``vad_batch_size`` chunks, and transcribes each batch sequentially.
+        This mirrors the whisperX batching strategy and gives a directly
+        measurable VRAM knob comparable across engines (ONNX, NeMo, etc.).
+
+        When ``vad_batch_size == 1`` (default / realtime), falls through to
+        a single ``model.transcribe()`` call with no extra overhead.
+        """
         # Normalize audio input
         audio_input: str | np.ndarray
         if isinstance(audio, Path):
@@ -236,7 +247,8 @@ class FasterWhisperInference:
         if language == "auto" or language == "":
             language = None
 
-        # Build kwargs for faster-whisper
+        # Build kwargs for faster-whisper (no batch_size — WhisperModel
+        # doesn't accept it; batching is handled via VAD chunking below)
         transcribe_kwargs: dict = {
             "language": language,
             "beam_size": config.beam_size,
@@ -265,58 +277,22 @@ class FasterWhisperInference:
                 "dalston.device": self._device,
                 "dalston.compute_type": self._compute_type,
                 "dalston.beam_size": config.beam_size,
+                "dalston.vad_batch_size": config.vad_batch_size,
                 "dalston.vad_filter": config.vad_filter,
             },
         ):
-            segments_generator, info = model.transcribe(
-                audio_input,
-                **transcribe_kwargs,
-            )
-
-            # Collect results into neutral types (iterating the generator
-            # drives inference for CTranslate2, so it must be inside the span)
-            segments: list[SegmentResult] = []
-            for segment in segments_generator:
-                words: list[WordResult] = []
-                if segment.words:
-                    words = [
-                        WordResult(
-                            word=w.word.strip(),
-                            start=round(w.start, 3),
-                            end=round(w.end, 3),
-                            probability=round(w.probability, 3),
-                        )
-                        for w in segment.words
-                    ]
-
-                raw_tokens = getattr(segment, "tokens", None)
-                raw_avg_logprob = getattr(segment, "avg_logprob", None)
-                raw_compression_ratio = getattr(segment, "compression_ratio", None)
-                raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
-
-                segments.append(
-                    SegmentResult(
-                        start=round(segment.start, 3),
-                        end=round(segment.end, 3),
-                        text=segment.text.strip(),
-                        words=words,
-                        tokens=list(raw_tokens) if raw_tokens else None,
-                        avg_logprob=(
-                            round(raw_avg_logprob, 4)
-                            if raw_avg_logprob is not None
-                            else None
-                        ),
-                        compression_ratio=(
-                            round(raw_compression_ratio, 4)
-                            if raw_compression_ratio is not None
-                            else None
-                        ),
-                        no_speech_prob=(
-                            round(raw_no_speech_prob, 4)
-                            if raw_no_speech_prob is not None
-                            else None
-                        ),
-                    )
+            if config.vad_batch_size > 1 and isinstance(audio_input, str):
+                segments, info = self._transcribe_vad_batched(
+                    model,
+                    audio_input,
+                    config.vad_batch_size,
+                    transcribe_kwargs,
+                )
+            else:
+                segments, info = self._transcribe_single(
+                    model,
+                    audio_input,
+                    transcribe_kwargs,
                 )
 
         recognize_time = time.monotonic() - start
@@ -345,6 +321,159 @@ class FasterWhisperInference:
             language_probability=info.language_probability,
             duration=info.duration,
         )
+
+    # -- Internal transcription helpers --------------------------------------
+
+    @staticmethod
+    def _collect_segments(segments_generator) -> list[SegmentResult]:  # noqa: ANN001
+        """Iterate faster-whisper segment generator into neutral result types."""
+        segments: list[SegmentResult] = []
+        for segment in segments_generator:
+            words: list[WordResult] = []
+            if segment.words:
+                words = [
+                    WordResult(
+                        word=w.word.strip(),
+                        start=round(w.start, 3),
+                        end=round(w.end, 3),
+                        probability=round(w.probability, 3),
+                    )
+                    for w in segment.words
+                ]
+
+            raw_tokens = getattr(segment, "tokens", None)
+            raw_avg_logprob = getattr(segment, "avg_logprob", None)
+            raw_compression_ratio = getattr(segment, "compression_ratio", None)
+            raw_no_speech_prob = getattr(segment, "no_speech_prob", None)
+
+            segments.append(
+                SegmentResult(
+                    start=round(segment.start, 3),
+                    end=round(segment.end, 3),
+                    text=segment.text.strip(),
+                    words=words,
+                    tokens=list(raw_tokens) if raw_tokens else None,
+                    avg_logprob=(
+                        round(raw_avg_logprob, 4)
+                        if raw_avg_logprob is not None
+                        else None
+                    ),
+                    compression_ratio=(
+                        round(raw_compression_ratio, 4)
+                        if raw_compression_ratio is not None
+                        else None
+                    ),
+                    no_speech_prob=(
+                        round(raw_no_speech_prob, 4)
+                        if raw_no_speech_prob is not None
+                        else None
+                    ),
+                )
+            )
+        return segments
+
+    def _transcribe_single(
+        self,
+        model: WhisperModel,
+        audio_input: str | np.ndarray,
+        transcribe_kwargs: dict,
+    ) -> tuple[list[SegmentResult], object]:
+        """Standard single-pass transcription (vad_batch_size=1)."""
+        segments_generator, info = model.transcribe(
+            audio_input,
+            **transcribe_kwargs,
+        )
+        return self._collect_segments(segments_generator), info
+
+    def _transcribe_vad_batched(
+        self,
+        model: WhisperModel,
+        audio_path: str,
+        vad_batch_size: int,
+        transcribe_kwargs: dict,
+    ) -> tuple[list[SegmentResult], object]:
+        """VAD-chunked batched transcription (whisperX-style).
+
+        1. Run Silero VAD to find speech segments
+        2. Group VAD segments into batches of ``vad_batch_size``
+        3. Transcribe each batch (chunk) through the model sequentially
+
+        Each chunk is sliced from the full audio and transcribed independently.
+        Segment timestamps are offset back to the original audio timeline.
+        """
+        from faster_whisper.audio import decode_audio
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+        SAMPLE_RATE = 16000
+
+        # Load and run VAD
+        full_audio = decode_audio(audio_path, sampling_rate=SAMPLE_RATE)
+        vad_opts = VadOptions()
+        speech_timestamps = get_speech_timestamps(full_audio, vad_opts)
+
+        if not speech_timestamps:
+            # No speech detected — run single pass to get info (language, duration)
+            return self._transcribe_single(model, audio_path, transcribe_kwargs)
+
+        # Group VAD segments into batches
+        all_segments: list[SegmentResult] = []
+        info = None
+
+        # Disable model-level VAD since we already ran it
+        batch_kwargs = {**transcribe_kwargs, "vad_filter": False}
+
+        for batch_start in range(0, len(speech_timestamps), vad_batch_size):
+            batch = speech_timestamps[batch_start : batch_start + vad_batch_size]
+
+            # Determine audio slice covering this batch
+            chunk_start_sample = batch[0]["start"]
+            chunk_end_sample = batch[-1]["end"]
+            chunk_audio = full_audio[chunk_start_sample:chunk_end_sample]
+            chunk_offset_s = chunk_start_sample / SAMPLE_RATE
+
+            segments_generator, chunk_info = model.transcribe(
+                chunk_audio,
+                **batch_kwargs,
+            )
+
+            if info is None:
+                info = chunk_info
+
+            # Collect and offset timestamps back to original timeline
+            for seg in self._collect_segments(segments_generator):
+                all_segments.append(
+                    SegmentResult(
+                        start=round(seg.start + chunk_offset_s, 3),
+                        end=round(seg.end + chunk_offset_s, 3),
+                        text=seg.text,
+                        words=[
+                            WordResult(
+                                word=w.word,
+                                start=round(w.start + chunk_offset_s, 3),
+                                end=round(w.end + chunk_offset_s, 3),
+                                probability=w.probability,
+                            )
+                            for w in seg.words
+                        ],
+                        tokens=seg.tokens,
+                        avg_logprob=seg.avg_logprob,
+                        compression_ratio=seg.compression_ratio,
+                        no_speech_prob=seg.no_speech_prob,
+                    )
+                )
+
+            logger.debug(
+                "vad_batch_transcribed",
+                batch_idx=batch_start // vad_batch_size,
+                vad_segments=len(batch),
+                result_segments=len(all_segments),
+                chunk_offset_s=round(chunk_offset_s, 3),
+            )
+
+        # Patch info.duration to reflect full audio
+        info.duration = len(full_audio) / SAMPLE_RATE
+
+        return all_segments, info
 
     # -- Lifecycle -----------------------------------------------------------
 

@@ -7,7 +7,7 @@ calculator uses to auto-tune engine parameters.
 
 Usage::
 
-    # Against a running engine container with GPU
+    # ONNX transcribe (default engine for transcribe stage)
     python -m dalston.tools.calibrate_vram \\
         --engine-url http://localhost:9100 \\
         --stage transcribe \\
@@ -15,10 +15,17 @@ Usage::
         --gpu-id 0 \\
         --output dalston/tools/vram_profiles/transcribe-parakeet-onnx-tdt-0.6b-v3-T4.json
 
+    # Faster-whisper transcribe (specify --engine-id)
+    python -m dalston.tools.calibrate_vram \\
+        --engine-url http://localhost:9100 \\
+        --stage transcribe --engine-id faster-whisper \\
+        --model-id large-v3-turbo \\
+        --output dalston/tools/vram_profiles/transcribe-large-v3-turbo-T4.json
+
     # Dry-run mode (no GPU needed, generates synthetic profile)
     python -m dalston.tools.calibrate_vram \\
-        --stage transcribe \\
-        --model-id parakeet-onnx-tdt-0.6b-v3 \\
+        --stage transcribe --engine-id faster-whisper \\
+        --model-id large-v3-turbo \\
         --dry-run \\
         --output /tmp/profile.json
 
@@ -48,18 +55,52 @@ STAGE_ENDPOINTS: dict[str, str] = {
     "align": "/v1/align",
 }
 
-# Parameter grids per stage
-STAGE_PARAMS: dict[str, dict[str, list]] = {
-    "transcribe": {
-        "audio_durations_s": [15, 30, 60, 120],
-        "vad_batch_sizes": [1, 2, 4, 8, 16],
+# Per-engine calibration profiles: maps (stage, engine_id) to sweep params,
+# model formula, and default engine_id guess.  New engines (NeMo, vLLM, etc.)
+# slot in here without touching sweep/fit logic.
+ENGINE_CALIBRATION: dict[str, dict[str, Any]] = {
+    "onnx": {
+        "stage": "transcribe",
+        "params": {
+            "audio_durations_s": [15, 30, 60, 120],
+            "vad_batch_sizes": [1, 2, 4, 8, 16],
+        },
+        "formula": "S + alpha_batch * vad_batch_size",
+        "sweep": "default",  # uses _sweep_default
     },
-    "diarize": {
-        "audio_durations_s": [60, 180, 300, 600, 900],
+    "faster-whisper": {
+        "stage": "transcribe",
+        "params": {
+            "audio_durations_s": [15, 30, 60, 120],
+            "vad_batch_sizes": [1, 2, 4, 8, 16],
+            "beam_sizes": [1, 3, 5],
+        },
+        "formula": "S + alpha_batch * vad_batch_size + alpha_beam * beam_size",
+        "sweep": "faster-whisper",  # uses _sweep_faster_whisper
     },
-    "align": {
-        "audio_durations_s": [30, 60, 120, 300],
+    "pyannote-4.0": {
+        "stage": "diarize",
+        "params": {
+            "audio_durations_s": [60, 180, 300, 600, 900],
+        },
+        "formula": "S + alpha_duration * audio_duration_s",
+        "sweep": "default",
     },
+    "phoneme-align": {
+        "stage": "align",
+        "params": {
+            "audio_durations_s": [30, 60, 120, 300],
+        },
+        "formula": "S + alpha_duration * audio_duration_s",
+        "sweep": "default",
+    },
+}
+
+# Default engine_id per stage (used when --engine-id is not specified)
+DEFAULT_ENGINE_FOR_STAGE: dict[str, str] = {
+    "transcribe": "onnx",
+    "diarize": "pyannote-4.0",
+    "align": "phoneme-align",
 }
 
 REPEATS = 3  # Run each measurement N times, take max peak
@@ -185,6 +226,7 @@ def measure_once(
     audio_path: Path,
     model_id: str | None,
     monitor: VRAMMonitor | None,
+    extra_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one inference and return VRAM measurements."""
     baseline_mb = monitor.current_used_mb() if monitor else 0
@@ -194,7 +236,7 @@ def measure_once(
 
     try:
         t0 = time.monotonic()
-        send_to_engine(engine_url, endpoint, audio_path, model_id)
+        send_to_engine(engine_url, endpoint, audio_path, model_id, extra_params)
         elapsed = time.monotonic() - t0
     finally:
         peak_mb = monitor.stop() if monitor else 0
@@ -210,19 +252,34 @@ def measure_once(
     }
 
 
+def _resolve_engine(stage: str, engine_id: str | None) -> tuple[str, dict[str, Any]]:
+    """Resolve engine_id and its calibration config for the given stage."""
+    eid = engine_id or DEFAULT_ENGINE_FOR_STAGE.get(stage, stage)
+    cal = ENGINE_CALIBRATION.get(eid)
+    if not cal:
+        raise ValueError(
+            f"Unknown engine '{eid}'. Available: {list(ENGINE_CALIBRATION)}"
+        )
+    if cal["stage"] != stage:
+        raise ValueError(f"Engine '{eid}' is a {cal['stage']} engine, not {stage}")
+    return eid, cal
+
+
 def run_calibration(
     engine_url: str,
     stage: str,
     model_id: str | None,
     gpu_id: int,
     dry_run: bool = False,
+    engine_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the full calibration sweep and return the profile dict."""
+    eid, cal = _resolve_engine(stage, engine_id)
     endpoint = STAGE_ENDPOINTS.get(stage)
     if not endpoint:
         raise ValueError(f"Unknown stage: {stage}. Supported: {list(STAGE_ENDPOINTS)}")
 
-    params = STAGE_PARAMS.get(stage, {})
+    params = cal["params"]
     durations = params.get("audio_durations_s", [60])
 
     monitor: VRAMMonitor | None = None
@@ -242,39 +299,36 @@ def run_calibration(
     measurements: list[dict[str, Any]] = []
     baseline_mb = monitor.current_used_mb() if monitor else 800
 
-    with tempfile.TemporaryDirectory(prefix="dalston_calibrate_") as tmp:
-        work_dir = Path(tmp)
-
-        for dur in durations:
-            audio_path = work_dir / f"test_{dur}s.wav"
-            generate_wav(audio_path, dur)
-
-            for _repeat in range(REPEATS):
-                if dry_run:
-                    m = _synthetic_measurement(dur, baseline_mb, stage)
-                else:
-                    m = measure_once(
-                        engine_url, endpoint, audio_path, model_id, monitor
-                    )
-
-                measurements.append(
-                    {
-                        "params": {"audio_s": dur},
-                        "peak_vram_mb": m["peak_mb"],
-                        "delta_mb": m["delta_mb"],
-                        "elapsed_s": m["elapsed_s"],
-                    }
-                )
-                print(
-                    f"  duration={dur}s peak={m['peak_mb']}MB delta={m['delta_mb']}MB t={m['elapsed_s']}s"
-                )
+    if cal["sweep"] == "faster-whisper":
+        measurements = _sweep_faster_whisper(
+            engine_url,
+            endpoint,
+            model_id,
+            monitor,
+            durations,
+            params,
+            dry_run,
+            baseline_mb,
+        )
+    else:
+        measurements = _sweep_default(
+            engine_url,
+            endpoint,
+            model_id,
+            monitor,
+            durations,
+            stage,
+            dry_run,
+            baseline_mb,
+            vad_batch_sizes=params.get("vad_batch_sizes"),
+        )
 
     # Fit linear model
-    coefficients, r_squared = _fit_model(measurements, stage)
+    coefficients, r_squared = _fit_model(measurements, eid)
 
     profile = {
         "schema_version": "1.0",
-        "engine_id": _engine_id_from_stage(stage),
+        "engine_id": eid,
         "model_id": model_id or "",
         "stage": stage,
         "gpu": gpu_name,
@@ -284,13 +338,220 @@ def run_calibration(
         "measurements": measurements,
         "model": {
             "weights_mb": baseline_mb,
-            "formula": _formula_string(stage),
+            "formula": cal["formula"],
             "coefficients": coefficients,
             "r_squared": round(r_squared, 4),
             "safety_margin": 0.15,
         },
     }
     return profile
+
+
+def _sweep_default(
+    engine_url: str,
+    endpoint: str,
+    model_id: str | None,
+    monitor: VRAMMonitor | None,
+    durations: list[int],
+    stage: str,
+    dry_run: bool,
+    baseline_mb: int,
+    vad_batch_sizes: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Standard calibration sweep.
+
+    When ``vad_batch_sizes`` is provided (transcribe engines), sweeps
+    vad_batch_size at a fixed 60s duration, then sweeps durations at
+    default settings.  Otherwise sweeps duration only (diarize, align).
+    """
+    measurements: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="dalston_calibrate_") as tmp:
+        work_dir = Path(tmp)
+
+        # Phase 1: vad_batch_size sweep (if applicable)
+        if vad_batch_sizes:
+            audio_60s = work_dir / "test_60s.wav"
+            generate_wav(audio_60s, 60)
+
+            print("Phase 1: vad_batch_size sweep (60s audio)")
+            for vad_batch in vad_batch_sizes:
+                for _repeat in range(REPEATS):
+                    if dry_run:
+                        m = _synthetic_measurement(60, baseline_mb, stage)
+                        # Adjust peak for batch size
+                        m["peak_mb"] += (vad_batch - 1) * 55
+                        m["delta_mb"] = m["peak_mb"] - m["baseline_mb"]
+                    else:
+                        m = measure_once(
+                            engine_url,
+                            endpoint,
+                            audio_60s,
+                            model_id,
+                            monitor,
+                            extra_params={"vad_batch_size": vad_batch},
+                        )
+
+                    measurements.append(
+                        {
+                            "params": {"audio_s": 60, "vad_batch_size": vad_batch},
+                            "peak_vram_mb": m["peak_mb"],
+                            "delta_mb": m["delta_mb"],
+                            "elapsed_s": m["elapsed_s"],
+                        }
+                    )
+                    print(
+                        f"  vad_batch={vad_batch} peak={m['peak_mb']}MB "
+                        f"delta={m['delta_mb']}MB t={m['elapsed_s']}s"
+                    )
+            print()
+
+        # Phase 2: duration sweep
+        phase_label = "Phase 2: duration sweep" if vad_batch_sizes else ""
+        if phase_label:
+            print(phase_label)
+
+        for dur in durations:
+            audio_path = work_dir / f"test_{dur}s.wav"
+            if not audio_path.exists():
+                generate_wav(audio_path, dur)
+
+            extra = {"vad_batch_size": 1} if vad_batch_sizes else None
+
+            for _repeat in range(REPEATS):
+                if dry_run:
+                    m = _synthetic_measurement(dur, baseline_mb, stage)
+                else:
+                    m = measure_once(
+                        engine_url,
+                        endpoint,
+                        audio_path,
+                        model_id,
+                        monitor,
+                        extra_params=extra,
+                    )
+
+                params_record: dict[str, Any] = {"audio_s": dur}
+                if vad_batch_sizes:
+                    params_record["vad_batch_size"] = 1
+
+                measurements.append(
+                    {
+                        "params": params_record,
+                        "peak_vram_mb": m["peak_mb"],
+                        "delta_mb": m["delta_mb"],
+                        "elapsed_s": m["elapsed_s"],
+                    }
+                )
+                print(
+                    f"  duration={dur}s peak={m['peak_mb']}MB "
+                    f"delta={m['delta_mb']}MB t={m['elapsed_s']}s"
+                )
+    return measurements
+
+
+def _sweep_faster_whisper(
+    engine_url: str,
+    endpoint: str,
+    model_id: str | None,
+    monitor: VRAMMonitor | None,
+    durations: list[int],
+    params: dict[str, list],
+    dry_run: bool,
+    baseline_mb: int,
+) -> list[dict[str, Any]]:
+    """Faster-whisper calibration sweep: vary vad_batch_size × beam_size × duration.
+
+    Uses a fixed 60s audio clip for vad_batch_size/beam_size sweeps (VRAM is
+    dominated by batch parallelism and beam width, not audio length).
+    Then sweeps durations at default settings to confirm duration-independence.
+    """
+    measurements: list[dict[str, Any]] = []
+    vad_batch_sizes = params.get("vad_batch_sizes", [1, 2, 4, 8, 16])
+    beam_sizes = params.get("beam_sizes", [1, 3, 5])
+    default_beam = beam_sizes[-1]  # highest beam in grid (5) used for phase 2
+
+    with tempfile.TemporaryDirectory(prefix="dalston_calibrate_fw_") as tmp:
+        work_dir = Path(tmp)
+
+        # Phase 1: vad_batch_size × beam_size sweep at fixed 60s duration
+        audio_60s = work_dir / "test_60s.wav"
+        generate_wav(audio_60s, 60)
+
+        print("Phase 1: vad_batch_size × beam_size sweep (60s audio)")
+        for beam in beam_sizes:
+            for vad_batch in vad_batch_sizes:
+                for _repeat in range(REPEATS):
+                    if dry_run:
+                        m = _synthetic_fw_measurement(60, baseline_mb, vad_batch, beam)
+                    else:
+                        m = measure_once(
+                            engine_url,
+                            endpoint,
+                            audio_60s,
+                            model_id,
+                            monitor,
+                            extra_params={
+                                "vad_batch_size": vad_batch,
+                                "beam_size": beam,
+                            },
+                        )
+
+                    measurements.append(
+                        {
+                            "params": {
+                                "audio_s": 60,
+                                "vad_batch_size": vad_batch,
+                                "beam_size": beam,
+                            },
+                            "peak_vram_mb": m["peak_mb"],
+                            "delta_mb": m["delta_mb"],
+                            "elapsed_s": m["elapsed_s"],
+                        }
+                    )
+                    print(
+                        f"  beam={beam} vad_batch={vad_batch} peak={m['peak_mb']}MB "
+                        f"delta={m['delta_mb']}MB t={m['elapsed_s']}s"
+                    )
+
+        # Phase 2: duration sweep at default settings
+        # to confirm VRAM is duration-independent with VAD chunking
+        print(f"\nPhase 2: duration sweep (vad_batch=1, beam={default_beam})")
+        for dur in durations:
+            audio_path = work_dir / f"test_{dur}s.wav"
+            if not audio_path.exists():
+                generate_wav(audio_path, dur)
+
+            for _repeat in range(REPEATS):
+                if dry_run:
+                    m = _synthetic_fw_measurement(dur, baseline_mb, 1, default_beam)
+                else:
+                    m = measure_once(
+                        engine_url,
+                        endpoint,
+                        audio_path,
+                        model_id,
+                        monitor,
+                        extra_params={"vad_batch_size": 1, "beam_size": default_beam},
+                    )
+
+                measurements.append(
+                    {
+                        "params": {
+                            "audio_s": dur,
+                            "vad_batch_size": 1,
+                            "beam_size": default_beam,
+                        },
+                        "peak_vram_mb": m["peak_mb"],
+                        "delta_mb": m["delta_mb"],
+                        "elapsed_s": m["elapsed_s"],
+                    }
+                )
+                print(
+                    f"  duration={dur}s peak={m['peak_mb']}MB "
+                    f"delta={m['delta_mb']}MB t={m['elapsed_s']}s"
+                )
+
+    return measurements
 
 
 def _synthetic_measurement(
@@ -318,14 +579,67 @@ def _synthetic_measurement(
     }
 
 
+def _synthetic_fw_measurement(
+    duration_s: float,
+    baseline_mb: int,
+    vad_batch_size: int,
+    beam_size: int,
+) -> dict[str, Any]:
+    """Generate a synthetic faster-whisper measurement for dry-run mode.
+
+    Models CTranslate2 VRAM: weights are constant, decoder KV-cache scales
+    with beam_size, and VAD batch parallelism scales with vad_batch_size.
+    Synthetic formula: peak = baseline + S + alpha_batch * vad_batch_size + alpha_beam * beam_size
+    """
+    S = 800  # Activation overhead (MB)
+    alpha_batch = 120  # Per-batch-slot VRAM (MB)
+    alpha_beam = 80  # Per-beam VRAM (MB)
+    peak = baseline_mb + S + alpha_batch * vad_batch_size + alpha_beam * beam_size
+    delta = peak - baseline_mb
+
+    # Throughput scales ~linearly with vad_batch_size, inversely with beam_size
+    rtf_base = 0.03
+    effective_rtf = rtf_base * (beam_size / 5) / max(vad_batch_size, 1)
+    elapsed = round(duration_s * effective_rtf + 0.3, 2)
+
+    return {
+        "baseline_mb": baseline_mb,
+        "peak_mb": peak,
+        "post_mb": baseline_mb + 50,
+        "delta_mb": delta,
+        "elapsed_s": elapsed,
+    }
+
+
+def _lstsq_r2(X: Any, y: Any) -> tuple[Any, float]:
+    """Least-squares fit returning (coefficients, R²)."""
+    import numpy as np
+
+    result, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    y_pred = X @ result
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
+    return result, r2
+
+
 def _fit_model(
-    measurements: list[dict[str, Any]], stage: str
+    measurements: list[dict[str, Any]], engine_id: str
 ) -> tuple[dict[str, float], float]:
-    """Fit a linear model to the measurements via least squares."""
+    """Fit a linear model to the measurements via least squares.
+
+    The fit strategy is determined by ``ENGINE_CALIBRATION[engine_id]``:
+    - Engines with ``beam_sizes`` in params → 2D fit (vad_batch_size + beam_size)
+    - Engines with ``vad_batch_sizes`` → 1D fit (vad_batch_size)
+    - Everything else → duration fit (audio_s)
+    """
     import numpy as np
 
     if not measurements:
         return {}, 0.0
+
+    cal = ENGINE_CALIBRATION.get(engine_id, {})
+    cal_params = cal.get("params", {})
 
     # Group by params and take max peak per param set (worst case)
     grouped: dict[str, int] = {}
@@ -333,22 +647,71 @@ def _fit_model(
         key = json.dumps(m["params"], sort_keys=True)
         grouped[key] = max(grouped.get(key, 0), m["peak_vram_mb"])
 
-    if stage == "transcribe":
-        # Fit: peak = S + alpha_batch * vad_batch_size
-        # For now we measure at default batch_size, so fit: peak = S (constant)
-        # The alpha_batch comes from varying batch_size in future calibrations
-        peaks = list(grouped.values())
-        S = float(np.mean(peaks))
-        alpha_batch = 55.0  # Default estimate until batch-size variation is calibrated
+    has_beam = "beam_sizes" in cal_params
+    has_vad_batch = "vad_batch_sizes" in cal_params
 
-        ss_res = sum((p - S) ** 2 for p in peaks)
-        ss_tot = sum((p - np.mean(peaks)) ** 2 for p in peaks)
-        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
+    if has_beam and has_vad_batch:
+        # 2D fit: peak = S + alpha_batch * vad_batch_size + alpha_beam * beam_size
+        # Group by (vad_batch_size, beam_size) — ignoring audio_s — so phase-2
+        # duration-sweep points don't overweight a single combination.
+        by_params: dict[tuple[int, int], int] = {}
+        for key, peak in grouped.items():
+            p = json.loads(key)
+            combo = (p.get("vad_batch_size", 1), p.get("beam_size", 5))
+            by_params[combo] = max(by_params.get(combo, 0), peak)
 
-        return {"S": round(S, 1), "alpha_batch": alpha_batch}, r2
+        batch_vals = [k[0] for k in by_params]
+        beam_vals = [k[1] for k in by_params]
+        peaks = list(by_params.values())
+
+        if len(peaks) < 3:
+            return {
+                "S": float(peaks[0]) if peaks else 0,
+                "alpha_batch": 0.0,
+                "alpha_beam": 0.0,
+            }, 1.0
+
+        X = np.column_stack(
+            [
+                np.ones(len(peaks)),
+                np.array(batch_vals, dtype=float),
+                np.array(beam_vals, dtype=float),
+            ]
+        )
+        y = np.array(peaks, dtype=float)
+        coeffs, r2 = _lstsq_r2(X, y)
+
+        return {
+            "S": round(float(coeffs[0]), 1),
+            "alpha_batch": round(float(coeffs[1]), 1),
+            "alpha_beam": round(float(coeffs[2]), 1),
+        }, r2
+
+    elif has_vad_batch:
+        # 1D fit: peak = S + alpha_batch * vad_batch_size
+        # Extract vad_batch_size from params where available; points without
+        # it (duration-sweep phase) are treated as vad_batch_size=1.
+        batch_vals = []
+        peaks = []
+        for key, peak in grouped.items():
+            p = json.loads(key)
+            batch_vals.append(p.get("vad_batch_size", 1))
+            peaks.append(peak)
+
+        if len(peaks) < 2:
+            return {"S": float(peaks[0]) if peaks else 0, "alpha_batch": 55.0}, 1.0
+
+        X = np.column_stack([np.ones(len(peaks)), np.array(batch_vals, dtype=float)])
+        y = np.array(peaks, dtype=float)
+        coeffs, r2 = _lstsq_r2(X, y)
+
+        return {
+            "S": round(float(coeffs[0]), 1),
+            "alpha_batch": round(float(coeffs[1]), 1),
+        }, r2
 
     else:
-        # Diarize / align / generic: fit peak = S + alpha_duration * duration_s
+        # Duration fit: peak = S + alpha_duration * audio_s
         durations = []
         peaks = []
         for key, peak in grouped.items():
@@ -361,16 +724,11 @@ def _fit_model(
 
         X = np.column_stack([np.ones(len(durations)), durations])
         y = np.array(peaks, dtype=float)
-        result, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
-
-        y_pred = X @ result
-        ss_res = float(np.sum((y - y_pred) ** 2))
-        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
+        coeffs, r2 = _lstsq_r2(X, y)
 
         return {
-            "S": round(float(result[0]), 1),
-            "alpha_duration": round(float(result[1]), 3),
+            "S": round(float(coeffs[0]), 1),
+            "alpha_duration": round(float(coeffs[1]), 3),
         }, r2
 
 
@@ -440,6 +798,7 @@ def run_leak_detection(
     audio_duration_s: float = 60.0,
     warmup: int = WARMUP_ITERATIONS,
     audio_file: str | None = None,
+    engine_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the same inference N times and track VRAM, threads, and RSS trends.
 
@@ -456,6 +815,7 @@ def run_leak_detection(
         audio_duration_s: Duration of synthetic test audio (default: 60).
         warmup: Iterations to ignore for trend analysis (default: 5).
         audio_file: Path to a real audio file instead of synthetic.
+        engine_id: Engine identifier (e.g. onnx, faster-whisper).
     """
     import numpy as np
 
@@ -699,21 +1059,6 @@ def run_leak_detection(
         }
 
 
-def _engine_id_from_stage(stage: str) -> str:
-    """Default engine_id guess from stage."""
-    return {
-        "transcribe": "onnx",
-        "diarize": "pyannote-4.0",
-        "align": "phoneme-align",
-    }.get(stage, stage)
-
-
-def _formula_string(stage: str) -> str:
-    if stage == "transcribe":
-        return "S + alpha_batch * vad_batch_size"
-    return "S + alpha_duration * audio_duration_s"
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -733,7 +1078,13 @@ def main() -> None:
         "--stage",
         required=True,
         choices=list(STAGE_ENDPOINTS),
-        help="Engine stage type",
+        help="Pipeline stage (transcribe, diarize, align)",
+    )
+    parser.add_argument(
+        "--engine-id",
+        default=None,
+        choices=list(ENGINE_CALIBRATION),
+        help="Engine identifier (default: inferred from stage)",
     )
     parser.add_argument("--model-id", help="Model ID to calibrate")
     parser.add_argument("--gpu-id", type=int, default=0, help="GPU device index")
@@ -774,8 +1125,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    engine_id = args.engine_id or DEFAULT_ENGINE_FOR_STAGE.get(args.stage)
+
     if args.leak_detect:
-        print(f"Leak detection: stage={args.stage} model={args.model_id}")
+        print(
+            f"Leak detection: stage={args.stage} engine={engine_id} model={args.model_id}"
+        )
         result = run_leak_detection(
             engine_url=args.engine_url,
             stage=args.stage,
@@ -785,6 +1140,7 @@ def main() -> None:
             audio_duration_s=args.audio_duration,
             warmup=args.warmup,
             audio_file=args.audio_file,
+            engine_id=engine_id,
         )
         if args.output:
             output_path = Path(args.output)
@@ -792,13 +1148,16 @@ def main() -> None:
             output_path.write_text(json.dumps(result, indent=2) + "\n")
             print(f"Report written to {output_path}")
     else:
-        print(f"Calibrating: stage={args.stage} model={args.model_id}")
+        print(
+            f"Calibrating: stage={args.stage} engine={engine_id} model={args.model_id}"
+        )
         profile = run_calibration(
             engine_url=args.engine_url,
             stage=args.stage,
             model_id=args.model_id,
             gpu_id=args.gpu_id,
             dry_run=args.dry_run,
+            engine_id=engine_id,
         )
 
         output_path = Path(args.output)

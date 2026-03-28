@@ -119,6 +119,21 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
         # Get model to use from task config
         loaded_model_id = params.loaded_model_id or self._default_model_id
 
+        # M84: Select vad_batch_size — explicit config (HTTP calibration) takes
+        # priority, then adaptive VRAM budget, then default of 1.
+        if params.vad_batch_size is not None:
+            adaptive_vad_batch_size = params.vad_batch_size
+        elif getattr(self, "_runner", None) is not None:
+            adaptive = self._runner.get_adaptive_params()
+            if adaptive is not None:
+                queue_depth = self._runner.get_queue_depth()
+                vram_params = adaptive.select(queue_depth, inflight=1)
+                adaptive_vad_batch_size = vram_params.vad_batch_size
+            else:
+                adaptive_vad_batch_size = 1
+        else:
+            adaptive_vad_batch_size = 1
+
         # Build transcribe config
         hotwords = " ".join(vocabulary) if vocabulary else None
         transcribe_config = FasterWhisperConfig(
@@ -128,6 +143,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
                 if params.beam_size is not None
                 else self.DEFAULT_BEAM_SIZE
             ),
+            vad_batch_size=adaptive_vad_batch_size,
             vad_filter=params.vad_filter,
             word_timestamps=(
                 True if params.word_timestamps is None else params.word_timestamps
@@ -141,12 +157,17 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
         # Update engine_id state for heartbeat reporting
         self._set_runtime_state(loaded_model=loaded_model_id, status="processing")
 
-        self.logger.info("transcribing", audio_path=str(audio_path))
+        self.logger.info(
+            "transcribing",
+            audio_path=str(audio_path),
+            vad_batch_size=adaptive_vad_batch_size,
+        )
         self.logger.info(
             "transcribe_config",
             loaded_model_id=loaded_model_id,
             language=transcribe_config.language,
             beam_size=transcribe_config.beam_size,
+            vad_batch_size=transcribe_config.vad_batch_size,
             vad_filter=transcribe_config.vad_filter,
             vocabulary_terms=len(vocabulary) if vocabulary else 0,
             has_prompt=bool(prompt),
