@@ -1,0 +1,62 @@
+# .github/workflows/build-engine-vllm-asr.yml
+#
+# Builds the vLLM-ASR engine image and pushes to GHCR.
+# Runs natively on x86 — no QEMU, no 40-minute builds.
+#
+# Triggers:
+#   - Push to main that changes engine code or its Dockerfile
+#   - Manual dispatch (for rebuilding without code changes)
+#
+# Prerequisites (one-time setup):
+#   - Repository must have packages write permission enabled for GitHub Actions
+
+name: Build vLLM-ASR Engine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engines/stt-transcribe/vllm-asr/**'
+      - 'dalston/**'
+      - 'pyproject.toml'
+  workflow_dispatch:  # manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/stt-transcribe-vllm-asr
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest  # x86 native — no QEMU needed
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build engine
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # vLLM-ASR builds directly from CUDA base (no dalston base image)
+          docker build \
+            -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
+            -t $REGISTRY/$IMAGE_NAME:latest \
+            -f engines/stt-transcribe/vllm-asr/Dockerfile \
+            .
+
+          docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
+          docker push $REGISTRY/$IMAGE_NAME:latest
+
+          echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$REGISTRY/$IMAGE_NAME:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`$REGISTRY/$IMAGE_NAME:latest\`" >> $GITHUB_STEP_SUMMARY

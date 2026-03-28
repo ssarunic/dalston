@@ -38,3 +38,12 @@ services:
 
   stt-diarize-pyannote-4.0:
     image: ${GHCR_REGISTRY}/stt-diarize-pyannote:${IMAGE_TAG:-latest}
+
+  stt-transcribe-nemo:
+    image: ${GHCR_REGISTRY}/stt-transcribe-nemo:${IMAGE_TAG:-latest}
+
+  stt-transcribe-vllm-asr:
+    image: ${GHCR_REGISTRY}/stt-transcribe-vllm-asr:${IMAGE_TAG:-latest}
+
+  stt-transcribe-hf-asr:
+    image: ${GHCR_REGISTRY}/stt-transcribe-hf-asr:${IMAGE_TAG:-latest}

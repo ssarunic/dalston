@@ -78,6 +78,34 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "needs_hf_token": True,
         "extra_env": {"DALSTON_WORKER_ID": "pyannote-gpu-1"},
     },
+    "nemo": {
+        "image": "stt-transcribe-nemo",
+        "engine_id": "nemo",
+        "container": "stt-transcribe-nemo",
+        "extra_env": {
+            "DALSTON_DEFAULT_MODEL_ID": "nvidia/parakeet-tdt-1.1b",
+            "DALSTON_MODEL_PRELOAD": "parakeet-rnnt-1.1b",
+            "NEMO_CACHE": "/data/models",
+        },
+    },
+    "vllm-asr": {
+        "image": "stt-transcribe-vllm-asr",
+        "engine_id": "vllm-asr",
+        "container": "stt-transcribe-vllm-asr",
+        "extra_env": {
+            "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
+            "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.9",
+            "DALSTON_VLLM_MAX_MODEL_LEN": "4096",
+        },
+    },
+    "hf-asr": {
+        "image": "stt-transcribe-hf-asr",
+        "engine_id": "hf-asr",
+        "container": "stt-transcribe-hf-asr",
+        "extra_env": {
+            "DALSTON_DEFAULT_MODEL_ID": "openai/whisper-large-v3",
+        },
+    },
 }
 
 # ---------------------------------------------------------------------------
