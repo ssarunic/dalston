@@ -46,7 +46,7 @@ async def seed_test_api_key() -> bool:
         existing = result.scalar_one_or_none()
 
         if existing:
-            print(f"Test API key already exists (prefix: {TEST_KEY_PREFIX})")
+            print(f"Test API key already exists (prefix: {TEST_KEY_PREFIX}...)")
             return False
 
         # Create the test API key
@@ -67,9 +67,8 @@ async def seed_test_api_key() -> bool:
         db.add(model)
         await db.commit()
 
-        print(f"Created test API key: {TEST_API_KEY}")
+        print(f"Created test API key: {TEST_KEY_PREFIX}...")
         print(f"  Prefix: {TEST_KEY_PREFIX}")
-        print(f"  Hash: {TEST_KEY_HASH}")
         print(f"  Tenant: {DEFAULT_TENANT_ID}")
         print(f"  Scopes: {Scope.ADMIN.value}")
         return True
