@@ -1,16 +1,16 @@
-# M84: VRAM Budget Management & Diarization Chunking
+# M84: VRAM Budget Management, Auto-Calibration & Live Tuning
 
 |                    |                                                              |
 | ------------------ | ------------------------------------------------------------ |
-| **Goal**           | Engines auto-tune parameters to maximise throughput within a VRAM budget without OOM |
-| **Duration**       | 8–12 days                                                    |
+| **Goal**           | Engines auto-tune parameters to maximise throughput within a VRAM budget — from calibration through centralised profiles, auto-calibration on first boot, UI visibility, and runtime parameter editing |
+| **Duration**       | 14–20 days                                                   |
 | **Dependencies**   | M37 (Capacity Management), M76 (Engine Telemetry Depth)      |
-| **Deliverable**    | Calibration script, VRAM profiles, runtime budget calculator, diarization chunking, engine startup integration |
-| **Status**         | Not Started                                                  |
+| **Deliverable**    | Calibration script, VRAM profiles, runtime budget calculator, diarization chunking, engine startup integration, centralised profile store, auto-calibration on first boot, VRAM visibility in web UI, runtime parameter editing, proactive suggestions |
+| **Status**         | In Progress (84.1–84.4 complete)                             |
 
 ## User Story
 
-> *"As an operator deploying two GPU engines on a single instance, I want each engine to automatically compute its optimal parameters (batch size, concurrency, chunk duration) from its VRAM allocation, so that I get maximum throughput without OOM crashes or manual tuning."*
+> *"As an operator deploying GPU engines across a fleet of instances, I want engines to automatically calibrate their VRAM parameters on first boot, share those profiles across identical hardware, and let me see and tune parameters from the web console — so that new instances start optimally without manual profiling, and I can adjust parameters without SSH or restarts."*
 
 ---
 
@@ -23,6 +23,11 @@
 | Operator deploys on new GPU (A10, L4, T4) | Must manually tune `DALSTON_VAD_BATCH_SIZE`, `DALSTON_VAD_MAX_SPEECH_S` per GPU | Set `DALSTON_VRAM_BUDGET_MB=10000`, engine reads calibration profile and computes optimal params |
 | Batch concurrency on transcribe engine | `DALSTON_BATCH_MAX_INFLIGHT=4` is a guess, may OOM with large files | Inflight limit derived from VRAM budget: `(budget - weights) / per_request_activation` |
 | Single file in queue, GPU underutilised | `vad_batch_size=1` always, GPU mostly idle between small inference calls | Engine detects shallow queue, switches to solo mode (high batch_size) for full GPU utilisation; switches back to concurrent mode when queue fills |
+| First instance on new hardware type | Operator must SSH in, run calibrate_vram.py, copy profile to image or mount | Engine auto-calibrates on first boot (~3 min), saves profile to central store; subsequent instances of same hardware skip calibration |
+| Checking engine VRAM usage | SSH into host, run `nvidia-smi`, guess which process is which | Web console shows per-engine VRAM params, current usage, profile source, and solo/concurrent mode |
+| Tuning batch size without restart | Edit docker-compose env vars, restart container, wait for model reload | Click "Edit Parameters" in web console, changes apply in seconds without model reload |
+| GPU underutilised after deployment | No visibility — operator doesn't know params are conservative | System detects 40% unused VRAM, suggests increasing vad_batch_size; operator clicks "Apply" |
+| Profile becomes stale after engine update | No detection — old params may cause OOM or waste GPU | System detects observed vs predicted VRAM divergence, triggers background re-calibration |
 
 ---
 
@@ -672,13 +677,596 @@ exactly as it does today. Zero behaviour change for existing deployments.
 
 ---
 
+### 84.5: Centralised Profile Store
+
+**Files modified:**
+
+- `dalston/db/models.py` — add `VRAMProfileModel`
+- `dalston/db/migrations/versions/xxxx_add_vram_profiles.py` *(new)*
+- `dalston/gateway/api/console.py` — add profile CRUD endpoints
+- `dalston/engine_sdk/vram_budget.py` — query central store before local files
+
+**Deliverables:**
+
+A Postgres table that stores calibration profiles keyed by `(engine_id, model_id, gpu_model, runtime_fingerprint)`, so any engine instance can look up an existing profile instead of requiring a local JSON file.
+
+```python
+# dalston/db/models.py
+
+class VRAMProfileModel(Base):
+    """Persisted VRAM calibration profile.
+
+    Keyed by (engine_id, model_id, gpu_model, runtime_fingerprint).
+    Any engine instance on matching hardware skips calibration and
+    reads this profile at startup.
+    """
+    __tablename__ = "vram_profiles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    engine_id: Mapped[str] = mapped_column(String(128))
+    model_id: Mapped[str] = mapped_column(String(256))
+    gpu_model: Mapped[str] = mapped_column(String(128))       # "Tesla T4"
+    gpu_vram_mb: Mapped[int]
+    runtime_fingerprint: Mapped[str] = mapped_column(String(64))  # hash of runtime versions
+    schema_version: Mapped[str] = mapped_column(String(16), default="1.0")
+    coefficients: Mapped[dict] = mapped_column(JSONB)          # {S: 3995, alpha_batch: 55}
+    formula: Mapped[str] = mapped_column(String(256))
+    r_squared: Mapped[float]
+    safety_margin: Mapped[float] = mapped_column(default=0.15)
+    measurements: Mapped[list] = mapped_column(JSONB)          # raw data points
+    manual_overrides: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    calibrated_at: Mapped[datetime]
+    calibrated_by: Mapped[str] = mapped_column(String(256))    # "auto" | instance_id
+
+    __table_args__ = (
+        UniqueConstraint(
+            "engine_id", "model_id", "gpu_model", "runtime_fingerprint",
+            name="uq_vram_profile_key",
+        ),
+    )
+```
+
+**Runtime fingerprint:** A short hash computed at engine startup from the versions that affect VRAM behaviour:
+
+```python
+# dalston/engine_sdk/vram_budget.py
+
+def compute_runtime_fingerprint(engine_id: str, model_id: str) -> str:
+    """Hash of runtime versions that affect VRAM characteristics.
+
+    Changes to any of these components invalidate cached profiles:
+    - ONNX Runtime / PyTorch version
+    - CUDA runtime version
+    - Model file checksum (first 64KB)
+    """
+    import hashlib
+    parts: list[str] = []
+
+    # CUDA version
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        parts.append(f"cuda:{pynvml.nvmlSystemGetCudaDriverVersion()}")
+        pynvml.nvmlShutdown()
+    except Exception:
+        parts.append("cuda:none")
+
+    # Framework version
+    try:
+        import onnxruntime
+        parts.append(f"ort:{onnxruntime.__version__}")
+    except ImportError:
+        pass
+    try:
+        import torch
+        parts.append(f"torch:{torch.__version__}")
+    except ImportError:
+        pass
+
+    # Model file hash (first 64KB for speed)
+    model_path = os.environ.get("DALSTON_MODEL_PATH", "")
+    if model_path and Path(model_path).exists():
+        with open(model_path, "rb") as f:
+            parts.append(f"model:{hashlib.sha256(f.read(65536)).hexdigest()[:12]}")
+
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+```
+
+**Profile lookup order** (modified `VRAMBudget.load()`):
+
+```
+1. Central store: exact match on (engine_id, model_id, gpu_model, runtime_fingerprint)
+2. Central store: same (engine_id, model_id, gpu_model), different fingerprint
+   → use it but flag as "stale", trigger background re-calibration
+3. Local file: dalston/tools/vram_profiles/ (existing path, for development)
+4. Fallback: conservative defaults
+```
+
+**Console API endpoints:**
+
+```
+GET  /api/console/vram-profiles                          — list all profiles
+GET  /api/console/vram-profiles/{engine_id}/{model_id}   — profiles for an engine+model
+DELETE /api/console/vram-profiles/{id}                    — delete a stale profile
+```
+
+---
+
+### 84.6: Auto-Calibration on First Boot
+
+**Files modified:**
+
+- `dalston/engine_sdk/runner.py` — add self-calibration phase to startup
+- `dalston/engine_sdk/self_calibrate.py` *(new)* — stripped-down calibration for in-process use
+- `dalston/engine_sdk/admission.py` — add calibration lock
+
+**Deliverables:**
+
+When an engine starts on hardware with no matching profile in the central store, it runs a self-calibration phase before accepting work. The calibration acquires all admission capacity (blocking batch tasks and RT sessions) and measures peak VRAM for the engine's parameter space.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Engine Startup Flow (expanded)                                  │
+│                                                                  │
+│  1. Load model (existing)                                        │
+│  2. Detect GPU model + compute runtime fingerprint               │
+│  3. Query central store for profile                              │
+│     ├─ Found (exact fingerprint) → use profile, skip to step 6  │
+│     ├─ Found (stale fingerprint) → use profile, schedule         │
+│     │   background re-calibration after startup                  │
+│     └─ Not found → step 4                                        │
+│  4. Acquire calibration lock (capacity → 0)                      │
+│     → Registry status: "calibrating"                             │
+│     → Orchestrator won't route work here                         │
+│  5. Run self-calibration (~2-5 min)                              │
+│     → Synthetic audio through actual inference path              │
+│     → VRAM monitoring via pynvml                                 │
+│     → Fit linear model, compute coefficients                     │
+│  6. Save profile to central store                                │
+│  7. Compute adaptive params from profile                         │
+│  8. Release calibration lock (capacity → normal)                 │
+│     → Registry status: "idle"                                    │
+│  9. Start accepting work                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Self-calibration module** — a streamlined version of `calibrate_vram.py` designed to run in-process:
+
+```python
+# dalston/engine_sdk/self_calibrate.py
+
+@dataclass
+class SelfCalibrationConfig:
+    """Config for in-process self-calibration."""
+    stage: str                          # "transcribe" | "diarize" | "align"
+    # Transcribe-specific
+    audio_durations_s: list[int] = field(default_factory=lambda: [15, 30, 60])
+    vad_batch_sizes: list[int] = field(default_factory=lambda: [1, 4, 8, 16])
+    # Diarize-specific
+    diarize_durations_s: list[int] = field(default_factory=lambda: [60, 180, 300, 600])
+    repeats: int = 2                    # fewer repeats than manual calibration
+    poll_interval_ms: int = 50
+
+
+async def run_self_calibration(
+    engine: Engine,
+    config: SelfCalibrationConfig,
+    gpu_index: int = 0,
+) -> dict:
+    """Run in-process calibration by calling engine.process() with synthetic audio.
+
+    Returns a profile dict compatible with VRAMBudget.load() format.
+    Runs synchronously in the engine process — no HTTP, no Redis.
+    """
+    ...
+```
+
+**Key difference from `calibrate_vram.py`:** Self-calibration calls `engine.process()` directly (in-process), not via HTTP. This avoids needing the engine's HTTP server to be running and eliminates network overhead. The VRAM monitor thread runs in parallel.
+
+**Reduced measurement matrix:** Self-calibration uses fewer data points than manual calibration (2 repeats instead of 3, fewer durations) to keep startup time under 3 minutes. The tradeoff is slightly lower R² — compensated by a higher safety margin for auto-calibrated profiles (20% vs 15% for manual).
+
+**Calibration lock via admission controller:**
+
+```python
+# dalston/engine_sdk/admission.py — addition
+
+class AdmissionController:
+    def acquire_calibration_lock(self) -> None:
+        """Block all new work during calibration.
+
+        Sets effective capacity to 0. Existing in-flight work (if any)
+        continues but no new tasks/sessions are admitted.
+        """
+        self._calibrating = True
+
+    def release_calibration_lock(self) -> None:
+        self._calibrating = False
+
+    def can_accept_batch(self) -> bool:
+        if self._calibrating:
+            return False
+        # ... existing logic
+
+    def can_accept_rt(self) -> bool:
+        if self._calibrating:
+            return False
+        # ... existing logic
+```
+
+---
+
+### 84.7: VRAM Visibility in Web Console
+
+**Files modified:**
+
+- `dalston/common/registry.py` — extend `EngineRecord` with VRAM fields
+- `dalston/engine_sdk/runner.py` — include VRAM params in heartbeat
+- `dalston/gateway/api/console.py` — add VRAM detail endpoint, VRAM history
+- `web/src/pages/EngineDetail.tsx` — add VRAM Budget panel
+- `web/src/pages/Infrastructure.tsx` — add per-engine VRAM badges
+- `web/src/api/types.ts` — add VRAM types
+- `web/src/hooks/useVRAMHistory.ts` *(new)*
+
+**Deliverables:**
+
+Extend the engine heartbeat and web console to show VRAM budget parameters, current GPU usage, profile source, and usage history.
+
+**Registry additions** — new fields on `EngineRecord`:
+
+```python
+# dalston/common/registry.py — additions to EngineRecord
+
+    # M84: VRAM budget fields
+    vram_budget_mb: int = 0
+    vram_profile_source: str = ""       # "calibrated" | "defaults" | "stale" | "manual_override"
+    vram_active_mode: str = ""          # "solo" | "concurrent"
+    vram_params_json: str = ""          # JSON of current EngineVRAMParams
+    vram_solo_params_json: str = ""     # JSON of solo EngineVRAMParams
+    vram_concurrent_params_json: str = ""  # JSON of concurrent EngineVRAMParams
+```
+
+These are included in the heartbeat so the gateway always has current state.
+
+**VRAM history** — a Redis ring buffer per engine instance:
+
+```
+dalston:engine:vram_history:{instance}    LIST of (timestamp, vram_used_mb) tuples
+```
+
+Each heartbeat (10s) appends the current `gpu_memory_used` to the list, trimmed to 180 entries (30 min window). The gateway reads this for the sparkline chart.
+
+**Console API additions:**
+
+```
+GET /api/console/engines/{instance}/vram
+  → {
+      budget_mb: 6912,
+      gpu_model: "Tesla T4",
+      gpu_vram_mb: 15360,
+      profile_source: "calibrated",
+      calibrated_at: "2026-03-26T16:54:16Z",
+      runtime_fingerprint: "a3f8b2c1...",
+      safety_margin: 0.15,
+      active_mode: "solo",
+      solo_params: { vad_batch_size: 8, batch_max_inflight: 1, peak_estimate_mb: 4435, ... },
+      concurrent_params: { vad_batch_size: 1, batch_max_inflight: 3, peak_estimate_mb: 6780, ... },
+      coefficients: { S: 3995, alpha_batch: 55 },
+      history: [ { ts: "...", vram_mb: 4102 }, ... ]  // last 30 min
+    }
+```
+
+**Web UI — Engine Detail page VRAM panel:**
+
+```
+┌─ VRAM Budget ──────────────────────────────────────────────┐
+│ GPU: Tesla T4 (15,360 MB)                                  │
+│ Budget: 6,912 MB (45% share)     Profile: calibrated       │
+│ CUDA overhead: 448 MB             Calibrated: 2h ago       │
+│ Available for inference: 6,464 MB  Safety margin: 15%      │
+│                                                             │
+│ ┌─ Current Parameters ──────────────────────────────────┐  │
+│ │ Mode: solo (queue empty)                              │  │
+│ │                                                       │  │
+│ │ vad_batch_size:      8    ← solo: 8  / concurrent: 1 │  │
+│ │ batch_max_inflight:  1    ← solo: 1  / concurrent: 3 │  │
+│ │ max_sessions:        2                                │  │
+│ │ rt_reservation:      2                                │  │
+│ │ total_capacity:      6                                │  │
+│ │                                                       │  │
+│ │ Peak VRAM estimate:  4,435 MB (solo)                  │  │
+│ │ Headroom:            2,029 MB                         │  │
+│ └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│ ┌─ GPU Usage (last 30 min) ─────────────────────────────┐  │
+│ │ ████████████░░░░░░░░ 4,102 / 15,360 MB (26.7%)       │  │
+│ │ ▁▂▃▃▅▇█▇▅▃▂▁▂▅▇█▇▅▃  (sparkline)                     │  │
+│ └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│ [Recalibrate]  [Edit Parameters]                           │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Infrastructure page additions:**
+
+- Per-engine row gains a small VRAM usage bar (inline, same row as status dot)
+- Tooltip on hover shows: `profile_source`, `active_mode`, `budget_mb`
+- If VRAM shares on a node sum > 95%: red "VRAM over-committed" badge on node header
+
+---
+
+### 84.8: Runtime Parameter Editing
+
+**Files modified:**
+
+- `dalston/gateway/api/console.py` — add override endpoint
+- `dalston/common/registry.py` — add override pubsub channel
+- `dalston/engine_sdk/runner.py` — subscribe to override channel, apply changes
+- `web/src/pages/EngineDetail.tsx` — add "Edit Parameters" modal
+
+**Deliverables:**
+
+Allow operators to override computed VRAM parameters at runtime without restarting the engine container. Changes take effect within one heartbeat interval (10s).
+
+**Override flow:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Web Console                                                 │
+│  [Edit Parameters] → modal with sliders/inputs               │
+│                                                              │
+│  POST /api/console/engines/{instance}/vram/override          │
+│    { "vad_batch_size_solo": 12, "batch_max_inflight": 4 }   │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Gateway                                                      │
+│  1. Validate: compute estimated peak from coefficients        │
+│     → reject if peak > gpu_vram_mb (hard limit)              │
+│     → warn if peak > 90% of gpu_vram_mb                      │
+│  2. Publish to Redis: dalston:engine:config:{instance}       │
+│  3. Store override in vram_profiles.manual_overrides (Postgres)│
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Engine Runner (heartbeat loop)                               │
+│  1. Subscribe to dalston:engine:config:{instance}            │
+│  2. On message: validate + apply new AdaptiveVRAMParams      │
+│  3. Log: vram_params_overridden, old=..., new=...            │
+│  4. Next heartbeat: vram_profile_source = "manual_override"  │
+│                                                              │
+│  On container restart:                                        │
+│  → Load profile from central store                           │
+│  → Apply manual_overrides column if present                  │
+│  → manual_overrides survive restart                          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Override API:**
+
+```python
+class VRAMOverrideRequest(BaseModel):
+    """Runtime parameter override."""
+    vad_batch_size_solo: int | None = None
+    vad_batch_size_concurrent: int | None = None
+    batch_max_inflight: int | None = None
+    max_sessions: int | None = None
+    max_diarize_chunk_s: float | None = None
+    rt_reservation: int | None = None
+    total_capacity: int | None = None
+    safety_margin: float | None = None
+
+class VRAMOverrideResponse(BaseModel):
+    applied: bool
+    estimated_peak_solo_mb: int
+    estimated_peak_concurrent_mb: int
+    headroom_mb: int
+    warnings: list[str]          # e.g. ["headroom below 10%"]
+```
+
+**Safety guardrails:**
+
+- Gateway computes estimated peak VRAM using stored coefficients before applying
+- Hard reject if estimated peak > 100% of `gpu_vram_mb`
+- Warning in response if estimated peak > 90% of `gpu_vram_mb`
+- UI shows live estimate as operator adjusts sliders
+- "Reset to Auto" button clears overrides, recomputes from profile
+
+**Edit Parameters modal:**
+
+```
+┌─ Override VRAM Parameters ─────────────────────────────────┐
+│                                                             │
+│ ⚠ Overrides replace auto-computed values. Persistent       │
+│   across restarts until cleared.                            │
+│                                                             │
+│ vad_batch_size (solo):      [  8  ] ▼  (auto: 8)          │
+│ vad_batch_size (concurrent):[  1  ] ▼  (auto: 1)          │
+│ batch_max_inflight:         [  3  ] ▼  (auto: 3)          │
+│ max_sessions:               [  2  ] ▼  (auto: 2)          │
+│ rt_reservation:             [  2  ] ▼  (auto: 2)          │
+│ total_capacity:             [  6  ] ▼  (auto: 6)          │
+│ safety_margin:              [ 0.15] ▼  (auto: 0.15)       │
+│                                                             │
+│ Estimated peak (solo):       4,435 MB                      │
+│ Estimated peak (concurrent): 6,780 MB                      │
+│ GPU headroom:                 132 MB ⚠ LOW                 │
+│                                                             │
+│              [Reset to Auto]  [Apply]                       │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 84.9: Proactive Suggestions & Drift Detection
+
+**Files modified:**
+
+- `dalston/engine_sdk/runner.py` — track per-task peak VRAM
+- `dalston/gateway/services/vram_advisor.py` *(new)* — analysis loop
+- `dalston/gateway/api/console.py` — suggestions endpoint
+- `web/src/pages/EngineDetail.tsx` — suggestion banner
+- `web/src/pages/Infrastructure.tsx` — suggestion badges
+
+**Deliverables:**
+
+A background analysis loop in the gateway that compares observed VRAM usage against profile predictions, generates tuning suggestions, and detects profile drift.
+
+**Per-task peak tracking** — engines record peak VRAM after each task:
+
+```python
+# dalston/engine_sdk/runner.py — after task completion
+
+def _record_task_vram_peak(self, task_id: str, peak_mb: int) -> None:
+    """Append peak VRAM to ring buffer for advisor analysis."""
+    key = f"dalston:engine:vram_peaks:{self._instance}"
+    entry = json.dumps({"ts": datetime.now(UTC).isoformat(), "peak_mb": peak_mb, "task_id": task_id})
+    pipe = self._redis.pipeline()
+    pipe.rpush(key, entry)
+    pipe.ltrim(key, -100, -1)  # keep last 100
+    pipe.execute()
+```
+
+**VRAM advisor service** — runs every 5 minutes in the gateway:
+
+```python
+# dalston/gateway/services/vram_advisor.py
+
+@dataclass
+class VRAMSuggestion:
+    instance: str
+    type: str               # "increase_throughput" | "reduce_oom_risk" | "profile_drift"
+    severity: str           # "info" | "warning"
+    message: str
+    current_params: dict
+    suggested_params: dict | None
+    dismissed: bool = False
+
+
+class VRAMAdvisor:
+    """Analyses observed VRAM usage and generates tuning suggestions."""
+
+    async def analyse_all(self) -> list[VRAMSuggestion]:
+        """Run analysis for all active engine instances."""
+        suggestions = []
+        for instance in await self._registry.get_all_instances():
+            suggestion = await self._analyse_instance(instance)
+            if suggestion:
+                suggestions.append(suggestion)
+        return suggestions
+
+    async def _analyse_instance(self, instance: str) -> VRAMSuggestion | None:
+        peaks = await self._get_recent_peaks(instance, count=50)
+        if len(peaks) < 10:
+            return None  # not enough data
+
+        profile = await self._get_profile(instance)
+        params = await self._get_current_params(instance)
+        budget_mb = await self._get_budget(instance)
+
+        observed_max = max(p["peak_mb"] for p in peaks)
+        observed_avg = mean(p["peak_mb"] for p in peaks)
+
+        # --- Underutilisation detection ---
+        headroom_pct = (budget_mb - observed_max) / budget_mb
+        if headroom_pct > 0.30:
+            new_params = self._recompute_with_target(
+                profile, target_headroom=0.15, budget_mb=budget_mb,
+            )
+            return VRAMSuggestion(
+                instance=instance,
+                type="increase_throughput",
+                severity="info",
+                message=(
+                    f"GPU has {headroom_pct:.0%} unused VRAM over last "
+                    f"{len(peaks)} tasks. Could increase vad_batch_size "
+                    f"from {params['vad_batch_size']} to "
+                    f"{new_params['vad_batch_size']} for higher throughput."
+                ),
+                current_params=params,
+                suggested_params=new_params,
+            )
+
+        # --- OOM risk detection ---
+        if headroom_pct < 0.05:
+            new_params = self._recompute_with_target(
+                profile, target_headroom=0.20, budget_mb=budget_mb,
+            )
+            return VRAMSuggestion(
+                instance=instance,
+                type="reduce_oom_risk",
+                severity="warning",
+                message=(
+                    f"GPU headroom is only {headroom_pct:.0%}. "
+                    f"Reduce vad_batch_size to avoid OOM on longer inputs."
+                ),
+                current_params=params,
+                suggested_params=new_params,
+            )
+
+        # --- Profile drift detection ---
+        if profile and profile.get("coefficients"):
+            predicted = self._predict_peak(profile, params)
+            drift = abs(observed_avg - predicted) / predicted
+            if drift > 0.10:
+                return VRAMSuggestion(
+                    instance=instance,
+                    type="profile_drift",
+                    severity="warning",
+                    message=(
+                        f"Observed VRAM ({observed_avg:.0f} MB avg) deviates "
+                        f"{drift:.0%} from profile prediction ({predicted:.0f} MB). "
+                        f"Profile may be stale — consider re-calibrating."
+                    ),
+                    current_params=params,
+                    suggested_params=None,
+                )
+
+        return None
+```
+
+**Console API:**
+
+```
+GET /api/console/vram-suggestions
+  → { suggestions: [ { instance, type, severity, message, suggested_params, ... } ] }
+
+POST /api/console/vram-suggestions/{instance}/apply
+  → applies suggested_params as override (same flow as 84.8)
+
+POST /api/console/vram-suggestions/{instance}/dismiss
+  → marks suggestion as dismissed for this instance (until next analysis cycle)
+
+POST /api/console/engines/{instance}/recalibrate
+  → triggers background re-calibration (publishes command to engine via pubsub)
+```
+
+**Web UI — suggestion banner on Engine Detail page:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 💡 GPU has 40% unused VRAM over last 50 tasks.              │
+│    Increase vad_batch_size from 4 → 8 for higher throughput.│
+│                                          [Apply]  [Dismiss] │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Infrastructure page:** Small badge on engines with pending suggestions (orange dot for info, red dot for warnings).
+
+**Drift-triggered re-calibration:** When a `profile_drift` suggestion is generated, the advisor can optionally auto-trigger re-calibration if the engine is idle. The engine receives a `recalibrate` command via pubsub, acquires the calibration lock, runs self-calibration (same as 84.6), and saves the updated profile. This happens without operator intervention.
+
+---
+
 ## Non-Goals
 
 - **ONNX `gpu_mem_limit` enforcement** — The calibrator tells the engine what params are safe; we don't need hard VRAM caps via ONNX session options. Hard caps cause cryptic failures; computed params prevent overuse gracefully.
 - **Dynamic VRAM rebalancing** — Engines get a static budget at startup. Dynamic rebalancing (idle engine yields VRAM) is a separate concern and requires model CPU offloading (future milestone).
 - **Multi-GPU partitioning** — This milestone assumes single-GPU instances. MIG/MPS partitioning is out of scope.
-- **Calibrating all engine × model × GPU combinations** — Ship profiles for the primary deployment target (Parakeet TDT 0.6B v3 ONNX + pyannote 4.0 on T4 and L4). Other combinations use conservative defaults until calibrated.
+- **Calibrating all engine × model × GPU combinations** — Ship profiles for the primary deployment target (Parakeet TDT 0.6B v3 ONNX + pyannote 4.0 on T4 and L4). Other combinations use auto-calibrated on first boot.
 - **Cross-engine VRAM coordination at runtime** — No runtime protocol between containers. Static budget split at deploy time is sufficient.
+- **Auto-negotiation of VRAM shares** — Operators set `DALSTON_VRAM_SHARE` per container. The system validates (warns on over-commitment) but does not auto-negotiate between engines on the same GPU.
+- **Kubernetes GPU scheduling** — This milestone targets Docker Compose and standalone deployments. K8s device plugin integration is a separate concern.
 
 ---
 
@@ -686,20 +1274,56 @@ exactly as it does today. Zero behaviour change for existing deployments.
 
 ### Ordering
 
-1. **84.1** (calibration script) can be built and run independently
-2. **84.2** (budget calculator) depends on 84.1's output format
-3. **84.3** (diarize chunking) is independent of 84.1/84.2 — can be built in parallel
-4. **84.4** (startup integration) depends on 84.2 and 84.3
+**Phase A (complete):**
+
+1. **84.1** (calibration script) — built and run independently
+2. **84.2** (budget calculator) — depends on 84.1's output format
+3. **84.3** (diarize chunking) — independent of 84.1/84.2, built in parallel
+4. **84.4** (startup integration) — depends on 84.2 and 84.3
+
+**Phase B (central store + auto-calibration):**
+
+5. **84.5** (centralised profile store) — requires Postgres migration, deploy gateway first
+6. **84.6** (auto-calibration) — depends on 84.5 for profile storage; engine images must be rebuilt
+
+**Phase C (UI + runtime tuning):**
+
+7. **84.7** (VRAM visibility) — depends on 84.5 for profile data; gateway + web deploy
+8. **84.8** (runtime editing) — depends on 84.7 for UI; gateway + engine + web deploy
+9. **84.9** (proactive suggestions) — depends on 84.7 and 84.8; gateway + engine + web deploy
 
 ### Migration
 
+**Phase A (existing):**
+
 - All changes are **additive**. Without `DALSTON_VRAM_BUDGET_MB` or `DALSTON_VRAM_SHARE`, engines behave exactly as today.
-- Diarize chunking activates only when audio exceeds `DALSTON_MAX_DIARIZE_CHUNK_S` (default 900s = 15 min). Files under 15 min take the existing path.
-- Ship initial calibration profiles for T4 and L4 alongside the code. Operators can re-calibrate for their hardware.
+- Diarize chunking activates only when audio exceeds `DALSTON_MAX_DIARIZE_CHUNK_S` (default 900s = 15 min).
+- Ship initial calibration profiles for T4 and L4 alongside the code.
+
+**Phase B:**
+
+- **Postgres migration**: Add `vram_profiles` table. Non-destructive — no existing tables modified.
+- **Profile migration**: On first startup after deploy, `VRAMBudget.load()` checks central store first, falls back to local files. Existing local profiles continue to work. Engines that find a local profile but no central one automatically save it to the central store (one-time migration).
+- **Auto-calibration**: Only triggers when no profile exists for the hardware. Existing deployments with local profiles are unaffected.
+
+**Phase C:**
+
+- **Registry fields**: New VRAM fields on `EngineRecord` default to empty strings — old engines that don't send them are unaffected.
+- **VRAM history**: New Redis keys, no migration needed.
+- **Override pubsub**: Engines that haven't been updated simply don't subscribe — overrides are a no-op until they do.
+
+### Rollback
+
+Each phase is independently rollable:
+
+- Phase B: Drop `vram_profiles` table, engines fall back to local files + defaults
+- Phase C: Remove UI components, engines ignore pubsub channels they're not subscribed to
 
 ---
 
 ## Verification
+
+### Phase A (84.1–84.4)
 
 ```bash
 # 1. Run calibration on a T4 instance
@@ -726,7 +1350,6 @@ assert p.headroom_mb > 0
 "
 
 # 3. Verify diarize chunking with a long file
-# Generate 30-min test audio
 ffmpeg -f lavfi -i "sine=frequency=440:duration=1800" -ar 16000 -ac 1 /tmp/long_test.wav
 
 curl -s -X POST http://localhost:9102/v1/diarize \
@@ -745,9 +1368,89 @@ curl -s -X POST http://localhost:9102/v1/diarize \
 # Expect: ~7200, completes successfully
 ```
 
+### Phase B (84.5–84.6)
+
+```bash
+# 6. Verify central profile store
+make dev-gpu
+
+# Check migration ran
+docker compose exec -T postgres psql -U dalston -c "\d vram_profiles"
+# Expect: table with columns id, engine_id, model_id, gpu_model, ...
+
+# Check profile was migrated from local file
+curl -s http://localhost:8000/api/console/vram-profiles \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '.profiles | length'
+# Expect: >= 1
+
+# 7. Verify auto-calibration on unknown hardware
+# Start engine with no matching profile (simulate by clearing profile store)
+docker compose exec -T postgres psql -U dalston \
+    -c "DELETE FROM vram_profiles WHERE gpu_model = 'Tesla T4'"
+
+# Restart engine
+docker compose restart stt-transcribe-onnx
+
+# Watch logs for calibration
+docker compose logs -f stt-transcribe-onnx 2>&1 | grep -E "calibrat|vram"
+# Expect: "no_vram_profile_found" → "self_calibration_started" → "self_calibration_complete" → "vram_budget_computed"
+
+# Verify profile was saved to central store
+curl -s http://localhost:8000/api/console/vram-profiles \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '.profiles[] | select(.gpu_model == "Tesla T4")'
+# Expect: profile with calibrated_by: "auto"
+
+# 8. Verify second instance skips calibration
+# Start a second onnx engine (same GPU)
+docker compose up -d stt-transcribe-onnx-2  # if configured
+docker compose logs stt-transcribe-onnx-2 2>&1 | grep "calibrat"
+# Expect: "vram_profile_found" (no calibration)
+```
+
+### Phase C (84.7–84.9)
+
+```bash
+# 9. Verify VRAM visibility in console
+curl -s http://localhost:8000/api/console/engines \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '.batch_engines[0].vram_profile_source'
+# Expect: "calibrated"
+
+# Verify VRAM detail endpoint
+INSTANCE=$(curl -s http://localhost:8000/api/console/engines \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq -r '.batch_engines[0].instance')
+
+curl -s "http://localhost:8000/api/console/engines/${INSTANCE}/vram" \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '{budget_mb, profile_source, active_mode, solo_params, concurrent_params}'
+# Expect: JSON with budget, params, coefficients
+
+# 10. Verify runtime parameter override
+curl -s -X POST "http://localhost:8000/api/console/engines/${INSTANCE}/vram/override" \
+    -H "Authorization: Bearer $DALSTON_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"vad_batch_size_solo": 12}' | jq '{applied, estimated_peak_solo_mb, warnings}'
+# Expect: applied=true, estimated_peak_solo_mb < gpu_vram_mb
+
+# Verify override took effect (wait one heartbeat interval)
+sleep 12
+curl -s "http://localhost:8000/api/console/engines/${INSTANCE}/vram" \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '.solo_params.vad_batch_size'
+# Expect: 12
+
+# 11. Verify VRAM suggestions
+curl -s http://localhost:8000/api/console/vram-suggestions \
+    -H "Authorization: Bearer $DALSTON_API_KEY" | jq '.suggestions'
+# Expect: array (may be empty if engine hasn't processed enough tasks)
+
+# 12. Verify web console shows VRAM panel
+# Open http://localhost:8000/console/engines/<engine_id>
+# Expect: VRAM Budget card with params, GPU usage bar, sparkline
+```
+
 ---
 
 ## Checkpoint
+
+### Phase A (84.1–84.4)
 
 - [ ] `calibrate_vram.py` runs against ONNX transcribe engine and produces valid profile JSON
 - [ ] `calibrate_vram.py` runs against pyannote diarize engine and produces valid profile JSON
@@ -759,3 +1462,37 @@ curl -s -X POST http://localhost:9102/v1/diarize \
 - [ ] Adaptive mode uses solo params (high batch) when queue depth ≤ 1 and concurrent params when queue depth > 1
 - [ ] Colocated ONNX + pyannote on T4 with `VRAM_SHARE=0.45/0.55` processes 1-hour audio without OOM
 - [ ] Ship calibration profiles for Parakeet TDT 0.6B v3 + pyannote 4.0 on T4 and L4
+
+### Phase B (84.5–84.6)
+
+- [ ] `vram_profiles` Postgres table created via migration
+- [ ] `VRAMBudget.load()` queries central store before local files
+- [ ] Existing local profiles auto-migrated to central store on first engine startup
+- [ ] `compute_runtime_fingerprint()` produces stable, deterministic hashes
+- [ ] Profile keyed by `(engine_id, model_id, gpu_model, runtime_fingerprint)` with unique constraint
+- [ ] Console API: `GET /api/console/vram-profiles` returns stored profiles
+- [ ] First engine on new hardware auto-calibrates and saves profile to central store
+- [ ] Engine status shows "calibrating" during self-calibration, orchestrator skips it
+- [ ] Self-calibration completes in under 5 minutes for transcribe engines
+- [ ] Second engine on same hardware skips calibration and uses stored profile
+- [ ] Stale fingerprint match: engine starts with old profile + schedules background re-calibration
+- [ ] Auto-calibrated profiles use 20% safety margin (vs 15% for manual)
+
+### Phase C (84.7–84.9)
+
+- [ ] `EngineRecord` includes VRAM budget fields in heartbeat
+- [ ] VRAM history ring buffer (30 min) written per heartbeat, readable via API
+- [ ] `GET /api/console/engines/{instance}/vram` returns budget, params, coefficients, history
+- [ ] Engine Detail page shows VRAM Budget panel with current params and solo/concurrent comparison
+- [ ] Engine Detail page shows GPU usage bar with sparkline (last 30 min)
+- [ ] Infrastructure page shows per-engine VRAM usage bars and over-commitment warnings
+- [ ] `POST /api/console/engines/{instance}/vram/override` applies param changes at runtime
+- [ ] Override rejected if estimated peak > 100% of GPU VRAM
+- [ ] Override warning if estimated peak > 90% of GPU VRAM
+- [ ] "Reset to Auto" clears overrides and recomputes from profile
+- [ ] Manual overrides persist across container restarts (stored in `vram_profiles.manual_overrides`)
+- [ ] VRAM advisor detects underutilisation (>30% headroom) and suggests increased batch size
+- [ ] VRAM advisor detects OOM risk (<5% headroom) and suggests reduced batch size
+- [ ] VRAM advisor detects profile drift (>10% divergence) and suggests re-calibration
+- [ ] Suggestion banner shown on Engine Detail page with Apply/Dismiss actions
+- [ ] Drift-triggered re-calibration runs automatically when engine is idle
