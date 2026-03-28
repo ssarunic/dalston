@@ -94,6 +94,33 @@ ENGINE_CALIBRATION: dict[str, dict[str, Any]] = {
         "formula": "S + alpha_duration * audio_duration_s",
         "sweep": "default",
     },
+    "nemo": {
+        "stage": "transcribe",
+        "params": {
+            "audio_durations_s": [30, 60, 120, 300, 600],
+            "vad_batch_sizes": [1, 2, 4, 8],
+        },
+        "formula": "S + alpha_batch * vad_batch_size",
+        "sweep": "default",
+    },
+    "hf-asr": {
+        "stage": "transcribe",
+        "params": {
+            "audio_durations_s": [15, 30, 60, 120],
+            "vad_batch_sizes": [1, 2, 4, 8],
+        },
+        "formula": "S + alpha_batch * vad_batch_size",
+        "sweep": "default",
+    },
+    "vllm-asr": {
+        "stage": "transcribe",
+        "params": {
+            "audio_durations_s": [15, 30, 60, 120, 300],
+            "concurrency_levels": [1, 2, 4, 6, 8],
+        },
+        "formula": "throughput = f(concurrency, audio_duration)",
+        "sweep": "vllm",
+    },
 }
 
 # Default engine_id per stage (used when --engine-id is not specified)
@@ -299,7 +326,20 @@ def run_calibration(
     measurements: list[dict[str, Any]] = []
     baseline_mb = monitor.current_used_mb() if monitor else 800
 
-    if cal["sweep"] == "faster-whisper":
+    if cal["sweep"] == "vllm":
+        measurements = _sweep_vllm(
+            engine_url,
+            endpoint,
+            model_id,
+            monitor,
+            durations,
+            params,
+            dry_run,
+            baseline_mb,
+        )
+        coefficients = _fit_vllm_model(measurements)
+        r_squared = 1.0
+    elif cal["sweep"] == "faster-whisper":
         measurements = _sweep_faster_whisper(
             engine_url,
             endpoint,
@@ -310,6 +350,7 @@ def run_calibration(
             dry_run,
             baseline_mb,
         )
+        coefficients, r_squared = _fit_model(measurements, eid)
     else:
         measurements = _sweep_default(
             engine_url,
@@ -322,9 +363,7 @@ def run_calibration(
             baseline_mb,
             vad_batch_sizes=params.get("vad_batch_sizes"),
         )
-
-    # Fit linear model
-    coefficients, r_squared = _fit_model(measurements, eid)
+        coefficients, r_squared = _fit_model(measurements, eid)
 
     profile = {
         "schema_version": "1.0",
@@ -552,6 +591,307 @@ def _sweep_faster_whisper(
                 )
 
     return measurements
+
+
+def _sweep_vllm(
+    engine_url: str,
+    endpoint: str,
+    model_id: str | None,
+    monitor: VRAMMonitor | None,
+    durations: list[int],
+    params: dict[str, list],
+    dry_run: bool,
+    baseline_mb: int,
+) -> list[dict[str, Any]]:
+    """vLLM throughput calibration: sweep concurrency × audio duration.
+
+    vLLM pre-allocates GPU memory via gpu_memory_utilization, so peak VRAM
+    is roughly constant regardless of load.  The knobs that matter are
+    concurrency (how many requests the KV cache can serve simultaneously)
+    and audio duration (which determines output token count and thus KV
+    cache page consumption per request).
+
+    This sweep sends concurrent requests and measures:
+    - Throughput (requests/second)
+    - Per-request latency (p50, p99)
+    - VRAM (should be constant — validates no dynamic leak)
+    - Failures (KV cache exhaustion causes request queuing/timeout)
+
+    The resulting profile tells the admission controller the safe
+    concurrency limit and expected throughput at each level.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    concurrency_levels = params.get("concurrency_levels", [1, 2, 4, 6, 8])
+    measurements: list[dict[str, Any]] = []
+
+    with tempfile.TemporaryDirectory(prefix="dalston_calibrate_vllm_") as tmp:
+        work_dir = Path(tmp)
+
+        # Pre-generate audio files for all durations
+        audio_files: dict[int, Path] = {}
+        for dur in durations:
+            p = work_dir / f"test_{dur}s.wav"
+            generate_wav(p, dur)
+            audio_files[dur] = p
+
+        # Warmup: single request to ensure model is fully loaded and KV cache
+        # is initialized (first request after vLLM start can be slow).
+        print("Warmup: single request (60s audio)")
+        warmup_audio = audio_files.get(60) or audio_files.get(30)
+        if warmup_audio is None:
+            warmup_audio = work_dir / "test_warmup.wav"
+            generate_wav(warmup_audio, 30)
+        if not dry_run:
+            try:
+                send_to_engine(engine_url, endpoint, warmup_audio, model_id)
+                print("  warmup complete")
+            except Exception as e:
+                print(f"  warmup failed: {e}")
+
+        # Phase 1: concurrency sweep at fixed 60s duration
+        test_dur = 60 if 60 in audio_files else durations[0]
+        test_audio = audio_files[test_dur]
+
+        print(f"\nPhase 1: concurrency sweep ({test_dur}s audio)")
+        for conc in concurrency_levels:
+            if dry_run:
+                m = _synthetic_vllm_measurement(test_dur, baseline_mb, conc)
+                measurements.append(m)
+                print(
+                    f"  concurrency={conc} throughput={m['throughput_rps']:.2f} req/s "
+                    f"latency_p50={m['latency_p50_s']:.1f}s "
+                    f"latency_p99={m['latency_p99_s']:.1f}s "
+                    f"failures={m['failures']}"
+                )
+                continue
+
+            # Send `conc` concurrent requests and measure
+            latencies: list[float] = []
+            failures = 0
+            vram_peak = baseline_mb
+
+            if monitor:
+                monitor.start()
+
+            t_batch_start = time.monotonic()
+            with ThreadPoolExecutor(max_workers=conc) as pool:
+                futures = []
+                for _ in range(conc):
+                    futures.append(
+                        pool.submit(
+                            _timed_request,
+                            engine_url,
+                            endpoint,
+                            test_audio,
+                            model_id,
+                        )
+                    )
+
+                for fut in as_completed(futures):
+                    elapsed, ok = fut.result()
+                    if ok:
+                        latencies.append(elapsed)
+                    else:
+                        failures += 1
+
+            t_batch_elapsed = time.monotonic() - t_batch_start
+
+            if monitor:
+                vram_peak = monitor.stop()
+
+            # Compute throughput: total successful requests / wall-clock time
+            successful = len(latencies)
+            throughput = successful / t_batch_elapsed if t_batch_elapsed > 0 else 0
+
+            latencies.sort()
+            p50 = latencies[len(latencies) // 2] if latencies else 0
+            p99 = latencies[int(len(latencies) * 0.99)] if latencies else 0
+
+            m_record = {
+                "params": {
+                    "audio_s": test_dur,
+                    "concurrency": conc,
+                },
+                "peak_vram_mb": vram_peak,
+                "delta_mb": vram_peak - baseline_mb,
+                "throughput_rps": round(throughput, 3),
+                "latency_p50_s": round(p50, 2),
+                "latency_p99_s": round(p99, 2),
+                "successful": successful,
+                "failures": failures,
+                "elapsed_s": round(t_batch_elapsed, 2),
+            }
+            measurements.append(m_record)
+            print(
+                f"  concurrency={conc} throughput={throughput:.2f} req/s "
+                f"p50={p50:.1f}s p99={p99:.1f}s peak={vram_peak}MB "
+                f"ok={successful} fail={failures}"
+            )
+
+        # Phase 2: duration sweep at concurrency=1 (skip test_dur already
+        # measured in phase 1 at concurrency=1)
+        print("\nPhase 2: duration sweep (concurrency=1)")
+        for dur in durations:
+            if dur == test_dur:
+                continue
+            audio_path = audio_files[dur]
+
+            if dry_run:
+                m = _synthetic_vllm_measurement(dur, baseline_mb, 1)
+                measurements.append(m)
+                print(
+                    f"  duration={dur}s latency={m['latency_p50_s']:.1f}s "
+                    f"throughput={m['throughput_rps']:.2f} req/s"
+                )
+                continue
+
+            if monitor:
+                monitor.start()
+            elapsed_req, ok = _timed_request(engine_url, endpoint, audio_path, model_id)
+            if monitor:
+                vram_peak = monitor.stop()
+            else:
+                vram_peak = baseline_mb
+
+            m_record = {
+                "params": {
+                    "audio_s": dur,
+                    "concurrency": 1,
+                },
+                "peak_vram_mb": vram_peak,
+                "delta_mb": vram_peak - baseline_mb,
+                "throughput_rps": round(1.0 / elapsed_req if ok else 0, 3),
+                "latency_p50_s": round(elapsed_req, 2),
+                "latency_p99_s": round(elapsed_req, 2),
+                "successful": 1 if ok else 0,
+                "failures": 0 if ok else 1,
+                "elapsed_s": round(elapsed_req, 2),
+            }
+            measurements.append(m_record)
+
+            rtf = elapsed_req / dur if dur > 0 and ok else 0
+            print(
+                f"  duration={dur}s latency={elapsed_req:.1f}s RTF={rtf:.3f} "
+                f"peak={vram_peak}MB"
+            )
+
+    return measurements
+
+
+def _timed_request(
+    engine_url: str,
+    endpoint: str,
+    audio_path: Path,
+    model_id: str | None,
+) -> tuple[float, bool]:
+    """Send a single request and return (elapsed_seconds, success)."""
+    t0 = time.monotonic()
+    try:
+        send_to_engine(engine_url, endpoint, audio_path, model_id)
+        return time.monotonic() - t0, True
+    except Exception:
+        return time.monotonic() - t0, False
+
+
+def _synthetic_vllm_measurement(
+    duration_s: float,
+    baseline_mb: int,
+    concurrency: int,
+) -> dict[str, Any]:
+    """Generate a synthetic vLLM measurement for dry-run mode.
+
+    Models vLLM throughput: latency increases linearly with concurrency
+    (KV cache contention), VRAM is roughly constant (pre-allocated).
+    """
+    # Base latency scales with audio duration (RTF ~0.12 for Voxtral Mini)
+    base_latency = duration_s * 0.12
+    # Concurrency adds ~30% overhead per additional request (KV cache sharing)
+    conc_factor = 1.0 + (concurrency - 1) * 0.3
+    latency = base_latency * conc_factor
+    throughput = concurrency / latency if latency > 0 else 0
+
+    # VRAM is constant (vLLM pre-allocates)
+    peak = baseline_mb + 50  # Small variance from KV cache page management
+
+    # Simulate failures at high concurrency (KV cache exhaustion)
+    failures = max(0, concurrency - 6) if concurrency > 6 else 0
+    successful = concurrency - failures
+
+    return {
+        "params": {
+            "audio_s": duration_s,
+            "concurrency": concurrency,
+        },
+        "peak_vram_mb": peak,
+        "delta_mb": peak - baseline_mb,
+        "throughput_rps": round(throughput, 3),
+        "latency_p50_s": round(latency, 2),
+        "latency_p99_s": round(latency * 1.2, 2),
+        "successful": successful,
+        "failures": failures,
+        "elapsed_s": round(latency, 2),
+    }
+
+
+def _fit_vllm_model(measurements: list[dict[str, Any]]) -> dict[str, float]:
+    """Extract vLLM profile coefficients from throughput measurements.
+
+    Instead of a VRAM linear model, this extracts:
+    - max_safe_concurrency: highest concurrency with zero failures
+    - throughput_at_max: throughput (req/s) at that concurrency
+    - latency_per_audio_s: base latency per second of audio (RTF estimate)
+    - optimal_concurrency: concurrency with highest throughput
+    """
+    if not measurements:
+        return {
+            "max_safe_concurrency": 1,
+            "optimal_concurrency": 1,
+            "throughput_at_max": 0.0,
+            "latency_per_audio_s": 0.15,
+        }
+
+    # Find max concurrency with zero failures
+    conc_results: dict[int, dict[str, Any]] = {}
+    for m in measurements:
+        conc = m["params"].get("concurrency", 1)
+        if conc not in conc_results or m["throughput_rps"] > conc_results[conc].get(
+            "throughput_rps", 0
+        ):
+            conc_results[conc] = m
+
+    max_safe = 1
+    best_throughput = 0.0
+    optimal_conc = 1
+
+    for conc in sorted(conc_results):
+        r = conc_results[conc]
+        if r.get("failures", 0) == 0:
+            max_safe = conc
+        if r.get("throughput_rps", 0) > best_throughput:
+            best_throughput = r["throughput_rps"]
+            optimal_conc = conc
+
+    # Estimate base RTF from single-concurrency duration sweep
+    single_conc = [
+        m
+        for m in measurements
+        if m["params"].get("concurrency", 1) == 1
+        and m.get("successful", 0) > 0
+        and m["params"].get("audio_s", 0) > 0
+    ]
+    if single_conc:
+        rtfs = [m["latency_p50_s"] / m["params"]["audio_s"] for m in single_conc]
+        latency_per_audio_s = sum(rtfs) / len(rtfs)
+    else:
+        latency_per_audio_s = 0.15
+
+    return {
+        "max_safe_concurrency": float(max_safe),
+        "optimal_concurrency": float(optimal_conc),
+        "throughput_at_max": round(best_throughput, 3),
+        "latency_per_audio_s": round(latency_per_audio_s, 4),
+    }
 
 
 def _synthetic_measurement(

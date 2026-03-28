@@ -29,12 +29,30 @@ class AdmissionConfig:
     total_capacity: int = 6
 
     @classmethod
-    def from_env(cls) -> AdmissionConfig:
-        """Create config from environment variables."""
+    def from_env(
+        cls,
+        *,
+        default_rt_reservation: int = 2,
+        default_batch_max_inflight: int = 4,
+        default_total_capacity: int = 6,
+    ) -> AdmissionConfig:
+        """Create config from environment variables.
+
+        Explicit env vars always take priority. The ``default_*`` kwargs
+        let callers (e.g. calibration-aware runners) supply computed
+        defaults that are used when the env var is absent.
+        """
         return cls(
-            rt_reservation=int(os.environ.get("DALSTON_RT_RESERVATION", "2")),
-            batch_max_inflight=int(os.environ.get("DALSTON_BATCH_MAX_INFLIGHT", "4")),
-            total_capacity=int(os.environ.get("DALSTON_TOTAL_CAPACITY", "6")),
+            rt_reservation=int(
+                os.environ.get("DALSTON_RT_RESERVATION") or default_rt_reservation
+            ),
+            batch_max_inflight=int(
+                os.environ.get("DALSTON_BATCH_MAX_INFLIGHT")
+                or default_batch_max_inflight
+            ),
+            total_capacity=int(
+                os.environ.get("DALSTON_TOTAL_CAPACITY") or default_total_capacity
+            ),
         )
 
 
@@ -157,6 +175,28 @@ class AdmissionController:
             self._active_rt = max(0, self._active_rt - 1)
             logger.debug(
                 "rt_released",
+                active_batch=self._active_batch,
+                active_rt=self._active_rt,
+            )
+
+    # -- Reconfiguration -----------------------------------------------------
+
+    def reconfigure(self, config: AdmissionConfig) -> None:
+        """Update admission limits (e.g. after a model swap).
+
+        Active counters are preserved — only the limits change.  If the
+        new limits are tighter than current active counts the controller
+        will simply stop admitting new work until counts drain.
+        """
+        with self._lock:
+            old = self._config
+            self._config = config
+            logger.info(
+                "admission_reconfigured",
+                old_capacity=old.total_capacity,
+                new_capacity=config.total_capacity,
+                old_batch_max=old.batch_max_inflight,
+                new_batch_max=config.batch_max_inflight,
                 active_batch=self._active_batch,
                 active_rt=self._active_rt,
             )

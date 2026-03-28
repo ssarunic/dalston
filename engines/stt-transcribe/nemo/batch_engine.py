@@ -285,6 +285,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         vocab_file: Path | None = None
         vocabulary_enabled = False
 
+        # Select batch_size: explicit config > adaptive VRAM budget > 1
+        if params.vad_batch_size is not None:
+            adaptive_batch_size = params.vad_batch_size
+        else:
+            adaptive_batch_size = self._resolve_adaptive_batch_size(fallback=1)
+
         if vocabulary:
             model = self._core.manager.acquire(model_id)
             try:
@@ -295,10 +301,13 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 self.logger.info(
                     "transcribing",
                     audio_path=str(audio_path),
+                    batch_size=adaptive_batch_size,
                     vocabulary_enabled=vocabulary_enabled,
                 )
 
-                core_result = self._core.transcribe_with_model(model, str(audio_path))
+                core_result = self._core.transcribe_with_model(
+                    model, str(audio_path), batch_size=adaptive_batch_size
+                )
             finally:
                 if vocab_file is not None:
                     try:
@@ -311,9 +320,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             self.logger.info(
                 "transcribing",
                 audio_path=str(audio_path),
+                batch_size=adaptive_batch_size,
                 vocabulary_enabled=False,
             )
-            core_result = self._core.transcribe(str(audio_path), model_id)
+            core_result = self._core.transcribe(
+                str(audio_path), model_id, batch_size=adaptive_batch_size
+            )
 
         # Convert core result to Transcript format
         segments: list[TranscriptSegment] = []

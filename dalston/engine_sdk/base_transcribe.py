@@ -75,6 +75,33 @@ class BaseBatchTranscribeEngine(Engine):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
+    # Adaptive parameter helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_adaptive_batch_size(self, fallback: int | None = 1) -> int | None:
+        """Resolve vad_batch_size from adaptive VRAM budget.
+
+        Priority: runner adaptive params (queue-depth aware) > fallback.
+        For explicit per-request overrides (e.g. from HTTP calibration),
+        callers should check ``params.vad_batch_size`` first before
+        calling this method.
+
+        Args:
+            fallback: Value when no adaptive params are available.
+
+        Returns:
+            Batch size from VRAM budget, or *fallback*.
+        """
+        runner = getattr(self, "_runner", None)
+        if runner is not None:
+            adaptive = runner.get_adaptive_params()
+            if adaptive is not None:
+                queue_depth = runner.get_queue_depth()
+                vram_params = adaptive.select(queue_depth, inflight=1)
+                return vram_params.vad_batch_size
+        return fallback
+
+    # ------------------------------------------------------------------
     # Helper builders
     # ------------------------------------------------------------------
 

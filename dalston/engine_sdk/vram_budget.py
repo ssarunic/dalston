@@ -128,6 +128,79 @@ class CalibrationProfile:
 # ---------------------------------------------------------------------------
 
 
+def _find_profile_data(
+    engine_id: str,
+    model_id: str,
+    gpu_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Search for a calibration profile JSON matching engine/model/GPU.
+
+    Search order:
+    1. ``DALSTON_VRAM_PROFILE_DIR`` (if set)
+    2. Built-in profiles shipped with the package
+
+    When *gpu_name* is provided, an exact GPU match is preferred.  A
+    profile for a different GPU is kept as a fallback and used only when
+    no exact match exists (with a warning).  This prevents, e.g., an A10
+    concurrency profile from being blindly applied on an L4.
+
+    Returns the raw dict if found, or None.
+    """
+    search_dirs: list[Path] = []
+
+    custom_dir = os.environ.get("DALSTON_VRAM_PROFILE_DIR")
+    if custom_dir:
+        search_dirs.append(Path(custom_dir))
+    search_dirs.append(_BUILTIN_PROFILE_DIR)
+
+    fallback_match: dict[str, Any] | None = None
+    fallback_file: str = ""
+
+    for d in search_dirs:
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            if data.get("engine_id") != engine_id or data.get("model_id") != model_id:
+                continue
+
+            profile_gpu = data.get("gpu")
+            if not gpu_name or not profile_gpu or profile_gpu == gpu_name:
+                logger.info(
+                    "vram_profile_loaded",
+                    file=str(f),
+                    engine_id=engine_id,
+                    model_id=model_id,
+                )
+                return data
+
+            # GPU mismatch — keep as fallback
+            if fallback_match is None:
+                fallback_match = data
+                fallback_file = str(f)
+
+    if fallback_match is not None:
+        logger.warning(
+            "vram_profile_gpu_mismatch",
+            profile_gpu=fallback_match.get("gpu"),
+            actual_gpu=gpu_name,
+            file=fallback_file,
+            message="No exact GPU match found, using mismatched profile",
+        )
+        return fallback_match
+
+    logger.info(
+        "vram_profile_not_found",
+        engine_id=engine_id,
+        model_id=model_id,
+        search_dirs=[str(d) for d in search_dirs],
+    )
+    return None
+
+
 class VRAMBudget:
     """Compute engine parameters from a VRAM budget and calibration profile."""
 
@@ -149,53 +222,12 @@ class VRAMBudget:
     ) -> VRAMBudget:
         """Load calibration profile for the given engine/model/GPU.
 
-        Search order:
-        1. ``DALSTON_VRAM_PROFILE_DIR`` (if set)
-        2. Built-in profiles shipped with the package
-
         Falls back to an empty profile (conservative defaults) if no
         match is found.
         """
-        search_dirs: list[Path] = []
-
-        custom_dir = os.environ.get("DALSTON_VRAM_PROFILE_DIR")
-        if custom_dir:
-            search_dirs.append(Path(custom_dir))
-        search_dirs.append(_BUILTIN_PROFILE_DIR)
-
-        for d in search_dirs:
-            if not d.is_dir():
-                continue
-            for f in d.glob("*.json"):
-                try:
-                    data = json.loads(f.read_text())
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if (
-                    data.get("engine_id") == engine_id
-                    and data.get("model_id") == model_id
-                ):
-                    if gpu_name and data.get("gpu") and data["gpu"] != gpu_name:
-                        logger.warning(
-                            "vram_profile_gpu_mismatch",
-                            profile_gpu=data["gpu"],
-                            actual_gpu=gpu_name,
-                            file=str(f),
-                        )
-                    logger.info(
-                        "vram_profile_loaded",
-                        file=str(f),
-                        engine_id=engine_id,
-                        model_id=model_id,
-                    )
-                    return cls(CalibrationProfile.from_dict(data))
-
-        logger.info(
-            "vram_profile_not_found",
-            engine_id=engine_id,
-            model_id=model_id,
-            search_dirs=[str(d) for d in search_dirs],
-        )
+        data = _find_profile_data(engine_id, model_id, gpu_name)
+        if data is not None:
+            return cls(CalibrationProfile.from_dict(data))
         return cls(CalibrationProfile())
 
     @classmethod
@@ -335,6 +367,116 @@ class VRAMBudget:
 
 
 # ---------------------------------------------------------------------------
+# vLLM throughput profile
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VllmAdmissionParams:
+    """Computed admission control parameters from a vLLM throughput profile.
+
+    Unlike VRAM-based engines that tune batch_size, vLLM pre-allocates GPU
+    memory and the tunable is concurrency.  This dataclass provides the
+    admission controller with safe limits derived from calibration.
+    """
+
+    total_capacity: int = 6
+    batch_max_inflight: int = 4
+    rt_reservation: int = 2
+    throughput_rps: float = 0.0
+    latency_per_audio_s: float = 0.15
+    profile_source: str = "defaults"
+
+
+@dataclass
+class VllmCalibrationProfile:
+    """Parsed vLLM calibration profile."""
+
+    engine_id: str = ""
+    model_id: str = ""
+    gpu: str = ""
+    gpu_vram_mb: int = 0
+    max_safe_concurrency: int = 6
+    optimal_concurrency: int = 4
+    throughput_at_max: float = 0.0
+    latency_per_audio_s: float = 0.15
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VllmCalibrationProfile:
+        model = data.get("model", {})
+        coefficients = model.get("coefficients", {})
+        return cls(
+            engine_id=data.get("engine_id", ""),
+            model_id=data.get("model_id", ""),
+            gpu=data.get("gpu", ""),
+            gpu_vram_mb=data.get("gpu_vram_mb", 0),
+            max_safe_concurrency=int(coefficients.get("max_safe_concurrency", 6)),
+            optimal_concurrency=int(coefficients.get("optimal_concurrency", 4)),
+            throughput_at_max=coefficients.get("throughput_at_max", 0.0),
+            latency_per_audio_s=coefficients.get("latency_per_audio_s", 0.15),
+        )
+
+
+def load_vllm_profile(
+    model_id: str,
+    gpu_name: str | None = None,
+) -> VllmCalibrationProfile | None:
+    """Load a vLLM calibration profile for the given model/GPU.
+
+    Uses the same search path as VRAMBudget.load().  Returns None if
+    no matching vllm-asr profile is found.
+    """
+    data = _find_profile_data("vllm-asr", model_id, gpu_name)
+    if data is not None:
+        return VllmCalibrationProfile.from_dict(data)
+    return None
+
+
+def compute_vllm_admission_params(
+    profile: VllmCalibrationProfile | None = None,
+    rt_reservation: int = 2,
+) -> VllmAdmissionParams:
+    """Compute admission control parameters from a vLLM profile.
+
+    If a calibration profile exists, uses the measured safe concurrency
+    to set total_capacity and batch_max_inflight. Otherwise returns
+    conservative defaults.
+
+    Args:
+        profile: Calibration profile, or None for defaults.
+        rt_reservation: Minimum slots reserved for realtime sessions.
+
+    Returns:
+        VllmAdmissionParams with computed limits.
+    """
+    if profile is None:
+        return VllmAdmissionParams(rt_reservation=rt_reservation)
+
+    safe = profile.max_safe_concurrency
+    optimal = profile.optimal_concurrency
+
+    # Total capacity = max safe concurrency from calibration
+    total_capacity = max(safe, rt_reservation + 1)
+
+    # Batch can use capacity beyond RT reservation
+    batch_max_inflight = max(1, total_capacity - rt_reservation)
+
+    # Use the optimal concurrency as a hint — if it's lower than max safe,
+    # it means throughput degrades before failures occur. Cap batch there.
+    if optimal < safe:
+        batch_max_inflight = min(batch_max_inflight, optimal)
+
+    return VllmAdmissionParams(
+        total_capacity=total_capacity,
+        batch_max_inflight=batch_max_inflight,
+        rt_reservation=rt_reservation,
+        throughput_rps=profile.throughput_at_max,
+        latency_per_audio_s=profile.latency_per_audio_s,
+        profile_source="calibrated",
+    )
+
+
+# ---------------------------------------------------------------------------
 # VRAM budget resolution from environment
 # ---------------------------------------------------------------------------
 
@@ -360,6 +502,20 @@ def resolve_vram_budget() -> int | None:
         )
 
     return None
+
+
+def get_gpu_name(gpu_index: int = 0) -> str | None:
+    """Return the GPU display name via pynvml, or None if unavailable."""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
+        name = pynvml.nvmlDeviceGetName(handle)
+        pynvml.nvmlShutdown()
+        return name.decode() if isinstance(name, bytes) else name
+    except Exception:
+        return None
 
 
 def _get_gpu_total_mb() -> int:

@@ -138,6 +138,13 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         channel = params.channel
 
+        # Select batch_size: explicit config > adaptive VRAM budget > env default
+        hf_default = int(os.environ.get("DALSTON_HF_BATCH_SIZE", "1"))
+        if params.vad_batch_size is not None:
+            adaptive_batch_size = params.vad_batch_size
+        else:
+            adaptive_batch_size = self._resolve_adaptive_batch_size(fallback=hf_default)
+
         # Acquire pipeline from manager (loads if needed, updates LRU)
         pipe = self._manager.acquire(loaded_model_id)
         try:
@@ -149,10 +156,15 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
                 audio_path=str(task_request.audio_path),
                 loaded_model_id=loaded_model_id,
                 language=language,
+                batch_size=adaptive_batch_size,
             )
 
             # Build pipeline kwargs
             pipe_kwargs: dict[str, Any] = {}
+
+            # Batch size for chunked long-form processing
+            if adaptive_batch_size > 1:
+                pipe_kwargs["batch_size"] = adaptive_batch_size
 
             # Request word-level timestamps when supported
             pipe_kwargs["return_timestamps"] = "word"

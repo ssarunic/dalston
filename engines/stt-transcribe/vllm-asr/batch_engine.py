@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import gc
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -73,17 +74,25 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
 
-    def __init__(self, llm: Any = None) -> None:
+    def __init__(
+        self,
+        llm: Any = None,
+        on_model_loaded: Callable[[str], None] | None = None,
+    ) -> None:
         """Initialize the engine.
 
         Args:
             llm: Optional shared vLLM LLM instance. If provided, the engine
                  skips creating its own and uses the injected one. This is how
                  the unified runner shares a single model across batch and RT.
+            on_model_loaded: Optional callback invoked after a model swap
+                 completes. Receives the new model ID. Used by the unified
+                 runner to reconfigure admission limits.
         """
         super().__init__()
 
         self._llm = llm
+        self._on_model_loaded = on_model_loaded
         self._loaded_model_id: str | None = None
         self._loaded_model_path: str | None = None
         self._tokenizer = None
@@ -207,6 +216,9 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             loaded_model_id=loaded_model_id,
             model_path=model_path,
         )
+
+        if self._on_model_loaded is not None:
+            self._on_model_loaded(loaded_model_id)
 
     def transcribe_audio(
         self, task_request: TaskRequest, ctx: BatchTaskContext

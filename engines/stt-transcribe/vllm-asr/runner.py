@@ -37,6 +37,12 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
+from dalston.engine_sdk.vram_budget import (
+    VllmAdmissionParams,
+    compute_vllm_admission_params,
+    get_gpu_name,
+    load_vllm_profile,
+)
 
 logger = structlog.get_logger()
 
@@ -100,8 +106,22 @@ class UnifiedVllmAsrRunner:
         # Create single shared vLLM instance
         self._llm = _create_vllm_instance()
 
-        # Create admission controller
-        self._admission = AdmissionController(AdmissionConfig.from_env())
+        # Cache GPU name (never changes within a process lifetime)
+        self._gpu_name = get_gpu_name()
+
+        # Load calibration profile and compute admission limits
+        model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
+        self._vllm_params = self._resolve_admission_params(model_id, self._gpu_name)
+
+        # Create admission controller — calibrated profile provides defaults,
+        # explicit env vars always take priority.
+        self._admission = AdmissionController(
+            AdmissionConfig.from_env(
+                default_rt_reservation=self._vllm_params.rt_reservation,
+                default_batch_max_inflight=self._vllm_params.batch_max_inflight,
+                default_total_capacity=self._vllm_params.total_capacity,
+            )
+        )
 
         # Adapters (created lazily in run())
         self._batch_engine: Any = None
@@ -112,8 +132,49 @@ class UnifiedVllmAsrRunner:
         logger.info(
             "unified_vllm_asr_runner_init",
             admission=self._admission.get_status(),
+            vllm_profile_source=self._vllm_params.profile_source,
             cuda_device_count=torch.cuda.device_count(),
         )
+
+    @staticmethod
+    def _resolve_admission_params(
+        model_id: str, gpu_name: str | None
+    ) -> VllmAdmissionParams:
+        """Load vLLM calibration profile and compute admission params."""
+        profile = load_vllm_profile(model_id, gpu_name=gpu_name)
+        rt_reservation = int(os.environ.get("DALSTON_RT_RESERVATION") or 2)
+        params = compute_vllm_admission_params(profile, rt_reservation)
+
+        if profile is not None:
+            logger.info(
+                "vllm_admission_from_profile",
+                model_id=model_id,
+                gpu=gpu_name,
+                max_safe_concurrency=profile.max_safe_concurrency,
+                optimal_concurrency=profile.optimal_concurrency,
+                total_capacity=params.total_capacity,
+                batch_max_inflight=params.batch_max_inflight,
+            )
+        else:
+            logger.info("vllm_admission_defaults", model_id=model_id)
+
+        return params
+
+    def _on_model_loaded(self, model_id: str) -> None:
+        """Reconfigure admission limits after a model swap.
+
+        Called by the batch engine's ``_ensure_model_loaded`` hook.
+        Looks up the calibration profile for the new model and
+        reconfigures the admission controller's limits.
+        """
+        params = self._resolve_admission_params(model_id, self._gpu_name)
+        new_config = AdmissionConfig.from_env(
+            default_rt_reservation=params.rt_reservation,
+            default_batch_max_inflight=params.batch_max_inflight,
+            default_total_capacity=params.total_capacity,
+        )
+        self._admission.reconfigure(new_config)
+        self._vllm_params = params
 
     def run(self) -> None:
         """Start the unified runner."""
@@ -127,7 +188,10 @@ class UnifiedVllmAsrRunner:
         from rt_engine import VllmAsrRealtimeEngine
 
         # Create adapters sharing the same vLLM instance
-        self._batch_engine = VllmAsrBatchEngine(llm=self._llm)
+        self._batch_engine = VllmAsrBatchEngine(
+            llm=self._llm,
+            on_model_loaded=self._on_model_loaded,
+        )
         self._rt_engine = VllmAsrRealtimeEngine(llm=self._llm)
 
         # Wrap batch engine's process to check admission

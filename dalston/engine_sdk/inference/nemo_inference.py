@@ -120,6 +120,7 @@ class NemoInference:
         self,
         audio: str | np.ndarray | list,
         model_id: str,
+        batch_size: int | None = None,
     ) -> NeMoTranscriptionResult:
         """Run transcription on audio input.
 
@@ -128,6 +129,7 @@ class NemoInference:
         Args:
             audio: File path string, numpy float32 array, or list of either
             model_id: Model identifier (e.g. "parakeet-tdt-1.1b")
+            batch_size: Override for NeMo batch_size (default: from env or 1).
 
         Returns:
             NeMoTranscriptionResult with text, segments, and words.
@@ -135,7 +137,7 @@ class NemoInference:
         self._current_model_id = model_id
         model = self._manager.acquire(model_id)
         try:
-            return self.transcribe_with_model(model, audio)
+            return self.transcribe_with_model(model, audio, batch_size=batch_size)
         finally:
             self._manager.release(model_id)
             self._current_model_id = None
@@ -144,6 +146,7 @@ class NemoInference:
         self,
         model: Any,
         audio: str | np.ndarray | list,
+        batch_size: int | None = None,
     ) -> NeMoTranscriptionResult:
         """Run transcription with an already-acquired model.
 
@@ -153,6 +156,7 @@ class NemoInference:
         Args:
             model: An acquired NeMo ASRModel instance
             audio: File path string, numpy float32 array, or list of either
+            batch_size: Override for NeMo batch_size (default: from env or 1).
 
         Returns:
             NeMoTranscriptionResult with text, segments, and words.
@@ -178,6 +182,10 @@ class NemoInference:
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
         model_id = self._current_model_id or ""
 
+        # Resolve batch_size: explicit arg > env var > default 1
+        if batch_size is None:
+            batch_size = int(os.environ.get("DALSTON_NEMO_BATCH_SIZE", "1"))
+
         # Run inference with appropriate context manager
         autocast_ctx = (
             torch.amp.autocast("cuda")
@@ -190,12 +198,13 @@ class NemoInference:
             attributes={
                 "dalston.device": self.device,
                 "dalston.model_id": model_id,
+                "dalston.batch_size": batch_size,
             },
         ):
             with autocast_ctx:
                 transcriptions = model.transcribe(
                     prepared,
-                    batch_size=1,
+                    batch_size=batch_size,
                     return_hypotheses=True,
                     timestamps=True,
                 )

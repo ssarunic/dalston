@@ -119,20 +119,11 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
         # Get model to use from task config
         loaded_model_id = params.loaded_model_id or self._default_model_id
 
-        # M84: Select vad_batch_size — explicit config (HTTP calibration) takes
-        # priority, then adaptive VRAM budget, then default of 1.
+        # Select vad_batch_size: explicit config > adaptive VRAM budget > 1
         if params.vad_batch_size is not None:
             adaptive_vad_batch_size = params.vad_batch_size
-        elif getattr(self, "_runner", None) is not None:
-            adaptive = self._runner.get_adaptive_params()
-            if adaptive is not None:
-                queue_depth = self._runner.get_queue_depth()
-                vram_params = adaptive.select(queue_depth, inflight=1)
-                adaptive_vad_batch_size = vram_params.vad_batch_size
-            else:
-                adaptive_vad_batch_size = 1
         else:
-            adaptive_vad_batch_size = 1
+            adaptive_vad_batch_size = self._resolve_adaptive_batch_size(fallback=1)
 
         # Build transcribe config
         hotwords = " ".join(vocabulary) if vocabulary else None

@@ -119,20 +119,11 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         decoder_type = self._get_decoder_type(model_id)
         alignment_method = self._alignment_method_for(decoder_type)
 
-        # M84: Select vad_batch_size — explicit config (HTTP calibration) takes
-        # priority, then adaptive VRAM budget, then None (env default).
+        # Select vad_batch_size: explicit config > adaptive VRAM budget > None (env default)
         if params.vad_batch_size is not None:
             vad_batch_size: int | None = params.vad_batch_size
-        elif getattr(self, "_runner", None) is not None:
-            adaptive = self._runner.get_adaptive_params()
-            if adaptive is not None:
-                queue_depth = self._runner.get_queue_depth()
-                vram_params = adaptive.select(queue_depth, inflight=1)
-                vad_batch_size = vram_params.vad_batch_size
-            else:
-                vad_batch_size = None
         else:
-            vad_batch_size = None
+            vad_batch_size = self._resolve_adaptive_batch_size(fallback=None)
 
         self.logger.info(
             "transcribing",
