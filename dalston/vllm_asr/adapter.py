@@ -1,17 +1,12 @@
-"""Qwen2-Audio adapter for Alibaba's audio LLM.
+"""Generic adapter for audio LLM transcription via vLLM.
 
-Handles prompt construction and output parsing for:
-- Qwen/Qwen2-Audio-7B-Instruct
-
-Qwen2-Audio processes audio via a dedicated audio encoder and
-produces text transcriptions. Like Voxtral, it does not produce
-word-level timestamps.
+Works with any vLLM-compatible audio model. No model-specific logic —
+the prompt format is universal across audio LLMs (Voxtral, Qwen2-Audio,
+etc.).
 """
 
 from pathlib import Path
 from typing import Any
-
-import structlog
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
@@ -20,18 +15,9 @@ from dalston.common.pipeline_types import (
     TranscriptSegment,
 )
 
-from .base import AudioLLMAdapter
 
-logger = structlog.get_logger()
-
-
-class Qwen2AudioAdapter(AudioLLMAdapter):
-    """Adapter for Qwen2-Audio models.
-
-    Qwen2-Audio uses a chat prompt format with audio embedded via
-    audio_url. The model supports multilingual transcription and
-    audio understanding tasks.
-    """
+class AudioLLMAdapter:
+    """Builds prompts and parses output for any vLLM audio model."""
 
     def build_messages(
         self,
@@ -39,30 +25,20 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         language: str | None = None,
         vocabulary: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Build Qwen2-Audio chat messages.
-
-        Args:
-            audio_path: Path to the audio file
-            language: Language code or None for auto-detect
-            vocabulary: Optional domain terms to include in instruction
-
-        Returns:
-            Chat messages list for vLLM
-        """
+        """Build chat messages with audio input for vLLM."""
         if language and language != "auto":
-            prompt_text = (
-                f"Please transcribe the following audio in {language}. "
+            prompt = (
+                f"Transcribe this audio in {language}. "
                 "Output only the transcription text."
             )
         else:
-            prompt_text = (
-                "Please transcribe the following audio. "
-                "Output only the transcription text."
+            prompt = (
+                "Transcribe this audio accurately. Output only the transcription text."
             )
 
         if vocabulary:
             terms = ", ".join(vocabulary)
-            prompt_text += f" Pay special attention to these terms: {terms}."
+            prompt += f" Pay special attention to these terms: {terms}."
 
         return [
             {
@@ -74,7 +50,7 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
                     },
                     {
                         "type": "text",
-                        "text": prompt_text,
+                        "text": prompt,
                     },
                 ],
             },
@@ -86,17 +62,8 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         language: str | None = None,
         duration: float | None = None,
     ) -> Transcript:
-        """Parse Qwen2-Audio output to Transcript.
-
-        Args:
-            raw_text: Raw text from the model
-            language: Language used for transcription
-
-        Returns:
-            Transcript with text in a single segment
-        """
+        """Parse model output to a single-segment Transcript."""
         text = raw_text.strip()
-
         effective_language = language if language and language != "auto" else "en"
         segment_end = max(duration or 0.0, 0.001 if text else 0.0)
 
@@ -118,8 +85,12 @@ class Qwen2AudioAdapter(AudioLLMAdapter):
         )
 
     def get_sampling_kwargs(self) -> dict[str, Any]:
-        """Qwen2-Audio sampling parameters."""
+        """Return sampling parameters for vLLM inference."""
         return {
             "temperature": 0.0,
             "max_tokens": 4096,
         }
+
+
+# Module-level singleton — adapter is stateless.
+adapter = AudioLLMAdapter()

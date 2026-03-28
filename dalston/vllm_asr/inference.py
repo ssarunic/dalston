@@ -9,19 +9,17 @@ import numpy as np
 
 from dalston.common.pipeline_types import Transcript
 
-from .adapters import get_adapter
+from .adapter import adapter
 from .audio import temporary_wav_file
 
 
 def transcribe_audio_path(
     llm: Any,
-    loaded_model_id: str,
     audio_path: Path,
     language: str | None,
     vocabulary: list[str] | None = None,
 ) -> tuple[str, Transcript]:
     """Run one vLLM audio chat inference and parse it into ``Transcript``."""
-    adapter = get_adapter(loaded_model_id)
     messages = adapter.build_messages(
         audio_path=audio_path, language=language, vocabulary=vocabulary
     )
@@ -48,7 +46,6 @@ def transcribe_audio_path(
 
 def transcribe_audio_array(
     llm: Any,
-    loaded_model_id: str,
     audio: np.ndarray,
     language: str | None,
     sample_rate: int = 16000,
@@ -62,7 +59,6 @@ def transcribe_audio_array(
     with temporary_wav_file(audio=audio, sample_rate=sample_rate) as audio_path:
         return transcribe_audio_path(
             llm=llm,
-            loaded_model_id=loaded_model_id,
             audio_path=audio_path,
             language=language,
             vocabulary=vocabulary,

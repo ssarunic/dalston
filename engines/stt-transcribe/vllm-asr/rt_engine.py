@@ -27,7 +27,6 @@ import torch
 
 from dalston.common.pipeline_types import Transcript, TranscriptionRequest
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
-from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 from dalston.vllm_asr.inference import transcribe_audio_array
 
 logger = structlog.get_logger()
@@ -36,7 +35,7 @@ logger = structlog.get_logger()
 class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     """Real-time transcription using audio-capable LLMs on vLLM.
 
-    Supports any model in the ADAPTER_REGISTRY (Voxtral, Qwen2-Audio).
+    Supports any vLLM-compatible audio model (Voxtral, Qwen2-Audio, etc.).
     """
 
     DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
@@ -74,12 +73,6 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Ensure the requested model is loaded in vLLM."""
         if model_id == self._loaded_model_id and self._llm is not None:
             return
-
-        if model_id not in ADAPTER_REGISTRY:
-            raise ValueError(
-                f"No adapter for model: {model_id}. "
-                f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
-            )
 
         if self._llm is not None:
             logger.info(
@@ -151,7 +144,6 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
 
         raw_text, transcript = transcribe_audio_array(
             llm=self._llm,
-            loaded_model_id=model_id,
             audio=audio,
             language=language,
             sample_rate=16000,
@@ -167,7 +159,7 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
         return True
 
     def get_models(self) -> list[str]:
-        return sorted(ADAPTER_REGISTRY.keys())
+        return []
 
     def get_engine_id(self) -> str:
         return self._engine_id

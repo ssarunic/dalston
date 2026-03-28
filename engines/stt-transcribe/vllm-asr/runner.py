@@ -5,7 +5,7 @@ the batch engine adapter (queue polling) and the realtime engine adapter
 (WebSocket server). An AdmissionController gates both paths to prevent
 realtime starvation under batch load.
 
-Supports any model in the ADAPTER_REGISTRY (Voxtral, Qwen2-Audio).
+Supports any vLLM-compatible audio model (Voxtral, Qwen2-Audio, etc.).
 
 Usage:
     python -m engines.stt-transcribe.vllm-asr.runner
@@ -37,7 +37,6 @@ from dalston.engine_sdk.admission import (
     AdmissionController,
     TaskDeferredError,
 )
-from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 
 logger = structlog.get_logger()
 
@@ -54,12 +53,6 @@ def _create_vllm_instance() -> Any:
         ) from e
 
     model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
-
-    if model_id not in ADAPTER_REGISTRY:
-        raise ValueError(
-            f"No adapter for model: {model_id}. "
-            f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
-        )
 
     gpu_memory_utilization = float(
         os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")

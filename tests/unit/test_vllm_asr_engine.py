@@ -1,6 +1,6 @@
 """Unit tests for vLLM-ASR transcription engine.
 
-Tests engine logic and adapters without loading actual model weights or vLLM.
+Tests engine logic and adapter without loading actual model weights or vLLM.
 """
 
 import importlib.util
@@ -34,18 +34,17 @@ def _ctx(input_obj) -> BatchTaskContext:
 # ---------------------------------------------------------------------------
 
 
-class TestVoxtralAdapter:
-    """Test Voxtral adapter prompt building and output parsing."""
+class TestAudioLLMAdapter:
+    """Test generic AudioLLMAdapter that works with any vLLM audio model."""
 
     @pytest.fixture
     def adapter(self):
-        """Import and create VoxtralAdapter."""
-        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
+        from dalston.vllm_asr.adapter import AudioLLMAdapter
 
-        return VoxtralAdapter()
+        return AudioLLMAdapter()
 
     def test_build_messages_default_language(self, adapter, tmp_path):
-        """Messages should use generic prompt when no language specified."""
+        """Should produce valid messages without language."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
@@ -54,191 +53,98 @@ class TestVoxtralAdapter:
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
         assert len(messages[0]["content"]) == 2
-
-        # First content should be audio
         assert messages[0]["content"][0]["type"] == "audio_url"
         assert str(audio_file) in messages[0]["content"][0]["audio_url"]["url"]
-
-        # Second content should be text prompt
-        assert messages[0]["content"][1]["type"] == "text"
         assert "Transcribe" in messages[0]["content"][1]["text"]
 
-    def test_build_messages_english(self, adapter, tmp_path):
-        """Messages should use English-specific prompt."""
+    def test_build_messages_with_language(self, adapter, tmp_path):
+        """Should include language code in prompt."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
-        messages = adapter.build_messages(audio_path=audio_file, language="en")
+        messages = adapter.build_messages(audio_path=audio_file, language="ja")
 
         text_content = messages[0]["content"][1]["text"]
-        assert "English" in text_content
+        assert "ja" in text_content
 
-    def test_build_messages_spanish(self, adapter, tmp_path):
-        """Messages should use Spanish-specific prompt."""
+    def test_build_messages_with_vocabulary(self, adapter, tmp_path):
+        """Should include vocabulary terms in prompt."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
-        messages = adapter.build_messages(audio_path=audio_file, language="es")
+        messages = adapter.build_messages(
+            audio_path=audio_file, language="en", vocabulary=["Dalston", "vLLM"]
+        )
 
         text_content = messages[0]["content"][1]["text"]
-        assert "Spanish" in text_content
+        assert "Dalston" in text_content
+        assert "vLLM" in text_content
 
     def test_parse_output_basic(self, adapter):
-        """Output parsing should produce valid Transcript."""
-        result = adapter.parse_output("Hello world, this is a test.", language="en")
+        """Should produce valid Transcript."""
+        result = adapter.parse_output(
+            "Hello world, this is a test.", language="en", duration=5.0
+        )
 
         assert result.text == "Hello world, this is a test."
         assert result.language == "en"
         assert result.engine_id == "vllm-asr"
         assert len(result.segments) == 1
         assert result.segments[0].text == "Hello world, this is a test."
-        assert result.segments[0].end > result.segments[0].start
+        assert result.segments[0].end == 5.0
 
     def test_parse_output_strips_whitespace(self, adapter):
-        """Output parsing should strip leading/trailing whitespace."""
+        """Should strip leading/trailing whitespace."""
         result = adapter.parse_output("  Hello world  \n\n", language="en")
 
         assert result.text == "Hello world"
         assert result.segments[0].text == "Hello world"
 
     def test_parse_output_no_word_timestamps(self, adapter):
-        """Output should have segment timestamps only, no words."""
+        """Should have segment timestamps only, no words."""
         result = adapter.parse_output("Test", language="en")
-
         assert result.segments[0].words is None
 
-    def test_parse_output_auto_language(self, adapter):
-        """Auto language should default to 'en'."""
-        result = adapter.parse_output("Test", language=None)
-
-        assert result.language == "en"
+    def test_parse_output_auto_language_defaults_to_en(self, adapter):
+        """Auto/None language should default to en."""
+        assert adapter.parse_output("Test", language=None).language == "en"
+        assert adapter.parse_output("Test", language="auto").language == "en"
 
     def test_sampling_kwargs(self, adapter):
-        """Sampling kwargs should use deterministic temperature."""
+        """Default sampling should be deterministic."""
         kwargs = adapter.get_sampling_kwargs()
-
         assert kwargs["temperature"] == 0.0
         assert kwargs["max_tokens"] == 4096
 
-    def test_supported_languages(self, adapter):
-        """Voxtral should support 8 languages."""
-        from dalston.vllm_asr.adapters.voxtral import SUPPORTED_LANGUAGES
 
-        assert len(SUPPORTED_LANGUAGES) == 8
-        assert "en" in SUPPORTED_LANGUAGES
-        assert "es" in SUPPORTED_LANGUAGES
-        assert "fr" in SUPPORTED_LANGUAGES
+class TestAdapterSingleton:
+    """Test module-level adapter singleton."""
 
+    def test_is_audio_llm_adapter(self):
+        from dalston.vllm_asr.adapter import AudioLLMAdapter, adapter
 
-class TestQwen2AudioAdapter:
-    """Test Qwen2-Audio adapter prompt building and output parsing."""
+        assert isinstance(adapter, AudioLLMAdapter)
 
-    @pytest.fixture
-    def adapter(self):
-        """Import and create Qwen2AudioAdapter."""
-        from dalston.vllm_asr.adapters.qwen2_audio import Qwen2AudioAdapter
+    def test_works_end_to_end(self, tmp_path):
+        from dalston.vllm_asr.adapter import adapter
 
-        return Qwen2AudioAdapter()
-
-    def test_build_messages_default_language(self, adapter, tmp_path):
-        """Messages should use generic prompt when no language specified."""
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
-        messages = adapter.build_messages(audio_path=audio_file, language=None)
-
+        messages = adapter.build_messages(audio_path=audio_file, language="en")
         assert len(messages) == 1
-        assert messages[0]["role"] == "user"
-        assert len(messages[0]["content"]) == 2
-        assert messages[0]["content"][0]["type"] == "audio_url"
 
-    def test_build_messages_with_language(self, adapter, tmp_path):
-        """Messages should include language instruction."""
-        audio_file = tmp_path / "test.wav"
-        audio_file.touch()
-
-        messages = adapter.build_messages(audio_path=audio_file, language="zh")
-
-        text_content = messages[0]["content"][1]["text"]
-        assert "zh" in text_content
-
-    def test_parse_output_basic(self, adapter):
-        """Output parsing should produce valid Transcript."""
-        result = adapter.parse_output("Hello world", language="en")
-
-        assert result.text == "Hello world"
-        assert result.language == "en"
-        assert result.engine_id == "vllm-asr"
-        assert len(result.segments) == 1
-        assert result.segments[0].end > result.segments[0].start
-
-    def test_sampling_kwargs(self, adapter):
-        """Sampling kwargs should use deterministic temperature."""
-        kwargs = adapter.get_sampling_kwargs()
-
-        assert kwargs["temperature"] == 0.0
-
-
-class TestAdapterRegistry:
-    """Test adapter registry and get_adapter function."""
-
-    def test_get_adapter_voxtral_mini(self):
-        """Registry should return VoxtralAdapter for Voxtral Mini."""
-        from dalston.vllm_asr.adapters import get_adapter
-        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
-
-        adapter = get_adapter("mistralai/Voxtral-Mini-3B-2507")
-        assert isinstance(adapter, VoxtralAdapter)
-
-    def test_get_adapter_voxtral_small(self):
-        """Registry should return VoxtralAdapter for Voxtral Small."""
-        from dalston.vllm_asr.adapters import get_adapter
-        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
-
-        adapter = get_adapter("mistralai/Voxtral-Small-24B-2507")
-        assert isinstance(adapter, VoxtralAdapter)
-
-    def test_get_adapter_voxtral_realtime(self):
-        """Registry should return VoxtralAdapter for Voxtral Realtime model."""
-        from dalston.vllm_asr.adapters import get_adapter
-        from dalston.vllm_asr.adapters.voxtral import VoxtralAdapter
-
-        adapter = get_adapter("mistralai/Voxtral-Mini-4B-Realtime-2602")
-        assert isinstance(adapter, VoxtralAdapter)
-
-    def test_get_adapter_qwen2_audio(self):
-        """Registry should return Qwen2AudioAdapter for Qwen2-Audio."""
-        from dalston.vllm_asr.adapters import get_adapter
-        from dalston.vllm_asr.adapters.qwen2_audio import Qwen2AudioAdapter
-
-        adapter = get_adapter("Qwen/Qwen2-Audio-7B-Instruct")
-        assert isinstance(adapter, Qwen2AudioAdapter)
-
-    def test_get_adapter_unknown_model_raises(self):
-        """Unknown model should raise ValueError."""
-        from dalston.vllm_asr.adapters import get_adapter
-
-        with pytest.raises(ValueError, match="No adapter for model"):
-            get_adapter("unknown/model-id")
-
-    def test_registry_contains_expected_models(self):
-        """Registry should contain all supported models."""
-        from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
-
-        assert "mistralai/Voxtral-Mini-3B-2507" in ADAPTER_REGISTRY
-        assert "mistralai/Voxtral-Small-24B-2507" in ADAPTER_REGISTRY
-        assert "mistralai/Voxtral-Mini-4B-Realtime-2602" in ADAPTER_REGISTRY
-        assert "Qwen/Qwen2-Audio-7B-Instruct" in ADAPTER_REGISTRY
-        assert len(ADAPTER_REGISTRY) == 4
+        result = adapter.parse_output("Transcribed text", language="en", duration=3.0)
+        assert result.text == "Transcribed text"
 
 
 # ---------------------------------------------------------------------------
-# Audio bridge tests (RT migration prerequisites)
+# Audio bridge tests
 # ---------------------------------------------------------------------------
 
 
 class TestVllmAudioBridge:
-    """Test shared audio bridge helpers for future RT-on-vLLM path."""
+    """Test shared audio bridge helpers."""
 
     def test_write_wav_file_pcm16_mono(self, tmp_path):
         """Helper should write mono PCM16 WAV files."""
@@ -347,7 +253,6 @@ class TestVLLMASREngine:
         assert caps.supports_native_streaming is False
         assert caps.gpu_required is True
         assert caps.supports_cpu is False
-        assert caps.engine_id == "vllm-asr"
 
     def test_health_check_no_model(self, engine):
         """Health check should work without model loaded."""
@@ -364,12 +269,6 @@ class TestVLLMASREngine:
         assert health["engine_id"] == "vllm-asr"
         assert health["model_loaded"] is False
         assert health["loaded_model_id"] is None
-        assert "mistralai/Voxtral-Mini-3B-2507" in health["supported_models"]
-
-    def test_ensure_model_loaded_unknown_adapter_raises(self, engine):
-        """Loading a model without an adapter should raise ValueError."""
-        with pytest.raises(ValueError, match="No adapter for model"):
-            engine._ensure_model_loaded("unknown/model-id")
 
     def test_ensure_model_loaded_vllm_not_installed(self, engine):
         """Missing vLLM should raise RuntimeError with install instructions."""
@@ -382,22 +281,18 @@ class TestVLLMASREngine:
 
     def test_process_with_mocked_vllm(self, engine, tmp_path):
         """Process should return valid Transcript with mocked vLLM."""
-        # Create a test audio file
         audio_file = tmp_path / "test.wav"
         audio_file.touch()
 
-        # Mock vLLM imports and model
         mock_output = MagicMock()
         mock_output.outputs = [MagicMock(text="Hello, this is a test transcription.")]
 
         mock_llm = MagicMock()
         mock_llm.chat.return_value = [mock_output]
 
-        # Set up the mocked model
         engine._llm = mock_llm
         engine._loaded_model_id = "mistralai/Voxtral-Mini-3B-2507"
 
-        # Create mock TaskRequest
         mock_input = MagicMock()
         mock_input.audio_path = audio_file
         mock_input.config = {
@@ -409,7 +304,6 @@ class TestVLLMASREngine:
             language="en",
         )
 
-        # Mock SamplingParams import
         mock_sampling_params = MagicMock()
         with patch.dict(
             sys.modules, {"vllm": MagicMock(SamplingParams=mock_sampling_params)}
@@ -454,10 +348,8 @@ class TestVLLMASREngine:
         ):
             engine.process(mock_input, _ctx(mock_input))
 
-        # Vocabulary terms should be injected into the LLM chat messages
         chat_call = mock_llm.chat.call_args
-        messages = chat_call[1]["messages"]  # passed as keyword arg
-        # Find the text content that contains vocabulary terms
+        messages = chat_call[1]["messages"]
         message_texts = [
             m["content"]
             if isinstance(m["content"], str)

@@ -49,7 +49,6 @@ from dalston.engine_sdk import (
     TaskRequest,
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-from dalston.vllm_asr.adapters import ADAPTER_REGISTRY
 from dalston.vllm_asr.inference import (
     transcribe_audio_array,
     transcribe_audio_path,
@@ -138,13 +137,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         """
         if loaded_model_id == self._loaded_model_id:
             return
-
-        # Validate adapter exists before loading
-        if loaded_model_id not in ADAPTER_REGISTRY:
-            raise ValueError(
-                f"No adapter for model: {loaded_model_id}. "
-                f"Supported models: {sorted(ADAPTER_REGISTRY.keys())}"
-            )
 
         # Unload current model if one is loaded
         if self._llm is not None:
@@ -296,7 +288,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                 )
                 raw_text, transcript = transcribe_audio_path(
                     llm=self._llm,
-                    loaded_model_id=loaded_model_id,
                     audio_path=Path(audio_path),
                     language=language,
                     vocabulary=vocabulary,
@@ -311,7 +302,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
                 )
                 raw_text, transcript = transcribe_audio_array(
                     llm=self._llm,
-                    loaded_model_id=loaded_model_id,
                     audio=audio,
                     language=language,
                     sample_rate=sample_rate,
@@ -349,7 +339,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
-            "supported_models": sorted(ADAPTER_REGISTRY.keys()),
+            "supported_models": [],
             "s3_storage_enabled": self._model_storage is not None,
             "cuda_available": cuda_available,
             "cuda_device_count": cuda_device_count,
@@ -366,7 +356,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             stages=["transcribe"],
             supports_word_timestamps=False,  # Audio LLMs don't produce timestamps
             supports_native_streaming=False,
-            model_variants=sorted(ADAPTER_REGISTRY.keys()),
+            model_variants=[],
             gpu_required=True,
             gpu_vram_mb=8000,  # Minimum for smallest model
             supports_cpu=False,
