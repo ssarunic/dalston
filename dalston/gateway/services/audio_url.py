@@ -12,7 +12,10 @@ Security:
 - Content-Type validation
 """
 
+import asyncio
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
@@ -163,6 +166,29 @@ def _convert_dropbox_url(url: str) -> str | None:
     return url
 
 
+def _check_ssrf(hostname: str) -> None:
+    """Block requests to private/internal network addresses."""
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        # Can't resolve — let httpx handle the connection error
+        return
+
+    for info in addrinfos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise InvalidUrlError(
+                "URLs pointing to private or internal network addresses are not allowed"
+            )
+
+
 def _normalize_url(url: str) -> str:
     """Normalize and validate URL, converting share links to direct downloads."""
     url = url.strip()
@@ -289,6 +315,11 @@ async def download_audio_from_url(
     """
     # Normalize URL (convert share links, upgrade to HTTPS)
     normalized_url = _normalize_url(url)
+
+    # SSRF check — blocking DNS resolution, must run off the event loop
+    parsed = urlparse(normalized_url)
+    if parsed.hostname:
+        await asyncio.to_thread(_check_ssrf, parsed.hostname)
 
     logger.info(
         "audio_url_download_started",
