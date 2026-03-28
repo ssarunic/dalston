@@ -439,6 +439,10 @@ class SessionHandler:
         self._chunks_since_partial = 0
         self._speech_audio_buffer: list[np.ndarray] = []
 
+        # Track where the current utterance starts in real session time
+        # (total audio processed when speech_start fires).
+        self._utterance_start_audio_pos: float = 0.0
+
         # Lag accounting state (M53)
         self._received_audio_seconds = 0.0
         self._processed_audio_seconds = 0.0
@@ -635,14 +639,19 @@ class SessionHandler:
             self._chunks_since_partial = 0
             self._speech_audio_buffer = []
 
+            # Record where this utterance starts in real session time.
+            # _processed_audio_seconds tracks total audio (speech+silence)
+            # that has flowed through the session up to this point.
+            self._utterance_start_audio_pos = self._processed_audio_seconds
+
             # M76.4: VAD endpoint span (unsampled — these are infrequent)
             dalston.telemetry.set_span_attribute(
                 "dalston.vad.speech_start_at",
-                self._assembler.current_time,
+                self._processed_audio_seconds,
             )
 
             await self._send(
-                VADSpeechStartMessage(timestamp=self._assembler.current_time)
+                VADSpeechStartMessage(timestamp=self._processed_audio_seconds)
             )
 
         elif vad_result.event == "speech_end":
@@ -652,17 +661,16 @@ class SessionHandler:
                 if vad_result.speech_audio is not None
                 else 0.0
             )
+            speech_end_time = self._utterance_start_audio_pos + speech_audio_duration
             with dalston.telemetry.create_span(
                 "realtime.vad.endpoint",
                 attributes={
                     "dalston.session_id": self.config.session_id,
                     "dalston.vad.speech_duration_s": speech_audio_duration,
-                    "dalston.vad.timestamp": self._assembler.current_time,
+                    "dalston.vad.timestamp": speech_end_time,
                 },
             ):
-                await self._send(
-                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
-                )
+                await self._send(VADSpeechEndMessage(timestamp=speech_end_time))
 
             # Clear streaming state
             self._speech_audio_buffer = []
@@ -712,13 +720,14 @@ class SessionHandler:
             vad_result = self._vad.process_chunk(audio)
 
             if vad_result.event == "speech_start":
+                self._utterance_start_audio_pos = self._processed_audio_seconds
                 await self._send(
-                    VADSpeechStartMessage(timestamp=self._assembler.current_time)
+                    VADSpeechStartMessage(timestamp=self._processed_audio_seconds)
                 )
 
             elif vad_result.event == "speech_end":
                 await self._send(
-                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
+                    VADSpeechEndMessage(timestamp=self._processed_audio_seconds)
                 )
 
                 # On endpoint, send a final result with accumulated text
@@ -767,12 +776,13 @@ class SessionHandler:
                     if self.config.interim_results:
                         cumulative_text = " ".join(self._streaming_session_text_parts)
                         word = result_words[0]
+                        offset = self._utterance_start_audio_pos
 
                         await self._send(
                             TranscriptPartialMessage(
                                 text=cumulative_text,
-                                start=word.start,
-                                end=word.end,
+                                start=word.start + offset,
+                                end=word.end + offset,
                             )
                         )
 
@@ -876,7 +886,11 @@ class SessionHandler:
         )
 
         # Add to assembler for timeline tracking
-        segment = self._assembler.add_transcript(result, audio_duration)
+        segment = self._assembler.add_transcript(
+            result,
+            audio_duration,
+            utterance_start=self._utterance_start_audio_pos,
+        )
 
         # Send final transcript
         word_infos = None
@@ -1007,9 +1021,9 @@ class SessionHandler:
             if self._ended or not result.text:
                 return
 
-            # Calculate timing
+            # Calculate timing using real session position
             audio_duration = self._samples_to_seconds(len(audio))
-            start_time = self._assembler.current_time
+            start_time = self._utterance_start_audio_pos
             end_time = start_time + audio_duration
 
             # Send partial result
@@ -1043,10 +1057,9 @@ class SessionHandler:
             )
 
             # Send VAD speech_end event
+            speech_end_time = self._utterance_start_audio_pos + speech_duration
             if self.config.enable_vad:
-                await self._send(
-                    VADSpeechEndMessage(timestamp=self._assembler.current_time)
-                )
+                await self._send(VADSpeechEndMessage(timestamp=speech_end_time))
 
             # Get accumulated speech audio from VAD and transcribe
             speech_audio = self._vad.force_endpoint()
@@ -1057,10 +1070,11 @@ class SessionHandler:
             self._speech_audio_buffer = []
             self._chunks_since_partial = 0
 
-            # Send VAD speech_start event (speech continues)
+            # Speech continues — update utterance start for new segment
+            self._utterance_start_audio_pos = self._processed_audio_seconds
             if self.config.enable_vad:
                 await self._send(
-                    VADSpeechStartMessage(timestamp=self._assembler.current_time)
+                    VADSpeechStartMessage(timestamp=self._processed_audio_seconds)
                 )
 
     async def _transcribe_and_send(self, audio: np.ndarray) -> None:
@@ -1121,8 +1135,12 @@ class SessionHandler:
             if self._ended or not result.text:
                 return
 
-            # Add to assembler
-            segment = self._assembler.add_transcript(result, audio_duration)
+            # Add to assembler with real session-relative start time
+            segment = self._assembler.add_transcript(
+                result,
+                audio_duration,
+                utterance_start=self._utterance_start_audio_pos,
+            )
 
             # Send transcript.final
             words = None

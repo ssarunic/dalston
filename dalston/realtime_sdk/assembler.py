@@ -72,6 +72,7 @@ class TranscriptAssembler:
         self,
         transcript: Transcript,
         audio_duration: float,
+        utterance_start: float | None = None,
     ) -> Segment:
         """Add a Transcript result to the session transcript.
 
@@ -81,10 +82,17 @@ class TranscriptAssembler:
         Args:
             transcript: Unified transcript from ASR engine
             audio_duration: Duration of the audio segment in seconds
+            utterance_start: Absolute session-relative start time for this
+                utterance. When provided, timestamps are anchored to real
+                session time (including silence gaps). When None, falls back
+                to ``_current_time`` (cumulative speech time).
 
         Returns:
             Segment with timestamps adjusted to session timeline
         """
+        # Use absolute start if provided, otherwise fall back to cumulative
+        offset = utterance_start if utterance_start is not None else self._current_time
+
         # Collect all words from transcript segments
         adjusted_words: list[Word] = []
         for seg in transcript.segments:
@@ -93,8 +101,8 @@ class TranscriptAssembler:
                     adjusted_words.append(
                         Word(
                             word=w.text,
-                            start=self._current_time + w.start,
-                            end=self._current_time + w.end,
+                            start=offset + w.start,
+                            end=offset + w.end,
                             confidence=w.confidence
                             if w.confidence is not None
                             else 0.0,
@@ -115,8 +123,8 @@ class TranscriptAssembler:
 
         segment = Segment(
             id=f"seg_{self._segment_counter:04d}",
-            start=self._current_time,
-            end=self._current_time + audio_duration,
+            start=offset,
+            end=offset + audio_duration,
             text=transcript.text,
             words=adjusted_words,
             confidence=overall_confidence,
