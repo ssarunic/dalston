@@ -32,7 +32,7 @@ gateway = [
     "aioboto3>=15.0.0",
     "types-aiobotocore-s3>=3.0.0",
     "websockets>=12.0",  # For realtime WebSocket proxy
-    "tinytag>=2.0.0",  # Audio metadata extraction
+    "tinytag>=2.2.1",  # Audio metadata extraction (CVE-2026-33671: SYLT loop DoS)
     "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
     "opentelemetry-instrumentation-fastapi==0.61b0",
@@ -51,7 +51,7 @@ orchestrator = [
     "fastapi>=0.135.0",  # Required for importing gateway.services
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
     "websockets>=12.0",  # Required by gateway module
-    "tinytag>=2.0.0",  # Required by gateway.services.audio_probe
+    "tinytag>=2.2.1",  # Required by gateway.services.audio_probe
     "aiohttp>=3.9.0",  # For lightweight HTTP server (metrics endpoint)
     "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
     "alembic>=1.13.0",
@@ -88,7 +88,7 @@ session-router = [
 ]
 tools = [
     "nvidia-ml-py3>=7.352.0",  # pynvml for VRAM calibration (M84)
-    "requests>=2.31.0",        # HTTP client for calibration script
+    "requests>=2.33.0",        # HTTP client for calibration script (CVE-2026-25645)
     "numpy>=1.24.0",           # Audio generation + linear regression
 ]
 dev = [
