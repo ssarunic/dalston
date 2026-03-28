@@ -606,7 +606,9 @@ class UnifiedRegistryWriter:
         *,
         status: str | None = None,
         active_batch: int | None = None,
+        active_realtime: int | None = None,
         loaded_model: str | None = None,
+        gpu_memory_used: str | None = None,
         engine_id: str | None = None,
         stage: str | None = None,
         hostname: str | None = None,
@@ -629,8 +631,12 @@ class UnifiedRegistryWriter:
             mapping["status"] = status
         if active_batch is not None:
             mapping["active_batch"] = str(active_batch)
+        if active_realtime is not None:
+            mapping["active_realtime"] = str(active_realtime)
         if loaded_model is not None:
             mapping["loaded_model"] = loaded_model
+        if gpu_memory_used is not None:
+            mapping["gpu_memory_used"] = gpu_memory_used
         if engine_id is not None:
             mapping["engine_id"] = engine_id
         if stage is not None:

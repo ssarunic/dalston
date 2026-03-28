@@ -2,7 +2,7 @@ schema_version: "1.1"
 id: stt-rt-onnx
 engine_id: onnx
 stage: transcribe
-mode: realtime
+mode: unified
 name: ONNX Realtime
 version: 1.0.0
 description: |
