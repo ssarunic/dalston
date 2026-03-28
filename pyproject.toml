@@ -58,7 +58,7 @@ orchestrator = [
 ]
 engine-sdk = [
     "redis>=7.0.0",
-    "boto3==1.40.61",
+    "boto3==1.42.78",
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
     "opentelemetry-instrumentation-redis==0.61b0",
@@ -107,9 +107,9 @@ dev = [
     # OpenTelemetry test utilities (M19)
     "opentelemetry-test-utils==0.61b0",
     # Pinned OpenAI SDK for M61 contract suite
-    "openai==2.29.0",
+    "openai==2.30.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.39.0",
+    "elevenlabs==2.40.0",
 ]
 
 [build-system]
