@@ -720,6 +720,12 @@ def _tailscale_cloud_init_block(hostname: str) -> str:
     cleans up stale nodes and re-joins via auth key from SSM.
     """
     return f"""\
+# Wait for unattended-upgrades / apt to release the dpkg lock
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  echo "Waiting for dpkg lock to be released..."
+  sleep 5
+done
+
 # Install and auto-join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 
