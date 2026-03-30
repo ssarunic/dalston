@@ -535,7 +535,7 @@ def _get_gpu_total_mb() -> int:
         import torch
 
         if torch.cuda.is_available():
-            return int(torch.cuda.get_device_properties(0).total_mem / (1024 * 1024))
+            return int(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024))
     except Exception:
         pass
 

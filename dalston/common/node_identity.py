@@ -122,7 +122,7 @@ def get_gpu_memory_total() -> str:
     """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available."""
     torch = _get_torch()
     if torch is not None:
-        return f"{torch.cuda.get_device_properties(0).total_mem / 1e9:.1f}GB"
+        return f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB"
     return _query_nvidia_smi_gb("memory.total") or "0GB"
 
 
