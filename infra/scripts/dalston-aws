@@ -1135,10 +1135,18 @@ fi
 # Mount instance store NVMe for model cache (free 125 GB on g4dn)
 NVME_DEV="/dev/nvme1n1"
 if [ -b "$NVME_DEV" ]; then
-  echo "Mounting instance store NVMe at /data/models..."
-  mkfs.xfs "$NVME_DEV"
-  mkdir -p /data/models
-  mount "$NVME_DEV" /data/models
+  EXISTING_MOUNT=$(findmnt -n -o TARGET "$NVME_DEV" 2>/dev/null || true)
+  if [ -n "$EXISTING_MOUNT" ]; then
+    echo "Instance store NVMe already mounted at $EXISTING_MOUNT, symlinking to /data/models"
+    mkdir -p /data/models
+    rm -rf /data/models
+    ln -s "$EXISTING_MOUNT" /data/models
+  else
+    echo "Mounting instance store NVMe at /data/models..."
+    mkfs.xfs "$NVME_DEV"
+    mkdir -p /data/models
+    mount "$NVME_DEV" /data/models
+  fi
 else
   echo "No instance store NVMe found, using root volume for models"
   mkdir -p /data/models
