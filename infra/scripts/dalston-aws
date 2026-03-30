@@ -92,6 +92,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "image": "stt-transcribe-vllm-asr",
         "engine_id": "vllm-asr",
         "container": "stt-transcribe-vllm-asr",
+        "min_gpu_compute": 8.0,  # Flash Attention 2 requires compute >= 8.0 (T4 = 7.5, won't work)
         "extra_env": {
             "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.9",
@@ -1387,16 +1388,72 @@ def launch_instance(
 
 
 # ---------------------------------------------------------------------------
+# GPU compute capability mapping
+# ---------------------------------------------------------------------------
+
+# Maps GPU model name (as returned by describe_instance_types) to CUDA compute capability.
+GPU_COMPUTE_CAPABILITY: dict[str, float] = {
+    "T4": 7.5,
+    "A10G": 8.6,
+    "L4": 8.9,
+    "L40S": 8.9,
+    "A100": 8.0,
+    "H100": 9.0,
+    "H200": 9.0,
+}
+
+
+def _gpu_compute_for_instance_type(instance_type: str) -> float:
+    """Return the GPU compute capability for a known instance family, or 0.0."""
+    family = instance_type.split(".")[0]
+    family_gpu = {
+        "g4dn": "T4",
+        "g5": "A10G",
+        "g6": "L4",
+        "g6e": "L40S",
+        "p4d": "A100",
+        "p5": "H100",
+    }
+    gpu_name = family_gpu.get(family, "")
+    return GPU_COMPUTE_CAPABILITY.get(gpu_name, 0.0)
+
+
+def _check_gpu_compat(engines: list[str], gpu_type: str) -> None:
+    """Warn and abort if any engine requires a higher compute capability than the GPU provides."""
+    gpu_cc = _gpu_compute_for_instance_type(gpu_type)
+    if gpu_cc == 0.0:
+        return  # unknown instance family, skip check
+    for engine_name in engines:
+        preset = GPU_ENGINE_PRESETS.get(engine_name, {})
+        min_cc = preset.get("min_gpu_compute", 0.0)
+        if min_cc and gpu_cc < min_cc:
+            gpu_family = gpu_type.split(".")[0]
+            gpu_name = {"g4dn": "T4", "g5": "A10G", "g6": "L4"}.get(
+                gpu_family, gpu_family
+            )
+            die(
+                f"Engine '{engine_name}' requires GPU compute >= {min_cc} "
+                f"but {gpu_type} has {gpu_name} (compute {gpu_cc}). "
+                f"Use g5.xlarge (A10G) or g6.xlarge (L4) instead."
+            )
+
+
+# ---------------------------------------------------------------------------
 # List GPU spot instances
 # ---------------------------------------------------------------------------
 
 
-def list_gpu_spot_instances(region: str) -> None:
+def list_gpu_spot_instances(region: str, engines: list[str] | None = None) -> None:
     log(f"Available GPU spot instances in {region}:")
     print()
     header_fmt = "  {:<20s} {:<8s} {:<10s} {:<18s} {:s}"
     print(header_fmt.format("INSTANCE TYPE", "vCPUs", "RAM (GiB)", "GPUs", "SPOT $/hr"))
     print(header_fmt.format("-------------", "-----", "---------", "----", "---------"))
+    # Compute minimum GPU requirement across all requested engines
+    min_cc_required = 0.0
+    for e in engines or []:
+        preset = GPU_ENGINE_PRESETS.get(e, {})
+        min_cc_required = max(min_cc_required, preset.get("min_gpu_compute", 0.0))
 
     ec2 = ec2_client(region)
 
@@ -1441,6 +1498,10 @@ def list_gpu_spot_instances(region: str) -> None:
         except ClientError:
             continue
 
+        gpu_cc = GPU_COMPUTE_CAPABILITY.get(gpu_name, 0.0)
+        compat_warn = ""
+        if min_cc_required and gpu_cc and gpu_cc < min_cc_required:
+            compat_warn = f"  {_YELLOW}⚠ compute {gpu_cc} < {min_cc_required}{_NC}"
         print(
             header_fmt.format(
                 itype,
@@ -1449,6 +1510,7 @@ def list_gpu_spot_instances(region: str) -> None:
                 f"{gpu_count}x {gpu_name}",
                 f"${spot_price}",
             )
+            + compat_warn
         )
     print()
 
@@ -1467,6 +1529,7 @@ def launch_gpu_interactive(
     key_name: str,
     instance_profile: str,
     gpu_type: str,
+    engines: list[str] | None = None,
 ) -> str:
     """Launch GPU worker with interactive retry on capacity failure."""
     gpu_ami = get_gpu_ami(region)
@@ -1486,7 +1549,7 @@ def launch_gpu_interactive(
             )
         except RuntimeError:
             print()
-            list_gpu_spot_instances(region)
+            list_gpu_spot_instances(region, engines=engines)
             try:
                 choice = input(
                     "Enter instance type to retry (or 'q' to quit): "
@@ -1495,6 +1558,7 @@ def launch_gpu_interactive(
                 die("GPU worker launch aborted.")
             if not choice or choice == "q":
                 die("GPU worker launch aborted.")
+            _check_gpu_compat(engines or [], choice)
             gpu_type = choice
 
 
@@ -1839,6 +1903,8 @@ def _launch_gpu(
     if st.observability:
         open_observability_ports(st.region, st.sg_id, st.gpu_sg_id)
 
+    _check_gpu_compat(engines, gpu_type)
+
     log(
         f"Launching GPU worker '{worker_name}' ({gpu_type}, spot={use_spot}, engines={engines})..."
     )
@@ -1860,6 +1926,7 @@ def _launch_gpu(
         st.key_name,
         st.instance_profile,
         gpu_type,
+        engines=engines,
     )
     wait_instance_running(st.region, instance_id)
 
