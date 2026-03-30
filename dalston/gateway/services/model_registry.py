@@ -593,13 +593,9 @@ class ModelRegistryService:
                     relative = file_path.relative_to(local_path)
                     s3_key = f"{s3_prefix}{relative}"
 
-                    # Read file and upload
-                    content = await asyncio.to_thread(file_path.read_bytes)
-                    await s3.put_object(
-                        Bucket=bucket,
-                        Key=s3_key,
-                        Body=content,
-                    )
+                    # Stream to S3 via aioboto3 (auto multipart)
+                    with open(file_path, "rb") as fh:
+                        await s3.upload_fileobj(fh, bucket, s3_key)
 
             # Upload .complete marker
             await s3.put_object(
