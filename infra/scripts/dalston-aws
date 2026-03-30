@@ -1131,7 +1131,11 @@ usermod -aG docker ubuntu
         + _tailscale_cloud_init_block(ts_hostname)
         + r"""
 # Configure NVIDIA Container Toolkit for Docker
-apt-get update
+for attempt in 1 2 3; do
+  apt-get update && break
+  echo "apt-get update failed (attempt $attempt/3), retrying in 10s..."
+  sleep 10
+done
 apt-get install -y nvidia-container-toolkit || true
 if command -v nvidia-ctk >/dev/null 2>&1; then
   nvidia-ctk runtime configure --runtime=docker
