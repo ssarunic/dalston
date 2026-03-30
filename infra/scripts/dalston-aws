@@ -1739,7 +1739,9 @@ def _launch_control_plane(
     log(f"Control plane running: {st.instance_id} ({ip})")
 
 
-def _write_gpu_prometheus_targets(workers: list[dict]) -> None:
+def _write_gpu_prometheus_targets(
+    workers: list[dict], key_name: str = "dalston-key"
+) -> None:
     """Write Prometheus file_sd targets for all GPU workers on the control plane.
 
     Uses SSH via Tailscale to write a JSON targets file that Prometheus picks up
@@ -1772,16 +1774,9 @@ def _write_gpu_prometheus_targets(workers: list[dict]) -> None:
     ctrl_host = _resolve_tailscale_host("dalston-control-plane")
     log(f"Writing GPU Prometheus targets on {ctrl_host}...")
     try:
+        key_file = Path.home() / ".dalston" / f"{key_name}.pem"
         subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "ConnectTimeout=10",
-                f"ec2-user@{ctrl_host}",
-                cmd,
-            ],
+            _ssh_base_args(ctrl_host, "ec2-user", key_file) + [cmd],
             check=True,
             capture_output=True,
             text=True,
@@ -1896,7 +1891,7 @@ def _launch_gpu(
 
     # Register all GPU worker metrics with Prometheus on the control plane
     if st.observability:
-        _write_gpu_prometheus_targets(st.gpu_workers)
+        _write_gpu_prometheus_targets(st.gpu_workers, key_name=st.key_name)
 
 
 def cmd_launch(args: argparse.Namespace) -> None:
