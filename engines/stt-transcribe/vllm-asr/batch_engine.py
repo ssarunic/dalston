@@ -201,7 +201,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self._llm = LLM(
             model=model_path,
-            trust_remote_code=True,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
             limit_mm_per_prompt={"audio": 1},

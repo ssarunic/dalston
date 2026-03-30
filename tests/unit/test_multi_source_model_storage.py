@@ -294,7 +294,18 @@ class TestHFModelStorage:
             result = storage.ensure_local("Systran/faster-whisper-base")
 
             mock_dl.assert_called_once_with(
-                "Systran/faster-whisper-base", token="hf_test"
+                "Systran/faster-whisper-base",
+                token="hf_test",
+                ignore_patterns=[
+                    "*.py",
+                    "*.pkl",
+                    "*.pickle",
+                    "*.sh",
+                    "*.bat",
+                    "*.exe",
+                    "*.so",
+                    "*.dll",
+                ],
             )
             assert result == Path("/cache/hf/snapshots/abc123")
 

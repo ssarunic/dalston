@@ -144,7 +144,11 @@ class HFTransformersModelManager(ModelManager[Any]):
         if self.torch_dtype is not None:
             pipe_kwargs["torch_dtype"] = self.torch_dtype
 
-        pipe = pipeline("automatic-speech-recognition", **pipe_kwargs)
+        pipe = pipeline(
+            "automatic-speech-recognition",
+            trust_remote_code=False,
+            **pipe_kwargs,
+        )
 
         logger.info(
             "hf_asr_pipeline_loaded",

@@ -242,8 +242,18 @@ class S3ModelStorage:
                 key = obj["Key"]
                 # Get relative path from model prefix
                 relative = key[len(s3_prefix) :]
-                if relative and relative != COMPLETE_MARKER:
-                    files_to_download.append((key, relative))
+                if not relative or relative == COMPLETE_MARKER:
+                    continue
+                # Reject path traversal attempts
+                if ".." in relative or relative.startswith("/"):
+                    logger.warning(
+                        "s3_path_traversal_blocked",
+                        model_id=model_id,
+                        key=key,
+                        relative=relative,
+                    )
+                    continue
+                files_to_download.append((key, relative))
 
         if not files_to_download:
             raise ModelNotInS3Error(model_id, self.bucket)
@@ -387,7 +397,22 @@ class HFModelStorage:
         from huggingface_hub import snapshot_download
 
         logger.info("ensuring_model_from_hf", model_id=model_id)
-        local_path = Path(snapshot_download(model_id, token=self.token))
+        local_path = Path(
+            snapshot_download(
+                model_id,
+                token=self.token,
+                ignore_patterns=[
+                    "*.py",
+                    "*.pkl",
+                    "*.pickle",
+                    "*.sh",
+                    "*.bat",
+                    "*.exe",
+                    "*.so",
+                    "*.dll",
+                ],
+            )
+        )
         logger.info(
             "model_ready_from_hf",
             model_id=model_id,
