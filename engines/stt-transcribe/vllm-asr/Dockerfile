@@ -49,4 +49,4 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 
 EXPOSE 9000
 
-CMD ["python", "engines/stt-transcribe/vllm-asr/runner.py"]
+CMD ["python3", "engines/stt-transcribe/vllm-asr/runner.py"]
