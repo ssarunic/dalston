@@ -593,7 +593,6 @@ class ModelRegistryService:
                     relative = file_path.relative_to(local_path)
                     s3_key = f"{s3_prefix}{relative}"
 
-                    # Stream to S3 via aioboto3 (auto multipart)
                     with open(file_path, "rb") as fh:
                         await s3.upload_fileobj(fh, bucket, s3_key)
 

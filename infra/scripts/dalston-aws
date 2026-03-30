@@ -722,8 +722,14 @@ def _tailscale_cloud_init_block(hostname: str) -> str:
     """
     return f"""\
 # Wait for unattended-upgrades / apt to release the dpkg lock
+dpkg_wait=0
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-  echo "Waiting for dpkg lock to be released..."
+  dpkg_wait=$((dpkg_wait + 1))
+  if [ $dpkg_wait -gt 36 ]; then
+    echo "WARNING: dpkg lock not released after 3 minutes, proceeding anyway"
+    break
+  fi
+  echo "Waiting for dpkg lock ($dpkg_wait/36)..."
   sleep 5
 done
 
@@ -1149,7 +1155,6 @@ if [ -b "$NVME_DEV" ]; then
   EXISTING_MOUNT=$(findmnt -n -o TARGET "$NVME_DEV" 2>/dev/null || true)
   if [ -n "$EXISTING_MOUNT" ]; then
     echo "Instance store NVMe already mounted at $EXISTING_MOUNT, symlinking to /data/models"
-    mkdir -p /data/models
     rm -rf /data/models
     ln -s "$EXISTING_MOUNT" /data/models
   else
@@ -1403,18 +1408,20 @@ GPU_COMPUTE_CAPABILITY: dict[str, float] = {
 }
 
 
+GPU_FAMILY_TO_NAME: dict[str, str] = {
+    "g4dn": "T4",
+    "g5": "A10G",
+    "g6": "L4",
+    "g6e": "L40S",
+    "p4d": "A100",
+    "p5": "H100",
+}
+
+
 def _gpu_compute_for_instance_type(instance_type: str) -> float:
     """Return the GPU compute capability for a known instance family, or 0.0."""
     family = instance_type.split(".")[0]
-    family_gpu = {
-        "g4dn": "T4",
-        "g5": "A10G",
-        "g6": "L4",
-        "g6e": "L40S",
-        "p4d": "A100",
-        "p5": "H100",
-    }
-    gpu_name = family_gpu.get(family, "")
+    gpu_name = GPU_FAMILY_TO_NAME.get(family, "")
     return GPU_COMPUTE_CAPABILITY.get(gpu_name, 0.0)
 
 
@@ -1428,9 +1435,7 @@ def _check_gpu_compat(engines: list[str], gpu_type: str) -> None:
         min_cc = preset.get("min_gpu_compute", 0.0)
         if min_cc and gpu_cc < min_cc:
             gpu_family = gpu_type.split(".")[0]
-            gpu_name = {"g4dn": "T4", "g5": "A10G", "g6": "L4"}.get(
-                gpu_family, gpu_family
-            )
+            gpu_name = GPU_FAMILY_TO_NAME.get(gpu_family, gpu_family)
             die(
                 f"Engine '{engine_name}' requires GPU compute >= {min_cc} "
                 f"but {gpu_type} has {gpu_name} (compute {gpu_cc}). "

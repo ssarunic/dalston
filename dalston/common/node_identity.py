@@ -111,19 +111,29 @@ def _get_torch() -> types.ModuleType | None:
 
 def get_gpu_memory_used() -> str:
     """Probe current GPU VRAM usage. Returns "0GB" if no GPU available."""
+    smi = _query_nvidia_smi_gb("memory.used")
+    if smi:
+        return smi
     torch = _get_torch()
     if torch is not None:
         return f"{torch.cuda.memory_allocated() / 1e9:.1f}GB"
-    return _query_nvidia_smi_gb("memory.used") or "0GB"
+    return "0GB"
 
 
 @functools.lru_cache(maxsize=1)
 def get_gpu_memory_total() -> str:
-    """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available."""
+    """Probe total GPU VRAM at startup. Returns "0GB" if no GPU available.
+
+    Prefers nvidia-smi over torch to avoid initializing CUDA in the parent
+    process — engines that fork (e.g. vLLM) crash if CUDA is already initialized.
+    """
+    smi = _query_nvidia_smi_gb("memory.total")
+    if smi:
+        return smi
     torch = _get_torch()
     if torch is not None:
         return f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB"
-    return _query_nvidia_smi_gb("memory.total") or "0GB"
+    return "0GB"
 
 
 @functools.lru_cache(maxsize=1)
