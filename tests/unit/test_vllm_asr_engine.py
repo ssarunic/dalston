@@ -199,7 +199,9 @@ class TestVLLMASREngine:
 
     @pytest.fixture
     def mock_cuda(self):
-        """Mock CUDA availability."""
+        """Mock CUDA availability via pynvml (engine uses pynvml, not torch.cuda, at init)."""
+        mock_pynvml = MagicMock()
+        mock_pynvml.nvmlDeviceGetCount.return_value = 1
         with patch.dict(
             os.environ,
             {
@@ -207,9 +209,8 @@ class TestVLLMASREngine:
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
-            with patch("torch.cuda.is_available", return_value=True):
-                with patch("torch.cuda.device_count", return_value=1):
-                    yield
+            with patch.dict(sys.modules, {"pynvml": mock_pynvml}):
+                yield
 
     @pytest.fixture
     def engine(self, mock_cuda):
@@ -232,11 +233,13 @@ class TestVLLMASREngine:
 
     def test_engine_init_no_cuda_raises(self):
         """Engine should raise RuntimeError when CUDA is unavailable."""
+        mock_pynvml = MagicMock()
+        mock_pynvml.nvmlInit.side_effect = Exception("No NVIDIA driver")
         with patch.dict(
             os.environ,
             {"DALSTON_ENGINE_ID": "vllm-asr"},
         ):
-            with patch("torch.cuda.is_available", return_value=False):
+            with patch.dict(sys.modules, {"pynvml": mock_pynvml}):
                 VllmAsrBatchEngine = load_vllm_asr_engine()
 
                 with pytest.raises(RuntimeError, match="requires CUDA"):
@@ -407,6 +410,14 @@ class TestVLLMASREngine:
 class TestVLLMASREngineEnvironment:
     """Test engine environment variable handling."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_pynvml(self):
+        """Mock pynvml for all environment tests."""
+        mock_pynvml = MagicMock()
+        mock_pynvml.nvmlDeviceGetCount.return_value = 1
+        with patch.dict(sys.modules, {"pynvml": mock_pynvml}):
+            yield
+
     def test_custom_engine_id(self):
         """Custom ENGINE_ID should be respected."""
         with patch.dict(
@@ -416,12 +427,10 @@ class TestVLLMASREngineEnvironment:
                 "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
-            with patch("torch.cuda.is_available", return_value=True):
-                with patch("torch.cuda.device_count", return_value=1):
-                    VllmAsrBatchEngine = load_vllm_asr_engine()
-                    engine = VllmAsrBatchEngine()
+            VllmAsrBatchEngine = load_vllm_asr_engine()
+            engine = VllmAsrBatchEngine()
 
-                    assert engine._engine_id == "custom-vllm"
+            assert engine._engine_id == "custom-vllm"
 
     def test_custom_gpu_memory_utilization(self):
         """Custom GPU memory utilization should be respected."""
@@ -432,12 +441,10 @@ class TestVLLMASREngineEnvironment:
                 "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.7",
             },
         ):
-            with patch("torch.cuda.is_available", return_value=True):
-                with patch("torch.cuda.device_count", return_value=1):
-                    VllmAsrBatchEngine = load_vllm_asr_engine()
-                    engine = VllmAsrBatchEngine()
+            VllmAsrBatchEngine = load_vllm_asr_engine()
+            engine = VllmAsrBatchEngine()
 
-                    assert engine._gpu_memory_utilization == 0.7
+            assert engine._gpu_memory_utilization == 0.7
 
     def test_custom_max_model_len(self):
         """Custom max model length should be respected."""
@@ -448,9 +455,7 @@ class TestVLLMASREngineEnvironment:
                 "DALSTON_VLLM_MAX_MODEL_LEN": "8192",
             },
         ):
-            with patch("torch.cuda.is_available", return_value=True):
-                with patch("torch.cuda.device_count", return_value=1):
-                    VllmAsrBatchEngine = load_vllm_asr_engine()
-                    engine = VllmAsrBatchEngine()
+            VllmAsrBatchEngine = load_vllm_asr_engine()
+            engine = VllmAsrBatchEngine()
 
-                    assert engine._max_model_len == 8192
+            assert engine._max_model_len == 8192
