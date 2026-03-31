@@ -114,11 +114,20 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self._model_storage = MultiSourceModelStorage.from_env()
 
-        # Verify CUDA is available
-        if not torch.cuda.is_available():
+        # Verify GPU is available using pynvml instead of torch.cuda to avoid
+        # premature CUDA initialization.  vLLM's EngineCore uses forked
+        # subprocesses; if CUDA is initialized in the parent first the fork
+        # fails with "Cannot re-initialize CUDA in forked subprocess".
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            gpu_count = pynvml.nvmlDeviceGetCount()
+            pynvml.nvmlShutdown()
+        except Exception as exc:
             raise RuntimeError(
                 "vLLM-ASR requires CUDA. GPU not available on this system."
-            )
+            ) from exc
 
         self.logger.info(
             "engine_init",
@@ -126,7 +135,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             default_model=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
-            cuda_device_count=torch.cuda.device_count(),
+            gpu_count=gpu_count,
             s3_storage_enabled=self._model_storage is not None,
         )
 
@@ -201,6 +210,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self._llm = LLM(
             model=model_path,
+            trust_remote_code=True,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
             limit_mm_per_prompt={"audio": 1},

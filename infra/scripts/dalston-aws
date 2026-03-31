@@ -1054,6 +1054,7 @@ def _generate_docker_run_block(engine_name: str, port: int) -> str:
 
     return f"""\
 docker run -d --name {container} --gpus all --network host --restart unless-stopped \\
+  --shm-size=8g \\
   -v /data/models:/data/models \\
   -e DALSTON_METRICS_PORT={port} \\
   -e DALSTON_DEVICE=cuda \\

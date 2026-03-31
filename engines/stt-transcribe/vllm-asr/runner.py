@@ -73,6 +73,7 @@ def _create_vllm_instance() -> Any:
 
     llm = LLM(
         model=model_id,
+        trust_remote_code=True,
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=max_model_len,
         limit_mm_per_prompt={"audio": 1},
