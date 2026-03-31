@@ -5,7 +5,7 @@
  * in the database.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 
 export default async function globalSetup() {
@@ -20,13 +20,8 @@ export default async function globalSetup() {
   console.log('Seeding test API key...');
 
   for (const pythonBin of pythonCandidates) {
-    // Reject paths containing shell metacharacters
-    if (/[;&|`$(){}]/.test(pythonBin)) {
-      console.warn(`Skipping unsafe PYTHON_BIN value: ${pythonBin}`);
-      continue;
-    }
     try {
-      execSync(`${JSON.stringify(pythonBin)} scripts/seed_test_api_key.py`, {
+      execFileSync(pythonBin, ['scripts/seed_test_api_key.py'], {
         cwd: projectRoot,
         stdio: 'inherit',
       });
