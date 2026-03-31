@@ -7,9 +7,6 @@ realtime starvation under batch load.
 
 Supports any vLLM-compatible audio model (Voxtral, Qwen2-Audio, etc.).
 
-Usage:
-    python -m engines.stt-transcribe.vllm-asr.runner
-
 Environment variables (in addition to each adapter's own env vars):
     DALSTON_RT_RESERVATION: Min slots reserved for realtime (default: 2)
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
@@ -24,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import multiprocessing
 import os
 import signal
 import threading
@@ -96,10 +94,13 @@ class UnifiedVllmAsrRunner:
     """
 
     def __init__(self) -> None:
-        # Defer torch import to avoid initializing CUDA before vLLM forks.
-        # vLLM's EngineCore uses forked subprocesses; if CUDA is initialized
-        # in the parent first, the fork fails with "Cannot re-initialize CUDA".
-        # We check GPU availability via pynvml instead.
+        # Force spawn before any CUDA initialization.  vLLM's EngineCore
+        # uses subprocesses; the default "fork" method inherits a CUDA
+        # context that cannot be re-initialized, causing a fatal error.
+        multiprocessing.set_start_method("spawn", force=True)
+
+        # Check GPU availability via pynvml — NOT torch.cuda — to avoid
+        # premature CUDA initialization before vLLM forks.
         try:
             import pynvml
 
@@ -319,28 +320,17 @@ class BatchRejectedError(TaskDeferredError):
     """
 
 
-# ---------------------------------------------------------------------------
-# Import path: ensure the engine directory is on sys.path so that sibling
-# modules (batch_engine, rt_engine) can be imported by name.
-# ---------------------------------------------------------------------------
-
-
-def _ensure_import_path() -> None:
-    """Add this file's directory to sys.path for sibling imports."""
+if __name__ == "__main__":
+    # Add engine directory to sys.path so sibling modules (batch_engine,
+    # rt_engine) can be imported by bare name.  This is only needed when
+    # running as a script; the Dockerfile CMD invokes this file directly.
+    # Hyphenated directory names prevent proper Python package imports.
     import sys
     from pathlib import Path
 
-    engine_dir = str(Path(__file__).resolve().parent)
-    if engine_dir not in sys.path:
-        sys.path.insert(0, engine_dir)
+    _engine_dir = str(Path(__file__).resolve().parent)
+    if _engine_dir not in sys.path:
+        sys.path.insert(0, _engine_dir)
 
-
-_ensure_import_path()
-
-
-if __name__ == "__main__":
-    import multiprocessing
-
-    multiprocessing.set_start_method("spawn", force=True)
     runner = UnifiedVllmAsrRunner()
     runner.run()
