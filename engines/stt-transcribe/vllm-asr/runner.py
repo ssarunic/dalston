@@ -30,7 +30,6 @@ import threading
 from typing import Any
 
 import structlog
-import torch
 
 from dalston.engine_sdk.admission import (
     AdmissionConfig,
@@ -97,10 +96,20 @@ class UnifiedVllmAsrRunner:
     """
 
     def __init__(self) -> None:
-        if not torch.cuda.is_available():
+        # Defer torch import to avoid initializing CUDA before vLLM forks.
+        # vLLM's EngineCore uses forked subprocesses; if CUDA is initialized
+        # in the parent first, the fork fails with "Cannot re-initialize CUDA".
+        # We check GPU availability via pynvml instead.
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            pynvml.nvmlDeviceGetCount()
+            pynvml.nvmlShutdown()
+        except Exception as exc:
             raise RuntimeError(
                 "vLLM-ASR requires CUDA. GPU not available on this system."
-            )
+            ) from exc
 
         # Create single shared vLLM instance
         self._llm = _create_vllm_instance()
@@ -132,7 +141,7 @@ class UnifiedVllmAsrRunner:
             "unified_vllm_asr_runner_init",
             admission=self._admission.get_status(),
             vllm_profile_source=self._vllm_params.profile_source,
-            cuda_device_count=torch.cuda.device_count(),
+            cuda_device_count=__import__("torch").cuda.device_count(),
         )
 
     @staticmethod
@@ -288,6 +297,8 @@ class UnifiedVllmAsrRunner:
         if self._llm is not None:
             del self._llm
             self._llm = None
+
+            import torch
 
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
