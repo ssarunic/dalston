@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import gc
-import multiprocessing
 import os
 import signal
 import threading
@@ -94,11 +93,6 @@ class UnifiedVllmAsrRunner:
     """
 
     def __init__(self) -> None:
-        # Force spawn before any CUDA initialization.  vLLM's EngineCore
-        # uses subprocesses; the default "fork" method inherits a CUDA
-        # context that cannot be re-initialized, causing a fatal error.
-        multiprocessing.set_start_method("spawn", force=True)
-
         # Check GPU availability via pynvml — NOT torch.cuda — to avoid
         # premature CUDA initialization before vLLM forks.
         try:
@@ -331,6 +325,13 @@ if __name__ == "__main__":
     _engine_dir = str(Path(__file__).resolve().parent)
     if _engine_dir not in sys.path:
         sys.path.insert(0, _engine_dir)
+
+    # Force spawn before any CUDA initialization.  vLLM's EngineCore
+    # uses subprocesses; the default "fork" method inherits a CUDA
+    # context that cannot be re-initialized, causing a fatal error.
+    import multiprocessing
+
+    multiprocessing.set_start_method("spawn", force=True)
 
     runner = UnifiedVllmAsrRunner()
     runner.run()
