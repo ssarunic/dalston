@@ -116,9 +116,9 @@ Dalston has 6 transcription engines that determine model compatibility:
 
 | # | Model ID | Dalston Support |
 |---|----------|-----------------|
-| 56 | `ibm-granite/granite-4.0-1b-speech` | **Not supported.** Granite Speech is a speech-augmented LLM (audio encoder + LLM decoder). **Gap:** Could potentially work via vllm-asr engine if vLLM adds Granite Speech support, or needs a dedicated engine with HF `pipeline("audio-text-to-text")`. |
-| 57 | `ibm-granite/granite-speech-3.3-8b` | **Not supported.** Same architecture gap — speech-augmented LLM. **Gap:** Requires vLLM support or dedicated engine. 8B params needs significant VRAM (~20GB). |
-| 58 | `ibm-granite/granite-speech-3.3-2b` | **Not supported.** Same gap. |
+| 56 | `ibm-granite/granite-4.0-1b-speech` | **Supported via vllm-asr.** vLLM has native `granite_speech` model implementation. Set `DALSTON_DEFAULT_MODEL_ID`. Compact (1B), ~4GB VRAM. |
+| 57 | `ibm-granite/granite-speech-3.3-8b` | **Supported via vllm-asr.** Same vLLM granite_speech backend. ~20GB VRAM. |
+| 58 | `ibm-granite/granite-speech-3.3-2b` | **Supported via vllm-asr.** Same backend. ~6GB VRAM. |
 
 ## Microsoft Models
 
@@ -133,8 +133,8 @@ Dalston has 6 transcription engines that determine model compatibility:
 
 | # | Model ID | Dalston Support |
 |---|----------|-----------------|
-| 63 | `Qwen/Qwen3-ASR-1.7B` | **Not supported.** Qwen3-ASR uses a custom architecture (audio encoder + Qwen LLM). Not a standard HF ASR pipeline model. **Gap:** vllm-asr engine could work if vLLM adds Qwen3-ASR support. Otherwise needs dedicated engine or adapter that handles Qwen's chat template with audio input. |
-| 64 | `Qwen/Qwen3-ASR-0.6B` | **Not supported.** Same gap as Qwen3-ASR-1.7B. |
+| 63 | `Qwen/Qwen3-ASR-1.7B` | **Supported via vllm-asr.** vLLM has day-0 Qwen3-ASR support. Uses same `audio_url` + `llm.chat()` pattern as Dalston's adapter. **Minor gap:** Output format is `"language {lang}<asr_text>{text}"` — `parse_output` should strip this prefix for clean transcripts. Set `DALSTON_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-1.7B`. |
+| 64 | `Qwen/Qwen3-ASR-0.6B` | **Supported via vllm-asr.** Same as 1.7B. Extremely fast (2000x throughput at concurrency 128, 92ms TTFT). Same output format parsing gap. |
 | 65 | `FunAudioLLM/SenseVoiceSmall` | **Not supported.** SenseVoice uses a custom non-autoregressive architecture with FunASR toolkit. **Gap:** Needs dedicated engine wrapping FunASR inference or an HF-compatible wrapper. Not a standard `transformers` pipeline model. |
 
 ## Alibaba / FunASR (ModelScope)
@@ -231,7 +231,7 @@ Dalston has 6 transcription engines that determine model compatibility:
 | Gap | Models Affected | Effort | How to Close |
 |-----|----------------|--------|--------------|
 | **Canary loader in nemo engine** | #18-22 (Canary family, #1 on leaderboard) | Medium | Add `EncDecMultiTaskModel` to `NeMoModelManager.ARCHITECTURE_LOADERS`. Handle task/language prompt tokens in transcribe path. Alternatively, Riva NIM can serve Canary today. |
-| **Speech-augmented LLM support** | #56-58 (Granite), #63-64 (Qwen3-ASR) | Medium-High | Extend vllm-asr engine or add `audio-text-to-text` pipeline support to hf-asr. Depends on vLLM adding model support. |
+| **Qwen3-ASR output parsing** | #63-64 (Qwen3-ASR) | Low | Strip `"language {lang}<asr_text>..."` prefix in `AudioLLMAdapter.parse_output()` or add a Qwen3-ASR-specific adapter. |
 | **SeamlessM4T pipeline tag** | #54-55 | Low | Add `audio-text-to-text` as alternative pipeline tag in hf-asr engine's `_load_model`. |
 
 ### Medium-Impact Gaps
@@ -254,9 +254,9 @@ Dalston has 6 transcription engines that determine model compatibility:
 
 ### Overall Coverage
 
-- **Fully supported:** 53 models (all Whisper/Distil-Whisper, Parakeet, wav2vec2/HuBERT fine-tunes, Voxtral, faster-whisper)
+- **Fully supported:** 58 models (all Whisper/Distil-Whisper, Parakeet, wav2vec2/HuBERT fine-tunes, Voxtral, faster-whisper, Granite Speech, Qwen3-ASR, Phi-4)
 - **Partially supported (works with caveats):** 18 models (pre-trained encoders needing fine-tuned checkpoints, passthrough model IDs, untested paths)
-- **Not supported (needs new engine or loader):** 25 models (Canary, Granite, Qwen3-ASR, SpeechBrain, FunASR, ESPnet, Moshi)
+- **Not supported (needs new engine or loader):** 20 models (Canary, SenseVoice, FunASR/Paraformer, SpeechBrain, ESPnet, Moshi)
 - **Not applicable (API-only):** 4 services
 
 Sources: [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard), [HuggingFace ASR Models](https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads), [Open ASR Leaderboard Paper (arXiv:2510.06961)](https://arxiv.org/abs/2510.06961)
