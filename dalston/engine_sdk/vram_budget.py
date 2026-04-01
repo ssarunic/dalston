@@ -519,7 +519,7 @@ def get_gpu_name(gpu_index: int = 0) -> str | None:
 
 
 def _get_gpu_total_mb() -> int:
-    """Get total VRAM of GPU 0 in MB using pynvml, falling back to torch."""
+    """Get total VRAM of GPU 0 in MB using pynvml, torch, or nvidia-smi."""
     try:
         import pynvml
 
@@ -536,6 +536,21 @@ def _get_gpu_total_mb() -> int:
 
         if torch.cuda.is_available():
             return int(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024))
+    except Exception:
+        pass
+
+    # Fallback: nvidia-smi (works in containers without pynvml/torch)
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return int(float(result.stdout.split("\n")[0]))
     except Exception:
         pass
 
