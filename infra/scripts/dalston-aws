@@ -1089,6 +1089,11 @@ def generate_gpu_worker_user_data(
             raise ValueError(
                 f"Unknown engine '{eng}'. Available: {list(GPU_ENGINE_PRESETS)}"
             )
+        if GPU_ENGINE_PRESETS[eng].get("needs_hf_token") and not hf_token:
+            die(
+                f"Engine '{eng}' requires HF_TOKEN for gated model access. "
+                f"Set it with: export HF_TOKEN=hf_..."
+            )
 
     # Build pull commands and docker run blocks
     presets = [GPU_ENGINE_PRESETS[e] for e in engines]
@@ -1151,15 +1156,27 @@ if command -v nvidia-ctk >/dev/null 2>&1; then
 fi
 
 # Mount instance store NVMe for model cache (free 125 GB on g4dn)
-NVME_DEV="/dev/nvme1n1"
-if [ -b "$NVME_DEV" ]; then
-  EXISTING_MOUNT=$(findmnt -n -o TARGET "$NVME_DEV" 2>/dev/null || true)
+# Device names aren't stable — find instance store by model string.
+NVME_DEV=""
+for dev in /dev/nvme*n1; do
+  [ -b "$dev" ] || continue
+  MODEL=$(lsblk -n -o MODEL "$dev" 2>/dev/null | head -1)
+  if echo "$MODEL" | grep -qi "Instance Storage"; then
+    NVME_DEV="$dev"
+    break
+  fi
+done
+
+if [ -n "$NVME_DEV" ]; then
+  # Check if already mounted (DL AMI uses LVM on instance store)
+  EXISTING_MOUNT=$(lsblk -n -o MOUNTPOINT "$NVME_DEV" 2>/dev/null | grep -v '^$' | head -1 || true)
   if [ -n "$EXISTING_MOUNT" ]; then
-    echo "Instance store NVMe already mounted at $EXISTING_MOUNT, symlinking to /data/models"
+    echo "Instance store $NVME_DEV already mounted at $EXISTING_MOUNT, symlinking to /data/models"
+    mkdir -p /data/models
     rm -rf /data/models
     ln -s "$EXISTING_MOUNT" /data/models
   else
-    echo "Mounting instance store NVMe at /data/models..."
+    echo "Mounting instance store $NVME_DEV at /data/models..."
     mkfs.xfs "$NVME_DEV"
     mkdir -p /data/models
     mount "$NVME_DEV" /data/models
