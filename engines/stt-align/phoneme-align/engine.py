@@ -331,18 +331,11 @@ class PhonemeAlignEngine(Engine):
         return AlignHTTPServer(engine=self, port=port)
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including device info."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        mps_available = torch.backends.mps.is_available()
-
         return {
-            "status": "healthy",
+            **super().health_check(),
             "device": self._device,
             "compute_type": self._compute_type,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "mps_available": mps_available,
+            "mps_available": torch.backends.mps.is_available(),
             "cached_models": sorted(self._align_models.keys()),
         }
 

@@ -63,6 +63,8 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
     INT8 quantization achieves competitive performance for batch processing.
     """
 
+    ENGINE_ID = "onnx"
+
     # Curated model set advertised at registration time.
     # The underlying OnnxModelManager accepts any onnx-asr compatible ID.
     CURATED_MODELS = {
@@ -88,11 +90,10 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             quantization=self._core.quantization,
@@ -176,7 +177,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             text=core_result.text,
             segments=segments,
             language=language if language != "auto" else "en",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
             alignment_method=alignment_method,
             channel=channel,
@@ -202,11 +203,9 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         return AlignmentMethod.CTC
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status."""
         model_stats = self._core.get_stats()
         return {
-            "status": "healthy",
-            "engine_id": self._engine_id,
+            **super().health_check(),
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
@@ -216,7 +215,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return ONNX engine capabilities."""
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version="1.2.0",
             stages=["transcribe"],
             supports_word_timestamps=True,

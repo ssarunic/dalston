@@ -10,7 +10,6 @@ with the RT adapter.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from riva_client import BYTES_PER_SAMPLE, SAMPLE_RATE, RivaClient
@@ -36,14 +35,15 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
     segments into a Transcript.
     """
 
+    ENGINE_ID = "riva"
+
     def __init__(self, core: RivaClient | None = None) -> None:
         super().__init__()
         self._core = core if core is not None else RivaClient.from_env()
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             riva_uri=self._core.uri,
             chunk_ms=self._core.chunk_ms,
             shared_core=core is not None,
@@ -83,7 +83,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
                 text=full_text,
                 segments=segments,
                 language=language,
-                engine_id=self._engine_id,
+                engine_id=self.engine_id,
                 duration=duration,
             )
         finally:
@@ -136,9 +136,6 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
 
         return segments
 
-    def get_engine_id(self) -> str:
-        return self._engine_id
-
     def health_check(self) -> dict[str, Any]:
         nim_health = self._core.health_check()
         status = "healthy" if nim_health["nim"] == "connected" else "unhealthy"
@@ -146,7 +143,7 @@ class RivaBatchEngine(BaseBatchTranscribeEngine):
 
     def get_capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version="1.1.0",
             stages=["transcribe"],
             supports_word_timestamps=True,

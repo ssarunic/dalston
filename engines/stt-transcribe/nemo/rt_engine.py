@@ -34,7 +34,6 @@ from dalston.common.pipeline_types import (
     AlignmentMethod,
     Transcript,
     TranscriptionRequest,
-    TranscriptWord,
     VocabularyMethod,
     VocabularySupport,
 )
@@ -167,42 +166,12 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         # Delegate to shared core
         result = self._core.transcribe(audio, model_id)
 
-        # Format core result into Transcript
-        segments = []
-        text_parts: list[str] = []
-
-        for seg in result.segments:
-            words: list[TranscriptWord] = []
-            seg_text = seg.text if hasattr(seg, "text") else ""
-            text_parts.append(seg_text)
-            for w in seg.words:
-                words.append(
-                    self.build_word(
-                        text=w.word,
-                        start=w.start,
-                        end=w.end,
-                        confidence=w.confidence or 0.95,
-                        alignment_method=AlignmentMethod.CTC,
-                    )
-                )
-            segments.append(
-                self.build_segment(
-                    start=seg.start
-                    if hasattr(seg, "start")
-                    else (words[0].start if words else 0.0),
-                    end=seg.end
-                    if hasattr(seg, "end")
-                    else (words[-1].end if words else 0.0),
-                    text=seg_text,
-                    words=words if words else None,
-                )
-            )
-
-        return self.build_transcript(
-            text=result.text,
-            segments=segments,
-            language=language if language != "auto" else "en",
-            engine_id=self.engine_id,
+        resolved_lang = language if language != "auto" else "en"
+        return self.build_transcript_from_core_result(
+            result,
+            language=resolved_lang,
+            alignment_method=AlignmentMethod.CTC,
+            default_confidence=0.95,
             language_confidence=1.0 if language != "auto" else 0.5,
         )
 

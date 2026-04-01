@@ -445,9 +445,9 @@ class TestRivaBatchShutdown:
         engine = engine_with_mock
         engine.shutdown()
 
-    def test_get_engine_id(self, engine_with_mock) -> None:
+    def test_engine_id(self, engine_with_mock) -> None:
         engine = engine_with_mock
-        assert engine.get_engine_id() == "riva"
+        assert engine.engine_id == "riva"
 
 
 class TestRivaBatchWordConfidence:

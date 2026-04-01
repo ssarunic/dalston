@@ -32,8 +32,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import torch
-
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Transcript,
@@ -70,6 +68,8 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         new one is loaded (with GPU memory cleanup).
     """
 
+    ENGINE_ID = "nemo"
+
     # Valid NeMo model identifiers that this engine_id can load
     # Keys are the loaded_model_id values that can be passed in task config
     SUPPORTED_MODELS = {
@@ -100,11 +100,10 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         )
 
         # Get engine ID from environment for registration (engine_id ID, not variant ID)
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             shared_core=core is not None,
@@ -371,7 +370,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             text=core_result.text,
             segments=segments,
             language=language if language != "auto" else "en",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
             alignment_method=alignment_method,
             channel=channel,
@@ -379,28 +378,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU availability."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0
-        cuda_memory_total = 0
-
-        if cuda_available:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
         model_stats = self._core.get_stats()
-
         return {
-            "status": "healthy",
-            "engine_id": self._engine_id,
+            **super().health_check(),
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
         }
 
     def get_capabilities(self) -> EngineCapabilities:
@@ -418,7 +401,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         vram_mb = 6000  # Maximum (tdt-1.1b)
 
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version="1.0.0",
             stages=["transcribe"],
             supports_word_timestamps=True,

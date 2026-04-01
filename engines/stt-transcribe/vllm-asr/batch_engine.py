@@ -73,6 +73,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     GPU is required - vLLM does not support CPU inference.
     """
 
+    ENGINE_ID = "vllm-asr"
     DEFAULT_MODEL = "mistralai/Voxtral-Mini-3B-2507"
 
     def __init__(
@@ -97,7 +98,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._tokenizer = None
         self._model_storage: MultiSourceModelStorage | None = None
 
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
@@ -137,7 +137,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
@@ -339,7 +339,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
             self.logger.info("transcription_complete", char_count=len(raw_text))
 
-            transcript.engine_id = self._engine_id
+            transcript.engine_id = self.engine_id
             if channel is not None:
                 transcript.channel = channel
             if warnings:
@@ -350,35 +350,19 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU and model info."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0.0
-        cuda_memory_total = 0.0
-
-        if cuda_available and cuda_device_count > 0:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
         return {
-            "status": "healthy",
-            "engine_id": self._engine_id,
+            **super().health_check(),
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
-            "supported_models": [],
             "s3_storage_enabled": self._model_storage is not None,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
             "gpu_memory_utilization": self._gpu_memory_utilization,
         }
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return vLLM-ASR engine capabilities."""
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version="1.0.0",
             stages=["transcribe"],
             supports_word_timestamps=False,  # Audio LLMs don't produce timestamps

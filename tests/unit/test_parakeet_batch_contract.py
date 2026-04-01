@@ -106,7 +106,7 @@ def _build_engine_with_mock_core(hypothesis):
         engine = _ParakeetEngine.__new__(_ParakeetEngine)
         engine._core = mock_core
         engine._default_model_id = "nvidia/parakeet-tdt-1.1b"
-        engine._engine_id = "nemo"
+        engine.engine_id = "nemo"
         engine.logger = MagicMock()
     return engine
 

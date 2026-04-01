@@ -14,7 +14,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+
+if TYPE_CHECKING:
+    from dalston.common.node_identity import NodeIdentity
 
 import redis
 import structlog
@@ -24,6 +26,7 @@ import dalston.metrics
 import dalston.telemetry
 from dalston.common.artifacts import ArtifactReference
 from dalston.common.durable_events import add_durable_event_sync
+from dalston.common.engine_yaml import generate_instance_id, is_port_in_use
 from dalston.common.pipeline_types import PIPELINE_SCHEMA_VERSION
 from dalston.common.registry import EngineRecord, UnifiedRegistryWriter
 from dalston.common.streams_sync import (
@@ -105,24 +108,12 @@ class EngineRunner:
         self._stage: str = "unknown"  # Pipeline stage from capabilities
         self._execution_profile = "container"
         self._supports_realtime = bool(os.environ.get("DALSTON_WORKER_PORT"))
-        self._node_hostname: str = ""
-        self._node_id: str = ""
-        self._deploy_env: str = "local"
+        self._node: NodeIdentity | None = None
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
 
-        # Load configuration from environment
-        self.engine_id = os.environ.get("DALSTON_ENGINE_ID", "unknown")
-        # Instance ID: prefer a stable ID so container restarts reuse the same Redis key
-        # and don't leave ghost entries in stage/engine_id sets.
-        # Priority: DALSTON_WORKER_ID > DALSTON_INSTANCE > random UUID (local/dev fallback)
-        stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
-            "DALSTON_INSTANCE"
-        )
-        if stable_id:
-            self.instance = f"{self.engine_id}-{stable_id[:12]}"
-        else:
-            self.instance = f"{self.engine_id}-{uuid4().hex[:12]}"
+        self.engine_id = engine.engine_id
+        self.instance = generate_instance_id(self.engine_id)
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         self.s3_bucket = os.environ.get("DALSTON_S3_BUCKET", "dalston-artifacts")
         self.metrics_port = int(os.environ.get("DALSTON_METRICS_PORT", "9100"))
@@ -196,11 +187,8 @@ class EngineRunner:
             get_gpu_memory_total,
         )
 
-        node = detect_node_identity()
+        self._node = detect_node_identity()
         gpu_total = get_gpu_memory_total()
-        self._node_hostname = node.hostname
-        self._node_id = node.node_id
-        self._deploy_env = node.deploy_env
 
         # Register with unified engine registry
         self._unified_writer = UnifiedRegistryWriter(self.redis_url)
@@ -223,11 +211,11 @@ class EngineRunner:
                     capabilities.includes_diarization if capabilities else False
                 ),
                 schema_version=PIPELINE_SCHEMA_VERSION,
-                hostname=node.hostname,
-                node_id=node.node_id,
-                deploy_env=node.deploy_env,
-                aws_az=node.region,
-                aws_instance_type=node.instance_type,
+                hostname=self._node.hostname,
+                node_id=self._node.node_id,
+                deploy_env=self._node.deploy_env,
+                aws_az=self._node.region,
+                aws_instance_type=self._node.instance_type,
                 gpu_memory_total=gpu_total,
             )
         )
@@ -367,20 +355,13 @@ class EngineRunner:
         (aiohttp with ``/health``, ``/metrics``, ``/v1/capabilities``),
         so we probe first and skip if the port is occupied.
         """
-        import socket
-
         try:
-            # Probe whether the port is already bound (e.g. by the
-            # realtime runner in a unified engine).  If so, skip — the
-            # realtime server already serves the M79 endpoints.
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.1)
-                if s.connect_ex(("127.0.0.1", self.metrics_port)) == 0:
-                    logger.info(
-                        "http_server_skipped_port_in_use",
-                        port=self.metrics_port,
-                    )
-                    return
+            if is_port_in_use(self.metrics_port):
+                logger.info(
+                    "http_server_skipped_port_in_use",
+                    port=self.metrics_port,
+                )
+                return
 
             http_server = self.engine.create_http_server(port=self.metrics_port)
             self._http_thread = threading.Thread(
@@ -449,9 +430,9 @@ class EngineRunner:
                             loaded_model=loaded_model,
                             engine_id=self.engine_id,
                             stage=self._stage,
-                            hostname=self._node_hostname,
-                            node_id=self._node_id,
-                            deploy_env=self._deploy_env,
+                            hostname=self._node.hostname,
+                            node_id=self._node.node_id,
+                            deploy_env=self._node.deploy_env,
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))

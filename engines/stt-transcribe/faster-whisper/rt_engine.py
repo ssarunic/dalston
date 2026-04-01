@@ -15,7 +15,6 @@ from dalston.common.pipeline_types import (
     AlignmentMethod,
     Transcript,
     TranscriptionRequest,
-    TranscriptWord,
     VocabularyMethod,
     VocabularySupport,
 )
@@ -144,38 +143,9 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             config=config,
         )
 
-        # Format core result into Transcript
-        segments = []
-        text_parts: list[str] = []
-
-        for seg in result.segments:
-            words: list[TranscriptWord] = []
-            text_parts.append(seg.text)
-            for w in seg.words:
-                words.append(
-                    self.build_word(
-                        text=w.word,
-                        start=w.start,
-                        end=w.end,
-                        confidence=w.probability,
-                        alignment_method=AlignmentMethod.ATTENTION,
-                    )
-                )
-            segments.append(
-                self.build_segment(
-                    start=seg.start,
-                    end=seg.end,
-                    text=seg.text,
-                    words=words if words else None,
-                )
-            )
-
-        return self.build_transcript(
-            text=" ".join(text_parts),
-            segments=segments,
+        return self.build_transcript_from_core_result(
+            result,
             language=result.language,
-            engine_id=self.engine_id,
-            language_confidence=result.language_probability,
             alignment_method=AlignmentMethod.ATTENTION,
         )
 
