@@ -336,10 +336,15 @@ updates:
       - javascript
 
   # Docker base images (core services)
+  # IMPORTANT: nvidia/cuda must stay on 12.x — ML libraries (PyTorch,
+  # onnxruntime-gpu, CTranslate2) only ship CUDA 12 wheels.
   - package-ecosystem: docker
     directory: "/docker"
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: "nvidia/cuda"
+        update-types: ["version-update:semver-major"]
     reviewers:
       - sasasarunic
     labels:
