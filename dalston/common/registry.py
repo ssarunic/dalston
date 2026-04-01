@@ -606,7 +606,10 @@ class UnifiedRegistryWriter:
         *,
         status: str | None = None,
         active_batch: int | None = None,
+        active_realtime: int | None = None,
         loaded_model: str | None = None,
+        models_loaded: list[str] | None = None,
+        gpu_memory_used: str | None = None,
         engine_id: str | None = None,
         stage: str | None = None,
         hostname: str | None = None,
@@ -614,6 +617,9 @@ class UnifiedRegistryWriter:
         deploy_env: str | None = None,
     ) -> None:
         """Update heartbeat (sync).
+
+        Signature matches the async ``UnifiedEngineRegistry.heartbeat``
+        so both batch and realtime runners can report the same fields.
 
         engine_id, stage, and node identity fields are written on every
         heartbeat so that if the Redis key expires and is re-created by
@@ -629,8 +635,14 @@ class UnifiedRegistryWriter:
             mapping["status"] = status
         if active_batch is not None:
             mapping["active_batch"] = str(active_batch)
+        if active_realtime is not None:
+            mapping["active_realtime"] = str(active_realtime)
         if loaded_model is not None:
             mapping["loaded_model"] = loaded_model
+        if models_loaded is not None:
+            mapping["models_loaded"] = json.dumps(models_loaded)
+        if gpu_memory_used is not None:
+            mapping["gpu_memory_used"] = gpu_memory_used
         if engine_id is not None:
             mapping["engine_id"] = engine_id
         if stage is not None:

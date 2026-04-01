@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 import structlog
 
-from dalston.common.engine_yaml import load_engine_yaml
+from dalston.common.engine_yaml import load_engine_yaml, parse_engine_capabilities
 from dalston.engine_sdk.audio import SPEECH_STANDARD, AudioFormat
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
@@ -60,8 +61,14 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
     # Set to None for engines that don't consume audio (e.g., merge, llm-cleanup).
     audio_format: AudioFormat | None = SPEECH_STANDARD
 
+    #: Default engine identifier. Override in subclasses. Resolved from
+    #: ``DALSTON_ENGINE_ID`` env var at construction time, falling back to
+    #: this class attribute.
+    ENGINE_ID: str = "unknown"
+
     def __init__(self) -> None:
         """Initialize the engine."""
+        self.engine_id = os.environ.get("DALSTON_ENGINE_ID", self.ENGINE_ID)
         self._runner = None
         # structlog loggers are lazy proxies — configuration is resolved on
         # first log call, not at creation time.  EngineRunner.__init__() calls
@@ -180,61 +187,17 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
         """Return engine capabilities for registration and validation.
 
         Loads capabilities from engine.yaml if available, otherwise falls back
-        to a minimal default. The engine.yaml is expected at /etc/dalston/engine.yaml
-        in containers, or ./engine.yaml for local development.
-
-        Returns:
-            EngineCapabilities describing what this engine can do
+        to a minimal default.
         """
         card = load_engine_yaml()
         if card is None:
-            # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                engine_id=getattr(self, "engine_id", "unknown"),
+                engine_id=self.engine_id,
                 version="unknown",
                 stages=[],
             )
 
-        # Extract capabilities from engine.yaml
-        caps = card.get("capabilities", {})
-        hardware = card.get("hardware", {})
-        performance = card.get("performance", {})
-
-        # Determine GPU requirement from profile-specific metadata.
-        # container.gpu is authoritative when present; otherwise infer from
-        # hardware metadata for non-container profiles.
-        container = card.get("container", {})
-        gpu_field = container.get("gpu")
-        if gpu_field is None:
-            min_vram_gb = hardware.get("min_vram_gb")
-            supports_cpu = hardware.get("supports_cpu", True)
-            gpu_required = bool(min_vram_gb and not supports_cpu)
-        else:
-            gpu_required = gpu_field == "required"
-
-        # Stages: derive from stage field for batch engines
-        stage = card.get("stage")
-        stages = [stage] if stage else []
-
-        return EngineCapabilities(
-            engine_id=card.get("engine_id") or card.get("id", "unknown"),
-            version=card.get("version", "unknown"),
-            stages=stages,
-            supports_word_timestamps=caps.get("word_timestamps", False),
-            supports_native_streaming=caps.get("native_streaming", False),
-            model_variants=None,
-            gpu_required=gpu_required,
-            gpu_vram_mb=(
-                hardware.get("min_vram_gb", 0) * 1024
-                if hardware.get("min_vram_gb")
-                else None
-            ),
-            supports_cpu=hardware.get("supports_cpu", True),
-            min_ram_gb=hardware.get("min_ram_gb"),
-            rtf_gpu=performance.get("rtf_gpu"),
-            rtf_cpu=performance.get("rtf_cpu"),
-            max_concurrency=caps.get("max_concurrency"),
-        )
+        return EngineCapabilities(**parse_engine_capabilities(card))
 
     def run(self) -> None:
         """Start the engine's processing loop.

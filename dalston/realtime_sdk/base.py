@@ -11,9 +11,8 @@ import json
 import os
 import signal
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
 
 import numpy as np
 import structlog
@@ -34,7 +33,12 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
     RESAMPLE_QUALITY_PROFILES,
 )
-from dalston.common.engine_yaml import load_engine_yaml
+from dalston.common.engine_yaml import (
+    generate_instance_id,
+    is_port_in_use,
+    load_engine_yaml,
+    parse_engine_capabilities,
+)
 from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
@@ -50,6 +54,9 @@ from dalston.common.ws_close_codes import (
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.realtime_sdk.model_manager import AsyncModelManager
 from dalston.realtime_sdk.session import SessionConfig, SessionHandler
+
+if TYPE_CHECKING:
+    from dalston.common.node_identity import NodeIdentity
 
 logger = structlog.get_logger()
 
@@ -132,12 +139,7 @@ class RealtimeEngine(ABC):
     def __init__(self) -> None:
         """Initialize the engine."""
         self.engine_id = os.environ.get("DALSTON_ENGINE_ID", self.ENGINE_ID)
-        # Must be unique per engine to avoid Redis key collisions in the unified registry.
-        stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
-            "DALSTON_INSTANCE"
-        )
-        suffix = (stable_id or uuid4().hex)[:12]
-        self.instance = f"{self.engine_id}-rt-{suffix}"
+        self.instance = generate_instance_id(self.engine_id, infix="rt")
         self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
         self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "2"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -155,9 +157,7 @@ class RealtimeEngine(ABC):
         self._sessions: dict[str, SessionHandler] = {}
         self._unified_registry: UnifiedEngineRegistry | None = None
         self._running = False
-        self._node_hostname: str = ""
-        self._node_id: str = ""
-        self._deploy_env: str = "local"
+        self._node: NodeIdentity | None = None
         self._server = None
         self._metrics_runner: web.AppRunner | None = None
 
@@ -302,17 +302,12 @@ class RealtimeEngine(ABC):
         """Return engine capabilities for registration and routing.
 
         Loads capabilities from engine.yaml if available, otherwise falls back
-        to values from getter methods. The engine.yaml is expected at
-        /etc/dalston/engine.yaml in containers, or ./engine.yaml for local dev.
-
-        Returns:
-            EngineCapabilities describing what this engine can do
+        to values from getter methods.
         """
         card = load_engine_yaml()
         if card is None:
-            # Fallback for engines without engine.yaml
             return EngineCapabilities(
-                engine_id=self.get_engine_id(),
+                engine_id=self.engine_id,
                 version="unknown",
                 stages=["transcribe"],
                 supports_native_streaming=self.supports_native_streaming(),
@@ -320,48 +315,15 @@ class RealtimeEngine(ABC):
                 vocabulary_support=self.get_vocabulary_support(),
             )
 
-        # Extract capabilities from engine.yaml
-        caps = card.get("capabilities", {})
-        hardware = card.get("hardware", {})
-        performance = card.get("performance", {})
-
-        # Determine GPU requirement from profile-specific metadata.
-        # container.gpu is authoritative when present; otherwise infer from
-        # hardware metadata for non-container profiles.
-        container = card.get("container", {})
-        gpu_field = container.get("gpu")
-        if gpu_field is None:
-            min_vram_gb = hardware.get("min_vram_gb")
-            supports_cpu = hardware.get("supports_cpu", True)
-            gpu_required = bool(min_vram_gb and not supports_cpu)
-        else:
-            gpu_required = gpu_field == "required"
-
-        # Stages: derive from stage field
-        stage = card.get("stage")
-        stages = [stage] if stage else ["transcribe"]
-
         return EngineCapabilities(
-            engine_id=card.get("engine_id") or card.get("id", self.get_engine_id()),
-            version=card.get("version", "unknown"),
-            stages=stages,
-            supports_word_timestamps=caps.get("word_timestamps", False),
-            supports_native_streaming=caps.get(
-                "native_streaming", self.supports_native_streaming()
-            ),
-            model_variants=None,
-            gpu_required=gpu_required,
-            gpu_vram_mb=(
-                hardware.get("min_vram_gb", 0) * 1024
-                if hardware.get("min_vram_gb")
-                else None
-            ),
-            supports_cpu=hardware.get("supports_cpu", True),
-            min_ram_gb=hardware.get("min_ram_gb"),
-            rtf_gpu=performance.get("rtf_gpu"),
-            rtf_cpu=performance.get("rtf_cpu"),
-            max_concurrency=caps.get("max_concurrency", self.max_sessions),
-            vocabulary_support=self.get_vocabulary_support(),
+            **parse_engine_capabilities(
+                card,
+                default_engine_id=self.engine_id,
+                default_stages=["transcribe"],
+                supports_native_streaming=self.supports_native_streaming(),
+                max_concurrency=self.max_sessions,
+                vocabulary_support=self.get_vocabulary_support(),
+            )
         )
 
     def health_check(self) -> dict[str, Any]:
@@ -455,11 +417,8 @@ class RealtimeEngine(ABC):
             get_gpu_memory_total,
         )
 
-        node = await asyncio.to_thread(detect_node_identity)
+        self._node = await asyncio.to_thread(detect_node_identity)
         gpu_total = get_gpu_memory_total()
-        self._node_hostname = node.hostname
-        self._node_id = node.node_id
-        self._deploy_env = node.deploy_env
 
         # Register with unified engine registry
         import redis.asyncio as aioredis
@@ -483,11 +442,11 @@ class RealtimeEngine(ABC):
                 supports_word_timestamps=capabilities.supports_word_timestamps,
                 includes_diarization=capabilities.includes_diarization,
                 vocabulary_support=vocab_support,
-                hostname=node.hostname,
-                node_id=node.node_id,
-                deploy_env=node.deploy_env,
-                aws_az=node.region,
-                aws_instance_type=node.instance_type,
+                hostname=self._node.hostname,
+                node_id=self._node.node_id,
+                deploy_env=self._node.deploy_env,
+                aws_az=self._node.region,
+                aws_instance_type=self._node.instance_type,
                 gpu_memory_total=gpu_total,
             )
         )
@@ -587,9 +546,9 @@ class RealtimeEngine(ABC):
                             active_realtime=active,
                             models_loaded=loaded_models,
                             gpu_memory_used=gpu_mem,
-                            hostname=self._node_hostname,
-                            node_id=self._node_id,
-                            deploy_env=self._deploy_env,
+                            hostname=self._node.hostname,
+                            node_id=self._node.node_id,
+                            deploy_env=self._node.deploy_env,
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))
@@ -604,19 +563,12 @@ class RealtimeEngine(ABC):
             logger.debug("metrics_disabled_skipping_server")
             return
 
-        # In unified engines the batch runner's FastAPI HTTP server may
-        # already occupy this port (it starts before the RT engine).
-        # Probe first and skip to avoid a bind error.
-        import socket
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.1)
-            if s.connect_ex(("127.0.0.1", self.metrics_port)) == 0:
-                logger.info(
-                    "metrics_server_skipped_port_in_use",
-                    port=self.metrics_port,
-                )
-                return
+        if is_port_in_use(self.metrics_port):
+            logger.info(
+                "metrics_server_skipped_port_in_use",
+                port=self.metrics_port,
+            )
+            return
 
         try:
             app = web.Application()

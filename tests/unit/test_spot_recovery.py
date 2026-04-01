@@ -23,6 +23,7 @@ class TestEngineRunnerInstanceId:
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
+            mock_engine.engine_id = "whisper-cpu"
             mock_engine.get_capabilities.return_value = MagicMock(stages=["transcribe"])
 
             # Create two runner instances
@@ -44,6 +45,7 @@ class TestEngineRunnerInstanceId:
             from dalston.engine_sdk.runner import EngineRunner
 
             mock_engine = MagicMock()
+            mock_engine.engine_id = "faster-whisper"
             mock_engine.get_capabilities.return_value = MagicMock(stages=["transcribe"])
 
             runner = EngineRunner(mock_engine)
