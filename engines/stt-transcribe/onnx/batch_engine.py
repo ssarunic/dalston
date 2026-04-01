@@ -203,11 +203,9 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         return AlignmentMethod.CTC
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status."""
         model_stats = self._core.get_stats()
         return {
-            "status": "healthy",
-            "engine_id": self.engine_id,
+            **super().health_check(),
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),

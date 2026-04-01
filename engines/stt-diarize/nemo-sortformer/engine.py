@@ -313,19 +313,13 @@ class NemoSortformerEngine(Engine):
         return TaskResponse(data=output)
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status."""
-        cuda_available = False
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-        except ImportError:
-            pass
-
+        base = super().health_check()
+        cuda_available = base.get("cuda_available", False)
+        if not cuda_available and not self._disabled:
+            base["status"] = "unhealthy"
         return {
-            "status": "healthy" if cuda_available or self._disabled else "unhealthy",
+            **base,
             "device": getattr(self, "_device", "unknown"),
-            "cuda_available": cuda_available,
             "diarization_disabled": self._disabled,
             "active_model_id": self._active_loaded_model_id,
             "loaded_models": sorted(self._models.keys()),

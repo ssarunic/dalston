@@ -32,8 +32,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import torch
-
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Transcript,
@@ -380,28 +378,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU availability."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0
-        cuda_memory_total = 0
-
-        if cuda_available:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
         model_stats = self._core.get_stats()
-
         return {
-            "status": "healthy",
-            "engine_id": self.engine_id,
+            **super().health_check(),
             "device": self._core.device,
             "models_loaded": model_stats.get("loaded_models", []),
             "model_count": model_stats.get("model_count", 0),
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
         }
 
     def get_capabilities(self) -> EngineCapabilities:

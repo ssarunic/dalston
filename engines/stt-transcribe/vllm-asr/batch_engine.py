@@ -350,28 +350,12 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             self._set_runtime_state(loaded_model=loaded_model_id, status="idle")
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU and model info."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0.0
-        cuda_memory_total = 0.0
-
-        if cuda_available and cuda_device_count > 0:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
         return {
-            "status": "healthy",
-            "engine_id": self.engine_id,
+            **super().health_check(),
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
-            "supported_models": [],
             "s3_storage_enabled": self._model_storage is not None,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
             "gpu_memory_utilization": self._gpu_memory_utilization,
         }
 

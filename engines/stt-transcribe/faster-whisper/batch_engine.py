@@ -236,28 +236,11 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
             self._set_runtime_state(status="idle")
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU availability and model stats."""
-        cuda_available = False
-        cuda_device_count = 0
-
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-            cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        except ImportError:
-            pass
-
-        manager_stats = self._core.get_stats()
-
         return {
-            "status": "healthy",
-            "engine_id": self.engine_id,
+            **super().health_check(),
             "device": self._core.device,
             "compute_type": self._core.compute_type,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "model_manager": manager_stats,
+            "model_manager": self._core.get_stats(),
         }
 
     def get_local_cache_stats(self) -> dict[str, Any] | None:

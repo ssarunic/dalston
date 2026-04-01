@@ -110,14 +110,34 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
     def health_check(self) -> dict[str, Any]:
         """Return health status for monitoring.
 
-        Override this method to provide engine-specific health information.
-
-        Returns:
-            Dictionary with at least a "status" key ("healthy" or "unhealthy")
+        The base implementation includes engine_id and CUDA details.
+        Override and spread ``super().health_check()`` to add
+        engine-specific fields.
         """
-        return {
+        info: dict[str, Any] = {
             "status": "healthy",
+            "engine_id": self.engine_id,
         }
+
+        try:
+            import torch
+
+            cuda_available = torch.cuda.is_available()
+            info["cuda_available"] = cuda_available
+            if cuda_available:
+                info["cuda_device_count"] = torch.cuda.device_count()
+                info["cuda_memory_allocated_gb"] = round(
+                    torch.cuda.memory_allocated() / 1e9, 2
+                )
+                info["cuda_memory_total_gb"] = round(
+                    torch.cuda.get_device_properties(0).total_memory / 1e9, 2
+                )
+            else:
+                info["cuda_device_count"] = 0
+        except ImportError:
+            pass
+
+        return info
 
     def shutdown(self) -> None:  # noqa: B027
         """Clean up resources on engine shutdown.

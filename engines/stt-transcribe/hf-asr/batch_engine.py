@@ -308,19 +308,11 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         )
 
     def health_check(self) -> dict[str, Any]:
-        """Return health status including GPU availability and model stats."""
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        manager_stats = self._manager.get_stats()
-
         return {
-            "status": "healthy",
-            "engine_id": self.engine_id,
+            **super().health_check(),
             "device": self._device,
             "torch_dtype": str(self._torch_dtype),
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "model_manager": manager_stats,
+            "model_manager": self._manager.get_stats(),
         }
 
     def get_local_cache_stats(self) -> dict[str, Any] | None:

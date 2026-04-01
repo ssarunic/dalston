@@ -112,7 +112,6 @@ class EngineRunner:
         self._materializer = ArtifactMaterializer(store=S3ArtifactStore())
         self._tmp_root: Path = Path(tempfile.gettempdir()).resolve()
 
-        # Engine ID: resolved by Engine.__init__() from DALSTON_ENGINE_ID env var.
         self.engine_id = engine.engine_id
         self.instance = generate_instance_id(self.engine_id)
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")

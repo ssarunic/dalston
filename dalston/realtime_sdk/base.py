@@ -281,19 +281,20 @@ class RealtimeEngine(ABC):
         return None
 
     def get_gpu_memory_usage(self) -> str:
-        """Return GPU memory usage string.
+        """Return process-scoped GPU memory usage string (e.g., "4.2GB").
 
-        Override to report actual GPU usage for monitoring.
+        Uses ``torch.cuda.memory_allocated()`` which reports memory held
+        by this process only.  This is important because heartbeat values
+        are summed per node in the console API — using node-wide metrics
+        (e.g. nvidia-smi) would inflate the total on multi-engine nodes.
 
-        Returns:
-            GPU memory usage string (e.g., "4.2GB"). Default: "0GB"
+        Override in engines that don't use local GPU (e.g. Riva returns "0GB").
         """
         try:
             import torch
 
             if torch.cuda.is_available():
-                used = torch.cuda.memory_allocated() / 1e9
-                return f"{used:.1f}GB"
+                return f"{torch.cuda.memory_allocated() / 1e9:.1f}GB"
         except ImportError:
             pass
         return "0GB"
