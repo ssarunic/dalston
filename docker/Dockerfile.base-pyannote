@@ -35,10 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # PyTorch + pyannote.audio (the heavy part — 2-3GB)
-# GPU: use CUDA 12.6 wheels matching the base image
+# GPU: use CUDA 13.2 wheels matching the base image
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
-            --extra-index-url https://download.pytorch.org/whl/cu126 \
+            --extra-index-url https://download.pytorch.org/whl/cu132 \
             "pyannote.audio>=4.0.0,<5.0.0" \
             "torchcodec>=0.11.0" \
             "huggingface_hub>=1.0.0"; \
