@@ -92,6 +92,12 @@ class FasterWhisperConfig:
     task: str = "transcribe"
     initial_prompt: str | None = None
     hotwords: str | None = None
+    # Anti-hallucination defaults aligned with WhisperX
+    condition_on_previous_text: bool = False
+    no_speech_threshold: float = 0.6
+    compression_ratio_threshold: float = 2.4
+    hallucination_silence_threshold: float | None = 2.0
+    repetition_penalty: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +261,16 @@ class FasterWhisperInference:
             "vad_filter": config.vad_filter,
             "word_timestamps": config.word_timestamps,
             "temperature": config.temperature,
+            "condition_on_previous_text": config.condition_on_previous_text,
+            "no_speech_threshold": config.no_speech_threshold,
+            "compression_ratio_threshold": config.compression_ratio_threshold,
+            "repetition_penalty": config.repetition_penalty,
         }
+
+        if config.hallucination_silence_threshold is not None:
+            transcribe_kwargs["hallucination_silence_threshold"] = (
+                config.hallucination_silence_threshold
+            )
 
         if config.task in {"transcribe", "translate"}:
             transcribe_kwargs["task"] = config.task

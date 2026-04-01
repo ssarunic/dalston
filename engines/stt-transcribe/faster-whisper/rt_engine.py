@@ -127,6 +127,8 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             temperature=params.temperature,
             task=params.task,
             initial_prompt=initial_prompt,
+            # RT chunks are short VAD segments — no silence gap detection needed
+            hallucination_silence_threshold=None,
         )
 
         if vocabulary:
