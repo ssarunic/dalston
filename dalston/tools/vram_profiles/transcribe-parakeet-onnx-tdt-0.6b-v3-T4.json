@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "engine_id": "onnx",
-  "model_id": "parakeet-onnx-tdt-0.6b-v3",
+  "model_id": "istupakov/parakeet-tdt-0.6b-v3-onnx",
   "stage": "transcribe",
   "gpu": "Tesla T4",
   "gpu_vram_mb": 15360,
