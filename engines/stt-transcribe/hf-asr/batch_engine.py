@@ -56,6 +56,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
     - CPU: float32 for compatibility
     """
 
+    ENGINE_ID = "hf-asr"
     DEFAULT_MODEL = "openai/whisper-large-v3"
 
     def __init__(self, manager: HFTransformersModelManager | None = None) -> None:
@@ -72,7 +73,6 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
 
         if manager is not None:
             self._manager = manager
@@ -98,7 +98,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             device=self._device,
             torch_dtype=str(self._torch_dtype),
@@ -298,7 +298,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
             text=text,
             segments=segments,
             language=language or "auto",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             alignment_method=(
                 AlignmentMethod.ATTENTION
                 if has_word_timestamps
@@ -315,7 +315,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "engine_id": self.engine_id,
             "device": self._device,
             "torch_dtype": str(self._torch_dtype),
             "cuda_available": cuda_available,

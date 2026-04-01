@@ -141,7 +141,11 @@ class CompositeEngine(Engine):
         super().__init__()
 
         card = load_engine_yaml() or {}
-        self._engine_id = card.get("engine_id") or card.get("id", "composite")
+        # Override engine_id from YAML if present (composite engines derive
+        # their identity from engine.yaml rather than DALSTON_ENGINE_ID).
+        yaml_engine_id = card.get("engine_id") or card.get("id")
+        if yaml_engine_id:
+            self.engine_id = yaml_engine_id
         self._children = _parse_compose_block(card)
         self._pipeline_config = card.get("pipeline", {})
 
@@ -153,7 +157,7 @@ class CompositeEngine(Engine):
 
         self.logger.info(
             "composite_engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             children=[c.engine_id for c in self._children],
             stages=list(self._stage_to_child.keys()),
         )
@@ -257,7 +261,7 @@ class CompositeEngine(Engine):
         """Dispatch to child engines based on stage."""
         stage = task_request.config.get("_stage", task_request.stage)
 
-        if stage == "combined" or stage == self._engine_id:
+        if stage == "combined" or stage == self.engine_id:
             return self._run_all(task_request, ctx)
 
         # Single-stage dispatch
@@ -450,7 +454,7 @@ class CompositeEngine(Engine):
     ) -> dict[str, Any]:
         """Merge child results into a stage-keyed envelope (§3.3)."""
         merged: dict[str, Any] = {
-            "engine_id": self._engine_id,
+            "engine_id": self.engine_id,
             "stages_completed": list(results.keys()),
         }
 
@@ -487,7 +491,7 @@ class CompositeEngine(Engine):
         caps = card.get("capabilities", {})
 
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version=card.get("version", "1.0.0"),
             stages=all_stages,
             supports_word_timestamps="transcribe" in all_stages,
@@ -510,7 +514,7 @@ class CompositeEngine(Engine):
         """Aggregate health from all children via HTTP."""
         health: dict[str, Any] = {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "engine_id": self.engine_id,
             "children": {},
         }
 

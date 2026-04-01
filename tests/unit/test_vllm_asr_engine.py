@@ -226,7 +226,7 @@ class TestVLLMASREngine:
 
     def test_engine_init(self, engine):
         """Engine should initialize with correct defaults."""
-        assert engine._engine_id == "vllm-asr"
+        assert engine.engine_id == "vllm-asr"
         assert engine._default_model_id == "mistralai/Voxtral-Mini-3B-2507"
         assert engine._llm is None
         assert engine._loaded_model_id is None
@@ -430,7 +430,7 @@ class TestVLLMASREngineEnvironment:
             VllmAsrBatchEngine = load_vllm_asr_engine()
             engine = VllmAsrBatchEngine()
 
-            assert engine._engine_id == "custom-vllm"
+            assert engine.engine_id == "custom-vllm"
 
     def test_custom_gpu_memory_utilization(self):
         """Custom GPU memory utilization should be respected."""

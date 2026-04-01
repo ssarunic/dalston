@@ -56,6 +56,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
     - CPU: int8 for efficient inference (all models including large-v3-turbo)
     """
 
+    ENGINE_ID = "faster-whisper"
     DEFAULT_BEAM_SIZE = 5
     DEFAULT_VAD_FILTER = True
     DEFAULT_MODEL = "large-v3-turbo"
@@ -67,14 +68,13 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
 
         # Use injected core (unified runner) or create own (standalone)
         self._core = core if core is not None else FasterWhisperInference.from_env()
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             device=self._core.device,
             compute_type=self._core.compute_type,
@@ -225,7 +225,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
                 text=full_text,
                 segments=segments,
                 language=result.language,
-                engine_id=self._engine_id,
+                engine_id=self.engine_id,
                 language_confidence=round(result.language_probability, 3),
                 duration=result.duration,
                 alignment_method=AlignmentMethod.ATTENTION,
@@ -252,7 +252,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "engine_id": self.engine_id,
             "device": self._core.device,
             "compute_type": self._core.compute_type,
             "cuda_available": cuda_available,

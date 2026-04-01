@@ -73,6 +73,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     GPU is required - vLLM does not support CPU inference.
     """
 
+    ENGINE_ID = "vllm-asr"
     DEFAULT_MODEL = "mistralai/Voxtral-Mini-3B-2507"
 
     def __init__(
@@ -97,7 +98,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._tokenizer = None
         self._model_storage: MultiSourceModelStorage | None = None
 
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
@@ -137,7 +137,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self.logger.info(
             "engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model=self._default_model_id,
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
@@ -339,7 +339,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
             self.logger.info("transcription_complete", char_count=len(raw_text))
 
-            transcript.engine_id = self._engine_id
+            transcript.engine_id = self.engine_id
             if channel is not None:
                 transcript.channel = channel
             if warnings:
@@ -362,7 +362,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         return {
             "status": "healthy",
-            "engine_id": self._engine_id,
+            "engine_id": self.engine_id,
             "model_loaded": self._llm is not None,
             "loaded_model_id": self._loaded_model_id,
             "loaded_model_path": self._loaded_model_path,
@@ -378,7 +378,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     def get_capabilities(self) -> EngineCapabilities:
         """Return vLLM-ASR engine capabilities."""
         return EngineCapabilities(
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             version="1.0.0",
             stages=["transcribe"],
             supports_word_timestamps=False,  # Audio LLMs don't produce timestamps

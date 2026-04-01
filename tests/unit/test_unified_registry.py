@@ -644,6 +644,22 @@ class TestUnifiedRegistryWriter:
         assert mapping["loaded_model"] == "model-v3"
         mock_redis.expire.assert_called_once()
 
+    def test_heartbeat_realtime_fields(self, writer, mock_redis):
+        """Sync writer supports the same fields as the async registry."""
+        writer.heartbeat(
+            "onnx-rt-abc123",
+            status="ready",
+            active_realtime=2,
+            models_loaded=["model-a", "model-b"],
+            gpu_memory_used="4.2GB",
+        )
+
+        mapping = mock_redis.hset.call_args[1]["mapping"]
+        assert mapping["status"] == "ready"
+        assert mapping["active_realtime"] == "2"
+        assert mapping["models_loaded"] == '["model-a", "model-b"]'
+        assert mapping["gpu_memory_used"] == "4.2GB"
+
     def test_deregister(self, writer, mock_redis):
         writer.deregister("fw-abc123")
 

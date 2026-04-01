@@ -84,7 +84,7 @@ def _build_engine_with_mock_core(core_result: OnnxTranscriptionResult):
         engine = _ParakeetOnnxEngine.__new__(_ParakeetOnnxEngine)
         engine._core = mock_core
         engine._default_model_id = "parakeet-onnx-ctc-0.6b"
-        engine._engine_id = "onnx"
+        engine.engine_id = "onnx"
         engine.logger = MagicMock()
     return engine
 

@@ -197,7 +197,9 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
                 stages=[],
             )
 
-        return EngineCapabilities(**parse_engine_capabilities(card))
+        return EngineCapabilities(
+            **parse_engine_capabilities(card, default_engine_id=self.engine_id)
+        )
 
     def run(self) -> None:
         """Start the engine's processing loop.

@@ -95,7 +95,7 @@ class TestHFASREngine:
             with patch("torch.cuda.is_available", return_value=False):
                 HfAsrBatchEngine = load_hf_asr_engine()
                 engine = HfAsrBatchEngine()
-                assert engine._engine_id == "custom-hf-asr"
+                assert engine.engine_id == "custom-hf-asr"
 
     def test_health_check(self, engine):
         """Health check should return healthy status."""
