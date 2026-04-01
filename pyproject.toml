@@ -109,7 +109,7 @@ dev = [
     # Pinned OpenAI SDK for M61 contract suite
     "openai==2.30.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.40.0",
+    "elevenlabs==2.41.0",
 ]
 
 [build-system]
