@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "engine_id": "pyannote-4.0",
+  "model_id": "pyannote/speaker-diarization-community-1",
+  "stage": "diarize",
+  "gpu": "Tesla T4",
+  "gpu_vram_mb": 15360,
+  "cuda_overhead_mb": 677,
+  "calibrated_at": "2026-04-01T21:20:30.777379+00:00",
+  "measurements": [
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 688,
+      "elapsed_s": 0.22
+    },
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.11
+    },
+    {
+      "params": {
+        "audio_s": 60
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.11
+    },
+    {
+      "params": {
+        "audio_s": 180
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.31
+    },
+    {
+      "params": {
+        "audio_s": 180
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.31
+    },
+    {
+      "params": {
+        "audio_s": 180
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.31
+    },
+    {
+      "params": {
+        "audio_s": 300
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.51
+    },
+    {
+      "params": {
+        "audio_s": 300
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.5
+    },
+    {
+      "params": {
+        "audio_s": 300
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.5
+    },
+    {
+      "params": {
+        "audio_s": 600
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 0.99
+    },
+    {
+      "params": {
+        "audio_s": 600
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 1.01
+    },
+    {
+      "params": {
+        "audio_s": 600
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 1.01
+    },
+    {
+      "params": {
+        "audio_s": 900
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 1.55
+    },
+    {
+      "params": {
+        "audio_s": 900
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 1.53
+    },
+    {
+      "params": {
+        "audio_s": 900
+      },
+      "peak_vram_mb": 1365,
+      "delta_mb": 0,
+      "elapsed_s": 1.52
+    }
+  ],
+  "model": {
+    "weights_mb": 677,
+    "formula": "S + alpha_duration * audio_duration_s",
+    "coefficients": {
+      "S": 1365.0,
+      "alpha_duration": -0.0
+    },
+    "r_squared": 1.0,
+    "safety_margin": 0.15
+  }
+}
