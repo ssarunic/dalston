@@ -1058,6 +1058,7 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
   -v /data/models:/data/models \\
   -e DALSTON_METRICS_PORT={port} \\
   -e DALSTON_DEVICE=cuda \\
+  -e DALSTON_VRAM_SHARE=1.0 \\
   -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
