@@ -1843,10 +1843,10 @@ def _write_gpu_prometheus_targets(
     Uses SSH via Tailscale to write a JSON targets file that Prometheus picks up
     via file_sd_configs. Prometheus rescans every 30s, so targets appear quickly.
     """
-    # Build targets from all workers with known private IPs
+    # Build targets from all workers, resolving actual Tailscale hostnames
     target_groups = []
     for w in workers:
-        ts_host = f"dalston-gpu-{w['name']}"
+        ts_host = _resolve_tailscale_host(f"dalston-gpu-{w['name']}")
         engines = w.get("engines", [])
         ports = [f"{ts_host}:{9100 + i}" for i in range(len(engines))]
         target_groups.append(
