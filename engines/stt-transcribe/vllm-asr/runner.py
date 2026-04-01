@@ -23,6 +23,7 @@ import asyncio
 import gc
 import os
 import signal
+import tempfile
 import threading
 from typing import Any
 
@@ -73,6 +74,7 @@ def _create_vllm_instance() -> Any:
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=max_model_len,
         limit_mm_per_prompt={"audio": 1},
+        allowed_local_media_path=tempfile.gettempdir(),
     )
 
     logger.info("shared_vllm_model_loaded", model_id=model_id)
