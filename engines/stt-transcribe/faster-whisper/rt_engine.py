@@ -61,6 +61,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             core: Optional shared FasterWhisperInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
         super().__init__()
         self._core: FasterWhisperInference | None = core
 
@@ -180,7 +181,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
-        return "faster-whisper"
+        return self._engine_id
 
     def get_vocabulary_support(self):
         """Faster-whisper uses prompt conditioning (initial_prompt) in both modes."""

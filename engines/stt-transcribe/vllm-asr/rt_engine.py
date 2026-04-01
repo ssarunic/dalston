@@ -47,12 +47,11 @@ class VllmAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             llm: Optional shared vLLM LLM instance. If provided,
                  load_models() skips creating its own instance.
         """
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         super().__init__()
 
         self._llm = llm
         self._loaded_model_id: str | None = None
-
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )

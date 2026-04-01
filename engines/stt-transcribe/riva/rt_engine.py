@@ -37,9 +37,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     """
 
     def __init__(self, core: RivaClient | None = None) -> None:
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
         super().__init__()
         self._core: RivaClient | None = core
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
 
     def load_models(self) -> None:
         """Initialize gRPC connection to NIM sidecar.

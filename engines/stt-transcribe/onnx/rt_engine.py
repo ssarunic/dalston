@@ -66,6 +66,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
             core: Optional shared OnnxInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
         super().__init__()
         self._core: OnnxInference | None = core
 
@@ -196,7 +197,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
 
     def get_engine_id(self) -> str:
         """Return the inference framework identifier."""
-        return "onnx"
+        return self._engine_id
 
     def get_vocabulary_support(self):
         """ONNX Runtime has no vocabulary boosting mechanism.

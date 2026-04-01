@@ -61,12 +61,11 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             manager: Optional shared HFTransformersModelManager. If provided,
                      load_models() skips creating its own manager.
         """
+        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
         super().__init__()
 
         self._manager: HFTransformersModelManager | None = manager
         self._model_manager: AsyncModelManager | None = None
-
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )

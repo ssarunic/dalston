@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 import numpy as np
 import structlog
@@ -118,7 +119,7 @@ class RealtimeEngine(ABC):
             asyncio.run(engine.run())
 
     Environment variables:
-        DALSTON_INSTANCE: Unique identifier for this instance (required)
+        DALSTON_INSTANCE: Stable identifier for this instance (optional, auto-generated if unset)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected)
         DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 2)
@@ -127,7 +128,12 @@ class RealtimeEngine(ABC):
 
     def __init__(self) -> None:
         """Initialize the engine."""
-        self.instance = os.environ.get("DALSTON_INSTANCE", "realtime-worker")
+        # Must be unique per engine to avoid Redis key collisions in the unified registry.
+        stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
+            "DALSTON_INSTANCE"
+        )
+        suffix = (stable_id or uuid4().hex)[:12]
+        self.instance = f"{self.get_engine_id()}-rt-{suffix}"
         self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
         self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "2"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
