@@ -74,14 +74,15 @@ class AdaptiveVRAMParams:
     budget_mb: int = 0
     profile_source: str = "defaults"  # "calibrated" | "fallback" | "defaults"
 
-    def select(self, queue_depth: int, inflight: int) -> EngineVRAMParams:
-        """Pick the right param set based on current load.
+    def select(self, queue_depth: int) -> EngineVRAMParams:
+        """Pick the right param set based on pending work.
 
-        Uses solo params when the GPU would otherwise be idle between
-        small inference calls.  Switches to concurrent params when
-        there is enough work to keep the GPU busy across files.
+        Uses solo params (high batch) when the queue is nearly empty,
+        maximizing per-file throughput.  Switches to concurrent params
+        (low batch) when work is queued, leaving VRAM headroom for
+        parallel processing.
         """
-        if queue_depth <= 1 and inflight == 0:
+        if queue_depth <= 1:
             return self.solo
         return self.concurrent
 

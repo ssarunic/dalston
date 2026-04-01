@@ -97,7 +97,7 @@ class BaseBatchTranscribeEngine(Engine):
             adaptive = runner.get_adaptive_params()
             if adaptive is not None:
                 queue_depth = runner.get_queue_depth()
-                vram_params = adaptive.select(queue_depth, inflight=1)
+                vram_params = adaptive.select(queue_depth)
                 return vram_params.vad_batch_size
         return fallback
 
