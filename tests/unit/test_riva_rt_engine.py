@@ -308,13 +308,13 @@ class TestRivaRtInitialization:
         with pytest.raises(RuntimeError, match="not initialized"):
             engine.transcribe(audio, _make_params("en"))
 
-    def test_shutdown_does_not_raise(self, engine_with_mock) -> None:
-        engine_with_mock.shutdown()
+    async def test_shutdown_does_not_raise(self, engine_with_mock) -> None:
+        await engine_with_mock.shutdown()
 
-    def test_shutdown_idempotent(self, riva_rt_engine_class) -> None:
+    async def test_shutdown_idempotent(self, riva_rt_engine_class) -> None:
         engine = riva_rt_engine_class()
         # shutdown before load_models should not raise
-        engine.shutdown()
+        await engine.shutdown()
 
 
 class TestRivaRtWordConfidence:

@@ -32,6 +32,7 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
     TranscriptWord,
+    VocabularySupport,
 )
 from dalston.engine_sdk.inference.onnx_inference import OnnxInference
 from dalston.realtime_sdk import AsyncModelManager
@@ -56,6 +57,8 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
     Supports CTC, TDT, and RNNT decoder variants.
     """
 
+    ENGINE_ID = "onnx"
+
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-onnx-ctc-0.6b"
 
@@ -66,7 +69,6 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
             core: Optional shared OnnxInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
         super().__init__()
         self._core: OnnxInference | None = core
 
@@ -77,6 +79,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
+        is_shared = self._core is not None
         if self._core is None:
             # Standalone mode — create own core
             self._core = OnnxInference.from_env()
@@ -91,7 +94,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
             device=self._core.device,
             quantization=self._core.quantization,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
-            shared_core=self._core is not None,
+            shared_core=is_shared,
         )
 
     def transcribe_v1(
@@ -165,7 +168,7 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=result.text,
             segments=segments,
             language=language if language != "auto" else "en",
-            engine_id="onnx",
+            engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
         )
 
@@ -195,10 +198,6 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return list of curated model aliases."""
         return OnnxInference.CURATED_MODELS
 
-    def get_engine_id(self) -> str:
-        """Return the inference framework identifier."""
-        return self._engine_id
-
     def get_vocabulary_support(self):
         """ONNX Runtime has no vocabulary boosting mechanism.
 
@@ -207,40 +206,14 @@ class OnnxRealtimeEngine(BaseRealtimeTranscribeEngine):
         Runtime does not expose decoding strategy APIs. Use the NeMo
         engine if vocabulary boosting is required.
         """
-        from dalston.common.pipeline_types import VocabularySupport
-
         return VocabularySupport()
-
-    def get_gpu_memory_usage(self) -> str:
-        """Return GPU memory usage string."""
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                used = torch.cuda.memory_allocated() / 1e9
-                return f"{used:.1f}GB"
-        except ImportError:
-            pass
-        return "0GB"
 
     def health_check(self) -> dict[str, Any]:
         """Return health status including model and device info."""
-        base_health = super().health_check()
-
-        model_stats = {}
-        if self._model_manager is not None:
-            model_stats = self._model_manager.get_stats()
-
-        device = self._core.device if self._core else "unknown"
-        quantization = self._core.quantization if self._core else "unknown"
-
         return {
-            **base_health,
-            "models_loaded": model_stats.get("loaded_models", []),
-            "model_count": model_stats.get("model_count", 0),
-            "max_loaded": model_stats.get("max_loaded", 0),
-            "device": device,
-            "quantization": quantization,
+            **super().health_check(),
+            "device": self._core.device if self._core else "unknown",
+            "quantization": self._core.quantization if self._core else "unknown",
         }
 
 

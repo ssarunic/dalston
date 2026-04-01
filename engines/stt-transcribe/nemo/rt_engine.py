@@ -29,13 +29,14 @@ from typing import Any
 
 import numpy as np
 import structlog
-import torch
 
 from dalston.common.pipeline_types import (
     AlignmentMethod,
     Transcript,
     TranscriptionRequest,
     TranscriptWord,
+    VocabularyMethod,
+    VocabularySupport,
 )
 from dalston.engine_sdk.inference.nemo_inference import NemoInference
 from dalston.realtime_sdk import AsyncModelManager
@@ -68,6 +69,8 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         DALSTON_DEVICE: Device to use (cuda, cpu). Defaults to cuda if available.
     """
 
+    ENGINE_ID = "nemo"
+
     # Default model when client doesn't specify
     DEFAULT_MODEL = "parakeet-rnnt-0.6b"
 
@@ -78,7 +81,6 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             core: Optional shared NemoInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
         super().__init__()
         self._core: NemoInference | None = core
 
@@ -200,7 +202,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=result.text,
             segments=segments,
             language=language if language != "auto" else "en",
-            engine_id="nemo",
+            engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
         )
 
@@ -281,7 +283,7 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
                     )
                 ],
                 language=language if language != "auto" else "en",
-                engine_id="nemo",
+                engine_id=self.engine_id,
                 language_confidence=confidence,
             )
 
@@ -358,57 +360,19 @@ class NemoRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return list of supported model identifiers."""
         return NemoInference.SUPPORTED_MODELS
 
-    def get_engine_id(self) -> str:
-        """Return the inference framework identifier."""
-        return self._engine_id
-
     def get_vocabulary_support(self):
         """NeMo supports GPU-PB phrase boosting in batch only (RT not yet implemented)."""
-        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
-
         return VocabularySupport(
             method=VocabularyMethod.PHRASE_BOOSTING,
             batch=True,
             realtime=False,
         )
 
-    def get_gpu_memory_usage(self) -> str:
-        """Return GPU memory usage string."""
-        if torch.cuda.is_available():
-            used = torch.cuda.memory_allocated() / 1e9
-            return f"{used:.1f}GB"
-        return "0GB"
-
     def health_check(self) -> dict[str, Any]:
         """Return health status including model and GPU info."""
-        base_health = super().health_check()
-
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0
-        cuda_memory_total = 0
-
-        if cuda_available:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
-        # Get model manager stats
-        model_stats = {}
-        if self._model_manager is not None:
-            model_stats = self._model_manager.get_stats()
-
-        device = self._core.device if self._core else "unknown"
-
         return {
-            **base_health,
-            "models_loaded": model_stats.get("loaded_models", []),
-            "model_count": model_stats.get("model_count", 0),
-            "max_loaded": model_stats.get("max_loaded", 0),
-            "device": device,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
+            **super().health_check(),
+            "device": self._core.device if self._core else "unknown",
         }
 
 

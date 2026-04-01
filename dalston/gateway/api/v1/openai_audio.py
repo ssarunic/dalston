@@ -34,8 +34,8 @@ logger = structlog.get_logger()
 
 # Default engine for OpenAI model mapping (can be overridden via env var)
 DEFAULT_OPENAI_ENGINE = os.getenv("DALSTON_OPENAI_DEFAULT_ENGINE", "faster-whisper")
-DEFAULT_OPENAI_RUNTIME_MODEL_ID = os.getenv(
-    "DALSTON_OPENAI_DEFAULT_MODEL_ID",
+DEFAULT_OPENAI_RUNTIME_MODEL = os.getenv(
+    "DALSTON_OPENAI_DEFAULT_MODEL",
     "Systran/faster-whisper-base",
 )
 
@@ -157,7 +157,7 @@ OPENAI_MODEL_MAP: dict[str, str] = dict.fromkeys(
 
 OPENAI_RUNTIME_MODEL_MAP: dict[str, str] = dict.fromkeys(
     OPENAI_STT_CAPABILITIES,
-    DEFAULT_OPENAI_RUNTIME_MODEL_ID,
+    DEFAULT_OPENAI_RUNTIME_MODEL,
 )
 
 

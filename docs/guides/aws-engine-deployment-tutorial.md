@@ -178,7 +178,7 @@ Add to your `.env.aws`:
 cat >> /data/dalston/.env.aws << 'EOF'
 
 # Override the default ONNX model to TDT v3 (punctuation + capitalization)
-DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3
+DALSTON_DEFAULT_MODEL=parakeet-onnx-tdt-0.6b-v3
 DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3
 EOF
 ```
@@ -321,7 +321,7 @@ Add to your `.env.aws` to use the 0.6B v3 model (smaller VRAM, has punctuation +
 cat >> /data/dalston/.env.aws << 'EOF'
 
 # Override the default NeMo model to TDT 0.6B v3
-DALSTON_DEFAULT_MODEL_ID=nvidia/parakeet-tdt-0.6b-v3
+DALSTON_DEFAULT_MODEL=nvidia/parakeet-tdt-0.6b-v3
 DALSTON_MODEL_PRELOAD=nvidia/parakeet-tdt-0.6b-v3
 EOF
 ```
@@ -571,7 +571,7 @@ docker run -d --name onnx-parakeet \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
 
   -e DALSTON_ENGINE_ID=onnx \
-  -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
+  -e DALSTON_DEFAULT_MODEL=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \
@@ -647,7 +647,7 @@ docker run -d --name onnx-parakeet \
   -e AWS_SECRET_ACCESS_KEY=minioadmin \
 
   -e DALSTON_ENGINE_ID=onnx \
-  -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
+  -e DALSTON_DEFAULT_MODEL=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \
@@ -730,7 +730,7 @@ docker run -d --name onnx-parakeet --gpus all --restart unless-stopped \
   "${COMMON_ENV[@]}" \
 
   -e DALSTON_ENGINE_ID=onnx \
-  -e DALSTON_DEFAULT_MODEL_ID=parakeet-onnx-tdt-0.6b-v3 \
+  -e DALSTON_DEFAULT_MODEL=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_MODEL_PRELOAD=parakeet-onnx-tdt-0.6b-v3 \
   -e DALSTON_INSTANCE=stt-transcribe-onnx-aws \
   -e DALSTON_WORKER_PORT=9000 \

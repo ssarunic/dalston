@@ -138,7 +138,7 @@ class PyannoteEngine(Engine):
         loaded_model_id = params.loaded_model_id
         if not loaded_model_id:
             loaded_model_id = os.environ.get(
-                "DALSTON_DEFAULT_MODEL_ID",
+                "DALSTON_DEFAULT_MODEL",
                 "pyannote/speaker-diarization-community-1",
             )
 

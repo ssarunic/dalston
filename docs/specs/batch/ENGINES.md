@@ -372,7 +372,7 @@ class MyTranscribeEngine(Engine):
         del ctx
         # Parse canonical typed transcribe params
         params: TranscribeRequest = input.get_transcribe_params()
-        model_id = params.loaded_model_id or os.environ.get("DALSTON_DEFAULT_MODEL_ID")
+        model_id = params.loaded_model_id or os.environ.get("DALSTON_DEFAULT_MODEL")
 
         # Acquire model (loads if needed)
         with self.model_manager.acquire(model_id) as model:
@@ -564,7 +564,7 @@ stt-transcribe-faster-whisper:
     - REDIS_URL=redis://redis:6379
     - DALSTON_ENGINE_ID=faster-whisper
     - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
-    - DALSTON_DEFAULT_MODEL_ID=Systran/faster-distil-whisper-large-v3
+    - DALSTON_DEFAULT_MODEL=Systran/faster-distil-whisper-large-v3
     - DALSTON_MAX_LOADED_MODELS=2
     - DALSTON_MODEL_TTL_SECONDS=3600
   tmpfs:
@@ -598,7 +598,7 @@ stt-transcribe-faster-whisper:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DALSTON_DEFAULT_MODEL_ID` | (none) | Default model if not specified in task |
+| `DALSTON_DEFAULT_MODEL` | (none) | Default model if not specified in task |
 | `DALSTON_MODEL_PRELOAD` | (none) | Model to load at startup |
 | `DALSTON_MAX_LOADED_MODELS` | 2 | Max models in memory |
 | `DALSTON_MODEL_TTL_SECONDS` | 3600 | Idle timeout before eviction |

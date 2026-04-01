@@ -26,7 +26,7 @@ Supported models:
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "onnx")
-    DALSTON_DEFAULT_MODEL_ID: Default ONNX model ID (default: "parakeet-onnx-ctc-0.6b")
+    DALSTON_DEFAULT_MODEL: Default ONNX model ID (default: "parakeet-onnx-ctc-0.6b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
 """
@@ -73,7 +73,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         "parakeet-onnx-rnnt-0.6b",
     }
 
-    DEFAULT_MODEL_ID = "parakeet-onnx-ctc-0.6b"
+    DEFAULT_MODEL = "parakeet-onnx-ctc-0.6b"
 
     def __init__(self, core: OnnxInference | None = None) -> None:
         """Initialize the engine.
@@ -86,7 +86,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         self._core = core if core is not None else OnnxInference.from_env()
 
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
 

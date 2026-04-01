@@ -82,7 +82,7 @@ def make_ctx():
 
 class TestModelRegistry:
     def test_default_model_in_registry(self, engine_module):
-        assert engine_module.DEFAULT_MODEL_ID in engine_module.MODEL_REGISTRY
+        assert engine_module.DEFAULT_MODEL in engine_module.MODEL_REGISTRY
 
     def test_all_registry_entries_have_hf_names(self, engine_module):
         for model_id, hf_name in engine_module.MODEL_REGISTRY.items():

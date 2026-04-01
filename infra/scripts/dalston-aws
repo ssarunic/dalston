@@ -69,7 +69,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "image": "stt-transcribe-faster-whisper",
         "engine_id": "faster-whisper",
         "container": "stt-transcribe-faster-whisper",
-        "extra_env": {"DALSTON_DEFAULT_MODEL_ID": "large-v3-turbo"},
+        "extra_env": {"DALSTON_DEFAULT_MODEL": "large-v3-turbo"},
     },
     "pyannote": {
         "image": "stt-diarize-pyannote",
@@ -83,7 +83,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "nemo",
         "container": "stt-transcribe-nemo",
         "extra_env": {
-            "DALSTON_DEFAULT_MODEL_ID": "nvidia/parakeet-tdt-0.6b-v3",
+            "DALSTON_DEFAULT_MODEL": "nvidia/parakeet-tdt-0.6b-v3",
             "DALSTON_MODEL_PRELOAD": "nvidia/parakeet-tdt-0.6b-v3",
             "NEMO_CACHE": "/data/models",
         },
@@ -94,7 +94,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "container": "stt-transcribe-vllm-asr",
         "min_gpu_compute": 8.0,  # Flash Attention 2 requires compute >= 8.0 (T4 = 7.5, won't work)
         "extra_env": {
-            "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
+            "DALSTON_DEFAULT_MODEL": "mistralai/Voxtral-Mini-3B-2507",
             "DALSTON_VLLM_GPU_MEMORY_UTILIZATION": "0.9",
             "DALSTON_VLLM_MAX_MODEL_LEN": "4096",
         },
@@ -104,7 +104,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "hf-asr",
         "container": "stt-transcribe-hf-asr",
         "extra_env": {
-            "DALSTON_DEFAULT_MODEL_ID": "openai/whisper-large-v3",
+            "DALSTON_DEFAULT_MODEL": "openai/whisper-large-v3",
         },
     },
 }

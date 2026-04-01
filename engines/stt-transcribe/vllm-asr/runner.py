@@ -12,7 +12,7 @@ Environment variables (in addition to each adapter's own env vars):
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
 
-    DALSTON_DEFAULT_MODEL_ID: HF model ID to preload (default: mistralai/Voxtral-Mini-3B-2507)
+    DALSTON_DEFAULT_MODEL: HF model ID to preload (default: mistralai/Voxtral-Mini-3B-2507)
     DALSTON_VLLM_GPU_MEMORY_UTILIZATION: GPU memory fraction (default: 0.9)
     DALSTON_VLLM_MAX_MODEL_LEN: Maximum context length (default: 4096)
 """
@@ -43,7 +43,7 @@ from dalston.engine_sdk.vram_budget import (
 
 logger = structlog.get_logger()
 
-DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
+DEFAULT_MODEL = "mistralai/Voxtral-Mini-3B-2507"
 
 
 def _create_vllm_instance() -> Any:
@@ -55,7 +55,7 @@ def _create_vllm_instance() -> Any:
             "vLLM not installed. Install with: pip install 'vllm[audio]>=0.6.0'"
         ) from e
 
-    model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
+    model_id = os.environ.get("DALSTON_DEFAULT_MODEL", DEFAULT_MODEL)
 
     gpu_memory_utilization = float(
         os.environ.get("DALSTON_VLLM_GPU_MEMORY_UTILIZATION", "0.9")
@@ -115,7 +115,7 @@ class UnifiedVllmAsrRunner:
         self._gpu_name = get_gpu_name()
 
         # Load calibration profile and compute admission limits
-        model_id = os.environ.get("DALSTON_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
+        model_id = os.environ.get("DALSTON_DEFAULT_MODEL", DEFAULT_MODEL)
         self._vllm_params = self._resolve_admission_params(model_id, self._gpu_name)
 
         # Create admission controller — calibrated profile provides defaults,

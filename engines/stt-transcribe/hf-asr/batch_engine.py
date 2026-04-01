@@ -15,7 +15,7 @@ Features:
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "hf-asr")
-    DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "openai/whisper-large-v3")
+    DALSTON_DEFAULT_MODEL: Default HF model ID (default: "openai/whisper-large-v3")
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
@@ -56,7 +56,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
     - CPU: float32 for compatibility
     """
 
-    DEFAULT_MODEL_ID = "openai/whisper-large-v3"
+    DEFAULT_MODEL = "openai/whisper-large-v3"
 
     def __init__(self, manager: HFTransformersModelManager | None = None) -> None:
         """Initialize the engine.
@@ -70,7 +70,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         super().__init__()
 
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
 

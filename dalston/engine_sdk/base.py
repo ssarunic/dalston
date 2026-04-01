@@ -3,26 +3,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 import structlog
-import yaml
 
+from dalston.common.engine_yaml import load_engine_yaml
 from dalston.engine_sdk.audio import SPEECH_STANDARD, AudioFormat
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.http_server import EngineHTTPServer
-
-# Paths for engine.yaml (container path first, local fallback second)
-ENGINE_YAML_PATHS = [
-    Path("/etc/dalston/engine.yaml"),
-    Path("engine.yaml"),
-]
-
 
 RequestPayloadT = TypeVar("RequestPayloadT")
 ResponsePayloadT = TypeVar("ResponsePayloadT")
@@ -194,7 +186,7 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
         Returns:
             EngineCapabilities describing what this engine can do
         """
-        card = self._load_engine_yaml()
+        card = load_engine_yaml()
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
@@ -243,25 +235,6 @@ class Engine(Generic[RequestPayloadT, ResponsePayloadT], ABC):
             rtf_cpu=performance.get("rtf_cpu"),
             max_concurrency=caps.get("max_concurrency"),
         )
-
-    def _load_engine_yaml(self) -> dict[str, Any] | None:
-        """Load engine.yaml from known paths.
-
-        Returns:
-            Parsed engine.yaml dict, or None if not found
-        """
-        for path in ENGINE_YAML_PATHS:
-            if path.exists():
-                try:
-                    with open(path) as f:
-                        return yaml.safe_load(f)
-                except Exception as e:
-                    self.logger.warning(
-                        "failed_to_load_engine_yaml",
-                        path=str(path),
-                        error=str(e),
-                    )
-        return None
 
     def run(self) -> None:
         """Start the engine's processing loop.

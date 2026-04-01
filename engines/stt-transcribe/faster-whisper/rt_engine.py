@@ -16,6 +16,8 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
     TranscriptWord,
+    VocabularyMethod,
+    VocabularySupport,
 )
 from dalston.engine_sdk.inference.faster_whisper_inference import (
     FasterWhisperConfig,
@@ -51,6 +53,8 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         DALSTON_S3_BUCKET: S3 bucket for model storage (optional)
     """
 
+    ENGINE_ID = "faster-whisper"
+
     # Default model when client doesn't specify
     DEFAULT_MODEL = "large-v3-turbo"
 
@@ -61,7 +65,6 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             core: Optional shared FasterWhisperInference. If provided, load_models()
                   skips creating its own core and uses the injected one.
         """
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
         super().__init__()
         self._core: FasterWhisperInference | None = core
 
@@ -72,6 +75,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         instead of creating a new one. This is how the unified runner shares
         a single model instance between batch and RT adapters.
         """
+        is_shared = self._core is not None
         if self._core is None:
             # Standalone mode — create own core
             self._core = FasterWhisperInference.from_env()
@@ -87,7 +91,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             compute_type=self._core.compute_type,
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
             s3_storage_enabled=self._core.manager.model_storage is not None,
-            shared_core=self._core is not None,
+            shared_core=is_shared,
         )
 
     def transcribe_v1(
@@ -170,7 +174,7 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=" ".join(text_parts),
             segments=segments,
             language=result.language,
-            engine_id="faster-whisper",
+            engine_id=self.engine_id,
             language_confidence=result.language_probability,
             alignment_method=AlignmentMethod.ATTENTION,
         )
@@ -179,64 +183,20 @@ class FasterWhisperRealtimeEngine(BaseRealtimeTranscribeEngine):
         """Return list of supported model variants."""
         return FasterWhisperInference.SUPPORTED_MODELS
 
-    def get_engine_id(self) -> str:
-        """Return the inference framework identifier."""
-        return self._engine_id
-
     def get_vocabulary_support(self):
         """Faster-whisper uses prompt conditioning (initial_prompt) in both modes."""
-        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
-
         return VocabularySupport(
             method=VocabularyMethod.PROMPT_CONDITIONING,
             batch=True,
             realtime=True,
         )
 
-    def get_gpu_memory_usage(self) -> str:
-        """Return GPU memory usage string."""
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                used = torch.cuda.memory_allocated() / 1e9
-                return f"{used:.1f}GB"
-        except ImportError:
-            pass
-        return "0GB"
-
     def health_check(self) -> dict[str, Any]:
         """Return health status including model and GPU info."""
-        base_health = super().health_check()
-
-        cuda_available = False
-        cuda_device_count = 0
-
-        try:
-            import torch
-
-            cuda_available = torch.cuda.is_available()
-            cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        except ImportError:
-            pass
-
-        # Get model manager stats
-        model_stats = {}
-        if self._model_manager is not None:
-            model_stats = self._model_manager.get_stats()
-
-        device = self._core.device if self._core else "unknown"
-        compute_type = self._core.compute_type if self._core else "unknown"
-
         return {
-            **base_health,
-            "models_loaded": model_stats.get("loaded_models", []),
-            "model_count": model_stats.get("model_count", 0),
-            "max_loaded": model_stats.get("max_loaded", 0),
-            "device": device,
-            "compute_type": compute_type,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
+            **super().health_check(),
+            "device": self._core.device if self._core else "unknown",
+            "compute_type": self._core.compute_type if self._core else "unknown",
         }
 
 

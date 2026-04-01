@@ -16,7 +16,7 @@ Environment variables (in addition to each adapter's own env vars):
     DALSTON_BATCH_MAX_INFLIGHT: Max concurrent batch tasks (default: 4)
     DALSTON_TOTAL_CAPACITY: Total engine capacity (default: 6)
 
-    DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: openai/whisper-large-v3)
+    DALSTON_DEFAULT_MODEL: Default HF model ID (default: openai/whisper-large-v3)
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
@@ -43,7 +43,7 @@ from dalston.engine_sdk.managers import HFTransformersModelManager
 
 logger = structlog.get_logger()
 
-DEFAULT_MODEL_ID = "openai/whisper-large-v3"
+DEFAULT_MODEL = "openai/whisper-large-v3"
 
 
 def _create_shared_manager() -> HFTransformersModelManager:

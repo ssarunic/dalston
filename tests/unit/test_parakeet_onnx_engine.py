@@ -33,7 +33,7 @@ class TestParakeetOnnxEngineModelVariants:
     def test_default_model_id_is_ctc_0_6b(self):
         """Test that default model is parakeet-onnx-ctc-0.6b."""
         OnnxBatchEngine = load_parakeet_onnx_engine()
-        assert OnnxBatchEngine.DEFAULT_MODEL_ID == "parakeet-onnx-ctc-0.6b"
+        assert OnnxBatchEngine.DEFAULT_MODEL == "parakeet-onnx-ctc-0.6b"
 
     def test_supported_models_include_ctc_variants(self):
         """Test that CTC model variants are supported."""

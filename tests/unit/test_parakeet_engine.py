@@ -74,7 +74,7 @@ class TestParakeetEngineModelVariants:
     def test_default_model_id_is_tdt_1_1b(self, mock_cuda_available):
         """Test that default model is nvidia/parakeet-tdt-1.1b (M36)."""
         NemoBatchEngine = load_parakeet_engine()
-        assert NemoBatchEngine.DEFAULT_MODEL_ID == "nvidia/parakeet-tdt-1.1b"
+        assert NemoBatchEngine.DEFAULT_MODEL == "nvidia/parakeet-tdt-1.1b"
 
     def test_supported_models(self, mock_cuda_available):
         """Test that expected NeMo model IDs are supported (M36)."""

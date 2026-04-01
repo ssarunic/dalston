@@ -244,7 +244,7 @@ class ParakeetOnnxEngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
             "loaded_model_id",
-            os.environ.get("DALSTON_DEFAULT_MODEL_ID", "parakeet-tdt-1.1b-onnx")
+            os.environ.get("DALSTON_DEFAULT_MODEL", "parakeet-tdt-1.1b-onnx")
         )
 
         session = self._manager.acquire(model_id)
@@ -367,7 +367,7 @@ stt-transcribe-parakeet-onnx:
   environment:
     <<: *common-env
     DALSTON_ENGINE_ID: parakeet-onnx
-    DALSTON_DEFAULT_MODEL_ID: parakeet-tdt-1.1b-onnx
+    DALSTON_DEFAULT_MODEL: parakeet-tdt-1.1b-onnx
   depends_on:
     - redis
     - minio
@@ -542,7 +542,7 @@ class HFASREngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
             "loaded_model_id",
-            os.environ.get("DALSTON_DEFAULT_MODEL_ID", "openai/whisper-large-v3")
+            os.environ.get("DALSTON_DEFAULT_MODEL", "openai/whisper-large-v3")
         )
         language = input.config.get("language")
 
@@ -659,7 +659,7 @@ stt-transcribe-hf-asr:
   environment:
     <<: *common-env
     DALSTON_ENGINE_ID: hf-asr
-    DALSTON_DEFAULT_MODEL_ID: openai/whisper-large-v3
+    DALSTON_DEFAULT_MODEL: openai/whisper-large-v3
   depends_on:
     - redis
     - minio
@@ -983,7 +983,7 @@ class VLLMASREngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
             "loaded_model_id",
-            os.environ.get("DALSTON_DEFAULT_MODEL_ID", "mistralai/Voxtral-Mini-3B-2507")
+            os.environ.get("DALSTON_DEFAULT_MODEL", "mistralai/Voxtral-Mini-3B-2507")
         )
         language = input.config.get("language")
 
@@ -1035,7 +1035,7 @@ stt-transcribe-vllm-asr:
   environment:
     <<: *common-env
     DALSTON_ENGINE_ID: vllm-asr
-    DALSTON_DEFAULT_MODEL_ID: mistralai/Voxtral-Mini-3B-2507
+    DALSTON_DEFAULT_MODEL: mistralai/Voxtral-Mini-3B-2507
     DALSTON_MODEL_TTL_SECONDS: 7200  # 2 hours - slow to load
     DALSTON_MAX_LOADED_MODELS: 1     # Large models
   depends_on:

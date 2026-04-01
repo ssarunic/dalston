@@ -19,11 +19,11 @@ biasing recognition toward specific terms without retraining.
 Phase 1 (Runtime Model Management):
     This engine now supports loading any Parakeet model variant at engine_id.
     The model to load is specified via config["loaded_model_id"] in the task,
-    falling back to DALSTON_DEFAULT_MODEL_ID environment variable.
+    falling back to DALSTON_DEFAULT_MODEL environment variable.
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
-    DALSTON_DEFAULT_MODEL_ID: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
+    DALSTON_DEFAULT_MODEL: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
@@ -81,7 +81,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
 
     # Default model to load if none specified (multilingual + CPU-capable not applicable
     # for Parakeet since it's English-only, so use the highest quality model)
-    DEFAULT_MODEL_ID = "nvidia/parakeet-tdt-1.1b"
+    DEFAULT_MODEL = "nvidia/parakeet-tdt-1.1b"
 
     def __init__(self, core: NemoInference | None = None) -> None:
         """Initialize the engine.
@@ -96,7 +96,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
 
         # Get engine ID from environment for registration (engine_id ID, not variant ID)

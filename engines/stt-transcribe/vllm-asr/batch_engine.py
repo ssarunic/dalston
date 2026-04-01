@@ -16,7 +16,7 @@ Features:
 
 Environment variables:
     DALSTON_ENGINE_ID: Engine ID for registration (default: "vllm-asr")
-    DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: "mistralai/Voxtral-Mini-3B-2507")
+    DALSTON_DEFAULT_MODEL: Default HF model ID (default: "mistralai/Voxtral-Mini-3B-2507")
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 7200)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 1)
     DALSTON_MODEL_PRELOAD: Model to preload on startup (optional)
@@ -73,7 +73,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
     GPU is required - vLLM does not support CPU inference.
     """
 
-    DEFAULT_MODEL_ID = "mistralai/Voxtral-Mini-3B-2507"
+    DEFAULT_MODEL = "mistralai/Voxtral-Mini-3B-2507"
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "vllm-asr")
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
 
         # When a shared LLM is injected (unified runner), the model is already

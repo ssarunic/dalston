@@ -10,7 +10,6 @@ with the batch adapter.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -22,6 +21,8 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
     TranscriptWord,
+    VocabularyMethod,
+    VocabularySupport,
 )
 from dalston.realtime_sdk.base_transcribe import BaseRealtimeTranscribeEngine
 
@@ -36,8 +37,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
     enable partial results during speech.
     """
 
+    ENGINE_ID = "riva"
+
     def __init__(self, core: RivaClient | None = None) -> None:
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "riva")
         super().__init__()
         self._core: RivaClient | None = core
 
@@ -47,13 +49,14 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         If a RivaClient was injected via __init__, this method uses it
         instead of creating a new one.
         """
+        is_shared = self._core is not None
         if self._core is None:
             self._core = RivaClient.from_env()
 
         logger.info(
             "riva_nim_ready",
             uri=self._core.uri,
-            shared_core=True,
+            shared_core=is_shared,
         )
 
     def transcribe_v1(
@@ -122,7 +125,7 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=" ".join(text_parts),
             segments=segments,
             language=lang_code,
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             language_confidence=max_confidence,
         )
 
@@ -134,13 +137,8 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
         """NIM manages models -- no local model selection."""
         return []
 
-    def get_engine_id(self) -> str:
-        return self._engine_id
-
     def get_vocabulary_support(self):
         """Riva NIM supports word boosting via SpeechContext in both modes."""
-        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
-
         return VocabularySupport(
             method=VocabularyMethod.WORD_BOOSTING,
             batch=True,
@@ -158,8 +156,9 @@ class RivaRealtimeEngine(BaseRealtimeTranscribeEngine):
             return {**base_health, **nim_health}
         return {**base_health, "nim": "not_initialized"}
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         logger.info("riva_rt_shutdown")
+        await super().shutdown()
 
 
 if __name__ == "__main__":

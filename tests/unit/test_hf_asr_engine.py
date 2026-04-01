@@ -78,10 +78,10 @@ class TestHFASREngine:
         assert engine._default_model_id == "openai/whisper-large-v3"
 
     def test_custom_default_model_from_env(self, mock_torch):
-        """Engine should respect DALSTON_DEFAULT_MODEL_ID env var."""
+        """Engine should respect DALSTON_DEFAULT_MODEL env var."""
         with patch.dict(
             os.environ,
-            {"DALSTON_DEFAULT_MODEL_ID": "facebook/wav2vec2-large-960h"},
+            {"DALSTON_DEFAULT_MODEL": "facebook/wav2vec2-large-960h"},
         ):
             HfAsrBatchEngine = load_hf_asr_engine()
             engine = HfAsrBatchEngine()

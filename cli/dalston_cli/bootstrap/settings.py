@@ -11,7 +11,7 @@ _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 _FALSE_VALUES = {"0", "false", "no", "n", "off"}
 
 DEFAULT_LOCAL_SERVER_URL = "http://127.0.0.1:8000"
-DEFAULT_MODEL_ID = "distil-small"
+DEFAULT_MODEL = "distil-small"
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
@@ -74,7 +74,7 @@ def load_bootstrap_settings(server_url: str | None = None) -> BootstrapSettings:
 
     return BootstrapSettings(
         enabled=_parse_bool(os.getenv("DALSTON_BOOTSTRAP"), default=True),
-        default_model=os.getenv("DALSTON_DEFAULT_MODEL", DEFAULT_MODEL_ID),
+        default_model=os.getenv("DALSTON_DEFAULT_MODEL", DEFAULT_MODEL),
         local_server_url=local_server_url,
         server_start_timeout_seconds=_parse_int(
             os.getenv("DALSTON_SERVER_START_TIMEOUT_SECONDS"),

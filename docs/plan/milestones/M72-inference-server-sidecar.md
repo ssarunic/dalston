@@ -282,7 +282,7 @@ COPY dalston/proto/ /app/proto/
 
 ENV DALSTON_SERVER_PORT=50052
 ENV DALSTON_MAX_CONCURRENT=4
-ENV DALSTON_DEFAULT_MODEL_ID=large-v3-turbo
+ENV DALSTON_DEFAULT_MODEL=large-v3-turbo
 ENV DALSTON_MODEL_TTL_SECONDS=3600
 ENV DALSTON_MAX_LOADED_MODELS=2
 
@@ -448,7 +448,7 @@ faster-whisper-server:
     <<: [*common-env, *observability-env]
     DALSTON_SERVER_PORT: 50052
     DALSTON_MAX_CONCURRENT: 4
-    DALSTON_DEFAULT_MODEL_ID: large-v3-turbo
+    DALSTON_DEFAULT_MODEL: large-v3-turbo
     DALSTON_MODEL_PRELOAD: large-v3-turbo
   ports:
     - "50052:50052"
@@ -473,7 +473,7 @@ parakeet-server:
     <<: [*common-env, *observability-env]
     DALSTON_SERVER_PORT: 50053
     DALSTON_MAX_CONCURRENT: 4
-    DALSTON_DEFAULT_MODEL_ID: nvidia/parakeet-tdt-1.1b
+    DALSTON_DEFAULT_MODEL: nvidia/parakeet-tdt-1.1b
     DALSTON_MODEL_PRELOAD: nvidia/parakeet-tdt-1.1b
   ports:
     - "50053:50053"
@@ -555,7 +555,7 @@ faster-whisper-server-cpu:
       DEVICE: cpu
   environment:
     DALSTON_DEVICE: cpu
-    DALSTON_DEFAULT_MODEL_ID: base
+    DALSTON_DEFAULT_MODEL: base
     DALSTON_MAX_CONCURRENT: 2
   profiles: [cpu]
 ```

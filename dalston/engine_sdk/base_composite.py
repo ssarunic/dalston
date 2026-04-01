@@ -21,6 +21,7 @@ from typing import Any
 
 import structlog
 
+from dalston.common.engine_yaml import load_engine_yaml
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
 from dalston.engine_sdk.types import EngineCapabilities, TaskRequest, TaskResponse
@@ -139,7 +140,7 @@ class CompositeEngine(Engine):
     def __init__(self) -> None:
         super().__init__()
 
-        card = self._load_engine_yaml() or {}
+        card = load_engine_yaml() or {}
         self._engine_id = card.get("engine_id") or card.get("id", "composite")
         self._children = _parse_compose_block(card)
         self._pipeline_config = card.get("pipeline", {})
@@ -479,7 +480,7 @@ class CompositeEngine(Engine):
 
     def get_capabilities(self) -> EngineCapabilities:
         """Return the union of child capabilities."""
-        card = self._load_engine_yaml() or {}
+        card = load_engine_yaml() or {}
         all_stages = list(self._stage_to_child.keys())
         hardware = card.get("hardware", {})
         performance = card.get("performance", {})

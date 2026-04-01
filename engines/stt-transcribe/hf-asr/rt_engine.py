@@ -12,7 +12,7 @@ Environment variables:
     DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
     DALSTON_MAX_SESSIONS: Maximum concurrent sessions (default: 4)
     REDIS_URL: Redis connection URL (default: redis://localhost:6379)
-    DALSTON_DEFAULT_MODEL_ID: Default HF model ID (default: openai/whisper-large-v3)
+    DALSTON_DEFAULT_MODEL: Default HF model ID (default: openai/whisper-large-v3)
     DALSTON_DEVICE: Device for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
@@ -33,6 +33,8 @@ from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
     TranscriptWord,
+    VocabularyMethod,
+    VocabularySupport,
 )
 from dalston.engine_sdk.managers import HFTransformersModelManager
 from dalston.realtime_sdk import AsyncModelManager
@@ -52,7 +54,8 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     manager to share loaded models with the batch adapter.
     """
 
-    DEFAULT_MODEL_ID = "openai/whisper-large-v3"
+    ENGINE_ID = "hf-asr"
+    DEFAULT_MODEL = "openai/whisper-large-v3"
 
     def __init__(self, manager: HFTransformersModelManager | None = None) -> None:
         """Initialize the engine.
@@ -61,18 +64,17 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             manager: Optional shared HFTransformersModelManager. If provided,
                      load_models() skips creating its own manager.
         """
-        self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "hf-asr")
         super().__init__()
 
         self._manager: HFTransformersModelManager | None = manager
         self._model_manager: AsyncModelManager | None = None
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
 
         logger.info(
             "hf_asr_rt_engine_init",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             default_model_id=self._default_model_id,
             shared_manager=manager is not None,
         )
@@ -175,7 +177,7 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             )
 
             transcript = self._normalize_output(result, language)
-            transcript.engine_id = self._engine_id
+            transcript.engine_id = self.engine_id
             transcript.channel = params.channel
             if warnings:
                 transcript.warnings = warnings + list(transcript.warnings)
@@ -242,7 +244,7 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
             text=text,
             segments=segments,
             language=language or "auto",
-            engine_id=self._engine_id,
+            engine_id=self.engine_id,
             alignment_method=(
                 AlignmentMethod.ATTENTION
                 if has_word_timestamps
@@ -257,61 +259,25 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
     def get_models(self) -> list[str]:
         return [self._default_model_id]
 
-    def get_engine_id(self) -> str:
-        return self._engine_id
-
     def get_vocabulary_support(self):
         """HF-ASR supports prompt conditioning for Whisper models via initial_prompt."""
-        from dalston.common.pipeline_types import VocabularyMethod, VocabularySupport
-
         return VocabularySupport(
             method=VocabularyMethod.PROMPT_CONDITIONING,
             batch=True,
             realtime=True,
         )
 
-    def get_gpu_memory_usage(self) -> str:
-        if torch.cuda.is_available():
-            used = torch.cuda.memory_allocated() / 1e9
-            return f"{used:.1f}GB"
-        return "0GB"
-
     def health_check(self) -> dict[str, Any]:
-        base_health = super().health_check()
-
-        cuda_available = torch.cuda.is_available()
-        cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-        cuda_memory_allocated = 0.0
-        cuda_memory_total = 0.0
-
-        if cuda_available and cuda_device_count > 0:
-            cuda_memory_allocated = torch.cuda.memory_allocated() / 1e9
-            cuda_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
-
-        model_stats = {}
-        if self._model_manager is not None:
-            model_stats = self._model_manager.get_stats()
-
-        device = self._manager.device if self._manager else "unknown"
-
         return {
-            **base_health,
-            "models_loaded": model_stats.get("loaded_models", []),
-            "model_count": model_stats.get("model_count", 0),
-            "max_loaded": model_stats.get("max_loaded", 0),
-            "device": device,
-            "engine_id": self._engine_id,
-            "cuda_available": cuda_available,
-            "cuda_device_count": cuda_device_count,
-            "cuda_memory_allocated_gb": round(cuda_memory_allocated, 2),
-            "cuda_memory_total_gb": round(cuda_memory_total, 2),
+            **super().health_check(),
+            "device": self._manager.device if self._manager else "unknown",
         }
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         logger.info("hf_asr_rt_shutdown")
         if self._manager is not None:
             self._manager.shutdown()
-        super().shutdown()
+        await super().shutdown()
 
 
 if __name__ == "__main__":

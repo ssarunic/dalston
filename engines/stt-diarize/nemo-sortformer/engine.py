@@ -35,7 +35,7 @@ MODEL_REGISTRY: dict[str, str] = {
     "nvidia/diar-sortformer-4spk-v1": "nvidia/diar_sortformer_4spk-v1",
 }
 
-DEFAULT_MODEL_ID = "nvidia/diar-sortformer-4spk-v2.1"
+DEFAULT_MODEL = "nvidia/diar-sortformer-4spk-v2.1"
 
 
 class NemoSortformerEngine(Engine):

@@ -206,7 +206,7 @@ class TestVLLMASREngine:
             os.environ,
             {
                 "DALSTON_ENGINE_ID": "vllm-asr",
-                "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
+                "DALSTON_DEFAULT_MODEL": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
             with patch.dict(sys.modules, {"pynvml": mock_pynvml}):
@@ -424,7 +424,7 @@ class TestVLLMASREngineEnvironment:
             os.environ,
             {
                 "DALSTON_ENGINE_ID": "custom-vllm",
-                "DALSTON_DEFAULT_MODEL_ID": "mistralai/Voxtral-Mini-3B-2507",
+                "DALSTON_DEFAULT_MODEL": "mistralai/Voxtral-Mini-3B-2507",
             },
         ):
             VllmAsrBatchEngine = load_vllm_asr_engine()

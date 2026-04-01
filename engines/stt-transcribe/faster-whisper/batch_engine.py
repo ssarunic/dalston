@@ -13,7 +13,7 @@ Features:
 
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "faster-whisper")
-    DALSTON_DEFAULT_MODEL_ID: Default model ID (default: "large-v3-turbo")
+    DALSTON_DEFAULT_MODEL: Default model ID (default: "large-v3-turbo")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
     DALSTON_MODEL_TTL_SECONDS: Evict models idle longer than this (default: 3600)
     DALSTON_MAX_LOADED_MODELS: Maximum models to keep loaded (default: 2)
@@ -58,14 +58,14 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
 
     DEFAULT_BEAM_SIZE = 5
     DEFAULT_VAD_FILTER = True
-    DEFAULT_MODEL_ID = "large-v3-turbo"
+    DEFAULT_MODEL = "large-v3-turbo"
 
     def __init__(self, core: FasterWhisperInference | None = None) -> None:
         super().__init__()
 
         # Get configuration from environment
         self._default_model_id = os.environ.get(
-            "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
+            "DALSTON_DEFAULT_MODEL", self.DEFAULT_MODEL
         )
         self._engine_id = os.environ.get("DALSTON_ENGINE_ID", "faster-whisper")
 

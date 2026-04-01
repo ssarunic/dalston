@@ -11,14 +11,12 @@ import json
 import os
 import signal
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import numpy as np
 import structlog
-import yaml
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
@@ -36,6 +34,7 @@ from dalston.common.audio_defaults import (
     MIN_SAMPLE_RATE,
     RESAMPLE_QUALITY_PROFILES,
 )
+from dalston.common.engine_yaml import load_engine_yaml
 from dalston.common.pipeline_types import (
     Transcript,
     TranscriptionRequest,
@@ -57,12 +56,6 @@ logger = structlog.get_logger()
 # Type alias for model manager (any model type)
 ModelManagerType = AsyncModelManager[Any]
 
-# Paths for engine.yaml (container path first, local fallback second)
-ENGINE_YAML_PATHS = [
-    Path("/etc/dalston/engine.yaml"),
-    Path("engine.yaml"),
-]
-
 
 class RealtimeEngine(ABC):
     """Abstract base class for real-time transcription engines.
@@ -77,8 +70,14 @@ class RealtimeEngine(ABC):
     - Worker registration and heartbeat
     - Signal handling for graceful shutdown
 
+    Subclasses should set ``ENGINE_ID`` to their default engine identifier.
+    The actual value is resolved from the ``DALSTON_ENGINE_ID`` environment
+    variable at construction time, falling back to the class attribute.
+
     Example:
         class MyRealtimeEngine(BaseRealtimeTranscribeEngine):
+            ENGINE_ID = "faster-whisper"
+
             def load_models(self) -> None:
                 from faster_whisper import WhisperModel
                 self.model = WhisperModel("large-v3", device="cuda")
@@ -110,7 +109,7 @@ class RealtimeEngine(ABC):
                     text=" ".join(text_parts),
                     segments=[self.build_segment(...)],
                     language=info.language,
-                    engine_id="faster-whisper",
+                    engine_id=self.engine_id,
                 )
 
         if __name__ == "__main__":
@@ -119,6 +118,7 @@ class RealtimeEngine(ABC):
             asyncio.run(engine.run())
 
     Environment variables:
+        DALSTON_ENGINE_ID: Engine identifier override (optional, defaults to ENGINE_ID class attr)
         DALSTON_INSTANCE: Stable identifier for this instance (optional, auto-generated if unset)
         DALSTON_WORKER_PORT: WebSocket server port (default: 9000)
         DALSTON_WORKER_ENDPOINT: WebSocket endpoint URL for registration (auto-detected)
@@ -126,14 +126,18 @@ class RealtimeEngine(ABC):
         REDIS_URL: Redis connection URL (default: redis://localhost:6379)
     """
 
+    #: Default engine identifier. Override in subclasses.
+    ENGINE_ID: str = "unknown"
+
     def __init__(self) -> None:
         """Initialize the engine."""
+        self.engine_id = os.environ.get("DALSTON_ENGINE_ID", self.ENGINE_ID)
         # Must be unique per engine to avoid Redis key collisions in the unified registry.
         stable_id = os.environ.get("DALSTON_WORKER_ID") or os.environ.get(
             "DALSTON_INSTANCE"
         )
         suffix = (stable_id or uuid4().hex)[:12]
-        self.instance = f"{self.get_engine_id()}-rt-{suffix}"
+        self.instance = f"{self.engine_id}-rt-{suffix}"
         self.port = int(os.environ.get("DALSTON_WORKER_PORT", "9000"))
         self.max_sessions = int(os.environ.get("DALSTON_MAX_SESSIONS", "2"))
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -218,15 +222,13 @@ class RealtimeEngine(ABC):
         return []
 
     def get_engine_id(self) -> str:
-        """Return the inference framework identifier.
+        """Return the engine identifier.
 
-        Override to report the engine_id (e.g., "faster-whisper", "parakeet").
-        Used when registering with Session Router.
-
-        Returns:
-            Runtime string. Default: "unknown"
+        Returns the value from ``DALSTON_ENGINE_ID`` env var, falling back
+        to the ``ENGINE_ID`` class attribute.  Engines should set
+        ``ENGINE_ID`` rather than overriding this method.
         """
-        return "unknown"
+        return self.engine_id
 
     def get_vocabulary_support(self) -> VocabularySupport:
         """Return vocabulary boosting capability for this engine.
@@ -306,7 +308,7 @@ class RealtimeEngine(ABC):
         Returns:
             EngineCapabilities describing what this engine can do
         """
-        card = self._load_engine_yaml()
+        card = load_engine_yaml()
         if card is None:
             # Fallback for engines without engine.yaml
             return EngineCapabilities(
@@ -362,40 +364,53 @@ class RealtimeEngine(ABC):
             vocabulary_support=self.get_vocabulary_support(),
         )
 
-    def _load_engine_yaml(self) -> dict[str, Any] | None:
-        """Load engine.yaml from known paths.
-
-        Returns:
-            Parsed engine.yaml dict, or None if not found
-        """
-        for path in ENGINE_YAML_PATHS:
-            if path.exists():
-                try:
-                    with open(path) as f:
-                        return yaml.safe_load(f)
-                except Exception as e:
-                    logger.warning(
-                        "failed_to_load_engine_yaml",
-                        path=str(path),
-                        error=str(e),
-                    )
-        return None
-
     def health_check(self) -> dict[str, Any]:
         """Return health status for monitoring.
 
         Override to provide engine-specific health information.
+        The base implementation includes instance, session, GPU, and model info.
+        Call ``super().health_check()`` and spread the result.
 
         Returns:
             Dictionary with at least a "status" key
         """
-        return {
+        info: dict[str, Any] = {
             "status": "healthy",
             "instance": self.instance,
             "active_sessions": len(self._sessions),
             "capacity": self.max_sessions,
             "gpu_memory": self.get_gpu_memory_usage(),
         }
+
+        try:
+            import torch
+
+            cuda_available = torch.cuda.is_available()
+            info["cuda_available"] = cuda_available
+            if cuda_available:
+                info["cuda_device_count"] = torch.cuda.device_count()
+                info["cuda_memory_allocated_gb"] = round(
+                    torch.cuda.memory_allocated() / 1e9, 2
+                )
+                info["cuda_memory_total_gb"] = round(
+                    torch.cuda.get_device_properties(0).total_memory / 1e9, 2
+                )
+            else:
+                info["cuda_device_count"] = 0
+        except ImportError:
+            pass
+
+        if self._model_manager is not None:
+            stats = self._model_manager.get_stats()
+            info["models_loaded"] = stats.get("loaded_models", [])
+            info["model_count"] = stats.get("model_count", 0)
+            info["max_loaded"] = stats.get("max_loaded", 0)
+        else:
+            info["models_loaded"] = []
+            info["model_count"] = 0
+            info["max_loaded"] = 0
+
+        return info
 
     async def run(self) -> None:
         """Start the engine.

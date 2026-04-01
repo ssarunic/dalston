@@ -472,7 +472,7 @@ class WhisperEngine(Engine):
     def process(self, input: TaskInput) -> TaskOutput:
         model_id = input.config.get(
             "loaded_model_id",
-            os.environ.get("DALSTON_DEFAULT_MODEL_ID", "large-v3-turbo")
+            os.environ.get("DALSTON_DEFAULT_MODEL", "large-v3-turbo")
         )
 
         model = self._manager.acquire(model_id)
