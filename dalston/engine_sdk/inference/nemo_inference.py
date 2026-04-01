@@ -594,10 +594,19 @@ class NemoInference:
         segments: list[NeMoSegmentResult] = []
         all_words: list[NeMoWordResult] = []
 
-        # Case 1: TDT dict format
-        if hasattr(hypothesis, "timestep") and isinstance(hypothesis.timestep, dict):
-            word_timestamps = hypothesis.timestep.get("word", [])
-            segment_timestamps = hypothesis.timestep.get("segment", [])
+        # Resolve timestamp dict: NeMo >=2.7 uses hypothesis.timestamp (dict
+        # with keys 'word', 'segment', 'char', 'timestep'), older versions
+        # stored the same dict directly as hypothesis.timestep.
+        ts_dict: dict | None = None
+        if hasattr(hypothesis, "timestamp") and isinstance(hypothesis.timestamp, dict):
+            ts_dict = hypothesis.timestamp
+        elif hasattr(hypothesis, "timestep") and isinstance(hypothesis.timestep, dict):
+            ts_dict = hypothesis.timestep
+
+        # Case 1: Dict with word/segment timestamps (TDT and RNNT >=2.7)
+        if ts_dict is not None:
+            word_timestamps = ts_dict.get("word", [])
+            segment_timestamps = ts_dict.get("segment", [])
 
             for wt in word_timestamps:
                 all_words.append(
@@ -636,8 +645,8 @@ class NemoInference:
                     )
                 )
 
-        # Case 2: RNNT legacy list format
-        elif hasattr(hypothesis, "timestep") and hypothesis.timestep is not None:
+        # Case 2: RNNT legacy list format (hypothesis.timestep is a list of frame indices)
+        elif hasattr(hypothesis, "timestep") and isinstance(hypothesis.timestep, list):
             timesteps = hypothesis.timestep
             tokens = full_text.split()
             frame_shift_seconds = 0.01
