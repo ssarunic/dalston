@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import gc
 import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -93,8 +94,6 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
 
         self._llm = llm
         self._on_model_loaded = on_model_loaded
-        self._loaded_model_id: str | None = None
-        self._loaded_model_path: str | None = None
         self._tokenizer = None
         self._model_storage: MultiSourceModelStorage | None = None
 
@@ -102,6 +101,13 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
         self._default_model_id = os.environ.get(
             "DALSTON_DEFAULT_MODEL_ID", self.DEFAULT_MODEL_ID
         )
+
+        # When a shared LLM is injected (unified runner), the model is already
+        # loaded — record its ID so _ensure_model_loaded short-circuits.
+        self._loaded_model_id: str | None = (
+            self._default_model_id if llm is not None else None
+        )
+        self._loaded_model_path: str | None = None
 
         # vLLM configuration
         self._gpu_memory_utilization = float(
@@ -213,6 +219,7 @@ class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
             gpu_memory_utilization=self._gpu_memory_utilization,
             max_model_len=self._max_model_len,
             limit_mm_per_prompt={"audio": 1},
+            allowed_local_media_path=tempfile.gettempdir(),
         )
 
         self._loaded_model_id = loaded_model_id
