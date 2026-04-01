@@ -1405,6 +1405,14 @@ def launch_instance(
             ):
                 warn(f"No capacity in {az}, trying next AZ...")
                 continue
+            if code == "MaxSpotInstanceCountExceeded":
+                die(
+                    f"AWS spot instance vCPU limit reached for {instance_type}. "
+                    f"Request a quota increase at: "
+                    f"https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas "
+                    f"(search 'All G and VT Spot Instance Requests'). "
+                    f"Or retry with --no-spot for on-demand pricing."
+                )
             raise
 
     raise RuntimeError(f"Failed to launch {instance_type} in any AZ.")
