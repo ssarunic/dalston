@@ -764,10 +764,6 @@ class EngineRunner:
         # Extract model from task config (set by orchestrator's engine selector)
         task_model = task_metadata.get("loaded_model_id", "")
 
-        # Deferred VRAM profile: load calibration on first task with a model_id
-        if task_model:
-            self._ensure_vram_profile(task_model)
-
         # Record queue wait time (M20) - time between enqueue and dequeue
         enqueued_at_str = task_metadata.get("enqueued_at")
         if enqueued_at_str:
@@ -823,6 +819,10 @@ class EngineRunner:
                         dalston.telemetry.set_span_attribute(
                             "dalston.model", task_model
                         )
+
+                # Deferred VRAM profile: load on first task with a model_id
+                if task_model:
+                    self._ensure_vram_profile(task_model)
 
                 # Set job_id on span
                 dalston.telemetry.set_span_attribute("dalston.job_id", job_id)
