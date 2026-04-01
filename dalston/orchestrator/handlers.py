@@ -102,6 +102,27 @@ def _get_engine_id_execution_profile(engine_id: str) -> str:
     return entry.execution_profile
 
 
+def _is_non_retryable_task_error(error: str) -> bool:
+    """Return True for deterministic task errors that won't succeed on retry.
+
+    Today this covers missing CUDA shared libraries surfaced by CTranslate2
+    (faster-whisper), e.g. ``libcublas.so.12 is not found or cannot be loaded``.
+    """
+    lowered = error.lower()
+    if "is not found or cannot be loaded" not in lowered:
+        return False
+
+    return any(
+        marker in lowered
+        for marker in (
+            "libcublas",
+            "libcudnn",
+            "libcuda",
+            "libnvrtc",
+        )
+    )
+
+
 async def _decrement_concurrent_jobs(
     redis: Redis, job_id: UUID, tenant_id: UUID
 ) -> bool:
@@ -755,8 +776,14 @@ async def handle_task_failed(
         )
         return
 
-    # 3. Normal path: task is RUNNING, check if we can retry
-    if task.retries < task.max_retries:
+    # 3. Normal path: task is RUNNING, check if we can retry.
+    # Deterministic runtime/dependency failures (e.g. missing CUDA shared libs)
+    # are marked non-retryable to avoid wasting attempts.
+    non_retryable_error = _is_non_retryable_task_error(error)
+    if non_retryable_error:
+        log.warning("task_error_marked_non_retryable", error=error)
+
+    if not non_retryable_error and task.retries < task.max_retries:
         task.retries += 1
         task.status = TaskStatus.READY.value
         task.error = error

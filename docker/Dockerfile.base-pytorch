@@ -57,4 +57,12 @@ ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 RUN mkdir -p /models/huggingface /models/torch
 
+# CTranslate2/PyTorch pip wheels bundle CUDA 12 libs (nvidia-cublas-cu12 etc.)
+# that aren't on the default library path — register them via ldconfig.
+RUN if [ "$DEVICE" = "cuda" ]; then \
+      SITE=$(python3 -c "import site; print(site.getsitepackages()[0])") \
+      && printf "%s\n%s\n" "$SITE/nvidia/cublas/lib" "$SITE/nvidia/cudnn/lib" \
+         > /etc/ld.so.conf.d/nvidia-pip.conf \
+      && ldconfig; \
+    fi
 ENV NVIDIA_VISIBLE_DEVICES=all

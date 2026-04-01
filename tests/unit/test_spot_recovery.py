@@ -1206,3 +1206,73 @@ class TestHandleTaskFailedIdempotency:
             == f"dalston:task:retry-enqueue:{task_id}:1"
         )
         mock_db_session.commit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_cuda_library_error_is_not_retried(
+        self, mock_redis, mock_db_session, mock_settings, mock_registry
+    ):
+        """Missing CUDA runtime libraries should fail fast without retry."""
+        from dalston.orchestrator.handlers import handle_task_failed
+
+        task_id = uuid4()
+        job_id = uuid4()
+        tenant_id = uuid4()
+
+        mock_task = MagicMock()
+        mock_task.id = task_id
+        mock_task.job_id = job_id
+        mock_task.stage = "transcribe"
+        mock_task.status = TaskStatus.RUNNING.value
+        mock_task.retries = 0
+        mock_task.max_retries = 3
+        mock_task.dependencies = []
+        mock_task.engine_id = "faster-whisper"
+        mock_task.config = {}
+        mock_task.request_uri = "s3://bucket/input.wav"
+        mock_task.response_uri = "s3://bucket/output.json"
+        mock_task.required = True
+        mock_task.error = None
+
+        mock_job = MagicMock()
+        mock_job.id = job_id
+        mock_job.tenant_id = tenant_id
+        mock_job.status = "running"
+        mock_job.error = None
+
+        def get_side_effect(model, id):
+            if id == task_id:
+                return mock_task
+            if id == job_id:
+                return mock_job
+            return None
+
+        mock_db_session.get = AsyncMock(side_effect=get_side_effect)
+
+        with (
+            patch(
+                "dalston.orchestrator.handlers.queue_task", new_callable=AsyncMock
+            ) as mock_queue_task,
+            patch(
+                "dalston.orchestrator.handlers._decrement_concurrent_jobs",
+                new_callable=AsyncMock,
+            ) as mock_decrement,
+            patch(
+                "dalston.orchestrator.handlers.publish_job_failed",
+                new_callable=AsyncMock,
+            ) as mock_publish,
+        ):
+            await handle_task_failed(
+                task_id=task_id,
+                error="Library libcublas.so.12 is not found or cannot be loaded",
+                db=mock_db_session,
+                redis=mock_redis,
+                settings=mock_settings,
+                registry=mock_registry,
+            )
+
+        assert mock_task.retries == 0
+        assert mock_task.status == TaskStatus.FAILED.value
+        mock_queue_task.assert_not_called()
+        assert mock_job.status == "failed"
+        mock_decrement.assert_called_once()
+        mock_publish.assert_called_once()

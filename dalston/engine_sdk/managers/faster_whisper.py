@@ -51,6 +51,22 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _is_missing_cuda_shared_library_error(exc: Exception) -> bool:
+    """Detect CTranslate2 CUDA shared-library load failures."""
+    lowered = str(exc).lower()
+    if "is not found or cannot be loaded" not in lowered:
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "libcublas",
+            "libcudnn",
+            "libcuda",
+            "libnvrtc",
+        )
+    )
+
+
 class FasterWhisperModelManager(ModelManager["WhisperModel"]):
     """Model manager for CTranslate2/faster-whisper models.
 
@@ -137,12 +153,22 @@ class FasterWhisperModelManager(ModelManager["WhisperModel"]):
             compute_type=self.compute_type,
         )
 
-        model = WhisperModel(
-            model_path,
-            device=self.device,
-            compute_type=self.compute_type,
-            download_root=self.download_root,
-        )
+        try:
+            model = WhisperModel(
+                model_path,
+                device=self.device,
+                compute_type=self.compute_type,
+                download_root=self.download_root,
+            )
+        except Exception as e:
+            if self.device == "cuda" and _is_missing_cuda_shared_library_error(e):
+                raise RuntimeError(
+                    "faster-whisper failed to initialize on CUDA because required "
+                    f"CUDA shared libraries are unavailable ({e}). "
+                    "Rebuild the GPU image so CUDA 12 runtime libraries are present "
+                    "or set DALSTON_DEVICE=cpu."
+                ) from e
+            raise
 
         logger.info(
             "faster_whisper_model_loaded",

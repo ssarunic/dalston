@@ -5,11 +5,9 @@
 # Requires base image: dalston/base-pytorch:latest
 #   docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
 #
-# Build from repo root:
-#   CPU:  docker build -t dalston/stt-faster-whisper:latest -f engines/stt-transcribe/faster-whisper/Dockerfile .
-#   GPU:  docker build --build-arg DEVICE=cuda -t dalston/stt-faster-whisper:latest -f engines/stt-transcribe/faster-whisper/Dockerfile .
+# Build from repo root (GPU/CPU depends on the base-pytorch image):
+#   docker build -t dalston/stt-faster-whisper:latest -f engines/stt-transcribe/faster-whisper/Dockerfile .
 
-ARG DEVICE=cpu
 FROM dalston/base-pytorch:latest AS base
 
 # Dalston SDK
