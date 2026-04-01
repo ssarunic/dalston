@@ -107,11 +107,9 @@ services:
       - /data/models:/data/models
 
 
-  # Prometheus needs Tailscale DNS to resolve GPU worker hostnames
+  # Prometheus can't resolve Tailscale hostnames from Docker's network.
+  # GPU targets in gpu-targets.json use Tailscale IPs instead.
   prometheus:
-    dns:
-      - 100.100.100.100  # Tailscale MagicDNS
-      - 127.0.0.53       # systemd-resolved fallback
     volumes:
       - /data/prometheus:/prometheus
 

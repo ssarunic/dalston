@@ -1843,12 +1843,17 @@ def _write_gpu_prometheus_targets(
     Uses SSH via Tailscale to write a JSON targets file that Prometheus picks up
     via file_sd_configs. Prometheus rescans every 30s, so targets appear quickly.
     """
-    # Build targets from all workers, resolving actual Tailscale hostnames
+    # Build targets using Tailscale IPs (Docker's DNS can't resolve
+    # Tailscale hostnames). IPs are stable for the instance lifetime.
     target_groups = []
     for w in workers:
         ts_host = _resolve_tailscale_host(f"dalston-gpu-{w['name']}")
+        ts_ip = _resolve_tailscale_ip(ts_host)
+        if not ts_ip:
+            warn(f"Could not resolve Tailscale IP for {ts_host}, skipping")
+            continue
         engines = w.get("engines", [])
-        ports = [f"{ts_host}:{9100 + i}" for i in range(len(engines))]
+        ports = [f"{ts_ip}:{9100 + i}" for i in range(len(engines))]
         target_groups.append(
             {
                 "targets": ports,
@@ -2249,6 +2254,29 @@ def _resolve_tailscale_host(base_hostname: str) -> str:
     except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
         pass
     return base_hostname
+
+
+def _resolve_tailscale_ip(hostname: str) -> str | None:
+    """Resolve a Tailscale hostname to its 100.x.y.z IP."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            status = json.loads(result.stdout)
+            for peer in (status.get("Peer") or {}).values():
+                if peer.get("HostName") == hostname and peer.get("Online"):
+                    ips = peer.get("TailscaleIPs", [])
+                    if ips:
+                        return ips[0]
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        pass
+    return None
 
 
 def cmd_ssh(args: argparse.Namespace) -> None:
