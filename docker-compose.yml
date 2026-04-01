@@ -342,12 +342,12 @@ services:
       <<: [*common-env, *observability-env]
 
       DALSTON_ENGINE_ID: nemo
-      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-ctc-0.6b"
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-0.6b-v3"
       DALSTON_INSTANCE: stt-transcribe-nemo
       DALSTON_WORKER_PORT: 9000
       DALSTON_MAX_SESSIONS: 2
       DALSTON_DEVICE: cpu
-      DALSTON_MODEL_PRELOAD: parakeet-rnnt-0.6b
+      DALSTON_MODEL_PRELOAD: nvidia/parakeet-tdt-0.6b-v3
       DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-1}
       DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-2}
       DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-3}

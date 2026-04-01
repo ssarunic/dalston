@@ -26,10 +26,10 @@ services:
       args:
         DEVICE: cuda
     environment:
-      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-1.1b"
+      DALSTON_DEFAULT_MODEL_ID: "nvidia/parakeet-tdt-0.6b-v3"
       DALSTON_MAX_SESSIONS: 4
       DALSTON_DEVICE: cuda
-      DALSTON_MODEL_PRELOAD: parakeet-rnnt-1.1b
+      DALSTON_MODEL_PRELOAD: nvidia/parakeet-tdt-0.6b-v3
       DALSTON_RT_RESERVATION: ${DALSTON_RT_RESERVATION:-2}
       DALSTON_BATCH_MAX_INFLIGHT: ${DALSTON_BATCH_MAX_INFLIGHT:-4}
       DALSTON_TOTAL_CAPACITY: ${DALSTON_TOTAL_CAPACITY:-6}

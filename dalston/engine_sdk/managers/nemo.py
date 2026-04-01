@@ -48,7 +48,7 @@ import structlog
 from dalston.engine_sdk.model_manager import ModelManager
 
 if TYPE_CHECKING:
-    pass
+    from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
 logger = structlog.get_logger()
 
@@ -103,9 +103,11 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
     def __init__(
         self,
         device: str = "cuda",
+        model_storage: MultiSourceModelStorage | None = None,
         **kwargs,
     ) -> None:
         self.device = device
+        self.model_storage = model_storage
 
         # NeMo cache directory
         self.nemo_cache = os.environ.get("NEMO_CACHE", "/models/nemo")
@@ -114,6 +116,7 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
             "nemo_model_manager_init",
             device=self.device,
             nemo_cache=self.nemo_cache,
+            storage_enabled=model_storage is not None,
         )
 
         super().__init__(**kwargs)
@@ -177,6 +180,29 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
                 f"Supported: {sorted(self.SUPPORTED_MODELS.keys())} or HuggingFace model IDs"
             )
 
+        # Use Dalston model storage if configured (S3 → HF fallback).
+        # If storage doesn't have the model (e.g. NGC-only models where the
+        # NGC backend is not yet implemented), fall through to NeMo's built-in
+        # NGC/HF downloader.
+        if self.model_storage is not None:
+            from dalston.engine_sdk.model_storage import ModelNotFoundError
+
+            try:
+                logger.info("ensuring_model_from_storage", model_id=model_id)
+                local_path = self.model_storage.ensure_local(model_path)
+                model_path = str(local_path)
+                logger.info(
+                    "model_ready_from_storage",
+                    model_id=model_id,
+                    local_path=model_path,
+                )
+            except ModelNotFoundError:
+                logger.info(
+                    "model_not_in_storage_using_nemo_downloader",
+                    model_id=model_id,
+                    model_path=model_path,
+                )
+
         # Import NeMo (deferred to avoid import errors if not installed)
         try:
             import nemo.collections.asr as nemo_asr
@@ -198,7 +224,6 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
             device=self.device,
         )
 
-        # Load model from NGC/HuggingFace
         model = loader.from_pretrained(model_path)
 
         # Move to device and set to eval mode
@@ -233,6 +258,12 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
         except ImportError:
             pass
 
+    def get_local_cache_stats(self) -> dict | None:
+        """Get local model cache statistics."""
+        if self.model_storage is not None:
+            return self.model_storage.get_cache_stats()
+        return None
+
     @classmethod
     def from_env(cls) -> NeMoModelManager:
         """Create a manager configured from environment variables.
@@ -248,12 +279,20 @@ class NeMoModelManager(ModelManager[NeMoASRModel]):
             Configured NeMoModelManager instance
         """
         from dalston.engine_sdk.device import detect_device
+        from dalston.engine_sdk.disk_cache import start_disk_evictor
+        from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
         device = detect_device(include_mps=False)
+        model_storage = MultiSourceModelStorage.from_env()
 
-        return cls(
+        manager = cls(
             device=device,
+            model_storage=model_storage,
             ttl_seconds=int(os.environ.get("DALSTON_MODEL_TTL_SECONDS", "3600")),
             max_loaded=int(os.environ.get("DALSTON_MAX_LOADED_MODELS", "2")),
             preload=os.environ.get("DALSTON_MODEL_PRELOAD"),
         )
+
+        manager._disk_evictor = start_disk_evictor(manager, model_storage)
+
+        return manager

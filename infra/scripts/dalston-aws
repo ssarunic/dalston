@@ -83,8 +83,8 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "nemo",
         "container": "stt-transcribe-nemo",
         "extra_env": {
-            "DALSTON_DEFAULT_MODEL_ID": "nvidia/parakeet-tdt-1.1b",
-            "DALSTON_MODEL_PRELOAD": "parakeet-rnnt-1.1b",
+            "DALSTON_DEFAULT_MODEL_ID": "nvidia/parakeet-tdt-0.6b-v3",
+            "DALSTON_MODEL_PRELOAD": "nvidia/parakeet-tdt-0.6b-v3",
             "NEMO_CACHE": "/data/models",
         },
     },
