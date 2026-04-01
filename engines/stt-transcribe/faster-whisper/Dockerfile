@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir --break-system-packages -e ".[engine-sdk,realtime
 WORKDIR /engine
 COPY engines/stt-transcribe/faster-whisper/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+# Re-run ldconfig to pick up nvidia-cublas-cu12 installed above
+RUN ldconfig
 
 # Additional model cache for CTranslate2
 ENV WHISPER_MODELS_DIR=/models/ctranslate2/faster-whisper
