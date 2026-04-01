@@ -20,6 +20,7 @@ on:
       - 'dalston/**'
       - 'pyproject.toml'
       - 'docker/Dockerfile.base-pytorch'
+    tags: ['v*']
   workflow_dispatch:  # manual trigger
 
 env:
@@ -45,8 +46,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build base-pytorch and engine
-        env:
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           # Build base-pytorch first (engine depends on it)
           docker build \
@@ -56,16 +55,22 @@ jobs:
             .
 
           # Build engine on top of base-pytorch
+          TAGS="-t $REGISTRY/$IMAGE_NAME:latest"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            TAGS="$TAGS -t $REGISTRY/$IMAGE_NAME:$VERSION"
+          fi
+
           docker build \
             --build-arg DEVICE=cuda \
-            -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
-            -t $REGISTRY/$IMAGE_NAME:latest \
+            $TAGS \
             -f engines/stt-transcribe/hf-asr/Dockerfile \
             .
 
-          docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
-          docker push $REGISTRY/$IMAGE_NAME:latest
+          docker push --all-tags $REGISTRY/$IMAGE_NAME
 
           echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$REGISTRY/$IMAGE_NAME:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`$REGISTRY/$IMAGE_NAME:latest\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "- \`$REGISTRY/$IMAGE_NAME:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+          fi

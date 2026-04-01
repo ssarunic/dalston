@@ -23,6 +23,7 @@ on:
       - 'dalston/**'
       - 'pyproject.toml'
       - 'docker/Dockerfile.base-engine'
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -48,8 +49,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build base-engine and stt-prepare
-        env:
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           # Build base-engine first (stt-prepare depends on it)
           docker build \
@@ -58,15 +57,21 @@ jobs:
             .
 
           # Build stt-prepare on top of base-engine
+          TAGS="-t $REGISTRY/$IMAGE_NAME:latest"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            TAGS="$TAGS -t $REGISTRY/$IMAGE_NAME:$VERSION"
+          fi
+
           docker build \
-            -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
-            -t $REGISTRY/$IMAGE_NAME:latest \
+            $TAGS \
             -f engines/stt-prepare/audio-prepare/Dockerfile \
             .
 
-          docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
-          docker push $REGISTRY/$IMAGE_NAME:latest
+          docker push --all-tags $REGISTRY/$IMAGE_NAME
 
           echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$REGISTRY/$IMAGE_NAME:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`$REGISTRY/$IMAGE_NAME:latest\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "- \`$REGISTRY/$IMAGE_NAME:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+          fi

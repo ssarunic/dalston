@@ -20,6 +20,7 @@ on:
       - 'docker/Dockerfile.orchestrator'
       - 'pyproject.toml'
       - 'alembic/**'
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -45,18 +46,22 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        env:
-          IMAGE_TAG: ${{ github.sha }}
         run: |
+          TAGS="-t $REGISTRY/$IMAGE_NAME:latest"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            TAGS="$TAGS -t $REGISTRY/$IMAGE_NAME:$VERSION"
+          fi
+
           docker build \
-            -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG \
-            -t $REGISTRY/$IMAGE_NAME:latest \
+            $TAGS \
             -f docker/Dockerfile.orchestrator \
             .
 
-          docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
-          docker push $REGISTRY/$IMAGE_NAME:latest
+          docker push --all-tags $REGISTRY/$IMAGE_NAME
 
           echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$REGISTRY/$IMAGE_NAME:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`$REGISTRY/$IMAGE_NAME:latest\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "- \`$REGISTRY/$IMAGE_NAME:$VERSION\`" >> $GITHUB_STEP_SUMMARY
+          fi
