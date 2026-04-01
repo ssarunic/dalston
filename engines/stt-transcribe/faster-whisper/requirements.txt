@@ -3,10 +3,6 @@
 # Core transcription library (CTranslate2-based Whisper)
 faster-whisper>=1.0.0
 
-# CTranslate2 is compiled against CUDA 12 — needs cuBLAS 12 at runtime.
-# The base image ships CUDA 13, so we install the CUDA 12 lib explicitly.
-nvidia-cublas-cu12
-
 # PyTorch for GPU support, model handling, and Silero VAD
 torch>=2.0.0
 torchaudio>=2.0.0

@@ -15,7 +15,7 @@ ARG DEVICE=cpu
 FROM python:3.13-slim AS base-cpu
 
 # --- GPU base ---
-FROM nvidia/cuda:13.2.0-runtime-ubuntu24.04 AS base-cuda
+FROM nvidia/cuda:12.6.0-runtime-ubuntu24.04 AS base-cuda
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-dev python3-pip \
@@ -57,13 +57,4 @@ ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
 RUN mkdir -p /models/huggingface /models/torch
 
-# Pip-installed nvidia packages (nvidia-cublas-cu12, nvidia-cu13, etc.)
-# put shared libs in site-packages — find and register all of them.
-RUN if [ "$DEVICE" = "cuda" ]; then \
-      python3 -c "import site, pathlib; \
-        [print(d) for s in site.getsitepackages() \
-         for d in pathlib.Path(s).glob('nvidia/*/lib') if d.is_dir()]" \
-        > /etc/ld.so.conf.d/nvidia-pip.conf \
-      && ldconfig; \
-    fi
 ENV NVIDIA_VISIBLE_DEVICES=all
