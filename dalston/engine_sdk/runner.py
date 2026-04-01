@@ -275,22 +275,51 @@ class EngineRunner:
         Reads DALSTON_VRAM_BUDGET_MB or DALSTON_VRAM_SHARE.  If neither
         is set, this is a no-op and the engine uses existing env-var
         defaults (full backward compatibility).
+
+        If DALSTON_MODEL_PRELOAD is set, loads the calibration profile
+        immediately.  Otherwise, defers profile lookup to the first task
+        via ``_ensure_vram_profile(model_id)``.
         """
-        from dalston.engine_sdk.vram_budget import VRAMBudget, resolve_vram_budget
+        from dalston.engine_sdk.vram_budget import resolve_vram_budget
 
         budget_mb = resolve_vram_budget()
         if budget_mb is None:
             logger.info("vram_budget_skip", reason="no budget configured")
             return
 
-        # Determine model_id from preload env var (best guess at startup)
+        self._vram_budget_mb = budget_mb
+
+        # If a preload model is configured, load the profile now
         model_id = os.environ.get("DALSTON_MODEL_PRELOAD", "")
+        if model_id:
+            self._apply_vram_profile(model_id, budget_mb)
+        else:
+            logger.info(
+                "vram_budget_deferred",
+                budget_mb=budget_mb,
+                reason="no DALSTON_MODEL_PRELOAD, profile will load on first task",
+            )
+
+    def _ensure_vram_profile(self, model_id: str) -> None:
+        """Load calibration profile on first task if not already loaded.
+
+        Called by the engine loop when processing the first task that
+        specifies a model_id.
+        """
+        if self._adaptive_params is not None:
+            return
+        budget_mb = getattr(self, "_vram_budget_mb", None)
+        if budget_mb is None or not model_id:
+            return
+        self._apply_vram_profile(model_id, budget_mb)
+
+    def _apply_vram_profile(self, model_id: str, budget_mb: int) -> None:
+        """Load a calibration profile and apply adaptive params."""
+        from dalston.engine_sdk.vram_budget import VRAMBudget
 
         vram = VRAMBudget.load(self.engine_id, model_id)
         adaptive = vram.compute_adaptive_params(budget_mb)
 
-        # Set static env vars that don't change per task.
-        # Only set if not already explicitly configured by the operator.
         self._set_env_if_absent(
             "DALSTON_BATCH_MAX_INFLIGHT",
             str(adaptive.concurrent.batch_max_inflight),
@@ -308,6 +337,7 @@ class EngineRunner:
         logger.info(
             "vram_budget_computed",
             budget_mb=budget_mb,
+            model_id=model_id,
             solo={
                 "vad_batch": adaptive.solo.vad_batch_size,
                 "inflight": adaptive.solo.batch_max_inflight,
@@ -733,6 +763,10 @@ class EngineRunner:
 
         # Extract model from task config (set by orchestrator's engine selector)
         task_model = task_metadata.get("loaded_model_id", "")
+
+        # Deferred VRAM profile: load calibration on first task with a model_id
+        if task_model:
+            self._ensure_vram_profile(task_model)
 
         # Record queue wait time (M20) - time between enqueue and dequeue
         enqueued_at_str = task_metadata.get("enqueued_at")
