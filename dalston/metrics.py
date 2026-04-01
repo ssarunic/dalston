@@ -70,12 +70,9 @@ def configure_metrics(service_name: str) -> None:
     if not enabled:
         return
 
-    if _metrics_initialized:
-        return
-
-    _metrics_initialized = True
-
-    # Initialize metrics based on service type
+    # Initialize metrics based on service type.
+    # Unified runners call configure_metrics() twice (once for RT, once for
+    # batch) — each call registers its own metric set idempotently.
     if service_name == "gateway":
         _init_gateway_metrics()
     elif service_name == "orchestrator":
@@ -86,6 +83,8 @@ def configure_metrics(service_name: str) -> None:
         _init_session_router_metrics()
     elif service_name.startswith("realtime-"):
         _init_realtime_metrics()
+
+    _metrics_initialized = True
 
 
 def _init_gateway_metrics() -> None:
@@ -196,6 +195,8 @@ def _init_orchestrator_metrics() -> None:
 
 def _init_engine_metrics() -> None:
     """Initialize Engine-specific metrics."""
+    if _engine_metrics:
+        return
     from prometheus_client import Counter, Histogram
 
     _engine_metrics["tasks_processed_total"] = Counter(
@@ -335,6 +336,8 @@ def _init_session_router_metrics() -> None:
 
 def _init_realtime_metrics() -> None:
     """Initialize Realtime SDK-specific metrics."""
+    if _realtime_metrics:
+        return
     from prometheus_client import Counter, Histogram
 
     _realtime_metrics["session_duration_seconds"] = Histogram(
