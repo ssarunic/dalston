@@ -37,12 +37,13 @@ STREAM_KEY_PATTERN = "dalston:stream:{engine_id}"
 KNOWN_ENGINES = [
     "audio-prepare",
     "faster-whisper",
+    "hf-asr",
     "nemo",
     "onnx",
     "phoneme-align",
     "pyannote-4.0",
     "nemo-msdd",
-    "parakeet",
+    "vllm-asr",
 ]
 
 # Global state
