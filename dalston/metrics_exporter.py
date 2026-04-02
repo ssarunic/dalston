@@ -38,6 +38,7 @@ KNOWN_ENGINES = [
     "audio-prepare",
     "faster-whisper",
     "nemo",
+    "onnx",
     "phoneme-align",
     "pyannote-4.0",
     "nemo-msdd",
