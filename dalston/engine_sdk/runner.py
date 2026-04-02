@@ -453,6 +453,8 @@ class EngineRunner:
 
                 if self._unified_writer:
                     try:
+                        from dalston.common.node_identity import get_gpu_memory_used
+
                         self._unified_writer.heartbeat(
                             self.instance,
                             status=status,
@@ -463,6 +465,7 @@ class EngineRunner:
                             hostname=self._node.hostname,
                             node_id=self._node.node_id,
                             deploy_env=self._node.deploy_env,
+                            gpu_memory_used=get_gpu_memory_used(),
                         )
                     except Exception as e:
                         logger.warning("unified_heartbeat_failed", error=str(e))
