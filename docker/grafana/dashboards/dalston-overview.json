@@ -900,7 +900,7 @@
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(dalston_orchestrator_audio_duration_seconds_sum[5m])) / ignoring(engine_id) group_right sum by (engine_id) (rate(dalston_engine_task_duration_seconds_sum[5m]))",
+          "expr": "sum(rate(dalston_orchestrator_audio_duration_seconds_sum[5m])) / ignoring(engine_id) group_right sum by (engine_id) (rate(dalston_engine_task_duration_seconds_sum{engine_id!=\"audio-prepare\"}[5m]))",
           "legendFormat": "{{ engine_id }}",
           "refId": "B"
         }
