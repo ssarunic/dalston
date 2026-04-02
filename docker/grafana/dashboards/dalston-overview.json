@@ -383,7 +383,7 @@
           },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "ops"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -396,18 +396,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"success\"}[5m])) by (engine_id, model)",
+          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"success\"}[5m])) by (engine_id, model) * 3600",
           "legendFormat": "{{ engine_id }}/{{ model }} ok",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"failure\"}[5m])) by (engine_id, model)",
+          "expr": "sum(rate(dalston_engine_tasks_processed_total{status=\"failure\"}[5m])) by (engine_id, model) * 3600",
           "legendFormat": "{{ engine_id }}/{{ model }} err",
           "refId": "B"
         }
       ],
-      "title": "Task Throughput by Runtime/Model",
+      "title": "Task Throughput by Runtime/Model (per hour)",
       "type": "timeseries"
     },
     {
@@ -879,9 +879,9 @@
             "thresholdsStyle": { "mode": "line+area" }
           },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "transparent", "value": null }, { "color": "red", "value": 1 }] },
-          "unit": "short",
-          "decimals": 2
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "suffix:x",
+          "decimals": 1
         },
         "overrides": []
       },
@@ -894,18 +894,18 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(dalston_orchestrator_job_duration_seconds_sum[5m]) / rate(dalston_orchestrator_audio_duration_seconds_sum[5m])",
-          "legendFormat": "Overall RTF",
+          "expr": "rate(dalston_orchestrator_audio_duration_seconds_sum[5m]) / rate(dalston_orchestrator_job_duration_seconds_sum[5m])",
+          "legendFormat": "Overall",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (engine_id) (rate(dalston_engine_task_duration_seconds_sum[5m])) / ignoring(engine_id) group_left sum(rate(dalston_orchestrator_audio_duration_seconds_sum[5m]))",
-          "legendFormat": "{{ engine_id }} RTF",
+          "expr": "sum(rate(dalston_orchestrator_audio_duration_seconds_sum[5m])) / ignoring(engine_id) group_right sum by (engine_id) (rate(dalston_engine_task_duration_seconds_sum[5m]))",
+          "legendFormat": "{{ engine_id }}",
           "refId": "B"
         }
       ],
-      "title": "Real-Time Factor (processing / audio duration)",
+      "title": "Speed Multiplier (audio duration / processing time)",
       "type": "timeseries"
     },
     {
