@@ -862,7 +862,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Real-time factor (lower = faster)",
+            "axisLabel": "Speed multiplier (higher = faster)",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
