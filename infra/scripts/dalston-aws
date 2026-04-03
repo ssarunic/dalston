@@ -1552,6 +1552,55 @@ def list_gpu_spot_instances(region: str, engines: list[str] | None = None) -> No
 # ---------------------------------------------------------------------------
 
 
+def _ensure_cross_region_sg(region: str, key_name: str) -> str:
+    """Create or reuse a minimal security group for GPU workers in another region.
+
+    Only allows SSH (22) inbound — all engine communication goes via Tailscale.
+    """
+    ec2 = ec2_client(region)
+    sg_name = f"{NAME_PREFIX}-gpu-cross-region"
+
+    # Check if SG already exists
+    try:
+        result = ec2.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": [sg_name]}]
+        )
+        if result["SecurityGroups"]:
+            sg_id = result["SecurityGroups"][0]["GroupId"]
+            log(f"Reusing cross-region SG {sg_id} in {region}")
+            return sg_id
+    except ClientError:
+        pass
+
+    # Get default VPC
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "is-default", "Values": ["true"]}])
+    if not vpcs["Vpcs"]:
+        die(
+            f"No default VPC in {region}. Create one or use the same region as control plane."
+        )
+    vpc_id = vpcs["Vpcs"][0]["VpcId"]
+
+    sg = ec2.create_security_group(
+        GroupName=sg_name,
+        Description="Dalston GPU worker (cross-region, Tailscale networking)",
+        VpcId=vpc_id,
+    )
+    sg_id = sg["GroupId"]
+    ec2.authorize_security_group_ingress(
+        GroupId=sg_id,
+        IpPermissions=[
+            {
+                "IpProtocol": "tcp",
+                "FromPort": 22,
+                "ToPort": 22,
+                "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "SSH"}],
+            },
+        ],
+    )
+    log(f"Created cross-region SG {sg_id} in {region}")
+    return sg_id
+
+
 def launch_gpu_interactive(
     region: str,
     sg_id: str,
@@ -1898,6 +1947,7 @@ def _launch_gpu(
     spot: bool | None = None,
     gpu_type: str | None = None,
     engines: list[str] | None = None,
+    region: str | None = None,
 ) -> None:
     """Launch a GPU worker instance with specified engines."""
     gw = tmpl.gpu_worker
@@ -1936,27 +1986,36 @@ def _launch_gpu(
     if not st.gpu_sg_id:
         die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
 
+    # Cross-region GPU worker: provision a minimal SG in the target region
+    gpu_region = region or st.region
+    if gpu_region != st.region:
+        log(f"Cross-region GPU worker: {gpu_region} (control plane: {st.region})")
+        gpu_sg_id = _ensure_cross_region_sg(gpu_region, st.key_name)
+    else:
+        gpu_sg_id = st.gpu_sg_id
+
     # Open observability ports if enabled (idempotent)
-    if st.observability:
+    if st.observability and gpu_region == st.region:
         open_observability_ports(st.region, st.sg_id, st.gpu_sg_id)
 
     _check_gpu_compat(engines, gpu_type)
 
     log(
-        f"Launching GPU worker '{worker_name}' ({gpu_type}, spot={use_spot}, engines={engines})..."
+        f"Launching GPU worker '{worker_name}' ({gpu_type}, spot={use_spot}, "
+        f"engines={engines}, region={gpu_region})..."
     )
 
     gpu_ud = generate_gpu_worker_user_data(
         st.s3_bucket,
-        st.region,
+        gpu_region,
         worker_name=worker_name,
         engines=engines,
         registry=tmpl.registry,
         observability=st.observability,
     )
     instance_id = launch_gpu_interactive(
-        st.region,
-        st.gpu_sg_id,
+        gpu_region,
+        gpu_sg_id,
         gpu_ud,
         f"{NAME_PREFIX}-gpu-{worker_name}",
         use_spot,
@@ -1965,9 +2024,9 @@ def _launch_gpu(
         gpu_type,
         engines=engines,
     )
-    wait_instance_running(st.region, instance_id)
+    wait_instance_running(gpu_region, instance_id)
 
-    gpu_inst = describe_instance(st.region, instance_id)
+    gpu_inst = describe_instance(gpu_region, instance_id)
     gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
 
     worker = asdict(
@@ -1979,6 +2038,8 @@ def _launch_gpu(
             engines=engines,
         )
     )
+    if gpu_region != st.region:
+        worker["region"] = gpu_region
     if st.gpu_workers is None:
         st.gpu_workers = []
     st.gpu_workers.append(worker)
@@ -2019,6 +2080,7 @@ def cmd_launch(args: argparse.Namespace) -> None:
                 spot=spot_override,
                 gpu_type=args.gpu_type,
                 engines=engines,
+                region=args.region,
             )
         elif target == "gpu":
             die("Template has no gpu_worker config.")
@@ -2036,7 +2098,6 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     if name is not None:
         names = {n.strip() for n in name.split(",")}
 
-    ec2 = ec2_client(st.region)
     to_remove = []
 
     for w in st.gpu_workers:
@@ -2044,15 +2105,16 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
             continue
         iid = w["instance_id"]
         wname = w["name"]
-        state = get_instance_state(st.region, iid)
+        w_region = w.get("region", st.region)
+        state = get_instance_state(w_region, iid)
         if state in ("terminated", "shutting-down"):
             to_remove.append(w)
             continue
         audit("terminate.gpu", gpu_instance=iid, worker=wname)
-        cancel_spot_requests_for_instances(st.region, [iid])
+        cancel_spot_requests_for_instances(w_region, [iid])
         log(f"Terminating GPU worker '{wname}' ({iid})...")
         try:
-            ec2.terminate_instances(InstanceIds=[iid])
+            ec2_client(w_region).terminate_instances(InstanceIds=[iid])
             to_remove.append(w)
         except ClientError as e:
             warn(f"Failed to terminate '{wname}' ({iid}): {e}")
@@ -2496,6 +2558,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Deploy observability stack (Jaeger, Prometheus, Grafana, Loki) on control plane",
+    )
+    p_launch.add_argument(
+        "--region",
+        default=None,
+        help="AWS region for GPU worker (default: same as control plane)",
     )
     p_launch.set_defaults(func=cmd_launch)
 
