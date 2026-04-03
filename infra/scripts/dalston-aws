@@ -64,6 +64,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "image": "stt-onnx",
         "engine_id": "onnx",
         "container": "stt-transcribe-onnx",
+        "extra_env": {"DALSTON_VAD_BATCH_SIZE": "48"},
     },
     "faster-whisper": {
         "image": "stt-transcribe-faster-whisper",
