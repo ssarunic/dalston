@@ -170,31 +170,70 @@ class PyannoteEngine(Engine):
             # Check duration and branch to chunked path if needed
             duration = get_audio_duration(audio_path)
 
-            if duration > self._max_chunk_s:
-                speakers, turns = run_chunked_diarization(
-                    pipeline,
-                    audio_path,
-                    diarization_params,
-                    hf_token=hf_token,
-                    device=self._device,
-                    convert_annotation=self._convert_annotation,
-                    exclusive=bool(exclusive),
-                    max_chunk_s=self._max_chunk_s,
-                    log=self.logger,
-                )
+            from dalston.engine_sdk.inference.gpu_guard import (
+                clear_gpu_cache,
+                is_oom_error,
+            )
+
+            max_chunk_s = self._max_chunk_s
+            use_chunked = duration > max_chunk_s
+
+            if not use_chunked:
+                # Single-pass: try direct, fall back to chunked on OOM
+                try:
+                    self.logger.info("running_diarization")
+                    diarization = pipeline(str(audio_path), **diarization_params)
+
+                    if exclusive and hasattr(
+                        diarization, "exclusive_speaker_diarization"
+                    ):
+                        diarization = diarization.exclusive_speaker_diarization
+
+                    speakers, turns = self._convert_annotation(diarization)
+                    overlap_duration, overlap_ratio = self._calculate_overlap_stats(
+                        diarization
+                    )
+                except Exception as exc:
+                    if not is_oom_error(exc):
+                        raise
+                    clear_gpu_cache()
+                    max_chunk_s = duration / 2
+                    use_chunked = True
+                    self.logger.warning(
+                        "diarize_oom_fallback_to_chunked",
+                        duration=round(duration, 1),
+                        new_max_chunk_s=round(max_chunk_s, 1),
+                    )
+
+            if use_chunked:
+                # Chunked path with OOM backoff on chunk size
+                while max_chunk_s >= 30:
+                    try:
+                        speakers, turns = run_chunked_diarization(
+                            pipeline,
+                            audio_path,
+                            diarization_params,
+                            hf_token=hf_token,
+                            device=self._device,
+                            convert_annotation=self._convert_annotation,
+                            exclusive=bool(exclusive),
+                            max_chunk_s=max_chunk_s,
+                            log=self.logger,
+                        )
+                        break
+                    except RuntimeError as exc:
+                        if "All chunks failed" not in str(exc) or max_chunk_s <= 30:
+                            raise
+                        clear_gpu_cache()
+                        old_chunk = max_chunk_s
+                        max_chunk_s = max(30, max_chunk_s / 2)
+                        self.logger.warning(
+                            "diarize_oom_chunk_backoff",
+                            old_max_chunk_s=round(old_chunk, 1),
+                            new_max_chunk_s=round(max_chunk_s, 1),
+                        )
+
                 overlap_duration, overlap_ratio = overlap_stats_from_turns(turns)
-            else:
-                self.logger.info("running_diarization")
-                diarization = pipeline(str(audio_path), **diarization_params)
-
-                # Apply exclusive mode if requested (new in pyannote 4.0)
-                if exclusive and hasattr(diarization, "exclusive_speaker_diarization"):
-                    diarization = diarization.exclusive_speaker_diarization
-
-                speakers, turns = self._convert_annotation(diarization)
-                overlap_duration, overlap_ratio = self._calculate_overlap_stats(
-                    diarization
-                )
 
             self.logger.info(
                 "diarization_complete",

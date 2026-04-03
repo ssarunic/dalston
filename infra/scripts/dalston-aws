@@ -77,7 +77,10 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "pyannote-4.0",
         "container": "stt-diarize-pyannote-4-0",
         "needs_hf_token": True,
-        "extra_env": {"DALSTON_WORKER_ID": "pyannote-gpu-1"},
+        "extra_env": {
+            "DALSTON_WORKER_ID": "pyannote-gpu-1",
+            "DALSTON_MAX_DIARIZE_CHUNK_S": "3600",
+        },
     },
     "nemo": {
         "image": "stt-transcribe-nemo",
