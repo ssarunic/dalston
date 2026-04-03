@@ -13,17 +13,6 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Error message patterns that indicate GPU OOM
-_OOM_PATTERNS = (
-    "cuda out of memory",
-    "out of memory",
-    "outofmemoryerror",
-    "failed to allocate memory",
-    "failed to allocate",
-    "bfc_arena",
-    "onnxruntime",  # ORT allocation errors include this
-)
-
 
 def is_oom_error(exc: BaseException) -> bool:
     """Check if an exception is a GPU out-of-memory error.

@@ -108,7 +108,7 @@ class OnnxInference:
         self._quantization = quantization
         self._vad: Any | None = None  # Lazy-loaded Silero VAD
         self._current_model_id: str | None = None  # Set during transcribe()
-        self._oom_callback: Any | None = None  # Set by runner for batch size caching
+        self._oom_callback: object | None = None  # Set by runner for batch size caching
 
         logger.info(
             "onnx_inference_init",
@@ -261,41 +261,44 @@ class OnnxInference:
 
         # OOM guard: try inference, halve batch_size on OOM, retry
         start = time.monotonic()
-        while True:
-            vad_ts_model = model.with_vad(
-                vad,
-                max_speech_duration_s=max_speech_s,
-                min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
-                batch_size=vad_batch_size,
-            ).with_timestamps()
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.device": self._device,
+                "dalston.mode": "vad",
+            },
+        ):
+            while True:
+                vad_ts_model = model.with_vad(
+                    vad,
+                    max_speech_duration_s=max_speech_s,
+                    min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
+                    batch_size=vad_batch_size,
+                ).with_timestamps()
 
-            try:
-                with dalston.telemetry.create_span(
-                    "engine.recognize",
-                    attributes={
-                        "dalston.device": self._device,
-                        "dalston.mode": "vad",
-                        "dalston.vad_batch_size": vad_batch_size,
-                    },
-                ):
+                try:
                     vad_segments = list(vad_ts_model.recognize(audio_path))
-                break  # success
-            except Exception as exc:
-                if not is_oom_error(exc) or vad_batch_size <= 1:
-                    raise
-                clear_gpu_cache()
-                old_batch = vad_batch_size
-                vad_batch_size = max(1, vad_batch_size // 2)
-                logger.warning(
-                    "vram_oom_backoff",
-                    old_batch_size=old_batch,
-                    new_batch_size=vad_batch_size,
-                    error=str(exc)[:200],
-                )
+                    break  # success
+                except Exception as exc:
+                    if not is_oom_error(exc) or vad_batch_size <= 1:
+                        raise
+                    clear_gpu_cache()
+                    old_batch = vad_batch_size
+                    vad_batch_size = max(1, vad_batch_size // 2)
+                    logger.warning(
+                        "vram_oom_backoff",
+                        old_batch_size=old_batch,
+                        new_batch_size=vad_batch_size,
+                        error=str(exc)[:200],
+                    )
+
+            dalston.telemetry.set_span_attribute(
+                "dalston.vad_batch_size", vad_batch_size
+            )
 
         recognize_time = time.monotonic() - start
 
-        # Notify callback if batch was reduced (Fix 4: cache safe size)
+        # Cache the safe batch size so subsequent tasks skip failed sizes
         if vad_batch_size < original_batch_size and self._oom_callback:
             self._oom_callback(vad_batch_size)
 
