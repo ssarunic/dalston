@@ -75,16 +75,13 @@ class AdaptiveVRAMParams:
     profile_source: str = "defaults"  # "calibrated" | "fallback" | "defaults"
 
     def select(self, queue_depth: int) -> EngineVRAMParams:
-        """Pick the right param set based on pending work.
+        """Return the engine params to use for the current task.
 
-        Uses solo params (high batch) when the queue is nearly empty,
-        maximizing per-file throughput.  Switches to concurrent params
-        (low batch) when work is queued, leaving VRAM headroom for
-        parallel processing.
+        Always returns solo params — single-GPU engines process one
+        task at a time and should use the maximum batch size for
+        best per-file throughput regardless of queue depth.
         """
-        if queue_depth <= 1:
-            return self.solo
-        return self.concurrent
+        return self.solo
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +296,7 @@ class VRAMBudget:
             + p.framework_overhead_mb
         )
 
-        # Concurrent: vad_batch_size=1, maximize inflight
-        # Each inflight request uses: S + alpha_batch * 1 + beam_cost
+        # Concurrent params (kept for future multi-GPU / parallel engines)
         activation_per_request = S + alpha_batch + beam_cost
         if activation_per_request > 0:
             concurrent_inflight = max(1, int(available / activation_per_request))
@@ -330,7 +326,7 @@ class VRAMBudget:
             headroom_mb=budget_mb - solo_peak,
         )
         concurrent = EngineVRAMParams(
-            vad_batch_size=1,
+            vad_batch_size=solo_batch,
             batch_max_inflight=concurrent_inflight,
             max_sessions=max(2, concurrent_inflight),
             max_diarize_chunk_s=max_diarize_chunk_s,
