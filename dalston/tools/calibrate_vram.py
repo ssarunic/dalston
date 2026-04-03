@@ -140,13 +140,45 @@ POLL_INTERVAL_MS = 50  # VRAM polling interval
 
 
 def generate_wav(path: Path, duration_s: float, sample_rate: int = 16000) -> None:
-    """Generate a WAV file with white noise at the given duration."""
+    """Generate a WAV file with speech-like synthetic audio.
+
+    Produces sine-wave mixtures at speech fundamentals with amplitude
+    modulation simulating speech cadence. Silero VAD detects these as
+    speech, producing realistic VRAM measurements during calibration
+    (unlike white noise which VAD rejects entirely).
+    """
     import numpy as np
 
     rng = np.random.default_rng(42)
-    samples = rng.normal(0, 0.1, int(duration_s * sample_rate)).astype(np.float32)
-    # Convert to 16-bit PCM
-    pcm = (samples * 32767).clip(-32768, 32767).astype(np.int16)
+    n_samples = int(duration_s * sample_rate)
+    t = np.arange(n_samples) / sample_rate
+
+    # Mix fundamentals and harmonics in speech frequency range
+    signal = np.zeros(n_samples, dtype=np.float32)
+    for freq in [150, 200, 300, 400, 800, 1200]:
+        signal += rng.uniform(0.05, 0.15) * np.sin(
+            2 * np.pi * freq * t, dtype=np.float32
+        )
+
+    # Amplitude envelope: speech-like on/off (1-3s on, 0.3-0.8s off)
+    envelope = np.zeros(n_samples, dtype=np.float32)
+    pos = 0
+    while pos < n_samples:
+        on_samples = int(rng.uniform(1.0, 3.0) * sample_rate)
+        off_samples = int(rng.uniform(0.3, 0.8) * sample_rate)
+        end_on = min(pos + on_samples, n_samples)
+        envelope[pos:end_on] = 1.0
+        pos = end_on + off_samples
+
+    signal *= envelope
+    signal += rng.normal(0, 0.01, n_samples).astype(np.float32)
+
+    # Normalize to speech-like level
+    peak = np.max(np.abs(signal))
+    if peak > 0:
+        signal = signal / peak * 0.3
+
+    pcm = (signal * 32767).clip(-32768, 32767).astype(np.int16)
 
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(1)

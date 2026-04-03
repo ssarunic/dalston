@@ -108,6 +108,7 @@ class OnnxInference:
         self._quantization = quantization
         self._vad: Any | None = None  # Lazy-loaded Silero VAD
         self._current_model_id: str | None = None  # Set during transcribe()
+        self._oom_callback: Any | None = None  # Set by runner for batch size caching
 
         logger.info(
             "onnx_inference_init",
@@ -238,9 +239,12 @@ class OnnxInference:
         """Transcribe a file using VAD segmentation for long audio safety.
 
         Silero VAD splits audio at speech boundaries (max 60s per segment by default),
-        then each segment is transcribed independently. This prevents GPU
-        OOM on long recordings while producing properly-timed output.
+        then each segment is transcribed independently. Includes OOM guard
+        with binary backoff — if a batch size causes GPU OOM, it halves
+        and retries until inference succeeds.
         """
+        from dalston.engine_sdk.inference.gpu_guard import clear_gpu_cache, is_oom_error
+
         vad = self._get_or_load_vad()
 
         max_speech_s = float(
@@ -251,28 +255,49 @@ class OnnxInference:
                 os.environ.get("DALSTON_VAD_BATCH_SIZE", _DEFAULT_VAD_BATCH_SIZE)
             )
 
-        # Chain: model → VAD segmentation → timestamped recognition
-        vad_ts_model = model.with_vad(
-            vad,
-            max_speech_duration_s=max_speech_s,
-            min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
-            batch_size=vad_batch_size,
-        ).with_timestamps()
-
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "onnx")
         model_id = self._current_model_id or ""
+        original_batch_size = vad_batch_size
 
-        # recognize() returns Iterator[TimestampedSegmentResult]
+        # OOM guard: try inference, halve batch_size on OOM, retry
         start = time.monotonic()
-        with dalston.telemetry.create_span(
-            "engine.recognize",
-            attributes={
-                "dalston.device": self._device,
-                "dalston.mode": "vad",
-            },
-        ):
-            vad_segments = list(vad_ts_model.recognize(audio_path))
+        while True:
+            vad_ts_model = model.with_vad(
+                vad,
+                max_speech_duration_s=max_speech_s,
+                min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
+                batch_size=vad_batch_size,
+            ).with_timestamps()
+
+            try:
+                with dalston.telemetry.create_span(
+                    "engine.recognize",
+                    attributes={
+                        "dalston.device": self._device,
+                        "dalston.mode": "vad",
+                        "dalston.vad_batch_size": vad_batch_size,
+                    },
+                ):
+                    vad_segments = list(vad_ts_model.recognize(audio_path))
+                break  # success
+            except Exception as exc:
+                if not is_oom_error(exc) or vad_batch_size <= 1:
+                    raise
+                clear_gpu_cache()
+                old_batch = vad_batch_size
+                vad_batch_size = max(1, vad_batch_size // 2)
+                logger.warning(
+                    "vram_oom_backoff",
+                    old_batch_size=old_batch,
+                    new_batch_size=vad_batch_size,
+                    error=str(exc)[:200],
+                )
+
         recognize_time = time.monotonic() - start
+
+        # Notify callback if batch was reduced (Fix 4: cache safe size)
+        if vad_batch_size < original_batch_size and self._oom_callback:
+            self._oom_callback(vad_batch_size)
 
         segment_count = len(vad_segments)
         dalston.telemetry.set_span_attribute("dalston.segment_count", segment_count)
