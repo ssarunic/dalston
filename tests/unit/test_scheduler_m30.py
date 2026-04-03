@@ -88,7 +88,7 @@ class TestCalculateTaskTimeout:
             rtf_gpu=0.05,
         )
         # Default: MIN_TIMEOUT_S * 5 = 300
-        assert timeout == MIN_TIMEOUT_S * 5
+        assert timeout == 3600
 
     def test_zero_audio_duration_returns_default(self):
         """Should return default timeout when audio duration is zero."""
@@ -96,7 +96,7 @@ class TestCalculateTaskTimeout:
             audio_duration_s=0,
             rtf_gpu=0.05,
         )
-        assert timeout == MIN_TIMEOUT_S * 5
+        assert timeout == 3600
 
     def test_negative_audio_duration_returns_default(self):
         """Should return default timeout when audio duration is negative."""
@@ -104,7 +104,7 @@ class TestCalculateTaskTimeout:
             audio_duration_s=-100,
             rtf_gpu=0.05,
         )
-        assert timeout == MIN_TIMEOUT_S * 5
+        assert timeout == 3600
 
     def test_returns_integer(self):
         """Should return an integer value."""

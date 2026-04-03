@@ -147,8 +147,9 @@ def calculate_task_timeout(
         144  # 60 * 0.8 * 3 = 144s (but min 60s)
     """
     if audio_duration_s is None or audio_duration_s <= 0:
-        # Default timeout for unknown duration (e.g., prepare stage)
-        return MIN_TIMEOUT_S * 5  # 5 minutes
+        # Default timeout for unknown duration — must be generous enough
+        # for long-audio stages (diarize can take 15+ min on 2hr audio)
+        return 3600  # 1 hour
 
     # Select RTF based on hardware preference
     rtf = None
