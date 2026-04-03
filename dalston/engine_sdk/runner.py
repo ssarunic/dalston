@@ -334,6 +334,11 @@ class EngineRunner:
 
         self._adaptive_params = adaptive
 
+        # Wire OOM callback so inference can cache safe batch sizes
+        core = getattr(self.engine, "_core", None)
+        if core and hasattr(core, "_oom_callback"):
+            core._oom_callback = adaptive.update_safe_batch_size
+
         logger.info(
             "vram_budget_computed",
             budget_mb=budget_mb,

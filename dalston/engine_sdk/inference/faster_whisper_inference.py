@@ -162,6 +162,7 @@ class FasterWhisperInference:
             preload=preload,
         )
         self._current_model_id: str | None = None
+        self._oom_callback: object | None = None  # Set by runner for batch size caching
 
         logger.info(
             "transcribe_core_init",
@@ -296,13 +297,40 @@ class FasterWhisperInference:
                 "dalston.vad_filter": config.vad_filter,
             },
         ):
-            if config.vad_batch_size > 1 and isinstance(audio_input, str):
-                segments, info = self._transcribe_vad_batched(
-                    model,
-                    audio_input,
-                    config.vad_batch_size,
-                    transcribe_kwargs,
+            vad_batch_size = config.vad_batch_size
+            original_batch_size = vad_batch_size
+
+            if vad_batch_size > 1 and isinstance(audio_input, str):
+                # OOM guard: halve batch_size on OOM, retry
+                from dalston.engine_sdk.inference.gpu_guard import (
+                    clear_gpu_cache,
+                    is_oom_error,
                 )
+
+                while True:
+                    try:
+                        segments, info = self._transcribe_vad_batched(
+                            model,
+                            audio_input,
+                            vad_batch_size,
+                            transcribe_kwargs,
+                        )
+                        break
+                    except Exception as exc:
+                        if not is_oom_error(exc) or vad_batch_size <= 1:
+                            raise
+                        clear_gpu_cache()
+                        old_batch = vad_batch_size
+                        vad_batch_size = max(1, vad_batch_size // 2)
+                        logger.warning(
+                            "vram_oom_backoff",
+                            old_batch_size=old_batch,
+                            new_batch_size=vad_batch_size,
+                            error=str(exc)[:200],
+                        )
+
+                if vad_batch_size < original_batch_size and self._oom_callback:
+                    self._oom_callback(vad_batch_size)
             else:
                 segments, info = self._transcribe_single(
                     model,

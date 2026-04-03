@@ -83,6 +83,21 @@ class AdaptiveVRAMParams:
         """
         return self.solo
 
+    def update_safe_batch_size(self, safe_batch_size: int) -> None:
+        """Cache a proven safe batch size after OOM backoff.
+
+        Called by the inference layer when a lower batch size succeeds
+        after OOM. Updates solo params so subsequent tasks use the
+        proven safe value instead of retrying from the profile max.
+        """
+        if safe_batch_size < self.solo.vad_batch_size:
+            logger.warning(
+                "vram_safe_batch_cached",
+                old=self.solo.vad_batch_size,
+                new=safe_batch_size,
+            )
+            self.solo.vad_batch_size = safe_batch_size
+
 
 # ---------------------------------------------------------------------------
 # Calibration profile schema

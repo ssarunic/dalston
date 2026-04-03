@@ -672,6 +672,38 @@ exactly as it does today. Zero behaviour change for existing deployments.
 
 ---
 
+## Post-Implementation Fixes (2026-04-03)
+
+### Problem: Calibration with silence produced invalid profiles
+
+The calibration script generates synthetic WAV files using white noise. Silero VAD
+rejects white noise (no speech-like features), so calibration measured near-zero
+activation memory regardless of `vad_batch_size`. This produced `alpha_batch=55 MB`
+when real speech uses ~157 MB per segment. The budget calculator then computed
+`vad_batch_size=144`, which requested 22.6 GB on a 15 GB T4 — instant OOM.
+
+The OOM corrupted CUDA state, requiring a full instance reboot. The engine had no
+fallback — it crashed and kept crashing on redelivered tasks.
+
+### Fixes Applied
+
+1. **Runtime OOM guard with binary backoff** — Inference wraps the GPU call in a
+   retry loop. On OOM: clear GPU cache, halve batch_size, retry. Engines self-correct
+   to a safe batch size in at most log₂(N) retries. The discovered safe value is
+   cached for subsequent tasks.
+
+2. **Simplify adaptive params** — Removed solo/concurrent split. Single-GPU engines
+   always use max batch size, process one task at a time.
+
+3. **Calibrate with speech-like audio** — `generate_wav()` now produces sine-wave
+   mixtures with speech-like spectral features and amplitude modulation. Silero VAD
+   detects these as speech, producing accurate VRAM measurements.
+
+4. **Cache discovered safe batch size** — After OOM backoff, the working batch size
+   is stored in `AdaptiveVRAMParams` so subsequent tasks skip the failed sizes.
+
+---
+
 ## Non-Goals
 
 - **ONNX `gpu_mem_limit` enforcement** — The calibrator tells the engine what params are safe; we don't need hard VRAM caps via ONNX session options. Hard caps cause cryptic failures; computed params prevent overuse gracefully.
