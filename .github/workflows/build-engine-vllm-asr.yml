@@ -44,6 +44,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Free disk space
+        run: |
+          # vLLM + CUDA deps need ~15GB — free up runner disk
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          docker system prune -af
+
       - name: Build engine
         run: |
           # vLLM-ASR builds directly from CUDA base (no dalston base image)
