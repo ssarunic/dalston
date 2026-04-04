@@ -829,8 +829,29 @@ def _find_nearest_turn_speaker(at_time: float, turns: list[SpeakerTurn]) -> str 
     return nearest_speaker
 
 
+def _is_sentence_ending(text: str) -> bool:
+    """Check if a word ends with sentence-terminating punctuation."""
+    stripped = text.rstrip()
+    return stripped.endswith((".", "!", "?"))
+
+
+def _find_start_turn_speaker(word_start: float, turns: list[SpeakerTurn]) -> str | None:
+    """Find the speaker whose turn contains the word's start time."""
+    for turn in turns:
+        if turn.start <= word_start <= turn.end:
+            return turn.speaker
+    return None
+
+
 def _assign_speaker_to_word(word: Word, turns: list[SpeakerTurn]) -> str | None:
-    """Assign speaker to a word using overlap, then nearest-turn fallback."""
+    """Assign speaker to a word using overlap, then nearest-turn fallback.
+
+    For sentence-ending words (trailing ``.``, ``!``, ``?``), the speaker
+    whose turn contains the word's *start* time wins.  This prevents the
+    common "last-word slip" where a sentence-final word's trailing audio
+    extends past the diarization boundary and overlap-based assignment
+    incorrectly gives it to the next speaker.
+    """
     if not turns:
         return None
 
@@ -840,6 +861,14 @@ def _assign_speaker_to_word(word: Word, turns: list[SpeakerTurn]) -> str | None:
     # Zero-duration words are common at segment tails; treat as point assignments.
     if word.end == word.start:
         return _find_nearest_turn_speaker(word.start, turns)
+
+    # Sentence-ending words: prefer the speaker whose turn contains the
+    # word onset.  The trailing acoustic energy (release, silence) often
+    # bleeds past the diarization boundary, making pure overlap unreliable.
+    if _is_sentence_ending(word.text):
+        start_speaker = _find_start_turn_speaker(word.start, turns)
+        if start_speaker is not None:
+            return start_speaker
 
     speaker = _find_speaker_by_overlap(word.start, word.end, turns)
     if speaker is not None:

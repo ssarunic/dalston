@@ -13,9 +13,12 @@ from dalston.common.pipeline_types import (
     Word,
 )
 from dalston.common.transcript import (
+    _assign_speaker_to_word,
     _build_merged_segments,
     _extract_audio_metadata,
     _find_speaker_by_overlap,
+    _find_start_turn_speaker,
+    _is_sentence_ending,
     _merge_adjacent_turns,
     _merge_short_splits,
     _select_segments,
@@ -1692,3 +1695,343 @@ class TestAudio2FixtureMerge:
 
         missing = original_words - merged_words
         assert not missing, f"Words lost during merge: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# _is_sentence_ending
+# ---------------------------------------------------------------------------
+
+
+class TestIsSentenceEnding:
+    def test_period(self):
+        assert _is_sentence_ending("world.") is True
+
+    def test_exclamation(self):
+        assert _is_sentence_ending("stop!") is True
+
+    def test_question(self):
+        assert _is_sentence_ending("really?") is True
+
+    def test_no_punctuation(self):
+        assert _is_sentence_ending("hello") is False
+
+    def test_comma(self):
+        assert _is_sentence_ending("well,") is False
+
+    def test_trailing_whitespace(self):
+        assert _is_sentence_ending("done.  ") is True
+
+    def test_empty(self):
+        assert _is_sentence_ending("") is False
+
+
+# ---------------------------------------------------------------------------
+# _find_start_turn_speaker
+# ---------------------------------------------------------------------------
+
+
+class TestFindStartTurnSpeaker:
+    def test_inside_turn(self):
+        turns = [SpeakerTurn(speaker="A", start=0.0, end=5.0)]
+        assert _find_start_turn_speaker(2.0, turns) == "A"
+
+    def test_at_turn_start(self):
+        turns = [SpeakerTurn(speaker="A", start=1.0, end=5.0)]
+        assert _find_start_turn_speaker(1.0, turns) == "A"
+
+    def test_at_turn_end(self):
+        turns = [SpeakerTurn(speaker="A", start=1.0, end=5.0)]
+        assert _find_start_turn_speaker(5.0, turns) == "A"
+
+    def test_between_turns(self):
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=2.0),
+            SpeakerTurn(speaker="B", start=3.0, end=5.0),
+        ]
+        assert _find_start_turn_speaker(2.5, turns) is None
+
+    def test_empty_turns(self):
+        assert _find_start_turn_speaker(1.0, []) is None
+
+
+# ---------------------------------------------------------------------------
+# _assign_speaker_to_word – sentence-end slip prevention
+# ---------------------------------------------------------------------------
+
+
+class TestAssignSpeakerToWord:
+    """Tests for word-to-speaker assignment including sentence-end fix."""
+
+    def _turns(self):
+        return [
+            SpeakerTurn(speaker="A", start=0.0, end=10.0),
+            SpeakerTurn(speaker="B", start=10.0, end=20.0),
+        ]
+
+    def test_mid_sentence_word_uses_overlap(self):
+        """A normal mid-sentence word crossing the boundary uses max overlap."""
+        turns = self._turns()
+        # Word "the" straddles boundary: starts at 9.8, ends at 10.6
+        # Overlap with A = 0.2s, overlap with B = 0.6s → B wins
+        word = Word(text="the", start=9.8, end=10.6)
+        assert _assign_speaker_to_word(word, turns) == "B"
+
+    def test_sentence_end_word_prefers_start_speaker(self):
+        """A sentence-ending word that starts in A's turn stays with A,
+        even when overlap with B is larger."""
+        turns = self._turns()
+        # "done." starts at 9.8 in A's turn, ends at 10.6 in B's turn.
+        # Overlap: A=0.2s, B=0.6s → overlap would pick B.
+        # But since it ends with '.', start-based picks A.
+        word = Word(text="done.", start=9.8, end=10.6)
+        assert _assign_speaker_to_word(word, turns) == "A"
+
+    def test_sentence_end_exclamation(self):
+        turns = self._turns()
+        word = Word(text="stop!", start=9.5, end=10.8)
+        assert _assign_speaker_to_word(word, turns) == "A"
+
+    def test_sentence_end_question(self):
+        turns = self._turns()
+        word = Word(text="right?", start=9.9, end=10.4)
+        assert _assign_speaker_to_word(word, turns) == "A"
+
+    def test_sentence_end_fully_in_next_turn_uses_overlap(self):
+        """If the sentence-ending word starts entirely in B's turn,
+        start-based correctly returns B (no false correction)."""
+        turns = self._turns()
+        word = Word(text="yes.", start=10.2, end=10.8)
+        assert _assign_speaker_to_word(word, turns) == "B"
+
+    def test_sentence_end_fully_in_same_turn(self):
+        """No boundary crossing — both strategies agree."""
+        turns = self._turns()
+        word = Word(text="hello.", start=3.0, end=3.5)
+        assert _assign_speaker_to_word(word, turns) == "A"
+
+    def test_mid_sentence_comma_uses_overlap(self):
+        """Comma-ending word should NOT get start-based treatment."""
+        turns = self._turns()
+        word = Word(text="well,", start=9.8, end=10.6)
+        assert _assign_speaker_to_word(word, turns) == "B"
+
+    def test_no_turns(self):
+        word = Word(text="hello.", start=1.0, end=2.0)
+        assert _assign_speaker_to_word(word, []) is None
+
+    def test_zero_duration_word(self):
+        turns = self._turns()
+        word = Word(text="ok.", start=5.0, end=5.0)
+        assert _assign_speaker_to_word(word, turns) == "A"
+
+    def test_invalid_word(self):
+        turns = self._turns()
+        word = Word(text="bad.", start=5.0, end=4.0)
+        assert _assign_speaker_to_word(word, turns) is None
+
+    def test_sentence_end_in_gap_falls_back_to_overlap(self):
+        """If word start doesn't land in any turn, fall back to overlap."""
+        turns = [
+            SpeakerTurn(speaker="A", start=0.0, end=5.0),
+            SpeakerTurn(speaker="B", start=6.0, end=10.0),
+        ]
+        # "end." starts in gap (5.5), more overlap with B
+        word = Word(text="end.", start=5.5, end=7.0)
+        assert _assign_speaker_to_word(word, turns) == "B"
+
+
+# ---------------------------------------------------------------------------
+# Integration: assemble_transcript with sentence-end slip scenario
+# ---------------------------------------------------------------------------
+
+
+class TestSentenceEndSlipIntegration:
+    """End-to-end tests reproducing the sentence-end word slip bug.
+
+    These use assemble_transcript with realistic diarization boundaries
+    that fall mid-word on sentence-final words.
+    """
+
+    @staticmethod
+    def _prepare_output():
+        return {
+            "channel_files": [
+                {
+                    "artifact_id": "a1",
+                    "format": "wav",
+                    "duration": 25.0,
+                    "sample_rate": 16000,
+                    "channels": 1,
+                }
+            ],
+            "engine_id": "audio-prepare",
+        }
+
+    def test_sentence_end_word_stays_with_speaker(self):
+        """'us.' should stay with SPEAKER_00, not slip to SPEAKER_01.
+
+        Reproduces the production bug: word 'us.' starts at 9.8 in
+        SPEAKER_00's turn but its end timestamp (10.6) extends past the
+        diarization boundary (10.0) into SPEAKER_01's turn.
+        """
+        stage_outputs = {
+            "prepare": self._prepare_output(),
+            "transcribe": {
+                "text": "doing more with us. Who is responsible",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 15.0,
+                        "text": "doing more with us. Who is responsible",
+                        "words": [
+                            {"text": "doing", "start": 8.0, "end": 8.4},
+                            {"text": "more", "start": 8.5, "end": 8.8},
+                            {"text": "with", "start": 8.9, "end": 9.2},
+                            {"text": "us.", "start": 9.8, "end": 10.6},
+                            {"text": "Who", "start": 10.8, "end": 11.1},
+                            {"text": "is", "start": 11.2, "end": 11.4},
+                            {"text": "responsible", "start": 11.5, "end": 12.2},
+                        ],
+                    },
+                ],
+                "engine_id": "onnx",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 10.0},
+                    {"speaker": "SPEAKER_01", "start": 10.0, "end": 20.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="slip-test-1",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        # Find the segment containing "us."
+        for seg in result.segments:
+            if seg.words:
+                word_texts = [w.text for w in seg.words]
+                if "us." in word_texts:
+                    assert seg.speaker == "SPEAKER_00", (
+                        f"'us.' should be SPEAKER_00 but got {seg.speaker}"
+                    )
+                    break
+        else:
+            raise AssertionError("'us.' not found in any segment")
+
+    def test_mid_sentence_word_still_uses_overlap(self):
+        """Non-punctuated words crossing the boundary should still use overlap.
+
+        'the' straddles the boundary — overlap correctly assigns it to
+        SPEAKER_01 and that should not change.
+        """
+        stage_outputs = {
+            "prepare": self._prepare_output(),
+            "transcribe": {
+                "text": "check the results now please.",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 15.0,
+                        "text": "check the results now please.",
+                        "words": [
+                            {"text": "check", "start": 8.0, "end": 8.5},
+                            {"text": "the", "start": 9.8, "end": 10.6},
+                            {"text": "results", "start": 10.7, "end": 11.3},
+                            {"text": "now", "start": 11.4, "end": 11.7},
+                            {"text": "please.", "start": 11.8, "end": 12.3},
+                        ],
+                    },
+                ],
+                "engine_id": "onnx",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 10.0},
+                    {"speaker": "SPEAKER_01", "start": 10.0, "end": 20.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="slip-test-2",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        # "the" crosses the boundary, overlap says SPEAKER_01 — should stay
+        for seg in result.segments:
+            if seg.words:
+                word_texts = [w.text for w in seg.words]
+                if "the" in word_texts:
+                    assert seg.speaker == "SPEAKER_01", (
+                        f"'the' should be SPEAKER_01 (overlap) but got {seg.speaker}"
+                    )
+                    break
+
+    def test_multiple_sentence_ends_at_boundaries(self):
+        """Two speakers alternating with sentence-final words at each boundary."""
+        stage_outputs = {
+            "prepare": self._prepare_output(),
+            "transcribe": {
+                "text": "I agree. That sounds right. Let me think.",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 25.0,
+                        "text": "I agree. That sounds right. Let me think.",
+                        "words": [
+                            {"text": "I", "start": 0.5, "end": 0.7},
+                            {"text": "agree.", "start": 0.8, "end": 1.5},
+                            # 'agree.' ends past the 1.2 boundary
+                            {"text": "That", "start": 1.6, "end": 2.0},
+                            {"text": "sounds", "start": 2.1, "end": 2.6},
+                            {"text": "right.", "start": 2.7, "end": 3.5},
+                            # 'right.' ends past the 3.0 boundary
+                            {"text": "Let", "start": 3.6, "end": 3.9},
+                            {"text": "me", "start": 4.0, "end": 4.2},
+                            {"text": "think.", "start": 4.3, "end": 5.0},
+                        ],
+                    },
+                ],
+                "engine_id": "onnx",
+            },
+            "diarize": {
+                "turns": [
+                    {"speaker": "SPEAKER_00", "start": 0.0, "end": 1.2},
+                    {"speaker": "SPEAKER_01", "start": 1.2, "end": 3.0},
+                    {"speaker": "SPEAKER_00", "start": 3.0, "end": 6.0},
+                ],
+                "speakers": ["SPEAKER_00", "SPEAKER_01"],
+                "num_speakers": 2,
+                "engine_id": "pyannote-4.0",
+            },
+        }
+
+        result = assemble_transcript(
+            job_id="slip-test-3",
+            stage_outputs=stage_outputs,
+            speaker_detection="diarize",
+        )
+
+        # Collect speaker assignments for key words
+        assignments = {}
+        for seg in result.segments:
+            for w in seg.words or []:
+                assignments[w.text] = seg.speaker
+
+        assert assignments["agree."] == "SPEAKER_00"
+        assert assignments["right."] == "SPEAKER_01"
+        assert assignments["think."] == "SPEAKER_00"
