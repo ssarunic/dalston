@@ -6,6 +6,7 @@ Usage:
     dalston-aws launch [control-plane|gpu]          # launch instances
     dalston-aws terminate [control-plane|gpu]       # terminate instances
     dalston-aws up / down                           # start/stop without terminating
+    dalston-aws patch                               # trigger on-demand OS patching
     dalston-aws status / ssh [main|gpu] / teardown
 
 Templates:
@@ -522,6 +523,11 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
         ),
     )
 
+    # SSM managed policy (for patch management + Run Command)
+    ssm_managed_policy = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    iam.attach_role_policy(RoleName=role_name, PolicyArn=ssm_managed_policy)
+    log("Attached AmazonSSMManagedInstanceCore for patch management")
+
     # Instance profile
     try:
         iam.get_instance_profile(InstanceProfileName=profile_name)
@@ -1024,6 +1030,39 @@ SVCEOF
 systemctl daemon-reload
 systemctl enable --now dalston.service
 
+# Enable SSM Agent for patch management
+echo "Enabling SSM Agent..."
+dnf install -y amazon-ssm-agent 2>/dev/null || true
+systemctl enable --now amazon-ssm-agent
+
+# Daily security patching via systemd timer (AL2023 has no cronie)
+cat > /etc/systemd/system/dalston-patch.service << 'PATCHSVCEOF'
+[Unit]
+Description=Dalston daily security patching
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'rpm --import https://pkgs.tailscale.com/stable/amazon-linux/2023/repo.gpg 2>/dev/null; dnf update -y --security >> /var/log/dalston-patch.log 2>&1 && echo "Patch completed at $(date)" >> /var/log/dalston-patch.log'
+PATCHSVCEOF
+
+cat > /etc/systemd/system/dalston-patch.timer << 'PATCHTMREOF'
+[Unit]
+Description=Run Dalston security patches daily at 3:30 AM UTC
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+PATCHTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-patch.timer
+# Run first patch immediately (services are already up, runs in background)
+systemctl start dalston-patch.service --no-block
+echo "Daily security patching enabled (3:30 AM UTC, first run triggered now)"
+
 echo ""
 echo "=========================================="
 echo "Dalston bootstrap completed at $(date)"
@@ -1257,6 +1296,39 @@ SVCEOF
 
 systemctl daemon-reload
 systemctl enable --now dalston-gpu.service
+
+# Enable SSM Agent for patch management
+echo "Enabling SSM Agent..."
+snap install amazon-ssm-agent --classic 2>/dev/null || apt-get install -y amazon-ssm-agent 2>/dev/null || true
+systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null || systemctl enable --now amazon-ssm-agent 2>/dev/null || true
+
+# Daily security patching via systemd timer (4:00 AM UTC, staggered from control plane)
+cat > /etc/systemd/system/dalston-patch.service << 'PATCHSVCEOF'
+[Unit]
+Description=Dalston daily security patching
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'apt-get update -q && apt-get upgrade -y -o Dpkg::Options::="--force-confold" >> /var/log/dalston-patch.log 2>&1 && echo "Patch completed at $(date)" >> /var/log/dalston-patch.log'
+PATCHSVCEOF
+
+cat > /etc/systemd/system/dalston-patch.timer << 'PATCHTMREOF'
+[Unit]
+Description=Run Dalston security patches daily at 4:00 AM UTC
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+PATCHTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-patch.timer
+# Run first patch immediately (services are already up, runs in background)
+systemctl start dalston-patch.service --no-block
+echo "Daily security patching enabled (4:00 AM UTC, first run triggered now)"
 
 echo ""
 echo "=========================================="
@@ -2383,6 +2455,85 @@ def cmd_ssh(args: argparse.Namespace) -> None:
     os.execvp("ssh", ssh_args)
 
 
+def cmd_patch(args: argparse.Namespace) -> None:
+    """Trigger on-demand system patching on all instances via SSM Run Command."""
+    st = require_state()
+    region = st.region
+
+    # Collect all instance IDs
+    instance_ids = []
+    if st.instance_id:
+        instance_ids.append(st.instance_id)
+    for w in st.gpu_workers or []:
+        instance_ids.append(w["instance_id"])
+
+    if not instance_ids:
+        die("No instances found in state.")
+
+    audit("patch", instances=instance_ids)
+
+    ssm = boto3.client("ssm", region_name=region)
+
+    # Detect OS per instance — control plane is AL2023 (dnf), GPU workers are Ubuntu (apt)
+    # Control plane is always the first instance_id in state
+    ctrl_id = st.instance_id
+    gpu_ids = [w["instance_id"] for w in (st.gpu_workers or [])]
+
+    commands_sent = 0
+
+    # Patch control plane (AL2023 / dnf)
+    if ctrl_id:
+        log(f"Sending patch command to control plane ({ctrl_id})...")
+        try:
+            resp = ssm.send_command(
+                InstanceIds=[ctrl_id],
+                DocumentName="AWS-RunShellScript",
+                Comment="Dalston on-demand patching (control plane)",
+                Parameters={
+                    "commands": [
+                        "dnf update -y --security 2>&1 | tee -a /var/log/dalston-patch.log",
+                        'echo "On-demand patch completed at $(date)" >> /var/log/dalston-patch.log',
+                    ],
+                    "executionTimeout": ["900"],
+                },
+            )
+            cmd_id = resp["Command"]["CommandId"]
+            log(f"  Command ID: {cmd_id}")
+            commands_sent += 1
+        except ClientError as e:
+            warn(f"  Failed to send patch command: {e}")
+
+    # Patch GPU workers (Ubuntu / apt)
+    if gpu_ids:
+        log(f"Sending patch command to {len(gpu_ids)} GPU worker(s)...")
+        try:
+            resp = ssm.send_command(
+                InstanceIds=gpu_ids,
+                DocumentName="AWS-RunShellScript",
+                Comment="Dalston on-demand patching (GPU workers)",
+                Parameters={
+                    "commands": [
+                        'apt-get update -q && apt-get upgrade -y -o Dpkg::Options::="--force-confold" 2>&1 | tee -a /var/log/dalston-patch.log',
+                        'echo "On-demand patch completed at $(date)" >> /var/log/dalston-patch.log',
+                    ],
+                    "executionTimeout": ["900"],
+                },
+            )
+            cmd_id = resp["Command"]["CommandId"]
+            log(f"  Command ID: {cmd_id}")
+            commands_sent += 1
+        except ClientError as e:
+            warn(f"  Failed to send patch command: {e}")
+
+    if commands_sent:
+        log(f"Patch commands sent to {len(instance_ids)} instance(s).")
+        log("Check progress: dalston-aws ssh main -- cat /var/log/dalston-patch.log")
+    else:
+        warn(
+            "No patch commands were sent. Ensure instances are running and SSM agent is active."
+        )
+
+
 def cmd_teardown(args: argparse.Namespace) -> None:
     st = require_state()
     gpu_ids = [w["instance_id"] for w in (st.gpu_workers or [])]
@@ -2455,6 +2606,14 @@ def cmd_teardown(args: argparse.Namespace) -> None:
             iam.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
         except ClientError:
             pass
+    # Detach managed policies
+    try:
+        iam.detach_role_policy(
+            RoleName=role_name,
+            PolicyArn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+        )
+    except ClientError:
+        pass
     try:
         iam.delete_role(RoleName=role_name)
     except ClientError:
@@ -2569,6 +2728,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="AWS region for GPU worker (default: same as control plane)",
     )
     p_launch.set_defaults(func=cmd_launch)
+
+    # patch
+    p_patch = sub.add_parser(
+        "patch", help="Trigger on-demand system patching on all instances via SSM"
+    )
+    p_patch.set_defaults(func=cmd_patch)
 
     # terminate
     p_term = sub.add_parser(
