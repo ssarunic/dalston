@@ -51,7 +51,7 @@ def _create_shared_manager() -> HFTransformersModelManager:
     from dalston.engine_sdk.device import detect_device
 
     device = detect_device()
-    torch_dtype = torch.float16 if device == "cuda" else torch.float32
+    torch_dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
 
     from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 

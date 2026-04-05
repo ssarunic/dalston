@@ -84,7 +84,7 @@ class HfAsrRealtimeEngine(BaseRealtimeTranscribeEngine):
         from dalston.engine_sdk.device import detect_device
 
         device = detect_device()
-        return device, torch.float16 if device == "cuda" else torch.float32
+        return device, torch.float16 if device in ("cuda", "mps") else torch.float32
 
     def load_models(self) -> None:
         """Initialize HFTransformersModelManager with optional preloading.

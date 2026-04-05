@@ -22,7 +22,7 @@ def detect_device(*, include_mps: bool = True) -> str:
 
     Args:
         include_mps: Whether to consider MPS (Apple Silicon) during auto-detection.
-            Set to ``False`` for frameworks that don't support MPS (e.g. NeMo, ONNX Runtime).
+            Set to ``False`` for frameworks that don't support MPS (e.g. NeMo).
 
     Returns:
         One of ``"cuda"``, ``"mps"``, or ``"cpu"``.

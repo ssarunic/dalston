@@ -199,7 +199,7 @@ class HFTransformersModelManager(ModelManager[Any]):
         device = detect_device()
 
         torch_dtype = None
-        if device == "cuda":
+        if device in ("cuda", "mps"):
             import torch
 
             torch_dtype = torch.float16

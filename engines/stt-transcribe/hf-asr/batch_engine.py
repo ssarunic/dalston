@@ -112,7 +112,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         from dalston.engine_sdk.device import detect_device
 
         device = detect_device()
-        return device, torch.float16 if device == "cuda" else torch.float32
+        return device, torch.float16 if device in ("cuda", "mps") else torch.float32
 
     def transcribe_audio(
         self, task_request: TaskRequest, ctx: BatchTaskContext
