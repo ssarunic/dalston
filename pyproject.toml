@@ -52,7 +52,7 @@ orchestrator = [
     "python-multipart>=0.0.6",  # Required by FastAPI for form data
     "websockets>=12.0",  # Required by gateway module
     "tinytag>=2.2.1",  # Required by gateway.services.audio_probe
-    "aiohttp>=3.9.0",  # For lightweight HTTP server (metrics endpoint)
+    "aiohttp>=3.13.4",  # For lightweight HTTP server (metrics endpoint)
     "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
     "alembic>=1.13.0",
 ]
