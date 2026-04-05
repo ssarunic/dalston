@@ -206,21 +206,19 @@ grafana:
 
 - `docker/grafana/dashboards/dalston-overview.json`
 
-**Dashboard Panels:**
+**Dashboard Layout (question-oriented, 3+2 rows):**
 
-| Row | Panels |
-| --- | --- |
-| **Request Overview** | Requests/sec, Error rate (%), Avg latency |
-| **Batch Pipeline** | Jobs in progress, Queue depth by engine, Job completion rate |
-| **Engine Performance** | Processing time by engine (p50, p95, p99), Task throughput, Failure rate by engine |
-| **Real-time Sessions** | Active sessions, Workers healthy/total, Session duration distribution |
-| **System Health** | Redis connectivity, Queue oldest task age, Error logs/sec |
+| Row | State | Panels |
+| --- | --- | --- |
+| **Health** | Open | Redis status (stat), Jobs in progress (stat), Queue depth (stat), Queue wait oldest task (timeseries by engine) |
+| **Performance** | Open | Speed ratio — processing vs wall clock (timeseries), Processing time by stage p50/p95 (timeseries), Jobs/hour (stat), Failure rate (stat) |
+| **Bottleneck** | Open | Wait vs process time p50 by engine (timeseries), Queue depth by engine (stacked bars) |
+| **Real-time Sessions** | Collapsed | Active sessions (stat), Sessions by worker (timeseries), Session completions (timeseries) |
+| **API & System** | Collapsed | Request latency p50/p95 (timeseries), Error rate 5xx (timeseries) |
 
 **Variables:**
 
-- `$service` — Filter by service (gateway, orchestrator, engine-*)
-- `$engine_id` — Filter by engine type
-- `$interval` — Auto-adjusted time aggregation
+- `$engine_id` — Multi-select filter by engine (default: all)
 
 ---
 

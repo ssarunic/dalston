@@ -27,6 +27,9 @@ function formatDurationMs(ms: number): string {
 
 type TaskDisplayStatus = TaskStatus | 'blocked'
 
+/** Only show per-task wait annotation when queue delay exceeds this threshold. */
+const NOTABLE_WAIT_MS = 500
+
 const statusConfig: Record<TaskDisplayStatus, { bg: string; text: string; ring?: string }> = {
   pending: { bg: 'bg-zinc-500/20', text: 'text-zinc-400' },
   ready: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', ring: 'ring-yellow-500/50' },
@@ -124,11 +127,16 @@ function TaskNode({
           {displayName}
         </span>
 
-        {/* Duration - always show to prevent layout shift */}
+        {/* Duration + wait time */}
         <span className="text-[10px] text-muted-foreground h-[14px]">
           {task.duration_ms != null && task.duration_ms > 0
             ? formatDurationMs(task.duration_ms)
             : '\u00A0'}
+          {task.wait_ms != null && task.wait_ms > NOTABLE_WAIT_MS && (
+            <span className="text-yellow-500/70" title="Queue wait time">
+              {' '}+{formatDurationMs(task.wait_ms)} wait
+            </span>
+          )}
         </span>
 
         {/* Error indicator */}
@@ -251,7 +259,7 @@ export function DAGViewer({
     return result
   }, [tasks, isJobFailed, failedTask, failedStageIdx])
 
-  // Calculate total processing time (wall clock) - must be before early return
+  // Calculate wall clock time (job created → completed) - must be before early return
   const totalTimeMs = useMemo(() => {
     if (!jobCreatedAt || !jobCompletedAt) return null
     const start = new Date(jobCreatedAt).getTime()
@@ -259,12 +267,24 @@ export function DAGViewer({
     return end - start
   }, [jobCreatedAt, jobCompletedAt])
 
-  // Calculate speed ratio (audio duration / wall clock time)
+  // Sum of actual engine processing time across all tasks
+  const totalProcessingMs = useMemo(() => {
+    const durations = tasks.map((t) => t.duration_ms).filter((d): d is number => d != null && d > 0)
+    return durations.length > 0 ? durations.reduce((a, b) => a + b, 0) : null
+  }, [tasks])
+
+  // Sum of queue wait time across all tasks
+  const totalWaitMs = useMemo(() => {
+    const waits = tasks.map((t) => t.wait_ms).filter((w): w is number => w != null && w > 0)
+    return waits.length > 0 ? waits.reduce((a, b) => a + b, 0) : null
+  }, [tasks])
+
+  // Speed ratio based on processing time (not wall time)
   const speedRatio = useMemo(() => {
-    if (!totalTimeMs || !audioDurationSeconds || totalTimeMs <= 0) return null
-    const wallClockSeconds = totalTimeMs / 1000
-    return audioDurationSeconds / wallClockSeconds
-  }, [totalTimeMs, audioDurationSeconds])
+    const processingMs = totalProcessingMs ?? totalTimeMs
+    if (!processingMs || !audioDurationSeconds || processingMs <= 0) return null
+    return audioDurationSeconds / (processingMs / 1000)
+  }, [totalProcessingMs, totalTimeMs, audioDurationSeconds])
 
   // Group tasks by stage
   const stageGroups: StageGroup[] = stageOrder
@@ -328,10 +348,16 @@ export function DAGViewer({
         )}
         </div>
 
-        {/* Total time + speed ratio */}
+        {/* Timing breakdown: wall / processing / wait */}
         {totalTimeMs != null && (
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <span>Total: {formatDurationMs(totalTimeMs)}</span>
+          <div className="flex items-center gap-3 text-muted-foreground text-xs">
+            <span>Wall: {formatDurationMs(totalTimeMs)}</span>
+            {totalProcessingMs != null && (
+              <span>Processing: {formatDurationMs(totalProcessingMs)}</span>
+            )}
+            {totalWaitMs != null && totalWaitMs > 0 && (
+              <span>Wait: {formatDurationMs(totalWaitMs)}</span>
+            )}
             {speedRatio != null && (
               <span className="text-primary font-medium">
                 {speedRatio >= 1 ? `${speedRatio.toFixed(1)}x` : `${(1 / speedRatio).toFixed(1)}x slower`}

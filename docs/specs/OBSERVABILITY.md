@@ -133,9 +133,11 @@ The `stages` field appears on any job that has reached `RUNNING` status (i.e., t
 | `engine_id` | string | Engine that executed (or will execute) this task |
 | `status` | string | `pending`, `ready`, `running`, `completed`, `failed`, `skipped` |
 | `required` | boolean | Whether this stage was required for job success |
+| `ready_at` | string | ISO 8601 timestamp when task became ready / enqueued (null if not yet ready) |
 | `started_at` | string | ISO 8601 timestamp when execution began (null if not started) |
 | `completed_at` | string | ISO 8601 timestamp when execution finished (null if not finished) |
-| `duration_ms` | integer | Wall-clock duration in milliseconds (null if not finished) |
+| `wait_ms` | integer | Queue wait time in milliseconds: `ready_at` to `started_at` (null if not started) |
+| `duration_ms` | integer | Processing duration in milliseconds: `started_at` to `completed_at` (null if not finished) |
 | `retries` | integer | Number of retries attempted (omitted if 0) |
 | `error` | string | Error message if failed (null otherwise) |
 
@@ -335,18 +337,25 @@ The web console (`web/`) should use these endpoints to provide a pipeline drill-
 
 #### Job Detail Page
 
-When viewing a completed or failed job, display a **pipeline timeline**:
+When viewing a completed or failed job, the DAG viewer shows:
+
+**Timing breakdown** (top-level summary):
+
+- **Wall**: Total time from job creation to completion (what the user waited)
+- **Processing**: Sum of all tasks' `duration_ms` (actual engine work)
+- **Wait**: Sum of all tasks' `wait_ms` (time queued before engine pickup)
+- **Speed ratio**: `audio_duration / processing_time` (uses processing time, not wall time)
+
+**Per-task nodes** show processing duration and queue wait (if > 500ms).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Job job_abc123 — completed in 14.5s                                │
+│  Wall: 14.5s | Processing: 13.5s (6.7x) | Wait: 1.0s              │
 │                                                                     │
 │  ┌──────────┐  ┌──────────────┐  ┌──────────┐  ┌──────────┐       │
 │  │ prepare  │─▶│  transcribe  │─▶│ diarize  │─▶│  merge   │       │
 │  │  1.2s ✓  │  │   8.4s ✓     │  │ 3.1s ✗   │  │  0.8s ✓  │       │
 │  └──────────┘  └──────────────┘  └──────────┘  └──────────┘       │
-│                                   (skipped,                        │
-│                                    optional)                       │
 │                                                                     │
 │  Click any stage to inspect its input and output artifacts.        │
 └─────────────────────────────────────────────────────────────────────┘

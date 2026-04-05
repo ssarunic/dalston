@@ -240,5 +240,6 @@ class Task(BaseModel):
     max_retries: int = 2
     required: bool = True
     error: str | None = None
+    ready_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None

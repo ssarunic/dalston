@@ -273,6 +273,10 @@ class TaskModel(Base):
     max_retries: Mapped[int] = mapped_column(nullable=False, default=2)
     required: Mapped[bool] = mapped_column(nullable=False, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
     started_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=True,

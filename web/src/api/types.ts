@@ -138,8 +138,10 @@ export interface Task {
   status: TaskStatus
   required?: boolean
   dependencies: string[]
+  ready_at?: string
   started_at?: string
   completed_at?: string
+  wait_ms?: number
   duration_ms?: number
   retries?: number
   error?: string

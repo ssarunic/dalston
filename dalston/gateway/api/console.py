@@ -34,6 +34,7 @@ from dalston.common.registry import (
     _parse_json_list,
 )
 from dalston.common.streams_types import CONSUMER_GROUP
+from dalston.common.utils import compute_duration_ms
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -203,8 +204,10 @@ class TaskResponse(BaseModel):
     engine_id: str
     status: str
     dependencies: list[UUID]
+    ready_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    wait_ms: int | None = None
     duration_ms: int | None = None
     error: str | None = None
 
@@ -257,12 +260,6 @@ async def get_job_tasks(
         key=lambda t: (stage_order.get(t.stage, 99), t.engine_id),
     )
 
-    def compute_duration(task):
-        if task.started_at and task.completed_at:
-            delta = task.completed_at - task.started_at
-            return int(delta.total_seconds() * 1000)
-        return None
-
     return TaskListResponse(
         job_id=job_dto.id,
         tasks=[
@@ -272,9 +269,11 @@ async def get_job_tasks(
                 engine_id=task.engine_id,
                 status=task.status,
                 dependencies=task.dependencies,
+                ready_at=task.ready_at,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
-                duration_ms=compute_duration(task),
+                wait_ms=compute_duration_ms(task.ready_at, task.started_at),
+                duration_ms=compute_duration_ms(task.started_at, task.completed_at),
                 error=task.error,
             )
             for task in sorted_tasks

@@ -250,14 +250,21 @@ class StageResponse(BaseModel):
     required: bool = Field(
         description="Whether this stage was required for job success"
     )
+    ready_at: datetime | None = Field(
+        default=None, description="When task became ready (enqueued for processing)"
+    )
     started_at: datetime | None = Field(
         default=None, description="When execution began"
     )
     completed_at: datetime | None = Field(
         default=None, description="When execution finished"
     )
+    wait_ms: int | None = Field(
+        default=None,
+        description="Queue wait time in milliseconds (ready_at to started_at)",
+    )
     duration_ms: int | None = Field(
-        default=None, description="Wall-clock duration in milliseconds"
+        default=None, description="Processing duration in milliseconds"
     )
     retries: int | None = Field(
         default=None, description="Number of retries attempted (omitted if 0)"

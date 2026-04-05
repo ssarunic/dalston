@@ -350,6 +350,7 @@ async def handle_job_created(
             task_model = await db.get(TaskModel, task.id)
             if task_model:
                 task_model.status = TaskStatus.READY.value
+                task_model.ready_at = datetime.now(UTC)
                 await db.commit()
 
             # Queue for execution (include audio metadata for prepare stage)
@@ -600,7 +601,7 @@ async def handle_task_completed(
                 update(TaskModel)
                 .where(TaskModel.id == dependent.id)
                 .where(TaskModel.status == TaskStatus.PENDING.value)
-                .values(status=TaskStatus.READY.value)
+                .values(status=TaskStatus.READY.value, ready_at=datetime.now(UTC))
                 .returning(TaskModel.id)
             )
             updated = result.scalar_one_or_none()
@@ -786,6 +787,7 @@ async def handle_task_failed(
     if not non_retryable_error and task.retries < task.max_retries:
         task.retries += 1
         task.status = TaskStatus.READY.value
+        task.ready_at = datetime.now(UTC)
         task.error = error
         await db.commit()
 
