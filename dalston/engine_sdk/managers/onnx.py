@@ -110,6 +110,8 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         if device == "cuda":
             self._providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             self._validate_cuda_compute()
+        elif device == "mps":
+            self._providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
         else:
             self._providers = ["CPUExecutionProvider"]
 
@@ -265,7 +267,7 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         """
         from dalston.engine_sdk.device import detect_device
 
-        device = detect_device(include_mps=False)
+        device = detect_device()
 
         quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
 

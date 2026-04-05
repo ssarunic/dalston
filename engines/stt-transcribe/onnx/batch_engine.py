@@ -27,7 +27,7 @@ Supported models:
 Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "onnx")
     DALSTON_DEFAULT_MODEL: Default ONNX model ID (default: "parakeet-onnx-ctc-0.6b")
-    DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cpu.
+    DALSTON_DEVICE: Device to use for inference (cuda, mps, cpu). Defaults to auto-detect.
     DALSTON_QUANTIZATION: ONNX quantization level (none, int8). Defaults to none.
 """
 
