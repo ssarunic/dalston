@@ -196,10 +196,10 @@ class HFTransformersModelManager(ModelManager[Any]):
         from dalston.engine_sdk.disk_cache import start_disk_evictor
         from dalston.engine_sdk.model_storage import MultiSourceModelStorage
 
-        device = detect_device(include_mps=False)
+        device = detect_device()
 
         torch_dtype = None
-        if device == "cuda":
+        if device in ("cuda", "mps"):
             import torch
 
             torch_dtype = torch.float16

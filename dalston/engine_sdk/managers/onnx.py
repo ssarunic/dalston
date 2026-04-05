@@ -110,6 +110,9 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         if device == "cuda":
             self._providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             self._validate_cuda_compute()
+        elif device == "mps":
+            self._providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+            self._validate_coreml()
         else:
             self._providers = ["CPUExecutionProvider"]
 
@@ -156,6 +159,35 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
             )
         except Exception:
             logger.exception("cuda_validation_error")
+
+    def _validate_coreml(self) -> None:
+        """Verify that CoreMLExecutionProvider is available for MPS inference.
+
+        CoreMLExecutionProvider requires ``onnxruntime`` with CoreML support.
+        If it is not available, fall back to CPU-only providers.
+        """
+        try:
+            import onnxruntime as ort
+
+            providers = ort.get_available_providers()
+            if "CoreMLExecutionProvider" not in providers:
+                logger.warning(
+                    "coreml_ep_not_available",
+                    available_providers=providers,
+                    ort_version=ort.__version__,
+                    hint="CoreMLExecutionProvider not found. "
+                    "Falling back to CPUExecutionProvider.",
+                )
+                self._providers = ["CPUExecutionProvider"]
+                return
+
+            logger.info(
+                "coreml_compute_validated",
+                ort_version=ort.__version__,
+                available_providers=providers,
+            )
+        except Exception:
+            logger.exception("coreml_validation_error")
 
     def _load_model(self, model_id: str) -> OnnxASRModel:
         """Load an ONNX ASR model.
@@ -211,11 +243,38 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
                 **kwargs,
             )
         except Exception as e:
-            raise type(e)(
-                f"Failed to load ONNX model '{model_id}' "
-                f"(resolved to '{onnx_asr_name}'). "
-                f"Curated aliases: {sorted(self.MODEL_ALIASES.keys())}"
-            ) from e
+            # CoreMLExecutionProvider fails on models with external data
+            # files (.onnx.data) due to an onnxruntime bug where model_path
+            # is not propagated to the initializer.  Fall back to CPU.
+            if self.device == "mps" and "model_path" in str(e):
+                logger.warning(
+                    "coreml_load_failed_falling_back_to_cpu",
+                    model_id=model_id,
+                    error=str(e),
+                    hint="CoreMLExecutionProvider cannot load this model "
+                    "(likely uses external data files). Retrying with "
+                    "CPUExecutionProvider.",
+                )
+                self._providers = ["CPUExecutionProvider"]
+                kwargs["providers"] = self._providers
+                try:
+                    model = onnx_asr.load_model(
+                        onnx_asr_name,
+                        quantization=self.quantization,
+                        **kwargs,
+                    )
+                except Exception as e2:
+                    raise type(e2)(
+                        f"Failed to load ONNX model '{model_id}' "
+                        f"(resolved to '{onnx_asr_name}'). "
+                        f"Curated aliases: {sorted(self.MODEL_ALIASES.keys())}"
+                    ) from e2
+            else:
+                raise type(e)(
+                    f"Failed to load ONNX model '{model_id}' "
+                    f"(resolved to '{onnx_asr_name}'). "
+                    f"Curated aliases: {sorted(self.MODEL_ALIASES.keys())}"
+                ) from e
 
         logger.info(
             "onnx_model_loaded",
@@ -265,7 +324,7 @@ class OnnxModelManager(ModelManager[OnnxASRModel]):
         """
         from dalston.engine_sdk.device import detect_device
 
-        device = detect_device(include_mps=False)
+        device = detect_device()
 
         quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
 

@@ -1,6 +1,6 @@
 """GPU OOM detection and recovery utilities.
 
-Provides helpers for catching CUDA/ONNX out-of-memory errors and
+Provides helpers for catching CUDA/MPS/ONNX out-of-memory errors and
 clearing GPU cache. Used by both ONNX and faster-whisper inference
 to implement binary backoff on OOM.
 """
@@ -40,5 +40,7 @@ def clear_gpu_cache() -> None:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
     except ImportError:
         pass

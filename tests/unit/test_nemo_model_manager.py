@@ -218,17 +218,21 @@ class TestOnnxModelManagerInit:
                 mock_ort.get_available_providers.return_value = ["CPUExecutionProvider"]
 
                 with patch.dict("sys.modules", {"onnxruntime": mock_ort}):
-                    from dalston.engine_sdk.managers.onnx import (
-                        OnnxModelManager,
-                    )
+                    with patch(
+                        "dalston.engine_sdk.device.detect_device",
+                        return_value="cpu",
+                    ):
+                        from dalston.engine_sdk.managers.onnx import (
+                            OnnxModelManager,
+                        )
 
-                    manager = OnnxModelManager.from_env()
+                        manager = OnnxModelManager.from_env()
 
-                    assert manager.device == "cpu"
-                    assert manager.ttl_seconds == 3600
-                    assert manager.max_loaded == 2
+                        assert manager.device == "cpu"
+                        assert manager.ttl_seconds == 3600
+                        assert manager.max_loaded == 2
 
-                    manager.shutdown()
+                        manager.shutdown()
 
     def test_from_env_with_custom_settings(self):
         """Test from_env with custom environment variables."""

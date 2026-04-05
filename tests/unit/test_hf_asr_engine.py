@@ -481,6 +481,7 @@ class TestHFTransformersModelManager:
 
             mock_pipeline_fn.assert_called_once_with(
                 "automatic-speech-recognition",
+                trust_remote_code=False,
                 model="facebook/wav2vec2-large-960h",
                 device="cpu",
                 torch_dtype=torch.float32,
@@ -562,6 +563,7 @@ class TestHFTransformersModelManager:
             # Should pass local path to pipeline, not model ID
             mock_pipeline_fn.assert_called_once_with(
                 "automatic-speech-recognition",
+                trust_remote_code=False,
                 model="/models/s3-cache/openai--whisper-large-v3",
                 device="cpu",
                 torch_dtype=torch.float32,

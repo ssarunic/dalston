@@ -602,7 +602,7 @@ class OnnxInference:
         """Create an OnnxInference configured from environment variables.
 
         Environment variables:
-            DALSTON_DEVICE: Device ("cuda" or "cpu", default: auto-detect)
+            DALSTON_DEVICE: Device ("cuda", "mps", or "cpu", default: auto-detect)
             DALSTON_QUANTIZATION: Quantization ("none" or "int8", default: none)
             DALSTON_MODEL_TTL_SECONDS: TTL in seconds (default: 3600)
             DALSTON_MAX_LOADED_MODELS: Max models (default: 2)
@@ -612,7 +612,7 @@ class OnnxInference:
         """
         from dalston.engine_sdk.device import detect_device
 
-        device = detect_device(include_mps=False)
+        device = detect_device()
 
         quantization = os.environ.get("DALSTON_QUANTIZATION", "none").lower()
 

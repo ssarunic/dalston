@@ -188,6 +188,21 @@ torch_mod = pytest.importorskip("torch")
 class TestRunCacheAwareStreaming:
     """_run_cache_aware_streaming uses model.conformer_stream_step per chunk."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_nemo_modules(self):
+        """Inject mock nemo modules so patch() can resolve the nemo import chain."""
+        mock_streaming_utils = MagicMock()
+        nemo_mocks = {
+            "nemo": MagicMock(),
+            "nemo.collections": MagicMock(),
+            "nemo.collections.asr": MagicMock(),
+            "nemo.collections.asr.parts": MagicMock(),
+            "nemo.collections.asr.parts.utils": MagicMock(),
+            "nemo.collections.asr.parts.utils.streaming_utils": mock_streaming_utils,
+        }
+        with patch.dict("sys.modules", nemo_mocks):
+            yield
+
     def _make_core(self) -> NemoInference:
         core = object.__new__(NemoInference)
         core._manager = MagicMock()
