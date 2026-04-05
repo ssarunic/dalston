@@ -111,7 +111,7 @@ class HfAsrBatchEngine(BaseBatchTranscribeEngine):
         """Detect the best available device and dtype."""
         from dalston.engine_sdk.device import detect_device
 
-        device = detect_device(include_mps=False)
+        device = detect_device()
         return device, torch.float16 if device == "cuda" else torch.float32
 
     def transcribe_audio(
