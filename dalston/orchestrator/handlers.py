@@ -1167,8 +1167,19 @@ async def _assemble_linear_transcript(
                 settings=settings,
             )
             if output and "data" in output:
-                stage_outputs[task.stage] = output["data"]
-                completed_stages.append(task.stage)
+                data = output["data"]
+                # Unpack multi-key envelope from combo engines (e.g.
+                # hf-asr-align-pyannote returns transcribe+align+diarize
+                # from a single task).
+                if isinstance(data, dict) and "stages_completed" in data:
+                    for stage_key in data["stages_completed"]:
+                        if stage_key in data:
+                            stage_outputs[stage_key] = data[stage_key]
+                            if stage_key not in completed_stages:
+                                completed_stages.append(stage_key)
+                else:
+                    stage_outputs[task.stage] = data
+                    completed_stages.append(task.stage)
 
     # Get job parameters for speaker detection and word timestamps config
     parameters = job.parameters or {}

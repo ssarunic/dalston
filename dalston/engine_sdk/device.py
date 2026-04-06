@@ -17,6 +17,27 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _configure_mps_memory_limit() -> None:
+    """Cap MPS GPU memory to prevent macOS system freezes.
+
+    Apple Silicon uses unified memory shared between CPU and GPU.
+    Without a cap, PyTorch MPS can allocate nearly all system RAM,
+    starving the window server and causing the entire Mac to freeze
+    (even the mouse cursor stops responding).
+
+    Defaults to 70% high / 50% low watermark.  Override via
+    ``PYTORCH_MPS_HIGH_WATERMARK_RATIO`` and
+    ``PYTORCH_MPS_LOW_WATERMARK_RATIO`` env vars.
+    """
+    os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.7")
+    os.environ.setdefault("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0.5")
+    logger.info(
+        "mps_memory_limit_configured",
+        high_watermark_ratio=os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"],
+        low_watermark_ratio=os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"],
+    )
+
+
 def detect_device(*, include_mps: bool = True) -> str:
     """Resolve the inference device from ``DALSTON_DEVICE`` with auto-detect fallback.
 
@@ -70,6 +91,7 @@ def detect_device(*, include_mps: bool = True) -> str:
                 "DALSTON_DEVICE=mps but MPS is not available"
                 + (" (or disabled for this engine)." if not include_mps else ".")
             )
+        _configure_mps_memory_limit()
         logger.info("device_using_mps")
         return "mps"
 
@@ -83,6 +105,7 @@ def detect_device(*, include_mps: bool = True) -> str:
         logger.info("device_auto_cuda")
         return "cuda"
     if mps_available:
+        _configure_mps_memory_limit()
         logger.info("device_auto_mps")
         return "mps"
 

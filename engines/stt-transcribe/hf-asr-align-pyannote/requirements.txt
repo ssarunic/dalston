@@ -1,0 +1,2 @@
+pyannote.audio>=4.0
+soundfile

@@ -1,0 +1,54 @@
+schema_version: "1.1"
+id: stt-hf-asr-align-pyannote
+engine_id: hf-asr-align-pyannote
+stage: transcribe
+mode: batch
+name: HF ASR + Phoneme Align + Pyannote 4.0
+version: 1.0.0
+description: |
+  Integrated combo engine that performs transcription (HuggingFace ASR),
+  phoneme-level word alignment (torchaudio wav2vec2), and speaker
+  diarization (pyannote 4.0) in a single process.
+
+  Supports any HuggingFace model with pipeline_tag=automatic-speech-recognition.
+  Produces a multi-key envelope so the standard assemble_transcript() merging
+  logic handles word-level speaker splitting.
+
+  Ideal for local Mac/MPS development where running separate containers is
+  impractical, or for single-GPU deployments where VRAM sharing is desired.
+
+container:
+  gpu: optional
+  memory: 16G
+  model_cache: /models/huggingface
+
+capabilities:
+  native_streaming: false
+  word_timestamps: true
+  includes_diarization: true
+  max_concurrency: 1
+
+input:
+  audio_formats:
+    - pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
+hardware:
+  min_vram_gb: 10
+  recommended_gpu:
+    - a10g
+    - l4
+  supports_cpu: true
+  min_ram_gb: 16
+
+performance:
+  rtf_gpu: 0.3
+  rtf_cpu: 3.0
