@@ -115,6 +115,7 @@ class TaskDTO:
     status: str
     required: bool
     dependencies: list[UUID]
+    ready_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
     retries: int
@@ -347,6 +348,7 @@ class ConsoleService:
                 status=task.status,
                 required=task.required,
                 dependencies=task.dependencies or [],
+                ready_at=task.ready_at,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
                 retries=task.retries,
