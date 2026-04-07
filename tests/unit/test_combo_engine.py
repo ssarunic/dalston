@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytest.importorskip("torch", reason="torch required for combo engine tests")
+
 # Ensure the engine directory is importable
 _engine_dir = str(
     Path(__file__).resolve().parents[2]
