@@ -2130,9 +2130,10 @@ def _launch_gpu(
     )
     log(f"GPU worker '{worker_name}' running: {instance_id} ({gpu_ip})")
 
-    # Register all GPU worker metrics with Prometheus on the control plane
-    if st.observability:
-        _write_gpu_prometheus_targets(st.gpu_workers, key_name=st.key_name)
+    # Register all GPU worker metrics with Prometheus on the control plane.
+    # Always write targets — harmless if Prometheus isn't running, and
+    # prevents missing metrics when GPU instances are launched separately.
+    _write_gpu_prometheus_targets(st.gpu_workers, key_name=st.key_name)
 
 
 def cmd_launch(args: argparse.Namespace) -> None:
