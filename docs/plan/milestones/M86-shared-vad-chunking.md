@@ -5,12 +5,12 @@
 | **Goal**           | Provide opt-in VAD-based audio chunking at the base engine level so any transcription engine can handle arbitrarily long audio |
 | **Duration**       | 5–8 days                                                     |
 | **Dependencies**   | None (uses existing Silero VAD model)                        |
-| **Deliverable**    | SDK VAD utility, base engine integration, vLLM-ASR migration, ONNX migration path |
+| **Deliverable**    | SDK VAD utility, base engine integration, vLLM-ASR enablement, combo engine migration |
 | **Status**         | Not Started                                                  |
 
 ## User Story
 
-> *"As an engine developer, I want to declare `max_audio_duration_s = 30` on my engine class and have the SDK automatically split long audio into VAD-segmented chunks before calling `transcribe_audio()`, so that I don't need to implement chunking logic in every engine."*
+> *"As an engine developer, I want to declare a max audio duration on my engine and have the SDK automatically split long audio into VAD-segmented chunks before calling `transcribe_audio()`, so that I don't need to implement chunking logic in every engine."*
 
 ---
 
@@ -19,10 +19,9 @@
 | Scenario | Current | After M86 |
 | -------- | ------- | ---------- |
 | Gemma 4 E4B via vLLM (30s audio limit) | Fails on any audio > 30s — model produces garbage or errors | Audio auto-chunked at speech boundaries, each chunk ≤ 30s, results merged into one Transcript |
-| ONNX engine VAD chunking | Custom implementation in `onnx_inference.py` (~100 lines), not reusable | Delegates to shared `dalston.engine_sdk.vad` utility |
-| New engine with audio length limit | Developer must copy VAD code from ONNX engine or implement from scratch | Set `max_audio_duration_s` on engine class, chunking is automatic |
-| HF-ASR / NeMo (no limit) | Works on any length audio natively | No change — `max_audio_duration_s = None` (default), chunking skipped |
-| faster-whisper | Uses library-internal Silero VAD | No change — keeps using faster-whisper's built-in VAD (better integrated with CTranslate2 batching) |
+| New engine with audio length limit | Developer must implement VAD from scratch | Override `get_max_audio_duration_s()`, chunking is automatic |
+| vLLM per-request model switching | N/A — no chunking | Limit resolved per-request from model metadata: Gemma = 30s, Voxtral = None |
+| HF-ASR / NeMo / faster-whisper | Works on any length audio natively | No change — `get_max_audio_duration_s()` returns `None` (default) |
 
 ---
 
@@ -30,14 +29,11 @@
 
 Audio LLMs (Gemma 4 E4B, future models) have hard limits on input audio duration imposed by their audio encoder architecture. Currently, the vLLM ASR engine sends full audio files with no chunking, making it incompatible with duration-limited models.
 
-The ONNX engine already implements Silero VAD chunking, but it's buried inside `onnx_inference.py` and tightly coupled to the onnx-asr library's `load_vad()` function. No other engine can reuse it.
-
 Lifting VAD chunking into `BaseBatchTranscribeEngine` provides:
 
 1. **Gemma 4 E4B support** — the immediate need
 2. **Future-proofing** — any new audio LLM with duration limits works automatically
 3. **Consistency** — one VAD implementation, one set of tuning knobs
-4. **ONNX migration path** — reduce ONNX engine complexity by delegating to the shared utility
 
 ---
 
@@ -47,33 +43,34 @@ Lifting VAD chunking into `BaseBatchTranscribeEngine` provides:
 ┌──────────────────────────────────────────────────────────────┐
 │              BaseBatchTranscribeEngine.process()              │
 │                                                              │
-│   audio_path ──► duration check                              │
-│                    │                                         │
-│         ┌─────────┴──────────┐                               │
-│         │ ≤ max_duration     │ > max_duration                │
-│         ▼                    ▼                               │
-│   transcribe_audio()   VadChunker.split()                    │
-│         │                    │                               │
-│         │              ┌─────┴─────┐                         │
-│         │              │ chunk_1   │ chunk_2  ... chunk_N    │
-│         │              ▼           ▼                         │
-│         │         transcribe_audio(chunk_request)  × N       │
-│         │              │           │                         │
-│         │              └─────┬─────┘                         │
-│         │                    ▼                               │
-│         │           _merge_chunk_transcripts()                │
-│         ▼                    ▼                               │
-│     TaskResponse(data=Transcript)                            │
+│   task_request ──► get_max_audio_duration_s(task_request)    │
+│                      │                                       │
+│           ┌──────────┴───────────┐                           │
+│           │ None or within limit │ exceeds limit             │
+│           ▼                      ▼                           │
+│     transcribe_audio()     VadChunker.split()                │
+│           │                      │                           │
+│           │              ┌───────┴───────┐                   │
+│           │              │ chunk_1       │ chunk_N           │
+│           │              ▼               ▼                   │
+│           │         transcribe_audio(chunk_req) × N          │
+│           │              │               │                   │
+│           │              └───────┬───────┘                   │
+│           │                      ▼                           │
+│           │         _merge_chunk_transcripts()                │
+│           ▼                      ▼                           │
+│       TaskResponse(data=Transcript)                          │
 └──────────────────────────────────────────────────────────────┘
 
 VadChunker (dalston/engine_sdk/vad.py):
   ┌─────────────────────────────────────┐
-  │  Silero VAD (ONNX, ~2 MB)          │
+  │  Silero VAD (torch-based, CPU)      │
   │                                     │
   │  audio ──► speech segments          │
   │        ──► group into ≤ max_s chunks│
-  │        ──► return (audio_slice,     │
-  │             offset) pairs           │
+  │        ──► force-split overlong     │
+  │             segments at max_s       │
+  │        ──► return AudioChunk list   │
   └─────────────────────────────────────┘
 ```
 
@@ -90,7 +87,7 @@ VadChunker (dalston/engine_sdk/vad.py):
 
 **Deliverables:**
 
-A standalone, lazy-loading VAD utility that any engine can use without importing `onnx_asr`.
+A standalone, lazy-loading VAD utility that any engine can use.
 
 ```python
 # dalston/engine_sdk/vad.py
@@ -103,7 +100,7 @@ class SpeechSegment:
 
 @dataclass
 class AudioChunk:
-    """A chunk of audio for transcription."""
+    """A chunk of audio ready for transcription."""
     audio_path: Path       # temp WAV file for this chunk
     offset: float          # start time in original audio (seconds)
     duration: float        # chunk duration (seconds)
@@ -111,7 +108,13 @@ class AudioChunk:
 class VadChunker:
     """Split audio into speech-bounded chunks using Silero VAD.
 
-    Lazy-loads the Silero VAD ONNX model on first use. Thread-safe.
+    Lazy-loads the Silero VAD model on first use. Thread-safe.
+
+    Invariant: every returned chunk has duration ≤ max_chunk_duration_s.
+    When a single speech span exceeds the limit (no internal silence),
+    the chunker force-splits at max_chunk_duration_s boundaries and
+    logs a warning. This produces imperfect cuts but prevents model
+    failures on duration-limited audio encoders.
     """
 
     def __init__(
@@ -132,19 +135,31 @@ class VadChunker:
         """Split audio into chunks at speech boundaries.
 
         Groups consecutive speech segments into chunks that don't
-        exceed max_chunk_duration_s. Respects silence boundaries
-        to avoid cutting mid-word.
+        exceed max_chunk_duration_s. When a single speech segment
+        exceeds the limit (continuous speech without silence), it is
+        force-split at the boundary with a warning logged.
+
+        Returns AudioChunk list with temp WAV files and offsets.
         """
         ...
 ```
 
-The Silero VAD model is loaded via `onnxruntime` (CPU-only, ~2 MB). If `DALSTON_SILERO_VAD_ONNX` env var is set (Docker images bake the model in), load from that path. Otherwise download from the silero-vad GitHub release.
+**VAD backend:** Use `torch.hub.load("snakers4/silero-vad")` which is
+pure PyTorch (no `onnxruntime` dependency). This avoids packaging
+conflicts — every engine that imports `torch` already has what it needs.
+For Docker images that bake the model, honour `DALSTON_SILERO_VAD_PATH`
+env var to skip the download.
+
+**Force-split policy:** When a speech region exceeds `max_chunk_duration_s`
+and contains no internal silence, split at the limit boundary. The last
+chunk may be shorter. Log a warning with the segment duration so operators
+can tune VAD sensitivity if it happens often.
 
 **Tests:**
 
 - Unit test with synthetic audio (silence + tone patterns)
-- Test that chunks respect `max_chunk_duration_s`
-- Test that speech segments are not split mid-segment
+- Test that chunks respect `max_chunk_duration_s` hard limit
+- Test force-split on continuous speech (no silence)
 - Test lazy loading and caching of VAD model
 
 ---
@@ -154,62 +169,85 @@ The Silero VAD model is loaded via `onnxruntime` (CPU-only, ~2 MB). If `DALSTON_
 **Files modified:**
 
 - `dalston/engine_sdk/base_transcribe.py` — add chunked processing path
-- `dalston/engine_sdk/types.py` — add `audio_offset` to TaskRequest or a new ChunkContext
+- `dalston/engine_sdk/types.py` — add `replace()` method to `TaskRequest`
 
 **Deliverables:**
 
-Add opt-in VAD chunking to the base engine class. Engines declare their max audio duration; the base `process()` handles the rest.
+Add opt-in VAD chunking to the base engine class. The audio duration
+limit is resolved **per request** via a method that engines override.
 
 ```python
 class BaseBatchTranscribeEngine(Engine):
-    # Subclasses override to enable VAD chunking.
-    # None = no limit (default, handles any length natively).
-    max_audio_duration_s: float | None = None
+
+    def get_max_audio_duration_s(
+        self, task_request: TaskRequest
+    ) -> float | None:
+        """Return the max audio duration this engine can handle for the
+        given request, or None if there is no limit.
+
+        Subclasses override this. The default returns None (no chunking).
+        vLLM overrides to look up the limit from model metadata.
+        """
+        return None
 
     def process(self, task_request, ctx):
-        if self._should_chunk(task_request):
-            return self._process_chunked(task_request, ctx)
+        max_s = self.get_max_audio_duration_s(task_request)
+        if max_s is not None and self._audio_exceeds(task_request, max_s):
+            return self._process_chunked(task_request, ctx, max_s)
         transcript = self.transcribe_audio(task_request, ctx)
         return TaskResponse(data=transcript)
 
-    def _should_chunk(self, task_request) -> bool:
-        """Check if audio exceeds max_audio_duration_s."""
-        if self.max_audio_duration_s is None:
-            return False
-        duration = get_audio_duration(task_request.audio_path)
-        return duration > self.max_audio_duration_s
-
-    def _process_chunked(self, task_request, ctx):
-        """Split audio with VAD, transcribe each chunk, merge results."""
-        chunker = VadChunker(max_chunk_duration_s=self.max_audio_duration_s)
+    def _process_chunked(self, task_request, ctx, max_s):
+        chunker = VadChunker(max_chunk_duration_s=max_s)
         chunks = chunker.split(task_request.audio_path, temp_dir=ctx.temp_dir)
 
-        transcripts = []
+        chunk_results: list[tuple[Transcript, float]] = []
         for chunk in chunks:
-            chunk_request = task_request.with_audio(chunk.audio_path)
+            chunk_request = task_request.replace(audio_path=chunk.audio_path)
             transcript = self.transcribe_audio(chunk_request, ctx)
-            transcripts.append((transcript, chunk.offset))
+            chunk_results.append((transcript, chunk.offset))
 
-        return TaskResponse(data=self._merge_chunk_transcripts(transcripts))
-
-    def _merge_chunk_transcripts(self, chunks):
-        """Merge chunk transcripts with offset-adjusted timestamps."""
-        ...
+        return TaskResponse(
+            data=self._merge_chunk_transcripts(chunk_results)
+        )
 ```
 
-Key design decisions:
+**`TaskRequest.replace()`:** New method that returns a shallow copy with
+specified fields overridden. Simpler than a full builder pattern:
 
-- `max_audio_duration_s` is a **class attribute**, not a config parameter. The audio limit is a property of the model architecture, not a user preference.
-- Chunking happens in `process()` before `transcribe_audio()` is called. The engine's `transcribe_audio()` always receives audio within its declared limit.
-- Timestamps are adjusted by adding the chunk's `offset` to all segment/word timestamps.
-- The merged transcript concatenates text with proper segment boundaries at chunk edges.
+```python
+@dataclass
+class TaskRequest:
+    ...
+    def replace(self, **kwargs) -> TaskRequest:
+        """Return a copy with the given fields replaced."""
+        import dataclasses
+        return dataclasses.replace(self, **kwargs)
+```
+
+**`_merge_chunk_transcripts()` contract:** Merges N chunk transcripts
+into one canonical `Transcript`. Explicit rules:
+
+| Field | Merge strategy |
+| ----- | -------------- |
+| `text` | Concatenate with space separator |
+| `segments` | Concatenate; adjust `start`/`end` by adding chunk offset |
+| `segments[*].words` | Adjust `start`/`end` by chunk offset |
+| `language` | Use first chunk's language (all chunks share the same audio language) |
+| `language_confidence` | Average across chunks |
+| `alignment_method` | Use first chunk's value (same engine, same method) |
+| `engine_id` | Use first chunk's value |
+| `warnings` | Concatenate and deduplicate |
+| `metadata` | Not merged — per-segment metadata stays with its segment |
 
 **Tests:**
 
-- Test that `max_audio_duration_s = None` skips chunking (no behaviour change)
+- Test that `get_max_audio_duration_s` returning `None` skips chunking
 - Test that chunking triggers when audio exceeds limit
-- Test timestamp offset adjustment in merged transcript
-- Test that existing engines (HF-ASR, NeMo) are unaffected
+- Test timestamp offset adjustment in merged segments and words
+- Test text concatenation across chunks
+- Test `TaskRequest.replace()` produces independent copy
+- Test existing engines (HF-ASR, NeMo) are unaffected
 
 ---
 
@@ -217,115 +255,118 @@ Key design decisions:
 
 **Files modified:**
 
-- `engines/stt-transcribe/vllm-asr/batch_engine.py` — add `max_audio_duration_s`
+- `engines/stt-transcribe/vllm-asr/batch_engine.py` — override `get_max_audio_duration_s()`
 
 **Deliverables:**
 
-The vLLM ASR engine declares its audio limit. For Gemma 4 E4B (30s), the base engine auto-chunks. For Voxtral/Qwen2 (no limit), chunking is skipped.
+The vLLM ASR engine resolves the audio limit **per request** based on
+which model is selected. This handles per-request model switching
+correctly — a Voxtral request has no limit, a Gemma 4 E4B request
+gets 30s.
 
 ```python
-class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
-    # Model-dependent. Gemma 4 E4B = 30s, Voxtral = None.
-    # Read from engine config or model adapter at runtime.
-    max_audio_duration_s: float | None = None
-
-    def __init__(self, ...):
-        super().__init__()
-        # Set from model metadata or env var
-        self.max_audio_duration_s = float(
-            os.environ.get("DALSTON_MAX_AUDIO_DURATION_S", "0")
-        ) or None
-```
-
-Alternatively, the adapter can declare the limit per model family:
-
-```python
-MODEL_AUDIO_LIMITS = {
+# Model-specific audio duration limits (seconds).
+# Models not listed have no limit.
+MODEL_AUDIO_LIMITS: dict[str, float] = {
     "google/gemma-4-E4B-it": 30.0,
     "google/gemma-4-E2B-it": 30.0,
-    # Voxtral, Qwen2 — no limit (not in map)
 }
+
+class VllmAsrBatchEngine(BaseBatchTranscribeEngine):
+
+    def get_max_audio_duration_s(
+        self, task_request: TaskRequest
+    ) -> float | None:
+        params = task_request.get_transcribe_params()
+        model_id = params.loaded_model_id or self._default_model_id
+        return MODEL_AUDIO_LIMITS.get(model_id)
 ```
 
-And the engine sets `max_audio_duration_s` dynamically after model selection.
+Also supports env-var override for unlisted models:
+`DALSTON_MAX_AUDIO_DURATION_S=30` forces chunking for any model.
 
 **Verification:**
 
 ```bash
-# Transcribe 4-min audio with Gemma 4 E4B
+# 4-min audio with Gemma 4 E4B — auto-chunked into ~8 × 30s
 export DALSTON_DEFAULT_MODEL=google/gemma-4-E4B-it
-export DALSTON_MAX_AUDIO_DURATION_S=30
-curl -X POST http://localhost:9100/v1/transcribe \
-  -F "file=@long_audio.wav"
-# Should succeed — auto-chunked into ~8 × 30s chunks
+python -m dalston.engine_sdk.local_runner run \
+  --engine engines/stt-transcribe/vllm-asr/batch_engine.py:VllmAsrBatchEngine \
+  --stage transcribe --config '{"language": "en"}' \
+  --audio ~/Downloads/audio-2.wav --output /tmp/gemma4.json
+python -c "
+import json; d=json.load(open('/tmp/gemma4.json'))['data']
+print(f'Segments: {len(d[\"segments\"])}')
+assert d['segments'][-1]['end'] > 60, 'Timestamps should span full audio'
+"
 ```
 
 ---
 
-### 86.4: Migrate ONNX engine to shared VadChunker
+### 86.4: Migrate combo engine to VadChunker
 
 **Files modified:**
 
-- `dalston/engine_sdk/inference/onnx_inference.py` — replace inline VAD with `VadChunker`
+- `engines/stt-transcribe/hf-asr-align-pyannote/engine.py` — replace
+  `_split_long_segments()` with `VadChunker`
 
 **Deliverables:**
 
-Replace the ONNX engine's custom `_transcribe_with_vad()` and `_get_or_load_vad()` methods with the shared `VadChunker`. This removes ~80 lines of ONNX-specific VAD code and the `onnx_asr.load_vad()` dependency.
+Replace the combo engine's word-boundary splitting (built earlier in
+this session) with proper VAD-based splitting. VAD splitting is more
+accurate because it uses actual speech/silence boundaries in the audio
+rather than Whisper's attention-based word timestamps.
 
-Two migration options:
+The combo engine's `_run_align()` currently calls
+`_split_long_segments()` to break Whisper's single segment into ~30s
+chunks for wav2vec2 alignment. Replace with:
 
-**Option A (clean):** Set `max_audio_duration_s = 60` on the ONNX batch engine and let `BaseBatchTranscribeEngine.process()` handle chunking. Remove `_transcribe_with_vad()` entirely.
-
-**Option B (incremental):** Replace only the VAD loading and segmentation with `VadChunker` inside `_transcribe_with_vad()`, keeping the ONNX-specific batch inference loop. This preserves the per-segment batching (`vad_batch_size`) that the base engine doesn't handle.
-
-**Recommendation:** Option B for this milestone. The ONNX engine's VAD batching (processing N segments in parallel on GPU) is a performance optimization that the base engine's sequential chunk processing doesn't replicate. Full migration to Option A requires adding batch support to `_process_chunked()`, which is out of scope.
-
-**Tests:**
-
-- Verify ONNX engine still produces identical output for existing test audio
-- Verify `onnx_asr.load_vad()` is no longer called (shared Silero model used instead)
-
----
-
-### 86.5: Enable VAD chunking for combo engine
-
-**Files modified:**
-
-- `engines/stt-transcribe/hf-asr-align-pyannote/engine.py` — use VadChunker for alignment pre-splitting
-
-**Deliverables:**
-
-Replace the combo engine's `_split_long_segments()` method (the one we built in this session that splits Whisper's single giant segment into ~30s chunks using word boundaries) with `VadChunker`. VAD-based splitting is more accurate than word-boundary splitting because it respects actual speech/silence boundaries in the audio, not just Whisper's attention-based timestamps.
+```python
+chunker = VadChunker(max_chunk_duration_s=30.0)
+speech_segments = chunker.detect_speech(audio_path)
+# Build InputSegment list from speech regions instead of word boundaries
+```
 
 ---
 
 ## Non-Goals
 
-- **Replacing faster-whisper's built-in VAD** — faster-whisper's Silero VAD is deeply integrated with CTranslate2's batched inference. Replacing it would regress performance. The shared `VadChunker` is for engines that don't have their own VAD.
-- **Streaming/realtime VAD** — realtime engines already have per-utterance VAD via the realtime SDK's audio buffer. This milestone is batch-only.
-- **Parallel chunk transcription** — chunks are transcribed sequentially. Parallel processing (multiple chunks on GPU simultaneously) is a future optimization, not needed for correctness.
-- **VAD-based endpoint detection tuning** — the default Silero VAD parameters (threshold 0.5, min silence 0.3s) work well for speech. Per-engine tuning is deferred.
+- **ONNX engine migration** — The ONNX engine uses `onnx-asr`'s
+  `model.with_vad()` which feeds VAD segments directly into the model's
+  batch inference pipeline. This is a fundamentally different API than
+  file-slice chunking and cannot be replaced without a performance
+  regression. ONNX keeps its own VAD.
+- **faster-whisper migration** — faster-whisper's Silero VAD is deeply
+  integrated with CTranslate2's batched inference. No benefit to
+  replacing it.
+- **Streaming/realtime VAD** — realtime engines already have
+  per-utterance VAD via the realtime SDK's audio buffer. M86 is
+  batch-only.
+- **Parallel chunk transcription** — chunks are transcribed
+  sequentially. Parallel processing is a future optimization.
+- **Gateway model routing for Gemma** — adding Gemma 4 to the gateway's
+  model resolver / HF routing table is a separate concern. M86 is
+  SDK-level chunking only.
 
 ---
 
 ## Deployment
 
-Standard rolling deploy. No migration required — the `max_audio_duration_s` attribute defaults to `None`, so existing engines are unaffected until they opt in.
+Standard rolling deploy. No migration required — `get_max_audio_duration_s()`
+defaults to `None`, so existing engines are unaffected until they opt in.
 
-The Silero VAD ONNX model (~2 MB) must be available at runtime. Options:
-
-1. **Docker images** — bake into base images (already done for vLLM Dockerfile)
-2. **Runtime download** — auto-download on first use from GitHub releases (fallback)
-3. **S3 model storage** — load from S3 like other models (future)
+The Silero VAD model is loaded via `torch.hub` (pure PyTorch, no
+`onnxruntime` dependency). Every engine that imports `torch` already has
+what it needs. Docker images that bake the model set
+`DALSTON_SILERO_VAD_PATH` to skip the runtime download.
 
 ---
 
 ## Verification
 
 ```bash
-# 1. Verify vLLM-ASR with Gemma 4 E4B handles long audio
+# 1. vLLM-ASR with Gemma 4 E4B handles long audio
 export DALSTON_DEFAULT_MODEL=google/gemma-4-E4B-it
-export DALSTON_MAX_AUDIO_DURATION_S=30
 python -m dalston.engine_sdk.local_runner run \
   --engine engines/stt-transcribe/vllm-asr/batch_engine.py:VllmAsrBatchEngine \
   --stage transcribe \
@@ -333,29 +374,29 @@ python -m dalston.engine_sdk.local_runner run \
   --audio ~/Downloads/audio-2.wav \
   --output /tmp/gemma4-output.json
 
-# Verify output has properly offset timestamps
 python -c "
 import json
 d = json.load(open('/tmp/gemma4-output.json'))['data']
 segs = d['segments']
-print(f'Segments: {len(segs)}')
-print(f'Last segment end: {segs[-1][\"end\"]}s')
+print(f'Segments: {len(segs)}, last end: {segs[-1][\"end\"]}s')
 assert segs[-1]['end'] > 60, 'Timestamps should span full audio'
 "
 
-# 2. Verify ONNX engine still works after migration
+# 2. Voxtral (no limit) still works without chunking
+export DALSTON_DEFAULT_MODEL=mistralai/Voxtral-Mini-3B-2507
 python -m dalston.engine_sdk.local_runner run \
-  --engine engines/stt-transcribe/onnx/batch_engine.py:OnnxBatchEngine \
+  --engine engines/stt-transcribe/vllm-asr/batch_engine.py:VllmAsrBatchEngine \
   --stage transcribe \
-  --config '{"model": "parakeet-onnx-tdt-0.6b-v3"}' \
+  --config '{"language": "en"}' \
   --audio ~/Downloads/audio-2.wav \
-  --output /tmp/onnx-output.json
+  --output /tmp/voxtral-output.json
 
-# 3. Verify engines without max_audio_duration_s are unaffected
+# 3. Default base engine has no limit
 python -c "
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
-assert BaseBatchTranscribeEngine.max_audio_duration_s is None
-print('Default is None — no chunking unless opted in')
+e = BaseBatchTranscribeEngine.__new__(BaseBatchTranscribeEngine)
+assert e.get_max_audio_duration_s(None) is None
+print('Default: no chunking')
 "
 ```
 
@@ -363,11 +404,12 @@ print('Default is None — no chunking unless opted in')
 
 ## Checkpoint
 
-- [ ] `dalston/engine_sdk/vad.py` — Silero VAD utility with `VadChunker.split()`
-- [ ] `BaseBatchTranscribeEngine` — opt-in `max_audio_duration_s` with automatic chunking
-- [ ] Chunk transcript merging with offset-adjusted timestamps
-- [ ] vLLM-ASR engine declares `max_audio_duration_s` (Gemma 4 E4B = 30s)
-- [ ] ONNX engine migrated to shared `VadChunker` (Option B — VAD loading only)
+- [ ] `dalston/engine_sdk/vad.py` — `VadChunker` with `split()` and force-split fallback
+- [ ] `TaskRequest.replace()` method for creating chunk requests
+- [ ] `BaseBatchTranscribeEngine.get_max_audio_duration_s()` per-request hook
+- [ ] `BaseBatchTranscribeEngine._process_chunked()` with timestamp-aware merge
+- [ ] `_merge_chunk_transcripts()` with explicit field merge rules
+- [ ] vLLM-ASR overrides `get_max_audio_duration_s()` with `MODEL_AUDIO_LIMITS` lookup
 - [ ] Combo engine uses `VadChunker` instead of `_split_long_segments()`
-- [ ] Unit tests for VadChunker, chunked processing, and timestamp merging
-- [ ] Existing engines (HF-ASR, NeMo, faster-whisper) unaffected
+- [ ] Unit tests for VadChunker, chunked processing, merge, and force-split
+- [ ] Existing engines (HF-ASR, NeMo, faster-whisper, ONNX) unaffected
