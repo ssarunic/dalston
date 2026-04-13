@@ -55,3 +55,7 @@ tmp/
 
 # Local runtime state
 .dalston/
+
+# Debug scratch area (keep only explicitly tracked helpers)
+debug/
+!debug/download_artifacts.py
