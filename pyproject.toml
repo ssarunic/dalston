@@ -92,7 +92,7 @@ tools = [
     "numpy>=1.24.0",           # Audio generation + linear regression
 ]
 dev = [
-    "pytest>=8.0.0",
+    "pytest>=9.0.3",  # CVE-2025-71176: vulnerable tmpdir handling
     "pytest-asyncio>=0.23.0",
     "pytest-httpx>=0.30.0",
     "httpx>=0.26.0",
