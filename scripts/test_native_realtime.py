@@ -151,8 +151,11 @@ async def transcribe(
             elapsed = time_module.time() - start_time
             print(f"[Session duration: {elapsed:.1f}s]")
 
-    except websockets.exceptions.InvalidStatusCode as e:
-        print(f"\nConnection rejected: HTTP {e.status_code}", file=sys.stderr)
+    except websockets.exceptions.InvalidStatus as e:
+        print(
+            f"\nConnection rejected: HTTP {e.response.status_code}",
+            file=sys.stderr,
+        )
     except Exception as e:
         print(f"\nError: {e}", file=sys.stderr)
     finally:

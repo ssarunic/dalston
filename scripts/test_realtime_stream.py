@@ -174,11 +174,12 @@ async def stream_audio(
                 print("(timeout)")
                 receiver_task.cancel()
 
-    except websockets.exceptions.InvalidStatusCode as e:
-        print(f"Connection rejected: HTTP {e.status_code}")
-        if e.status_code == 401:
+    except websockets.exceptions.InvalidStatus as e:
+        status_code = e.response.status_code
+        print(f"Connection rejected: HTTP {status_code}")
+        if status_code == 401:
             print("Authentication failed - check API key")
-        elif e.status_code == 503:
+        elif status_code == 503:
             print("No realtime workers available")
     except Exception as e:
         print(f"Error: {e}")

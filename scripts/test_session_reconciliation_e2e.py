@@ -243,9 +243,10 @@ async def main():
 
         return 0 if success else 1
 
-    except websockets.exceptions.InvalidStatusCode as e:
-        print(f"[ERROR] WebSocket connection rejected: HTTP {e.status_code}")
-        if e.status_code == 4503:
+    except websockets.exceptions.InvalidStatus as e:
+        status_code = e.response.status_code
+        print(f"[ERROR] WebSocket connection rejected: HTTP {status_code}")
+        if status_code == 4503:
             print("[HINT] No realtime workers available. Check worker is running.")
         return 1
     except Exception as e:

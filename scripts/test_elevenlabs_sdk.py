@@ -407,8 +407,11 @@ async def test_realtime_manual(
                 except asyncio.CancelledError:
                     pass
 
-    except websockets.exceptions.InvalidStatusCode as e:
-        print(f"\nConnection rejected: HTTP {e.status_code}", file=sys.stderr)
+    except websockets.exceptions.InvalidStatus as e:
+        print(
+            f"\nConnection rejected: HTTP {e.response.status_code}",
+            file=sys.stderr,
+        )
     except Exception as e:
         print(f"\nError: {e}", file=sys.stderr)
     finally:

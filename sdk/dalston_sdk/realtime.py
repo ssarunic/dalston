@@ -329,13 +329,14 @@ class AsyncRealtimeSession:
                 open_timeout=10,
                 close_timeout=5,
             )
-        except websockets.exceptions.InvalidStatusCode as e:
+        except websockets.exceptions.InvalidStatus as e:
             # Handle HTTP-level errors (before WebSocket upgrade)
-            if e.status_code == 401:
+            status_code = e.response.status_code
+            if status_code == 401:
                 raise AuthenticationError("Invalid or missing API key") from e
-            elif e.status_code == 403:
+            elif status_code == 403:
                 raise ForbiddenError("API key lacks required scope") from e
-            elif e.status_code == 429:
+            elif status_code == 429:
                 raise RateLimitError("Rate limit exceeded") from e
             raise ConnectError(f"Failed to connect: {e}") from e
         except websockets.exceptions.ConnectionClosedError as e:
