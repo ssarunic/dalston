@@ -28,6 +28,7 @@ def _create_mock_task(
     engine_id: str,
     status: str = "completed",
     dependencies: list[UUID] | None = None,
+    ready_at: datetime | None = None,
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
     required: bool = True,
@@ -42,6 +43,7 @@ def _create_mock_task(
     task.engine_id = engine_id
     task.status = status
     task.dependencies = dependencies or []
+    task.ready_at = ready_at
     task.started_at = started_at
     task.completed_at = completed_at
     task.required = required
