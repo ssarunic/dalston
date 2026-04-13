@@ -150,6 +150,12 @@ export interface Task {
 export interface TaskListResponse {
   job_id: string
   tasks: Task[]
+  /**
+   * Total queue wait time across the pipeline as a union of per-task
+   * [ready_at, started_at) intervals. Overlapping waits on different
+   * engines are merged, so this is not the sum of per-task wait_ms.
+   */
+  total_wait_ms?: number | null
 }
 
 export interface TaskArtifact {

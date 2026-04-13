@@ -34,7 +34,7 @@ from dalston.common.registry import (
     _parse_json_list,
 )
 from dalston.common.streams_types import CONSUMER_GROUP
-from dalston.common.utils import compute_duration_ms
+from dalston.common.utils import compute_duration_ms, compute_interval_union_ms
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -219,6 +219,7 @@ class TaskListResponse(BaseModel):
 
     job_id: UUID
     tasks: list[TaskResponse]
+    total_wait_ms: int | None = None
 
 
 @router.get(
@@ -278,6 +279,9 @@ async def get_job_tasks(
             )
             for task in sorted_tasks
         ],
+        total_wait_ms=compute_interval_union_ms(
+            (task.ready_at, task.started_at) for task in sorted_tasks
+        ),
     )
 
 

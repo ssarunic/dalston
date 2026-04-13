@@ -1,5 +1,6 @@
 """Common utility functions."""
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from urllib.parse import unquote, urlparse
 from uuid import UUID
@@ -21,6 +22,50 @@ def compute_duration_ms(
         return None
     delta = completed_at - started_at
     return int(delta.total_seconds() * 1000)
+
+
+def compute_interval_union_ms(
+    intervals: Iterable[tuple[datetime | None, datetime | None]],
+) -> int | None:
+    """Compute the total covered duration (in ms) across a set of intervals.
+
+    Overlapping intervals are merged so periods that occurred in parallel are
+    counted once rather than summed. Used for job-level wait time where tasks
+    on different engine instances may have queued concurrently — summing their
+    individual waits would overcount the real queue delay experienced by the
+    job.
+
+    Args:
+        intervals: Iterable of (start, end) timestamp pairs. Pairs with a
+            missing endpoint or with end <= start are ignored.
+
+    Returns:
+        Union duration in milliseconds, or None if no valid intervals.
+    """
+    pairs: list[tuple[datetime, datetime]] = []
+    for start, end in intervals:
+        if start is None or end is None:
+            continue
+        if end <= start:
+            continue
+        pairs.append((start, end))
+
+    if not pairs:
+        return None
+
+    pairs.sort(key=lambda p: p[0])
+    total_seconds = 0.0
+    cur_start, cur_end = pairs[0]
+    for start, end in pairs[1:]:
+        if start <= cur_end:
+            if end > cur_end:
+                cur_end = end
+        else:
+            total_seconds += (cur_end - cur_start).total_seconds()
+            cur_start, cur_end = start, end
+    total_seconds += (cur_end - cur_start).total_seconds()
+
+    return int(total_seconds * 1000)
 
 
 MAX_DISPLAY_NAME_LENGTH = 255
