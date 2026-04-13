@@ -129,6 +129,15 @@ class JobResponse(BaseModel):
         default=None,
         description="Pipeline stages with status and timing (available once job is RUNNING)",
     )
+    total_wait_ms: int | None = Field(
+        default=None,
+        description=(
+            "Total queue wait time across all pipeline stages, computed as the "
+            "union of per-task [ready_at, started_at) intervals. Overlapping "
+            "waits on different engines are merged, so this is not the sum of "
+            "per-stage wait_ms."
+        ),
+    )
 
     # Transcript data (if completed) - populated from S3
     language_code: str | None = None

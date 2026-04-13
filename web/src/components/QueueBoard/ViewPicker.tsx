@@ -2,7 +2,7 @@ import { Columns3, Rows3, Table2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
- * The three supported queue board layouts (M86).
+ * The three supported queue board layouts (M87).
  *
  * - `grid` — table with rows=jobs, columns=stages
  * - `stage-board` — kanban with columns=stages only

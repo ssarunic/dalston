@@ -11,6 +11,13 @@ interface DAGViewerProps {
   audioDurationSeconds?: number | null
   jobCreatedAt?: string
   jobCompletedAt?: string | null
+  /**
+   * Server-computed total wait time across the pipeline, as the union of
+   * per-task [ready_at, started_at) intervals. Prefer this over summing
+   * per-task wait_ms, since parallel stages on different engines can wait
+   * concurrently.
+   */
+  totalWaitMs?: number | null
   /** The model ID used for this job (from job.model) */
   jobModelId?: string
   /** All models indexed by ID for looking up model names */
@@ -219,6 +226,7 @@ export function DAGViewer({
   audioDurationSeconds,
   jobCreatedAt,
   jobCompletedAt,
+  totalWaitMs: totalWaitMsProp,
   jobModelId,
   modelsById,
 }: DAGViewerProps) {
@@ -273,11 +281,36 @@ export function DAGViewer({
     return durations.length > 0 ? durations.reduce((a, b) => a + b, 0) : null
   }, [tasks])
 
-  // Sum of queue wait time across all tasks
+  // Union of per-task queue-wait intervals. Parallel tasks on different
+  // engines may wait concurrently, so summing wait_ms would overcount — we
+  // merge [ready_at, started_at) intervals instead. Prefer the server-
+  // computed value if present.
   const totalWaitMs = useMemo(() => {
-    const waits = tasks.map((t) => t.wait_ms).filter((w): w is number => w != null && w > 0)
-    return waits.length > 0 ? waits.reduce((a, b) => a + b, 0) : null
-  }, [tasks])
+    if (totalWaitMsProp != null) return totalWaitMsProp > 0 ? totalWaitMsProp : null
+    const intervals: Array<[number, number]> = []
+    for (const t of tasks) {
+      if (!t.ready_at || !t.started_at) continue
+      const start = new Date(t.ready_at).getTime()
+      const end = new Date(t.started_at).getTime()
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue
+      intervals.push([start, end])
+    }
+    if (intervals.length === 0) return null
+    intervals.sort((a, b) => a[0] - b[0])
+    let total = 0
+    let [curStart, curEnd] = intervals[0]
+    for (let i = 1; i < intervals.length; i++) {
+      const [s, e] = intervals[i]
+      if (s <= curEnd) {
+        if (e > curEnd) curEnd = e
+      } else {
+        total += curEnd - curStart
+        ;[curStart, curEnd] = [s, e]
+      }
+    }
+    total += curEnd - curStart
+    return total > 0 ? total : null
+  }, [tasks, totalWaitMsProp])
 
   // Speed ratio based on processing time (not wall time)
   const speedRatio = useMemo(() => {

@@ -259,9 +259,9 @@ async def test_realtime_transcription():
                 print("Real-time transcription test SKIPPED (no worker available)")
                 return True  # Not a failure if worker isn't running
 
-    except websockets.exceptions.InvalidStatusCode as e:
+    except websockets.exceptions.InvalidStatus as e:
         print(f"   Connection rejected: {e}")
-        if e.status_code == 401:
+        if e.response.status_code == 401:
             print("   (Authentication required - this is expected behavior)")
             return True
         return False

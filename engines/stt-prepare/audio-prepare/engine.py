@@ -293,7 +293,11 @@ class AudioPrepareEngine(Engine):
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.FFMPEG_TIMEOUT
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self.FFMPEG_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
@@ -330,7 +334,11 @@ class AudioPrepareEngine(Engine):
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.FFPROBE_TIMEOUT
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self.FFPROBE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
@@ -424,7 +432,11 @@ class AudioPrepareEngine(Engine):
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.FFMPEG_TIMEOUT
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self.FFMPEG_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(

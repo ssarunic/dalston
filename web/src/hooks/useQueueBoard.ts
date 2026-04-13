@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { POLL_INTERVAL_ACTIVE_MS, QUERY_RETRY_COUNT } from '@/lib/queryTimings'
 
 /**
- * Queue Board data hook (M86).
+ * Queue Board data hook (M87).
  *
  * Polls at the active-items cadence (2s) because this page is the
  * operational monitoring surface — operators expect near-real-time

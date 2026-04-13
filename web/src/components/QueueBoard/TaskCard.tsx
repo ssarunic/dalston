@@ -5,7 +5,7 @@ import { STAGE_LABELS } from '@/lib/stages'
 import type { QueueBoardTask, TaskStatus } from '@/api/types'
 
 /**
- * Compact task card used by all three queue board layouts (M86).
+ * Compact task card used by all three queue board layouts (M87).
  *
  * The same component adapts to Grid / Stage Board / Job Strips by
  * toggling label visibility via `showStage` and `showJob`:

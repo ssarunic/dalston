@@ -123,7 +123,7 @@ export const apiClient = {
   // Console metrics (throughput, success rates, engine performance)
   getMetrics: () => currentClient.get('api/console/metrics').json<MetricsResponse>(),
 
-  // Queue board (M86) - cross-job operational view
+  // Queue board (M87) - cross-job operational view
   getQueueBoard: () =>
     currentClient.get('api/console/queue-board').json<QueueBoardResponse>(),
 

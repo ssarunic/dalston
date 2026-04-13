@@ -45,7 +45,11 @@ from dalston.common.models import (
     validate_retention,
 )
 from dalston.common.timeouts import S3_PRESIGNED_URL_EXPIRY_SECONDS
-from dalston.common.utils import compute_duration_ms, generate_display_name
+from dalston.common.utils import (
+    compute_duration_ms,
+    compute_interval_union_ms,
+    generate_display_name,
+)
 from dalston.config import Settings
 
 # OpenAI compatibility imports (M38)
@@ -906,6 +910,7 @@ async def get_transcription(
 
     # Build stages array from tasks (if any)
     stages = None
+    total_wait_ms = None
     if job.tasks:
         sorted_tasks = jobs_service._topological_sort_tasks(list(job.tasks))
         stages = [
@@ -925,6 +930,9 @@ async def get_transcription(
             )
             for task in sorted_tasks
         ]
+        total_wait_ms = compute_interval_union_ms(
+            (task.ready_at, task.started_at) for task in sorted_tasks
+        )
 
     retention_info = _build_retention_info(
         job.retention if job.retention is not None else 30,
@@ -948,6 +956,7 @@ async def get_transcription(
         model=model,
         error=job.error,
         stages=stages,
+        total_wait_ms=total_wait_ms,
         retention=retention_info,
         # Result stats (populated on job completion)
         audio_duration_seconds=job.audio_duration,

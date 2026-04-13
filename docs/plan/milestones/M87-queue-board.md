@@ -1,4 +1,4 @@
-# M86: Queue Board — Cross-Job Pipeline Visualization
+# M87: Queue Board — Cross-Job Pipeline Visualization
 
 |                    |                                                              |
 | ------------------ | ------------------------------------------------------------ |
@@ -16,7 +16,7 @@
 
 ## Outcomes
 
-| Scenario | Current | After M86 |
+| Scenario | Current | After M87 |
 | -------- | ------- | --------- |
 | 12 jobs in flight, several stuck at transcribe | Must click each job individually to discover they're all blocked on the same stage | Open `/queue` — the transcribe column shows 12 pending tasks stacked up, bottleneck is visually obvious |
 | Operator asks "which worker is handling job-abc123?" | Click job → scroll to task DAG → click task → read engine field | Find the card on the board, engine label is right on it |

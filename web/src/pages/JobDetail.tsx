@@ -619,6 +619,7 @@ export function JobDetail() {
               audioDurationSeconds={job.audio_duration_seconds}
               jobCreatedAt={job.created_at}
               jobCompletedAt={job.completed_at}
+              totalWaitMs={tasksData.total_wait_ms}
               jobModelId={job.model}
               modelsById={modelsById}
             />
