@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "dalston-sdk>=0.1.0",
     "typer[all]>=0.24.1",
-    "sounddevice>=0.4",
+    "sounddevice>=0.5.5",
     "python-dotenv>=1.2.2",
 ]
 
