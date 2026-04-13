@@ -1,12 +1,14 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { formatMs, shortJobId } from '@/lib/format'
 import { STAGE_COLORS, STAGE_LABELS } from '@/lib/stages'
 import type {
   QueueBoardJob,
   QueueBoardStageHealth,
   QueueBoardTask,
 } from '@/api/types'
+import { findBottleneckStage } from './helpers'
 import { TaskCard } from './TaskCard'
 
 /**
@@ -40,19 +42,6 @@ function stageLabel(stage: string): string {
   return STAGE_LABELS[stage]?.label ?? stage
 }
 
-function shortJobId(jobId: string): string {
-  return jobId.slice(0, 8)
-}
-
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null) return '—'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const secs = ms / 1000
-  if (secs < 60) return `${secs.toFixed(1)}s`
-  const mins = Math.floor(secs / 60)
-  return `${mins}m ${Math.round(secs % 60)}s`
-}
-
 /** Group tasks by `task.stage`. Used by Grid and Stage Board. */
 function groupByStage(
   tasks: QueueBoardTask[],
@@ -81,33 +70,34 @@ function groupByJob(tasks: QueueBoardTask[]): Map<string, QueueBoardTask[]> {
   return result
 }
 
-/** Identify the bottleneck stage (highest queue_depth) if any stage has load. */
-function findBottleneckStage(health: QueueBoardStageHealth[]): string | null {
-  let max = 0
-  let winner: string | null = null
-  for (const h of health) {
-    if (h.queue_depth > max) {
-      max = h.queue_depth
-      winner = h.stage
-    }
-  }
-  return winner
+interface LayoutProps extends PivotBoardProps {
+  healthByStage: Map<string, QueueBoardStageHealth>
+  bottleneck: string | null
 }
 
 export function PivotBoard(props: PivotBoardProps) {
-  const { groupByColumn, groupByRow } = props
+  const { groupByColumn, groupByRow, stageHealth } = props
+
+  const healthByStage = useMemo(() => {
+    const map = new Map<string, QueueBoardStageHealth>()
+    for (const h of stageHealth) map.set(h.stage, h)
+    return map
+  }, [stageHealth])
+  const bottleneck = useMemo(() => findBottleneckStage(stageHealth), [stageHealth])
+
+  const layoutProps: LayoutProps = { ...props, healthByStage, bottleneck }
 
   if (groupByColumn === 'stage' && groupByRow === 'job') {
-    return <GridLayout {...props} />
+    return <GridLayout {...layoutProps} />
   }
   if (groupByColumn === 'stage' && groupByRow === 'none') {
-    return <StageBoardLayout {...props} />
+    return <StageBoardLayout {...layoutProps} />
   }
   if (groupByColumn === 'none' && groupByRow === 'job') {
-    return <JobStripsLayout {...props} />
+    return <JobStripsLayout {...layoutProps} />
   }
   // None/none is unsupported — fall through to Grid as a safe default.
-  return <GridLayout {...props} />
+  return <GridLayout {...layoutProps} />
 }
 
 // =============================================================================
@@ -118,11 +108,9 @@ function GridLayout({
   tasks,
   jobs,
   visibleStages,
-  stageHealth,
-}: PivotBoardProps) {
-  const bottleneck = findBottleneckStage(stageHealth)
-
-  // Build a job×stage bucket map so each cell can render its task(s).
+  healthByStage,
+  bottleneck,
+}: LayoutProps) {
   const cellMap = useMemo(() => {
     const result = new Map<string, Map<string, QueueBoardTask[]>>()
     for (const task of tasks) {
@@ -140,12 +128,6 @@ function GridLayout({
     }
     return result
   }, [tasks])
-
-  const healthByStage = useMemo(() => {
-    const map = new Map<string, QueueBoardStageHealth>()
-    for (const h of stageHealth) map.set(h.stage, h)
-    return map
-  }, [stageHealth])
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -286,18 +268,13 @@ function GridLayout({
 function StageBoardLayout({
   tasks,
   visibleStages,
-  stageHealth,
-}: PivotBoardProps) {
+  healthByStage,
+  bottleneck,
+}: LayoutProps) {
   const buckets = useMemo(
     () => groupByStage(tasks, visibleStages),
     [tasks, visibleStages],
   )
-  const healthByStage = useMemo(() => {
-    const map = new Map<string, QueueBoardStageHealth>()
-    for (const h of stageHealth) map.set(h.stage, h)
-    return map
-  }, [stageHealth])
-  const bottleneck = findBottleneckStage(stageHealth)
 
   return (
     <div className="flex gap-3 overflow-x-auto rounded-lg border border-border bg-card p-3">
@@ -356,7 +333,7 @@ function StageBoardLayout({
 // Job Strips Layout — rows = jobs, no columns (stage order is implicit)
 // =============================================================================
 
-function JobStripsLayout({ tasks, jobs, visibleStages }: PivotBoardProps) {
+function JobStripsLayout({ tasks, jobs, visibleStages }: LayoutProps) {
   const buckets = useMemo(() => groupByJob(tasks), [tasks])
 
   // Within each strip, sort tasks by pipeline stage order so the cards

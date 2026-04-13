@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { Tooltip } from '@/components/ui/tooltip'
+import { formatMs, shortJobId } from '@/lib/format'
 import { STAGE_LABELS } from '@/lib/stages'
 import type { QueueBoardTask, TaskStatus } from '@/api/types'
 
@@ -82,15 +83,6 @@ const statusConfig: Record<
   },
 }
 
-/** Human-friendly duration in ms → "1.2s" / "12s" / "1m 30s". */
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const secs = ms / 1000
-  if (secs < 60) return `${secs.toFixed(1)}s`
-  const mins = Math.floor(secs / 60)
-  return `${mins}m ${Math.round(secs % 60)}s`
-}
-
 /** Elapsed wall-clock since a task started, as ms. */
 function elapsedSinceMs(isoStart: string | null): number | null {
   if (!isoStart) return null
@@ -101,11 +93,6 @@ function elapsedSinceMs(isoStart: string | null): number | null {
 
 function stageLabel(stage: string): string {
   return STAGE_LABELS[stage]?.label ?? stage
-}
-
-/** Short job id for card display. */
-function shortJobId(jobId: string): string {
-  return jobId.slice(0, 8)
 }
 
 export function TaskCard({
@@ -127,10 +114,14 @@ export function TaskCard({
   const taskHref = `/jobs/${task.job_id}/tasks/${task.task_id}`
   const engineHref = task.engine_id ? `/engines/${task.engine_id}` : null
 
-  const body = (
+  // Card uses the "link overlay" pattern: one <Link> stretches over the
+  // whole card background, while the engine pill is a sibling <Link>
+  // layered above it. This gives the card a single enclosing anchor
+  // without nesting two <a> elements (which is invalid HTML).
+  const card = (
     <div
       className={cn(
-        'group flex flex-col gap-1 rounded-md border px-2.5 transition-colors',
+        'group relative flex flex-col gap-1 rounded-md border px-2.5 transition-colors',
         compact ? 'py-1.5 text-[11px]' : 'py-2 text-xs',
         config.bg,
         config.border,
@@ -138,8 +129,13 @@ export function TaskCard({
         className,
       )}
     >
-      {/* Header row: status dot + stage label (if shown) + duration */}
-      <div className="flex items-center gap-1.5">
+      <Link
+        to={taskHref}
+        aria-label={`Task ${shortJobId(task.task_id)}`}
+        className="absolute inset-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      />
+
+      <div className="relative flex items-center gap-1.5">
         <span
           className={cn('h-2 w-2 rounded-full shrink-0', config.dot)}
           aria-label={config.label}
@@ -156,22 +152,17 @@ export function TaskCard({
         )}
       </div>
 
-      {/* Secondary row: job id (if shown) */}
       {showJob && (
-        <div className={cn('font-mono', config.text, 'opacity-80')}>
+        <div className={cn('relative font-mono', config.text, 'opacity-80')}>
           {shortJobId(task.job_id)}
         </div>
       )}
 
-      {/* Engine label — always shown; small but clickable. We render it as a
-          nested Link and stopPropagation on click so the outer Link doesn't
-          trigger. */}
       {task.engine_id && engineHref && (
         <Link
           to={engineHref}
-          onClick={(e) => e.stopPropagation()}
           className={cn(
-            'truncate text-[10px] font-mono underline-offset-2 hover:underline',
+            'relative truncate text-[10px] font-mono underline-offset-2 hover:underline',
             config.text,
             'opacity-70 hover:opacity-100',
           )}
@@ -183,18 +174,12 @@ export function TaskCard({
     </div>
   )
 
-  const card =
-    task.status === 'failed' && task.error ? (
+  if (task.status === 'failed' && task.error) {
+    return (
       <Tooltip content={<span className="block max-w-xs">{task.error}</span>} side="top">
-        <Link to={taskHref} className="block">
-          {body}
-        </Link>
+        {card}
       </Tooltip>
-    ) : (
-      <Link to={taskHref} className="block">
-        {body}
-      </Link>
     )
-
+  }
   return card
 }

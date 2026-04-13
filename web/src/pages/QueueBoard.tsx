@@ -3,8 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Activity, AlertTriangle, Gauge, Timer } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useQueueBoard } from '@/hooks/useQueueBoard'
+import { formatMs } from '@/lib/format'
 import { STAGE_LABELS } from '@/lib/stages'
 import { PivotBoard } from '@/components/QueueBoard/PivotBoard'
+import { findBottleneckStage } from '@/components/QueueBoard/helpers'
 import {
   ViewPicker,
   type BoardView,
@@ -35,15 +37,6 @@ function parseView(raw: string | null): BoardView {
     return raw as BoardView
   }
   return 'grid'
-}
-
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null) return '—'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const secs = ms / 1000
-  if (secs < 60) return `${secs.toFixed(1)}s`
-  const mins = Math.floor(secs / 60)
-  return `${mins}m ${Math.round(secs % 60)}s`
 }
 
 function SummaryCard({
@@ -98,19 +91,14 @@ export function QueueBoard() {
 
   const { data, isLoading, error } = useQueueBoard()
 
-  // Find the current bottleneck stage for the summary card
   const bottleneckName = useMemo(() => {
-    if (!data?.stages?.length) return null
-    let winner: { stage: string; depth: number } | null = null
-    for (const s of data.stages) {
-      if (!winner || s.queue_depth > winner.depth) {
-        winner = { stage: s.stage, depth: s.queue_depth }
-      }
-    }
-    if (!winner || winner.depth === 0) return null
+    const stage = findBottleneckStage(data?.stages ?? [])
+    if (!stage) return null
+    const depth = data?.stages.find((s) => s.stage === stage)?.queue_depth ?? 0
+    if (depth === 0) return null
     return {
-      name: STAGE_LABELS[winner.stage]?.label ?? winner.stage,
-      depth: winner.depth,
+      name: STAGE_LABELS[stage]?.label ?? stage,
+      depth,
     }
   }, [data])
 

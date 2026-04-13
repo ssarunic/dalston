@@ -12,6 +12,7 @@ PATCH /api/console/settings/{namespace} - Update settings
 POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
+import asyncio
 import os
 import re
 from datetime import UTC, datetime, timedelta
@@ -27,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
-from dalston.common.models import JobStatus
+from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
@@ -53,7 +54,7 @@ from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
-from dalston.gateway.services.console import ConsoleService
+from dalston.gateway.services.console import ConsoleService, normalize_stage
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.orchestrator.session_coordinator import SessionCoordinator
@@ -1422,18 +1423,13 @@ async def get_metrics(
     )
 
 
-# ---------------------------------------------------------------------------
-# Queue Board (M87)
-# ---------------------------------------------------------------------------
-
-
 class QueueBoardTask(BaseModel):
     """Single task entry in the queue board flat list."""
 
     task_id: UUID
     job_id: UUID
-    stage: str  # normalized (no _ch0/_ch1 suffix)
-    status: str  # pending | ready | running | completed | failed | skipped | cancelled
+    stage: str
+    status: str
     engine_id: str | None = None
     duration_ms: int | None = None
     wait_ms: int | None = None
@@ -1447,7 +1443,7 @@ class QueueBoardJob(BaseModel):
 
     job_id: UUID
     display_name: str | None = None
-    status: str  # pending | running
+    status: str
     created_at: datetime
     audio_duration_seconds: float | None = None
 
@@ -1456,9 +1452,9 @@ class QueueBoardStageHealth(BaseModel):
     """Aggregated queue health for a single visible stage."""
 
     stage: str
-    queue_depth: int  # sum of XLEN-equivalent across engines serving this stage
-    processing: int  # count of heartbeats reporting current_task for this stage
-    total_workers: int  # number of distinct engine instances serving this stage
+    queue_depth: int
+    processing: int
+    total_workers: int
     avg_duration_ms: float | None = None
 
 
@@ -1467,9 +1463,9 @@ class QueueBoardResponse(BaseModel):
 
     jobs: list[QueueBoardJob]
     tasks: list[QueueBoardTask]
-    visible_stages: list[str]  # stages with at least one non-skipped task
-    hidden_stages: list[str]  # known pipeline stages with no active work
-    stages: list[QueueBoardStageHealth]  # health info for visible stages only
+    visible_stages: list[str]
+    hidden_stages: list[str]
+    stages: list[QueueBoardStageHealth]
     completed_last_hour: int
     avg_pipeline_ms: float | None = None
 
@@ -1500,23 +1496,22 @@ async def get_queue_board(
     security_manager = get_security_manager()
     security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
 
-    # 1. Active jobs + flat task list + visible/hidden stages
     board = await console_service.get_queue_board(db)
 
-    # 2. Per-stage health from Redis queues and engine heartbeats. We walk
-    #    the engine catalog once, map each engine to its stage, and sum
-    #    queue depths + worker counts per stage. Only stages that are
-    #    visible in the board get aggregated.
     from dalston.orchestrator.catalog import get_catalog
 
     catalog = get_catalog()
     visible_set = set(board.visible_stages)
 
-    # Fetch heartbeats so we can count active workers per stage
-    all_instance_ids = await redis.smembers(UNIFIED_INSTANCE_SET_KEY)
+    all_instance_ids = list(await redis.smembers(UNIFIED_INSTANCE_SET_KEY))
+    instance_hashes = await asyncio.gather(
+        *(
+            redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+            for instance_id in all_instance_ids
+        )
+    )
     heartbeats_by_engine: dict[str, list[dict[str, str]]] = {}
-    for instance_id in all_instance_ids:
-        data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+    for data in instance_hashes:
         if data and "engine_id" in data:
             heartbeats_by_engine.setdefault(data["engine_id"], []).append(data)
 
@@ -1532,25 +1527,26 @@ async def get_queue_board(
         for stage in board.visible_stages
     }
 
+    # Multi-stage engines (e.g. whisperx-full) register against their primary
+    # stage at `stages[0]`, matching the /engines endpoint behaviour.
+    visible_engines: list[tuple[str, str]] = []  # (stage, engine_id)
     for entry in catalog.get_all_engines():
-        # Batch engines have a non-empty stages list; the first entry is
-        # the stage this engine serves. Multi-stage engines (e.g.
-        # whisperx-full) register against their primary stage, so mapping
-        # by stages[0] matches the existing /engines endpoint behaviour.
         if not entry.capabilities.stages:
             continue
-
         stage = entry.capabilities.stages[0]
-        if stage not in visible_set:
-            continue
+        if stage in visible_set:
+            visible_engines.append((stage, entry.engine_id))
 
-        engine_id = entry.engine_id
-        stream_key = f"dalston:stream:{engine_id}"
-        queue_depth = await _get_stream_backlog(redis, stream_key)
+    backlogs = await asyncio.gather(
+        *(
+            _get_stream_backlog(redis, f"dalston:stream:{engine_id}")
+            for _, engine_id in visible_engines
+        )
+    )
 
+    for (stage, engine_id), queue_depth in zip(visible_engines, backlogs, strict=True):
         totals = stage_totals[stage]
         totals.queue_depth += queue_depth
-
         for heartbeat in heartbeats_by_engine.get(engine_id, []):
             try:
                 last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
@@ -1559,39 +1555,51 @@ async def get_queue_board(
                 continue
             if age > HEARTBEAT_STALE_THRESHOLD:
                 continue
-
             totals.total_workers += 1
             if heartbeat.get("current_task"):
                 totals.processing += 1
 
-    # Per-stage average durations over the last hour, to show a rough
-    # "how fast is this stage moving" indicator in the footer.
-    hour_ago = now - timedelta(hours=1)
-    stage_avg_query = (
-        select(
-            TaskModel.stage,
-            func.avg(
-                func.extract("epoch", TaskModel.completed_at - TaskModel.started_at)
-            ).label("avg_seconds"),
+    if visible_set:
+        hour_ago = now - timedelta(hours=1)
+        stage_avg_query = (
+            select(
+                TaskModel.stage,
+                func.count(TaskModel.id).label("row_count"),
+                func.avg(
+                    func.extract("epoch", TaskModel.completed_at - TaskModel.started_at)
+                ).label("avg_seconds"),
+            )
+            .where(
+                TaskModel.status == TaskStatus.COMPLETED.value,
+                TaskModel.completed_at >= hour_ago,
+                TaskModel.started_at.isnot(None),
+                TaskModel.completed_at.isnot(None),
+            )
+            .group_by(TaskModel.stage)
         )
-        .where(
-            TaskModel.status == "completed",
-            TaskModel.completed_at >= hour_ago,
-            TaskModel.started_at.isnot(None),
-            TaskModel.completed_at.isnot(None),
-        )
-        .group_by(TaskModel.stage)
-    )
-    stage_avg_rows = (await db.execute(stage_avg_query)).all()
-    for row in stage_avg_rows:
-        normalized = row.stage
-        if "_ch" in normalized:
-            base, _, suffix = normalized.rpartition("_ch")
-            if suffix.isdigit():
-                normalized = base
-        totals = stage_totals.get(normalized)
-        if totals is not None and row.avg_seconds is not None:
-            totals.avg_duration_ms = round(float(row.avg_seconds) * 1000, 1)
+        stage_avg_rows = (await db.execute(stage_avg_query)).all()
+        # Weighted-accumulate per normalized stage so channel-suffixed rows
+        # (e.g. transcribe_ch0 + transcribe_ch1) fold into their base stage
+        # without overwriting each other.
+        accum: dict[str, tuple[int, float]] = {}
+        for row in stage_avg_rows:
+            if row.avg_seconds is None:
+                continue
+            count = int(row.row_count or 0)
+            if count == 0:
+                continue
+            normalized = normalize_stage(row.stage)
+            if normalized not in stage_totals:
+                continue
+            prev_count, prev_sum = accum.get(normalized, (0, 0.0))
+            accum[normalized] = (
+                prev_count + count,
+                prev_sum + count * float(row.avg_seconds),
+            )
+        for normalized, (count, weighted_sum) in accum.items():
+            stage_totals[normalized].avg_duration_ms = round(
+                (weighted_sum / count) * 1000, 1
+            )
 
     stages_health = [stage_totals[s] for s in board.visible_stages]
 
