@@ -663,9 +663,7 @@ class ConsoleService:
         jobs_result = await db.execute(
             select(JobModel)
             .where(
-                JobModel.status.in_(
-                    [JobStatus.PENDING.value, JobStatus.RUNNING.value]
-                )
+                JobModel.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value])
             )
             .options(selectinload(JobModel.tasks))
             .order_by(JobModel.created_at.asc())
@@ -698,9 +696,7 @@ class ConsoleService:
                         duration_ms=compute_duration_ms(
                             task.started_at, task.completed_at
                         ),
-                        wait_ms=compute_duration_ms(
-                            task.ready_at, task.started_at
-                        ),
+                        wait_ms=compute_duration_ms(task.ready_at, task.started_at),
                         started_at=task.started_at,
                         completed_at=task.completed_at,
                         error=task.error,
