@@ -16,6 +16,7 @@ import { RealtimeLive } from '@/pages/RealtimeLive'
 import { Engines } from '@/pages/Engines'
 import { Infrastructure } from '@/pages/Infrastructure'
 import { EngineDetail } from '@/pages/EngineDetail'
+import { QueueBoard } from '@/pages/QueueBoard'
 import { Models } from '@/pages/Models'
 import { ApiKeys } from '@/pages/ApiKeys'
 import { Webhooks } from '@/pages/Webhooks'
@@ -55,6 +56,7 @@ const router = createBrowserRouter(
       element: <ProtectedLayout />,
       children: [
         { path: '/', element: <Dashboard /> },
+        { path: '/queue', element: <QueueBoard /> },
         { path: '/jobs', element: <BatchJobs /> },
         { path: '/jobs/new', element: <NewJob /> },
         { path: '/jobs/:jobId', element: <JobDetail /> },

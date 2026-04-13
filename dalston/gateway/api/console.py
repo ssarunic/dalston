@@ -14,7 +14,7 @@ POST /api/console/settings/{namespace}/reset - Reset to defaults
 
 import os
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -22,6 +22,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
@@ -35,6 +36,7 @@ from dalston.common.registry import (
 )
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.common.utils import compute_duration_ms
+from dalston.db.models import TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -1413,4 +1415,211 @@ async def get_metrics(
         total_jobs_all_time=total_jobs_all_time,
         engines=engine_metrics,
         grafana_url=grafana_url,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Queue Board (M86)
+# ---------------------------------------------------------------------------
+
+
+class QueueBoardTask(BaseModel):
+    """Single task entry in the queue board flat list."""
+
+    task_id: UUID
+    job_id: UUID
+    stage: str  # normalized (no _ch0/_ch1 suffix)
+    status: str  # pending | ready | running | completed | failed | skipped | cancelled
+    engine_id: str | None = None
+    duration_ms: int | None = None
+    wait_ms: int | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+
+
+class QueueBoardJob(BaseModel):
+    """Active job entry in the queue board."""
+
+    job_id: UUID
+    display_name: str | None = None
+    status: str  # pending | running
+    created_at: datetime
+    audio_duration_seconds: float | None = None
+
+
+class QueueBoardStageHealth(BaseModel):
+    """Aggregated queue health for a single visible stage."""
+
+    stage: str
+    queue_depth: int  # sum of XLEN-equivalent across engines serving this stage
+    processing: int  # count of heartbeats reporting current_task for this stage
+    total_workers: int  # number of distinct engine instances serving this stage
+    avg_duration_ms: float | None = None
+
+
+class QueueBoardResponse(BaseModel):
+    """Aggregated queue board data for the operational monitoring page."""
+
+    jobs: list[QueueBoardJob]
+    tasks: list[QueueBoardTask]
+    visible_stages: list[str]  # stages with at least one non-skipped task
+    hidden_stages: list[str]  # known pipeline stages with no active work
+    stages: list[QueueBoardStageHealth]  # health info for visible stages only
+    completed_last_hour: int
+    avg_pipeline_ms: float | None = None
+
+
+@router.get(
+    "/queue-board",
+    response_model=QueueBoardResponse,
+    summary="Get queue board data",
+    description=(
+        "Return all active batch jobs with their tasks (flat list), plus "
+        "per-stage queue health and pipeline-level summary stats. Designed "
+        "for a cross-job operational view polled every 2 seconds."
+    ),
+)
+async def get_queue_board(
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    console_service: ConsoleService = Depends(get_console_service),
+) -> QueueBoardResponse:
+    """Return the data feeding the Queue Board page.
+
+    Combines a single database query (active jobs + eagerly-loaded tasks)
+    with per-stage Redis queue depth aggregation, so the frontend can
+    regroup the flat task list into any of the three supported layouts
+    (Grid, Stage Board, Job Strips) without a follow-up fetch.
+    """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
+
+    # 1. Active jobs + flat task list + visible/hidden stages
+    board = await console_service.get_queue_board(db)
+
+    # 2. Per-stage health from Redis queues and engine heartbeats. We walk
+    #    the engine catalog once, map each engine to its stage, and sum
+    #    queue depths + worker counts per stage. Only stages that are
+    #    visible in the board get aggregated.
+    from dalston.orchestrator.catalog import get_catalog
+
+    catalog = get_catalog()
+    visible_set = set(board.visible_stages)
+
+    # Fetch heartbeats so we can count active workers per stage
+    all_instance_ids = await redis.smembers(UNIFIED_INSTANCE_SET_KEY)
+    heartbeats_by_engine: dict[str, list[dict[str, str]]] = {}
+    for instance_id in all_instance_ids:
+        data = await redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+        if data and "engine_id" in data:
+            heartbeats_by_engine.setdefault(data["engine_id"], []).append(data)
+
+    now = datetime.now(UTC)
+    stage_totals: dict[str, QueueBoardStageHealth] = {
+        stage: QueueBoardStageHealth(
+            stage=stage,
+            queue_depth=0,
+            processing=0,
+            total_workers=0,
+            avg_duration_ms=None,
+        )
+        for stage in board.visible_stages
+    }
+
+    for entry in catalog.get_all_engines():
+        # Batch engines have a non-empty stages list; the first entry is
+        # the stage this engine serves. Multi-stage engines (e.g.
+        # whisperx-full) register against their primary stage, so mapping
+        # by stages[0] matches the existing /engines endpoint behaviour.
+        if not entry.capabilities.stages:
+            continue
+
+        stage = entry.capabilities.stages[0]
+        if stage not in visible_set:
+            continue
+
+        engine_id = entry.engine_id
+        stream_key = f"dalston:stream:{engine_id}"
+        queue_depth = await _get_stream_backlog(redis, stream_key)
+
+        totals = stage_totals[stage]
+        totals.queue_depth += queue_depth
+
+        for heartbeat in heartbeats_by_engine.get(engine_id, []):
+            try:
+                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
+                age = (now - last_seen).total_seconds()
+            except (KeyError, ValueError):
+                continue
+            if age > HEARTBEAT_STALE_THRESHOLD:
+                continue
+
+            totals.total_workers += 1
+            if heartbeat.get("current_task"):
+                totals.processing += 1
+
+    # Per-stage average durations over the last hour, to show a rough
+    # "how fast is this stage moving" indicator in the footer.
+    hour_ago = now - timedelta(hours=1)
+    stage_avg_query = (
+        select(
+            TaskModel.stage,
+            func.avg(
+                func.extract("epoch", TaskModel.completed_at - TaskModel.started_at)
+            ).label("avg_seconds"),
+        )
+        .where(
+            TaskModel.status == "completed",
+            TaskModel.completed_at >= hour_ago,
+            TaskModel.started_at.isnot(None),
+            TaskModel.completed_at.isnot(None),
+        )
+        .group_by(TaskModel.stage)
+    )
+    stage_avg_rows = (await db.execute(stage_avg_query)).all()
+    for row in stage_avg_rows:
+        normalized = row.stage
+        if "_ch" in normalized:
+            base, _, suffix = normalized.rpartition("_ch")
+            if suffix.isdigit():
+                normalized = base
+        totals = stage_totals.get(normalized)
+        if totals is not None and row.avg_seconds is not None:
+            totals.avg_duration_ms = round(float(row.avg_seconds) * 1000, 1)
+
+    stages_health = [stage_totals[s] for s in board.visible_stages]
+
+    return QueueBoardResponse(
+        jobs=[
+            QueueBoardJob(
+                job_id=job.job_id,
+                display_name=job.display_name,
+                status=job.status,
+                created_at=job.created_at,
+                audio_duration_seconds=job.audio_duration_seconds,
+            )
+            for job in board.jobs
+        ],
+        tasks=[
+            QueueBoardTask(
+                task_id=task.task_id,
+                job_id=task.job_id,
+                stage=task.stage,
+                status=task.status,
+                engine_id=task.engine_id,
+                duration_ms=task.duration_ms,
+                wait_ms=task.wait_ms,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                error=task.error,
+            )
+            for task in board.tasks
+        ],
+        visible_stages=board.visible_stages,
+        hidden_stages=board.hidden_stages,
+        stages=stages_health,
+        completed_last_hour=board.completed_last_hour,
+        avg_pipeline_ms=board.avg_pipeline_ms,
     )

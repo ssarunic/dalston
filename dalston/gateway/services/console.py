@@ -13,9 +13,36 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from dalston.common.models import JobStatus
+from dalston.common.models import JobStatus, TaskStatus
+from dalston.common.utils import compute_duration_ms
 from dalston.db.models import JobModel, TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
+
+# Canonical pipeline stage order, mirroring web/src/lib/stages.ts. Used by
+# the queue board to render columns in pipeline order and to compute
+# visible_stages / hidden_stages. Unknown stages sort after these.
+PIPELINE_STAGES: tuple[str, ...] = (
+    "prepare",
+    "transcribe",
+    "align",
+    "diarize",
+    "pii_detect",
+    "audio_redact",
+    "merge",
+)
+
+
+def _normalize_stage(stage: str) -> str:
+    """Strip channel suffix (e.g. transcribe_ch0 -> transcribe).
+
+    Mirrors DAGViewer.normalizeStage() in the web console so the frontend
+    and backend agree on which stage a task belongs to.
+    """
+    if "_ch" in stage:
+        base, _, suffix = stage.rpartition("_ch")
+        if suffix.isdigit():
+            return base
+    return stage
 
 
 @dataclass
@@ -129,6 +156,55 @@ class JobWithTasksDTO:
 
     id: UUID
     tasks: list[TaskDTO]
+
+
+# ---------------------------------------------------------------------------
+# Queue Board DTOs (M86)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class QueueBoardTaskDTO:
+    """Task entry for the queue board view."""
+
+    task_id: UUID
+    job_id: UUID
+    stage: str  # normalized (no _ch0/_ch1 suffix)
+    status: str
+    engine_id: str | None
+    duration_ms: int | None
+    wait_ms: int | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    error: str | None
+
+
+@dataclass
+class QueueBoardJobDTO:
+    """Active job entry for the queue board view."""
+
+    job_id: UUID
+    display_name: str | None
+    status: str
+    created_at: datetime
+    audio_duration_seconds: float | None
+
+
+@dataclass
+class QueueBoardDTO:
+    """Aggregated queue board data returned by the service layer.
+
+    The tasks list is intentionally flat — the frontend regroups it for
+    each of the three board layouts (Grid, Stage Board, Job Strips).
+    Stage health and visible stages are computed from that same flat list.
+    """
+
+    jobs: list[QueueBoardJobDTO]
+    tasks: list[QueueBoardTaskDTO]
+    visible_stages: list[str]
+    hidden_stages: list[str]
+    completed_last_hour: int
+    avg_pipeline_ms: float | None
 
 
 class ConsoleService:
@@ -566,6 +642,114 @@ class ConsoleService:
                 if row.p95_seconds is not None
                 else None
             ),
+        )
+
+    async def get_queue_board(self, db: AsyncSession) -> QueueBoardDTO:
+        """Fetch all active jobs + their tasks plus pipeline aggregates.
+
+        Returns a flat task list (one entry per task, regardless of job)
+        together with the set of jobs those tasks belong to, pipeline-level
+        aggregates (last-hour completions, avg pipeline duration), and the
+        visible / hidden stage sets. The frontend regroups the tasks for
+        each of the three board layouts (Grid, Stage Board, Job Strips);
+        keeping the shape flat keeps the regrouping cheap and orthogonal.
+
+        The query eager-loads tasks via selectinload so this is a single
+        round-trip regardless of how many active jobs exist.
+        """
+        # Active jobs with tasks eagerly loaded. A job is "active" if it is
+        # pending or running — completed / failed / cancelled jobs live on
+        # the batch jobs page.
+        jobs_result = await db.execute(
+            select(JobModel)
+            .where(
+                JobModel.status.in_(
+                    [JobStatus.PENDING.value, JobStatus.RUNNING.value]
+                )
+            )
+            .options(selectinload(JobModel.tasks))
+            .order_by(JobModel.created_at.asc())
+        )
+        orm_jobs = list(jobs_result.scalars().unique().all())
+
+        # Flat task list (normalized stage) and job list
+        jobs_dto: list[QueueBoardJobDTO] = []
+        tasks_dto: list[QueueBoardTaskDTO] = []
+
+        for job in orm_jobs:
+            jobs_dto.append(
+                QueueBoardJobDTO(
+                    job_id=job.id,
+                    display_name=job.display_name or None,
+                    status=job.status,
+                    created_at=job.created_at,
+                    audio_duration_seconds=job.audio_duration,
+                )
+            )
+
+            for task in job.tasks:
+                tasks_dto.append(
+                    QueueBoardTaskDTO(
+                        task_id=task.id,
+                        job_id=job.id,
+                        stage=_normalize_stage(task.stage),
+                        status=task.status,
+                        engine_id=task.engine_id or None,
+                        duration_ms=compute_duration_ms(
+                            task.started_at, task.completed_at
+                        ),
+                        wait_ms=compute_duration_ms(
+                            task.ready_at, task.started_at
+                        ),
+                        started_at=task.started_at,
+                        completed_at=task.completed_at,
+                        error=task.error,
+                    )
+                )
+
+        # visible_stages: stages with at least one non-skipped task in the
+        # currently active jobs. hidden_stages: the complement within the
+        # canonical pipeline list. We deliberately exclude skipped tasks
+        # from visibility so stages that were decided against at DAG build
+        # time (e.g. align when the transcriber has implicit alignment)
+        # don't pull in an empty column.
+        seen_stages: set[str] = set()
+        for task in tasks_dto:
+            if task.status != TaskStatus.SKIPPED.value:
+                seen_stages.add(task.stage)
+
+        visible_stages = [s for s in PIPELINE_STAGES if s in seen_stages]
+        hidden_stages = [s for s in PIPELINE_STAGES if s not in seen_stages]
+
+        # Last-hour completion stats — the summary cards on the page header
+        # show "completed in the last hour" and average pipeline wall-clock.
+        one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+        recent_query = select(
+            func.count(JobModel.id).label("count"),
+            func.avg(
+                func.extract("epoch", JobModel.completed_at - JobModel.created_at)
+            ).label("avg_seconds"),
+        ).where(
+            JobModel.status == JobStatus.COMPLETED.value,
+            JobModel.completed_at >= one_hour_ago,
+            JobModel.completed_at.isnot(None),
+            JobModel.created_at.isnot(None),
+        )
+        recent_row = (await db.execute(recent_query)).one()
+        completed_last_hour = int(recent_row.count or 0)
+        avg_pipeline_ms = (
+            round(recent_row.avg_seconds * 1000, 1)
+            if recent_row.avg_seconds is not None
+            else None
+        )
+
+        return QueueBoardDTO(
+            jobs=jobs_dto,
+            tasks=tasks_dto,
+            visible_stages=visible_stages,
+            hidden_stages=hidden_stages,
+            completed_last_hour=completed_last_hour,
+            avg_pipeline_ms=avg_pipeline_ms,
         )
 
     @staticmethod

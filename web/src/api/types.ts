@@ -798,3 +798,44 @@ export interface SyncModelsResponse {
   updated: number
   unchanged: number
 }
+
+// Queue Board (M86)
+
+export interface QueueBoardTask {
+  task_id: string
+  job_id: string
+  stage: string // normalized, no _ch0/_ch1 suffix
+  status: TaskStatus
+  engine_id: string | null
+  duration_ms: number | null
+  wait_ms: number | null
+  started_at: string | null
+  completed_at: string | null
+  error: string | null
+}
+
+export interface QueueBoardJob {
+  job_id: string
+  display_name: string | null
+  status: 'pending' | 'running'
+  created_at: string
+  audio_duration_seconds: number | null
+}
+
+export interface QueueBoardStageHealth {
+  stage: string
+  queue_depth: number
+  processing: number
+  total_workers: number
+  avg_duration_ms: number | null
+}
+
+export interface QueueBoardResponse {
+  jobs: QueueBoardJob[]
+  tasks: QueueBoardTask[]
+  visible_stages: string[]
+  hidden_stages: string[]
+  stages: QueueBoardStageHealth[]
+  completed_last_hour: number
+  avg_pipeline_ms: number | null
+}

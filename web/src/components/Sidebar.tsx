@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard,
+  Kanban,
   ListTodo,
   Radio,
   Server,
@@ -17,6 +18,7 @@ import {
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/queue', icon: Kanban, label: 'Queue Board' },
   { to: '/jobs', icon: ListTodo, label: 'Batch Jobs' },
   { to: '/realtime', icon: Radio, label: 'Real-time' },
   { to: '/engines', icon: Server, label: 'Engines' },
