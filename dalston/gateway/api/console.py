@@ -12,9 +12,10 @@ PATCH /api/console/settings/{namespace} - Update settings
 POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
+import asyncio
 import os
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -22,11 +23,12 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
-from dalston.common.models import JobStatus
+from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
@@ -35,6 +37,7 @@ from dalston.common.registry import (
 )
 from dalston.common.streams_types import CONSUMER_GROUP
 from dalston.common.utils import compute_duration_ms, compute_interval_union_ms
+from dalston.db.models import TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
@@ -51,7 +54,7 @@ from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
-from dalston.gateway.services.console import ConsoleService
+from dalston.gateway.services.console import ConsoleService, normalize_stage
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
 from dalston.orchestrator.session_coordinator import SessionCoordinator
@@ -1417,4 +1420,218 @@ async def get_metrics(
         total_jobs_all_time=total_jobs_all_time,
         engines=engine_metrics,
         grafana_url=grafana_url,
+    )
+
+
+class QueueBoardTask(BaseModel):
+    """Single task entry in the queue board flat list."""
+
+    task_id: UUID
+    job_id: UUID
+    stage: str
+    status: str
+    engine_id: str | None = None
+    duration_ms: int | None = None
+    wait_ms: int | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+
+
+class QueueBoardJob(BaseModel):
+    """Active job entry in the queue board."""
+
+    job_id: UUID
+    display_name: str | None = None
+    status: str
+    created_at: datetime
+    audio_duration_seconds: float | None = None
+
+
+class QueueBoardStageHealth(BaseModel):
+    """Aggregated queue health for a single visible stage."""
+
+    stage: str
+    queue_depth: int
+    processing: int
+    total_workers: int
+    avg_duration_ms: float | None = None
+
+
+class QueueBoardResponse(BaseModel):
+    """Aggregated queue board data for the operational monitoring page."""
+
+    jobs: list[QueueBoardJob]
+    tasks: list[QueueBoardTask]
+    visible_stages: list[str]
+    hidden_stages: list[str]
+    stages: list[QueueBoardStageHealth]
+    completed_last_hour: int
+    avg_pipeline_ms: float | None = None
+
+
+@router.get(
+    "/queue-board",
+    response_model=QueueBoardResponse,
+    summary="Get queue board data",
+    description=(
+        "Return all active batch jobs with their tasks (flat list), plus "
+        "per-stage queue health and pipeline-level summary stats. Designed "
+        "for a cross-job operational view polled every 2 seconds."
+    ),
+)
+async def get_queue_board(
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    console_service: ConsoleService = Depends(get_console_service),
+) -> QueueBoardResponse:
+    """Return the data feeding the Queue Board page.
+
+    Combines a single database query (active jobs + eagerly-loaded tasks)
+    with per-stage Redis queue depth aggregation, so the frontend can
+    regroup the flat task list into any of the three supported layouts
+    (Grid, Stage Board, Job Strips) without a follow-up fetch.
+    """
+    security_manager = get_security_manager()
+    security_manager.require_permission(principal, Permission.CONSOLE_ACCESS)
+
+    board = await console_service.get_queue_board(db)
+
+    from dalston.orchestrator.catalog import get_catalog
+
+    catalog = get_catalog()
+    visible_set = set(board.visible_stages)
+
+    all_instance_ids = list(await redis.smembers(UNIFIED_INSTANCE_SET_KEY))
+    instance_hashes = await asyncio.gather(
+        *(
+            redis.hgetall(f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance_id}")
+            for instance_id in all_instance_ids
+        )
+    )
+    heartbeats_by_engine: dict[str, list[dict[str, str]]] = {}
+    for data in instance_hashes:
+        if data and "engine_id" in data:
+            heartbeats_by_engine.setdefault(data["engine_id"], []).append(data)
+
+    now = datetime.now(UTC)
+    stage_totals: dict[str, QueueBoardStageHealth] = {
+        stage: QueueBoardStageHealth(
+            stage=stage,
+            queue_depth=0,
+            processing=0,
+            total_workers=0,
+            avg_duration_ms=None,
+        )
+        for stage in board.visible_stages
+    }
+
+    # Multi-stage engines (e.g. whisperx-full) register against their primary
+    # stage at `stages[0]`, matching the /engines endpoint behaviour.
+    visible_engines: list[tuple[str, str]] = []  # (stage, engine_id)
+    for entry in catalog.get_all_engines():
+        if not entry.capabilities.stages:
+            continue
+        stage = entry.capabilities.stages[0]
+        if stage in visible_set:
+            visible_engines.append((stage, entry.engine_id))
+
+    backlogs = await asyncio.gather(
+        *(
+            _get_stream_backlog(redis, f"dalston:stream:{engine_id}")
+            for _, engine_id in visible_engines
+        )
+    )
+
+    for (stage, engine_id), queue_depth in zip(visible_engines, backlogs, strict=True):
+        totals = stage_totals[stage]
+        totals.queue_depth += queue_depth
+        for heartbeat in heartbeats_by_engine.get(engine_id, []):
+            try:
+                last_seen = datetime.fromisoformat(heartbeat["last_heartbeat"])
+                age = (now - last_seen).total_seconds()
+            except (KeyError, ValueError):
+                continue
+            if age > HEARTBEAT_STALE_THRESHOLD:
+                continue
+            totals.total_workers += 1
+            if heartbeat.get("current_task"):
+                totals.processing += 1
+
+    if visible_set:
+        hour_ago = now - timedelta(hours=1)
+        stage_avg_query = (
+            select(
+                TaskModel.stage,
+                func.count(TaskModel.id).label("row_count"),
+                func.avg(
+                    func.extract("epoch", TaskModel.completed_at - TaskModel.started_at)
+                ).label("avg_seconds"),
+            )
+            .where(
+                TaskModel.status == TaskStatus.COMPLETED.value,
+                TaskModel.completed_at >= hour_ago,
+                TaskModel.started_at.isnot(None),
+                TaskModel.completed_at.isnot(None),
+            )
+            .group_by(TaskModel.stage)
+        )
+        stage_avg_rows = (await db.execute(stage_avg_query)).all()
+        # Weighted-accumulate per normalized stage so channel-suffixed rows
+        # (e.g. transcribe_ch0 + transcribe_ch1) fold into their base stage
+        # without overwriting each other.
+        accum: dict[str, tuple[int, float]] = {}
+        for row in stage_avg_rows:
+            if row.avg_seconds is None:
+                continue
+            count = int(row.row_count or 0)
+            if count == 0:
+                continue
+            normalized = normalize_stage(row.stage)
+            if normalized not in stage_totals:
+                continue
+            prev_count, prev_sum = accum.get(normalized, (0, 0.0))
+            accum[normalized] = (
+                prev_count + count,
+                prev_sum + count * float(row.avg_seconds),
+            )
+        for normalized, (count, weighted_sum) in accum.items():
+            stage_totals[normalized].avg_duration_ms = round(
+                (weighted_sum / count) * 1000, 1
+            )
+
+    stages_health = [stage_totals[s] for s in board.visible_stages]
+
+    return QueueBoardResponse(
+        jobs=[
+            QueueBoardJob(
+                job_id=job.job_id,
+                display_name=job.display_name,
+                status=job.status,
+                created_at=job.created_at,
+                audio_duration_seconds=job.audio_duration_seconds,
+            )
+            for job in board.jobs
+        ],
+        tasks=[
+            QueueBoardTask(
+                task_id=task.task_id,
+                job_id=task.job_id,
+                stage=task.stage,
+                status=task.status,
+                engine_id=task.engine_id,
+                duration_ms=task.duration_ms,
+                wait_ms=task.wait_ms,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                error=task.error,
+            )
+            for task in board.tasks
+        ],
+        visible_stages=board.visible_stages,
+        hidden_stages=board.hidden_stages,
+        stages=stages_health,
+        completed_last_hour=board.completed_last_hour,
+        avg_pipeline_ms=board.avg_pipeline_ms,
     )

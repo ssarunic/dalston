@@ -31,6 +31,7 @@ import type {
   ModelRegistryListResponse,
   NamespaceSettings,
   PullModelResponse,
+  QueueBoardResponse,
   RealtimeSessionDetail,
   RealtimeSessionListParams,
   RealtimeSessionListResponse,
@@ -121,6 +122,10 @@ export const apiClient = {
 
   // Console metrics (throughput, success rates, engine performance)
   getMetrics: () => currentClient.get('api/console/metrics').json<MetricsResponse>(),
+
+  // Queue board (M87) - cross-job operational view
+  getQueueBoard: () =>
+    currentClient.get('api/console/queue-board').json<QueueBoardResponse>(),
 
   // Jobs list - use console endpoint (admin required, shows all tenants)
   getJobs: (params: JobListParams = {}) => {
