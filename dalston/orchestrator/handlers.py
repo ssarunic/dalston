@@ -833,19 +833,19 @@ async def handle_task_failed(
             task.status = TaskStatus.FAILED.value
             task.error = error_str
             await db.commit()
-            job = await db.get(JobModel, job_id)
-            if job:
-                job.status = JobStatus.FAILED.value
-                job.error = error_str
-                job.completed_at = datetime.now(UTC)
-                await db.commit()
-                await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
-                await publish_job_failed(redis, job_id, error_str)
             log.error(
                 "job_failed_engine_error_on_retry",
                 error_type=type(e).__name__,
                 engine_id=getattr(e, "engine_id", None),
                 stage=getattr(e, "stage", None),
+            )
+            await _ensure_job_failed_side_effects(
+                task=task,
+                job_id=job_id,
+                error=error_str,
+                db=db,
+                redis=redis,
+                log=log,
             )
             return
 
@@ -886,20 +886,14 @@ async def handle_task_failed(
         _get_engine_id_execution_profile(task.engine_id),
     )
 
-    job = await db.get(JobModel, job_id)
-    if job:
-        job.status = JobStatus.FAILED.value
-        job.error = f"Task {task.stage} failed: {error}"
-        job.completed_at = datetime.now(UTC)
-        await db.commit()
-
-        # Decrement concurrent job count for rate limiting
-        await _decrement_concurrent_jobs(redis, job_id, job.tenant_id)
-
-        # Publish job failed event for webhook delivery
-        await publish_job_failed(redis, job_id, job.error)
-
-    log.error("job_failed", reason=f"Task {task.stage} failed: {error}")
+    await _ensure_job_failed_side_effects(
+        task=task,
+        job_id=job_id,
+        error=error,
+        db=db,
+        redis=redis,
+        log=log,
+    )
 
 
 async def handle_task_wait_timeout(
@@ -1079,11 +1073,20 @@ async def _ensure_job_failed_side_effects(
 
     # Update job to FAILED if not already terminal
     if job.status not in (JobStatus.FAILED.value, JobStatus.CANCELLED.value):
+        was_running = job.started_at is not None
         job.status = JobStatus.FAILED.value
         job.error = f"Task {task.stage} failed: {error}"
         job.completed_at = datetime.now(UTC)
         await db.commit()
-        log.info("job_marked_failed_on_replay")
+        log.info("job_marked_failed")
+
+        # Record job-level outcome metrics on first transition to FAILED.
+        # Mirrors the success path in _check_job_completion so that
+        # dalston_orchestrator_jobs_total{status="failed"} reflects real
+        # failures and the in-progress gauge doesn't drift upward.
+        if was_running:
+            dalston.metrics.dec_orchestrator_jobs_in_progress()
+        dalston.metrics.inc_orchestrator_jobs("failed")
 
     # Always run side effects (idempotent/at-least-once)
     # _decrement_concurrent_jobs uses SET NX guard - safe to call multiple times
