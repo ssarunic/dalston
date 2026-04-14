@@ -214,6 +214,109 @@ dalston-aws remove-gpu
 
 ---
 
+## Accessing the control plane over HTTPS
+
+The control-plane bootstrap automatically runs `tailscale serve` to expose the
+gateway at `https://<node>.<tailnet>.ts.net/` with a real Let's Encrypt
+certificate. Traffic stays on the Tailscale overlay interface (`tailscale0`),
+so there are **no security group changes** and **no public port 443
+exposure** — the Dalston SG is unchanged from the default "SSH from Tailscale
+only" setup.
+
+### One-time tailnet setup
+
+Before the control plane can produce a working HTTPS URL, enable MagicDNS
+HTTPS certificates **once** in your tailnet admin console. This is a
+tailnet-wide toggle and cannot be set from code.
+
+1. Go to <https://login.tailscale.com/admin/dns>.
+2. Enable **MagicDNS**.
+3. Enable **HTTPS Certificates**.
+
+If the toggle is already on, skip this step.
+
+### Finding your HTTPS URL
+
+After the control plane finishes bootstrapping, SSH in and print the FQDN:
+
+```bash
+dalston-aws ssh
+tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'])"
+# → dalston-control-plane.<your-tailnet>.ts.net.
+```
+
+The short MagicDNS name `dalston-control-plane` **won't work** for HTTPS —
+browsers need the full `.ts.net` FQDN because that's what the Let's Encrypt
+cert is issued for. From any device on your tailnet:
+
+```
+https://dalston-control-plane.<your-tailnet>.ts.net/console
+wss://dalston-control-plane.<your-tailnet>.ts.net/v1/audio/transcriptions/stream
+```
+
+The cert is real Let's Encrypt — no browser warnings, and `getUserMedia`
+works in the secure context for in-browser mic capture.
+
+### Enabling HTTPS certs after the instance is already running
+
+The bootstrap runs `tailscale serve` once on first boot. If MagicDNS HTTPS
+certs were disabled at that time, the `dalston-tailscale-serve` unit logged
+a warning to `/var/log/user-data.log` and exited 0 (so the boot succeeded).
+To apply the config without rebooting, toggle the admin console setting, then:
+
+```bash
+dalston-aws ssh
+sudo systemctl restart dalston-tailscale-serve
+sudo systemctl status dalston-tailscale-serve
+tailscale serve status
+```
+
+### Persistence limitation: cert re-issue on spot rotation
+
+`tailscale serve` keeps its config and Let's Encrypt cert under
+`/var/lib/tailscale/`, which lives on the **ephemeral root volume** — not
+the `/data` EBS volume. When a spot instance is replaced, the new node
+reclaims the `dalston-control-plane` hostname and requests a **new** cert
+from Let's Encrypt on first boot.
+
+For typical usage this is fine. Let's Encrypt's duplicate-certificate rate
+limit is 5 identical certs per 168 hours per exact hostname, and normal spot
+rotation (minutes to hours of downtime per week at most) stays well below
+it. You'd have to rotate the control plane more than 5 times a week to hit
+the limit.
+
+If you rotate aggressively (e.g. chaos testing, frequent redeploys), the
+symptoms are:
+
+- `tailscale serve status` shows the config applied.
+- Browsers get a cert error, or the TLS handshake hangs.
+- `/var/log/user-data.log` (or `journalctl -u dalston-tailscale-serve`)
+  shows Let's Encrypt rate-limit errors.
+
+Workarounds: either wait for the weekly window to roll over, or bind-mount
+`/var/lib/tailscale/` onto the persistent `/data` EBS volume so cert state
+survives rotation. The bind mount is **not** currently automated by
+`dalston-aws`; if you need it, add it manually on the instance after first
+boot and restart `tailscaled`.
+
+### Other notes
+
+- **Gateway port is unchanged.** Port 8000 is still the backend. HTTPS on 443
+  is a Tailscale-terminated reverse proxy; the gateway itself speaks plain
+  HTTP on localhost.
+- **WebSocket upgrades work transparently.** `tailscale serve` forwards
+  `Upgrade: websocket` headers without extra config — good for the realtime
+  streaming endpoints.
+- **Public 443 stays closed.** Don't add a public 443 ingress rule to the
+  Dalston security group. `tailscale serve` binds to `tailscale0`, not the
+  public ENI; a public 443 rule would expose nothing useful and just widen
+  your attack surface.
+- **If you later front this with an ALB** (for non-tailnet access), bump the
+  idle timeout from the default 60s — long-lived WebSocket sessions will
+  otherwise be killed mid-stream.
+
+---
+
 ## Day-to-day operations
 
 ### Check what's running
@@ -344,6 +447,32 @@ dalston-aws up
 
 Your data on EBS is preserved. The instance gets a new public IP but Tailscale
 reconnects automatically.
+
+### HTTPS URL returns a cert error or hangs
+
+Check the serve unit on the instance:
+
+```bash
+dalston-aws ssh
+sudo systemctl status dalston-tailscale-serve
+sudo journalctl -u dalston-tailscale-serve -n 50
+tailscale serve status
+```
+
+Common causes:
+
+- **MagicDNS HTTPS certs not enabled in the tailnet admin console.** The
+  unit logs a warning on first boot and exits 0. Enable the toggle (see
+  [Accessing the control plane over HTTPS](#accessing-the-control-plane-over-https)),
+  then `sudo systemctl restart dalston-tailscale-serve`.
+- **You used the short name** (`dalston-control-plane`) instead of the full
+  `.ts.net` FQDN. The cert is only valid for the full name.
+- **Let's Encrypt rate limit** after heavy spot rotation. See the
+  persistence limitation section above.
+- **Gateway isn't healthy yet.** `tailscale serve` happily accepts the
+  reverse-proxy config before the backend exists, so early requests can
+  return 502. Check `docker compose ... ps gateway` and
+  `curl -s http://127.0.0.1:8000/health` on the instance.
 
 ---
 
