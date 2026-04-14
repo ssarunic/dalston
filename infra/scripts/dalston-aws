@@ -820,6 +820,81 @@ systemctl enable dalston-tailscale.service
 """
 
 
+def _tailscale_serve_cloud_init_block(target_port: int) -> str:
+    """Return shell snippet that installs a Tailscale serve systemd service.
+
+    Exposes the gateway at https://<node>.<tailnet>.ts.net/ by binding port
+    443 on the tailscale0 interface and reverse-proxying to localhost:<port>.
+    Tailscale provisions a Let's Encrypt certificate automatically and handles
+    renewals. Traffic never touches the public ENI, so no security group
+    changes are needed.
+
+    Requires the one-time tailnet admin action: DNS → MagicDNS → enable HTTPS
+    Certificates. If that is not enabled, the serve command fails; we log a
+    warning and return 0 so boot still succeeds. Re-running the unit after
+    enabling HTTPS certs (via `systemctl restart dalston-tailscale-serve`)
+    fixes it without rebooting.
+    """
+    return f"""\
+# Create Tailscale serve setup script (runs on every boot; idempotent)
+cat > /usr/local/bin/dalston-tailscale-serve.sh << 'SERVEEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Wait up to 60s for tailscaled to be connected (dalston-tailscale.service
+# orders us after the join, but be defensive in case of transient failures).
+for i in $(seq 1 12); do
+  if tailscale status --json 2>/dev/null | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin).get('BackendState')=='Running' else 1)" 2>/dev/null; then
+    break
+  fi
+  echo "Waiting for tailscaled to be Running ($i/12)..."
+  sleep 5
+done
+
+# Apply reverse-proxy config. `tailscale serve` persists state under
+# /var/lib/tailscale/, so this is a no-op if already configured, and safe
+# to re-run on every boot. The cert is provisioned lazily on first TLS
+# handshake.
+if tailscale serve --bg --https=443 "http://127.0.0.1:{target_port}"; then
+  echo "Tailscale serve configured: https://<node>.ts.net -> 127.0.0.1:{target_port}"
+  tailscale serve status || true
+else
+  echo "WARNING: 'tailscale serve --https=443' failed."
+  echo "  Ensure MagicDNS + HTTPS Certificates are enabled in the tailnet"
+  echo "  admin console (https://login.tailscale.com/admin/dns), then run:"
+  echo "    sudo systemctl restart dalston-tailscale-serve"
+  exit 0
+fi
+SERVEEOF
+chmod +x /usr/local/bin/dalston-tailscale-serve.sh
+
+# Install systemd service that (re)applies the serve config on every boot.
+# Ordered after dalston-tailscale.service so tailscaled is already joined.
+# Not dependent on dalston.service — the reverse proxy can be configured
+# before the backend exists; early requests will just get 502 until the
+# gateway is healthy.
+cat > /etc/systemd/system/dalston-tailscale-serve.service << 'SERVESVCEOF'
+[Unit]
+Description=Dalston Tailscale serve (HTTPS reverse proxy to gateway)
+After=dalston-tailscale.service
+Requires=dalston-tailscale.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dalston-tailscale-serve.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+SERVESVCEOF
+systemctl daemon-reload
+systemctl enable dalston-tailscale-serve.service
+
+# Run it now for first boot (non-fatal — script exits 0 on serve errors)
+/usr/local/bin/dalston-tailscale-serve.sh || true
+"""
+
+
 # ---------------------------------------------------------------------------
 # User-data generation
 # ---------------------------------------------------------------------------
@@ -880,6 +955,7 @@ COMPOSE_UP_FLAGS="{compose_up_flags}"
 """
 
     tailscale_block = _tailscale_cloud_init_block("dalston-control-plane")
+    tailscale_serve_block = _tailscale_serve_cloud_init_block(8000)
     loki_driver_block = _loki_driver_cloud_init_block()
 
     # Part 3: body (raw string — no f-string to avoid bash {brace} conflicts)
@@ -892,6 +968,7 @@ dnf install -y docker git pciutils
 
 """
         + tailscale_block
+        + tailscale_serve_block
         + r"""
 # Start Docker
 systemctl start docker
