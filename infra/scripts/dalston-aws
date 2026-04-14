@@ -80,8 +80,11 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "pyannote-4.0",
         "container": "stt-diarize-pyannote-4-0",
         "needs_hf_token": True,
+        # DALSTON_WORKER_ID is injected per-instance from IMDSv2 in
+        # gpu-start.sh so every replica registers distinctly. Do not
+        # hardcode one here — two replicas with the same ID would
+        # collide on the Redis registry key and XREADGROUP consumer name.
         "extra_env": {
-            "DALSTON_WORKER_ID": "pyannote-gpu-1",
             "DALSTON_MAX_DIARIZE_CHUNK_S": "3600",
         },
     },
@@ -1125,6 +1128,7 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
   -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
+  -e DALSTON_WORKER_ID="$DALSTON_WORKER_ID" \\
   -e REDIS_URL="redis://${{CTRL_PLANE_HOST}}:6379" \\
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
   -e DALSTON_S3_REGION="$AWS_REGION" \\
@@ -1282,6 +1286,16 @@ source /opt/dalston/gpu-env.sh
 {rm_line}
 
 HOST_HOSTNAME=$(hostname)
+
+# Fetch the EC2 instance ID via IMDSv2 and use it as DALSTON_WORKER_ID.
+# This makes every replica register with a unique worker ID even when
+# two launches share an engine label (e.g. two 'pyannote' GPUs). Without
+# this, the engine SDK's generate_instance_id() would hash both replicas
+# to the same Redis registry key and XREADGROUP consumer name, causing
+# registry overwrites and task-pickup races.
+IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+DALSTON_WORKER_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || hostname)
+echo "DALSTON_WORKER_ID=$DALSTON_WORKER_ID"
 
 # Build observability flags for docker run
 OTEL_FLAGS=""
