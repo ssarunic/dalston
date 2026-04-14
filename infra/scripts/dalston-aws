@@ -2479,12 +2479,29 @@ def _tailscale_peers() -> dict[str, Any] | None:
         return None
 
 
+def _peer_shortname(peer: dict[str, Any]) -> str:
+    """Return a peer's unique short name — the label before the tailnet suffix.
+
+    Matching on the JSON `HostName` field is wrong for replicas: Tailscale
+    disambiguates name collisions on `DNSName` only. Two nodes that both
+    run `tailscale up --hostname=foo` when `foo` is already online report
+    the same `HostName='foo'` but different `DNSName`s
+    (`foo.<tailnet>.ts.net.` vs `foo-1.<tailnet>.ts.net.`). Use the first
+    label of `DNSName` so replicas get distinct short names.
+    """
+    dns = peer.get("DNSName", "")
+    if dns:
+        return dns.split(".", 1)[0]
+    return str(peer.get("HostName", ""))
+
+
 def _resolve_tailscale_host(base_hostname: str) -> str:
     """Find the actual Tailscale hostname, handling -1/-2 suffixes.
 
-    Returns the first online peer whose HostName matches `base_hostname`
-    optionally followed by a `-N` suffix. Used for the control plane and as
-    a fallback for GPU workers that have no recorded hostname.
+    Returns the first online peer whose short DNS name matches
+    `base_hostname` optionally followed by a `-N` suffix. Used for the
+    control plane and as a fallback for GPU workers that have no recorded
+    hostname.
     """
     import re
 
@@ -2493,7 +2510,7 @@ def _resolve_tailscale_host(base_hostname: str) -> str:
         return base_hostname
     pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
     for peer in peers.values():
-        name = peer.get("HostName", "")
+        name = _peer_shortname(peer)
         if pattern.match(name) and peer.get("Online"):
             if name != base_hostname:
                 warn(f"Tailscale node is '{name}' (not '{base_hostname}')")
@@ -2502,7 +2519,7 @@ def _resolve_tailscale_host(base_hostname: str) -> str:
 
 
 def _snapshot_ts_peers(base_hostname: str) -> set[str] | None:
-    """Return Tailscale HostNames matching `base_hostname[-N]`.
+    """Return Tailscale short DNS names matching `base_hostname[-N]`.
 
     Returns None when Tailscale itself is unavailable so callers can
     distinguish "no matching peers" from "tailnet not reachable" — the
@@ -2516,9 +2533,9 @@ def _snapshot_ts_peers(base_hostname: str) -> set[str] | None:
         return None
     pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
     return {
-        peer.get("HostName", "")
+        _peer_shortname(peer)
         for peer in peers.values()
-        if pattern.match(peer.get("HostName", ""))
+        if pattern.match(_peer_shortname(peer))
     }
 
 
@@ -2650,15 +2667,21 @@ def _match_gpu_worker(workers: list[dict[str, Any]], key: str) -> dict[str, Any]
 
 
 def _resolve_tailscale_ip(hostname: str) -> str | None:
-    """Resolve a Tailscale hostname to its 100.x.y.z IP."""
+    """Resolve a Tailscale short DNS name to its 100.x.y.z IP.
+
+    Matches on the short DNS name (first label of `DNSName`) rather than
+    `HostName` — replicas share the same `HostName` but have unique
+    `DNSName`s, so a `HostName`-based lookup would non-deterministically
+    return whichever replica's peer iterated first.
+    """
     peers = _tailscale_peers()
     if peers is None:
         return None
     for peer in peers.values():
-        if peer.get("HostName") == hostname and peer.get("Online"):
+        if _peer_shortname(peer) == hostname and peer.get("Online"):
             ips = peer.get("TailscaleIPs", [])
             if ips:
-                return ips[0]
+                return str(ips[0])
     return None
 
 
