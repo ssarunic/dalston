@@ -93,6 +93,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         """
         super().__init__()
         self._core = core if core is not None else NemoInference.from_env()
+        self._local_attention_applied: set[str] = set()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -230,7 +231,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
     def _enable_local_attention(self, model: Any) -> None:
         """Enable local attention for long audio support (up to 3 hours).
 
-        Reduces memory from O(n^2) to O(n), essential for T4/A10g GPUs.
+        Reduces memory from O(n^2) to O(n), essential for T4/A10g/L4 GPUs.
         """
         try:
             model.change_attention_model(
@@ -249,6 +250,22 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 error=str(e),
                 message="Falling back to full attention (limited to ~24min on A100)",
             )
+
+    def _ensure_local_attention(self, model: Any, model_id: str) -> None:
+        """Apply local attention once per model_id (idempotent).
+
+        Without this, Parakeet's default full attention allocates O(n^2)
+        activations that OOM on long audio — e.g. ~20 GiB on L4 for a
+        ~20 min file, which blows past the 22 GB g6.xlarge budget.
+        """
+        applied = getattr(self, "_local_attention_applied", None)
+        if applied is None:
+            applied = set()
+            self._local_attention_applied = applied
+        if model_id in applied:
+            return
+        self._enable_local_attention(model)
+        applied.add(model_id)
 
     def transcribe_audio(
         self, task_request: TaskRequest, ctx: BatchTaskContext
@@ -279,52 +296,44 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         else:
             alignment_method = AlignmentMethod.TDT
 
-        # If vocabulary boosting is needed, acquire model directly for
-        # decoding strategy modification; otherwise use core.transcribe()
         vocab_file: Path | None = None
         vocabulary_enabled = False
 
-        # Select batch_size: explicit config > adaptive VRAM budget > 1
         if params.vad_batch_size is not None:
             adaptive_batch_size = params.vad_batch_size
         else:
             adaptive_batch_size = self._resolve_adaptive_batch_size(fallback=1)
 
-        if vocabulary:
-            model = self._core.manager.acquire(model_id)
-            try:
-                self._enable_local_attention(model)
+        model = self._core.manager.acquire(model_id)
+        try:
+            self._ensure_local_attention(model, model_id)
+
+            if vocabulary:
                 vocab_file = self._configure_vocabulary_boosting(model, vocabulary)
                 vocabulary_enabled = vocab_file is not None
 
-                self.logger.info(
-                    "transcribing",
-                    audio_path=str(audio_path),
-                    batch_size=adaptive_batch_size,
-                    vocabulary_enabled=vocabulary_enabled,
-                )
-
-                core_result = self._core.transcribe_with_model(
-                    model, str(audio_path), batch_size=adaptive_batch_size
-                )
-            finally:
-                if vocab_file is not None:
-                    try:
-                        vocab_file.unlink(missing_ok=True)
-                        self._reset_decoding_strategy(model)
-                    except Exception:
-                        pass
-                self._core.manager.release(model_id)
-        else:
             self.logger.info(
                 "transcribing",
                 audio_path=str(audio_path),
                 batch_size=adaptive_batch_size,
-                vocabulary_enabled=False,
+                vocabulary_enabled=vocabulary_enabled,
             )
-            core_result = self._core.transcribe(
-                str(audio_path), model_id, batch_size=adaptive_batch_size
-            )
+
+            self._core._current_model_id = model_id
+            try:
+                core_result = self._core.transcribe_with_model(
+                    model, str(audio_path), batch_size=adaptive_batch_size
+                )
+            finally:
+                self._core._current_model_id = None
+        finally:
+            if vocab_file is not None:
+                try:
+                    vocab_file.unlink(missing_ok=True)
+                    self._reset_decoding_strategy(model)
+                except Exception:
+                    pass
+            self._core.manager.release(model_id)
 
         # Convert core result to Transcript format
         segments: list[TranscriptSegment] = []
