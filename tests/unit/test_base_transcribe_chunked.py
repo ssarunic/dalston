@@ -431,6 +431,92 @@ class TestOomBackoff:
                 engine.process(request, _ctx())
 
 
+class TestTelemetryContract:
+    """86.6 telemetry: outer span is engine.chunked_request (not recognize),
+    and no aggregate engine_recognize/engine_realtime_factor metric emission
+    happens at the chunked wrapper — per-chunk metrics from the inference
+    layer remain the source of truth."""
+
+    def test_outer_span_name_is_chunked_request(self, tmp_path: Path) -> None:
+        audio = tmp_path / "long.wav"
+        audio.write_bytes(b"")
+
+        _FakeVadChunker.scenarios = {
+            600.0: [(0.0, 600.0), (600.0, 400.0)],
+        }
+        chunk0 = _make_transcript("x", [(0.0, 1.0, "x")], engine_id="spy-engine")
+        chunk1 = _make_transcript("y", [(0.0, 1.0, "y")], engine_id="spy-engine")
+        engine = _SpyEngine(max_chunk_s=600.0, side_effects=[chunk0, chunk1])
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        spans: list[tuple[str, dict[str, Any]]] = []
+        original_create = __import__(
+            "dalston.telemetry", fromlist=["create_span"]
+        ).create_span
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _recording_span(name: str, attributes: dict[str, Any] | None = None):
+            spans.append((name, dict(attributes or {})))
+            with original_create(name, attributes=attributes):
+                yield
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=1000.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+            patch("dalston.telemetry.create_span", side_effect=_recording_span),
+        ):
+            engine.process(request, _ctx())
+
+        span_names = [name for name, _ in spans]
+        # The top-level wrapper must be engine.chunked_request so it does
+        # NOT clash with inner engine.recognize from inference layers.
+        assert "engine.chunked_request" in span_names
+        assert "engine.recognize" not in span_names  # outer level
+        # Each chunk gets its own engine.chunk_recognize span
+        assert span_names.count("engine.chunk_recognize") == 2
+
+    def test_no_aggregate_recognize_metric_emission(self, tmp_path: Path) -> None:
+        """_process_chunked must NOT call observe_engine_recognize directly.
+
+        Metrics are per-chunk and emitted by the inference layer through
+        transcribe_audio() calls. If the chunked wrapper also emitted a
+        top-level engine_recognize metric, prometheus would double-count
+        chunked requests relative to non-chunked ones.
+        """
+        audio = tmp_path / "long.wav"
+        audio.write_bytes(b"")
+
+        _FakeVadChunker.scenarios = {
+            600.0: [(0.0, 600.0), (600.0, 400.0)],
+        }
+        chunk0 = _make_transcript("x", [(0.0, 1.0, "x")], engine_id="spy-engine")
+        chunk1 = _make_transcript("y", [(0.0, 1.0, "y")], engine_id="spy-engine")
+        engine = _SpyEngine(max_chunk_s=600.0, side_effects=[chunk0, chunk1])
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        import dalston.metrics as dm
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=1000.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+            patch.object(dm, "observe_engine_recognize") as mock_recognize,
+            patch.object(dm, "observe_engine_realtime_factor") as mock_rtf,
+        ):
+            engine.process(request, _ctx())
+
+        # The chunked wrapper itself must not touch these metric helpers;
+        # per-chunk emission is a concern of transcribe_audio's inference
+        # layer, which is stubbed out in _SpyEngine.
+        mock_recognize.assert_not_called()
+        mock_rtf.assert_not_called()
+
+
 class TestMergeTranscripts:
     """Merge-level invariants."""
 

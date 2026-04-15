@@ -17,13 +17,11 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
-import dalston.metrics
 import dalston.telemetry
 
 if TYPE_CHECKING:
@@ -145,17 +143,34 @@ class BaseBatchTranscribeEngine(Engine):
     ) -> TaskResponse:
         """Split long audio, transcribe each chunk, merge the results.
 
-        Wraps the whole run in a single top-level ``engine.recognize``
-        span so chunked requests report as one inference in observability
-        (M86.6). Halves ``max_chunk_s`` on CUDA OOM and retries the
-        remaining chunks (M86.5).
+        Wraps the whole run in a single top-level
+        ``engine.chunked_request`` span (named distinctly from the inner
+        ``engine.recognize`` spans that the inference layer emits per
+        model.transcribe call, so the aggregate does not double-count
+        recognize metrics).
+
+        Halves ``max_chunk_s`` on CUDA OOM and retries the remaining
+        chunks via :meth:`_transcribe_chunks_with_backoff` (M86.5).
+
+        Telemetry contract (M86.6, revised):
+
+        - One ``engine.chunked_request`` span per request with
+          ``dalston.chunked=true``, ``dalston.chunk_count``,
+          ``dalston.chunk_max_s``, ``dalston.chunk_max_s_final``, and
+          total ``dalston.audio_duration_s`` attributes.
+        - Per-chunk work lives in nested ``engine.chunk_recognize``
+          spans (one per chunk).
+        - Each chunk's ``transcribe_audio()`` call is free to emit its
+          own ``engine.recognize`` span and per-call
+          ``engine_recognize_seconds`` / ``engine_realtime_factor``
+          metrics at chunk granularity — exactly as the non-chunked
+          path does. No aggregate metric is emitted here, to avoid
+          inflating Prometheus counts for chunked requests.
         """
-        start_wall = time.monotonic()
-        engine_id = getattr(self, "engine_id", "unknown")
         effective_max_s = self._effective_chunk_cap(max_chunk_s)
 
         with dalston.telemetry.create_span(
-            "engine.recognize",
+            "engine.chunked_request",
             attributes={
                 "dalston.chunked": True,
                 "dalston.chunk_max_s": effective_max_s,
@@ -171,23 +186,12 @@ class BaseBatchTranscribeEngine(Engine):
                     tmp_dir,
                 )
 
-            wall_time = time.monotonic() - start_wall
             dalston.telemetry.set_span_attribute(
                 "dalston.chunk_count", merged["chunk_count"]
             )
             dalston.telemetry.set_span_attribute(
                 "dalston.chunk_max_s_final", merged["final_max_s"]
             )
-
-            dalston.metrics.observe_engine_recognize(
-                engine_id, "", "cpu-or-gpu", wall_time
-            )
-            if audio_duration_s > 0:
-                rtf = wall_time / audio_duration_s
-                dalston.metrics.observe_engine_realtime_factor(
-                    engine_id, "", "cpu-or-gpu", rtf
-                )
-                dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
 
             return TaskResponse(data=merged["transcript"])
 
