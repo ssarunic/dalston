@@ -755,7 +755,22 @@ def _tailscale_cloud_init_block(hostname: str) -> str:
     cleans up stale nodes and re-joins via auth key from SSM.
     """
     return f"""\
-# Wait for unattended-upgrades / apt to release the dpkg lock
+# On Ubuntu (GPU workers), make apt wait for the dpkg frontend lock
+# instead of failing immediately. `curl | sh` below runs apt-get
+# install internally, and unattended-upgrades racing it for the lock
+# is the #1 cause of silently-broken GPU workers. DPkg::Lock::Timeout
+# is honoured by any apt invocation on the system, including the one
+# inside the Tailscale installer script.
+if command -v apt-get >/dev/null 2>&1; then
+  mkdir -p /etc/apt/apt.conf.d
+  echo 'DPkg::Lock::Timeout "600";' > /etc/apt/apt.conf.d/99-dalston-lock-timeout
+fi
+
+# Opportunistically wait up to 3 minutes for the dpkg frontend lock
+# before even starting the tailscale install. Belt-and-suspenders with
+# the DPkg::Lock::Timeout above — the timeout handles the TOCTOU race
+# where the lock gets re-acquired between check and install, this
+# loop just avoids sitting in that retry window if we can help it.
 dpkg_wait=0
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
   dpkg_wait=$((dpkg_wait + 1))
