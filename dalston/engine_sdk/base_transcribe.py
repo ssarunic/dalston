@@ -200,36 +200,48 @@ class BaseBatchTranscribeEngine(Engine):
     ) -> dict[str, Any]:
         """Run VAD chunking + per-chunk transcribe + OOM backoff.
 
+        Every pass splits the *original* source file from scratch. The
+        ``remaining_start_s`` boundary marks the earliest absolute
+        offset that still needs work — chunks whose offset lies before
+        it were already completed by an earlier pass and are filtered
+        out, so timestamps remain absolute in the source's timeline and
+        no audio is reprocessed after an OOM retry.
+
         Returns a dict with ``transcript`` (merged Transcript),
         ``chunk_count`` (total chunks processed), and ``final_max_s``
         (the effective chunk cap after any OOM halving).
         """
         assert task_request.audio_path is not None
+        source_audio_path = task_request.audio_path
 
         completed_transcripts: list[tuple[Transcript, float]] = []
         current_max_s = max_chunk_s
-        pending_audio_path: Path | None = task_request.audio_path
-        pending_offset: float = 0.0
+        remaining_start_s = 0.0
         total_chunks = 0
+        retry_pass = 0
 
-        while pending_audio_path is not None:
+        while True:
+            retry_pass += 1
             chunker = VadChunker(max_chunk_duration_s=current_max_s)
-            sub_tmp = tmp_dir / f"pass_{int(current_max_s)}"
+            sub_tmp = tmp_dir / f"pass_{retry_pass}_max_{int(current_max_s)}"
             sub_tmp.mkdir(parents=True, exist_ok=True)
             try:
-                chunks = chunker.split(pending_audio_path, sub_tmp)
+                all_chunks = chunker.split(source_audio_path, sub_tmp)
             except Exception:
                 logger.exception(
                     "vad_split_failed",
-                    audio_path=str(pending_audio_path),
+                    audio_path=str(source_audio_path),
                     max_chunk_s=current_max_s,
                 )
                 raise
+
+            chunks = [c for c in all_chunks if c.offset + 1e-3 >= remaining_start_s]
 
             if not chunks:
                 break
 
             oom_index: int | None = None
+            processed_in_pass = 0
             for idx, chunk in enumerate(chunks):
                 chunk_request = task_request.replace(audio_path=chunk.audio_path)
                 try:
@@ -238,9 +250,7 @@ class BaseBatchTranscribeEngine(Engine):
                         attributes={
                             "dalston.chunk_index": total_chunks + idx,
                             "dalston.chunk_duration_s": round(chunk.duration, 3),
-                            "dalston.chunk_offset_s": round(
-                                pending_offset + chunk.offset, 3
-                            ),
+                            "dalston.chunk_offset_s": round(chunk.offset, 3),
                         },
                     ):
                         transcript = self.transcribe_audio(chunk_request, ctx)
@@ -250,14 +260,12 @@ class BaseBatchTranscribeEngine(Engine):
                     oom_index = idx
                     clear_gpu_cache()
                     break
-                completed_transcripts.append(
-                    (transcript, pending_offset + chunk.offset)
-                )
+                completed_transcripts.append((transcript, chunk.offset))
+                processed_in_pass += 1
 
-            total_chunks += idx + 1 if oom_index is None else oom_index
+            total_chunks += processed_in_pass
 
             if oom_index is None:
-                pending_audio_path = None
                 break
 
             new_max_s = max(current_max_s / 2.0, _MIN_CHUNK_FLOOR_S)
@@ -275,11 +283,12 @@ class BaseBatchTranscribeEngine(Engine):
                 "chunked_oom_backoff",
                 old_max_s=current_max_s,
                 new_max_s=new_max_s,
-                chunk_index=total_chunks,
+                remaining_start_s=round(chunks[oom_index].offset, 3),
+                chunks_completed=total_chunks,
             )
             self._cache_chunk_cap(new_max_s)
             current_max_s = new_max_s
-            pending_offset = pending_offset + chunks[oom_index].offset
+            remaining_start_s = chunks[oom_index].offset
 
         merged = self._merge_chunk_transcripts(completed_transcripts)
         return {

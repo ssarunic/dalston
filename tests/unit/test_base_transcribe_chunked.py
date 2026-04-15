@@ -317,6 +317,72 @@ class TestOomBackoff:
         assert engine._chunked_oom_cap_s == 600.0
         assert result.data.text == "retry zero retry one"
 
+    def test_mid_stream_oom_skips_completed_chunks(self, tmp_path: Path) -> None:
+        """Pass 1 completes chunk 0, chunk 1 OOMs.
+
+        Pass 2 re-splits the full source and must skip the region
+        already covered by pass 1's chunk 0. Absolute offsets on the
+        surviving transcripts are preserved in the original timeline.
+        """
+        audio = tmp_path / "long.wav"
+        audio.write_bytes(b"")
+
+        # Pass 1 (max=1200): two chunks at 0s and 1200s. Chunk 1 OOMs.
+        # Pass 2 (max=600): four chunks at 0/600/1200/1800. First two
+        #                   are filtered (offset < 1200 = remaining_start_s);
+        #                   last two actually run.
+        _FakeVadChunker.scenarios = {
+            1200.0: [(0.0, 1200.0), (1200.0, 1200.0)],
+            600.0: [
+                (0.0, 600.0),
+                (600.0, 600.0),
+                (1200.0, 600.0),
+                (1800.0, 600.0),
+            ],
+        }
+
+        oom = RuntimeError("CUDA out of memory")
+        chunk_a = _make_transcript(
+            "alpha", [(0.0, 1.0, "alpha")], engine_id="spy-engine"
+        )
+        retry_c = _make_transcript(
+            "gamma", [(0.0, 1.0, "gamma")], engine_id="spy-engine"
+        )
+        retry_d = _make_transcript(
+            "delta", [(0.0, 1.0, "delta")], engine_id="spy-engine"
+        )
+
+        engine = _SpyEngine(
+            max_chunk_s=1200.0,
+            side_effects=[chunk_a, oom, retry_c, retry_d],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=2400.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+        ):
+            result = engine.process(request, _ctx())
+
+        # 4 transcribe_audio calls:
+        #   1. Pass 1 chunk 0 (success, offset 0)
+        #   2. Pass 1 chunk 1 (OOM, offset 1200)
+        #   3. Pass 2 chunk at offset 1200 (success — re-try of OOM'd region)
+        #   4. Pass 2 chunk at offset 1800 (success)
+        # Crucially: pass 2 chunks at offsets 0 and 600 are FILTERED OUT,
+        # so we do NOT re-transcribe the region pass 1 already covered.
+        assert len(engine._calls) == 4
+        assert result.data.text == "alpha gamma delta"
+        assert len(result.data.segments) == 3
+        # Absolute offsets preserved in source timeline
+        assert result.data.segments[0].start == pytest.approx(0.0, abs=1e-3)
+        assert result.data.segments[1].start == pytest.approx(1200.0, abs=1e-3)
+        assert result.data.segments[2].start == pytest.approx(1800.0, abs=1e-3)
+        # OOM cap cached
+        assert engine._chunked_oom_cap_s == 600.0
+
     def test_floor_aborts_loop(self, tmp_path: Path) -> None:
         """When OOM persists below the floor, raise loudly."""
         audio = tmp_path / "long.wav"
