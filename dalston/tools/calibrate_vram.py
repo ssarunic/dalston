@@ -331,6 +331,7 @@ def run_calibration(
     gpu_id: int,
     dry_run: bool = False,
     engine_id: str | None = None,
+    audio_file: str | None = None,
 ) -> dict[str, Any]:
     """Run the full calibration sweep and return the profile dict."""
     eid, cal = _resolve_engine(stage, engine_id)
@@ -394,6 +395,7 @@ def run_calibration(
             dry_run,
             baseline_mb,
             vad_batch_sizes=params.get("vad_batch_sizes"),
+            audio_file=audio_file,
         )
         coefficients, r_squared = _fit_model(measurements, eid)
 
@@ -418,6 +420,37 @@ def run_calibration(
     return profile
 
 
+def _slice_audio(source: Path, out: Path, duration_s: float) -> None:
+    """Extract the first ``duration_s`` seconds of ``source`` as 16 kHz mono WAV.
+
+    Used by calibration sweeps that want real speech distribution (more VAD
+    segments, more realistic batch dynamics) instead of synthetic sinewaves.
+    """
+    import subprocess
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source),
+            "-t",
+            str(duration_s),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "wav",
+            str(out),
+        ],
+        check=True,
+    )
+
+
 def _sweep_default(
     engine_url: str,
     endpoint: str,
@@ -428,21 +461,42 @@ def _sweep_default(
     dry_run: bool,
     baseline_mb: int,
     vad_batch_sizes: list[int] | None = None,
+    audio_file: str | None = None,
 ) -> list[dict[str, Any]]:
     """Standard calibration sweep.
 
     When ``vad_batch_sizes`` is provided (transcribe engines), sweeps
     vad_batch_size at a fixed 60s duration, then sweeps durations at
     default settings.  Otherwise sweeps duration only (diarize, align).
+
+    When ``audio_file`` is provided, each duration is cut from the real file
+    via ffmpeg (requires ffmpeg on PATH).  This gives realistic VAD segment
+    counts and batch dynamics instead of the 1–2 segments that synthetic
+    sinewaves produce.
     """
+    real_source: Path | None = None
+    if audio_file:
+        real_source = Path(audio_file)
+        if not real_source.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
+
+    def _prepare_clip(work_dir: Path, duration: float) -> Path:
+        out = work_dir / f"test_{int(duration)}s.wav"
+        if out.exists():
+            return out
+        if real_source is not None:
+            _slice_audio(real_source, out, duration)
+        else:
+            generate_wav(out, duration)
+        return out
+
     measurements: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="dalston_calibrate_") as tmp:
         work_dir = Path(tmp)
 
         # Phase 1: vad_batch_size sweep (if applicable)
         if vad_batch_sizes:
-            audio_60s = work_dir / "test_60s.wav"
-            generate_wav(audio_60s, 60)
+            audio_60s = _prepare_clip(work_dir, 60)
 
             print("Phase 1: vad_batch_size sweep (60s audio)")
             for vad_batch in vad_batch_sizes:
@@ -482,9 +536,7 @@ def _sweep_default(
             print(phase_label)
 
         for dur in durations:
-            audio_path = work_dir / f"test_{dur}s.wav"
-            if not audio_path.exists():
-                generate_wav(audio_path, dur)
+            audio_path = _prepare_clip(work_dir, dur)
 
             extra = {"vad_batch_size": 1} if vad_batch_sizes else None
 
@@ -1530,6 +1582,7 @@ def main() -> None:
             gpu_id=args.gpu_id,
             dry_run=args.dry_run,
             engine_id=engine_id,
+            audio_file=args.audio_file,
         )
 
         output_path = Path(args.output)
