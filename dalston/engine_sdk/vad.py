@@ -297,16 +297,21 @@ class VadChunker:
             return audio, []
 
         assert self._get_speech_timestamps is not None
-        # The ``silero_vad`` pip package and ``torch.hub`` paths require a
-        # torch tensor; the onnxruntime fallback (``_get_speech_timestamps_offline``)
-        # accepts the numpy array directly so the chunker can run in
-        # environments that don't ship torch at all.
-        if self._get_speech_timestamps is _get_speech_timestamps_offline:
-            audio_input: Any = audio
-        else:
-            import torch
+        # The ``silero_vad`` pip package and ``torch.hub`` paths want a
+        # torch tensor; the onnxruntime fallback and test fakes accept
+        # numpy directly. Convert only when torch is importable — if it
+        # isn't, by construction the only backends that could have
+        # loaded are numpy-native ones, so passing the array through is
+        # safe (and lets the chunker run in environments that don't
+        # ship torch at all, including the CI unit tests).
+        audio_input: Any = audio
+        if self._get_speech_timestamps is not _get_speech_timestamps_offline:
+            try:
+                import torch
 
-            audio_input = torch.from_numpy(audio)
+                audio_input = torch.from_numpy(audio)
+            except ImportError:
+                pass
 
         raw_segments = self._get_speech_timestamps(
             audio_input,
