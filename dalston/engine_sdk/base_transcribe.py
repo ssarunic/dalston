@@ -221,7 +221,11 @@ class BaseBatchTranscribeEngine(Engine):
             sub_tmp = tmp_dir / f"pass_{retry_pass}_max_{int(current_max_s)}"
             sub_tmp.mkdir(parents=True, exist_ok=True)
             try:
-                all_chunks = chunker.split(source_audio_path, sub_tmp)
+                chunks = chunker.split(
+                    source_audio_path,
+                    sub_tmp,
+                    start_offset_s=remaining_start_s,
+                )
             except Exception:
                 logger.exception(
                     "vad_split_failed",
@@ -229,8 +233,6 @@ class BaseBatchTranscribeEngine(Engine):
                     max_chunk_s=current_max_s,
                 )
                 raise
-
-            chunks = [c for c in all_chunks if c.offset + 1e-3 >= remaining_start_s]
 
             if not chunks:
                 break

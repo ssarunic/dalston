@@ -78,8 +78,11 @@ class _FakeChunk:
 class _FakeVadChunker:
     """Test double for VadChunker — returns pre-canned chunks on split().
 
-    Honours max_chunk_duration_s by re-splitting when the cap shrinks
-    (simulating the OOM-backoff re-split pass).
+    Honours ``max_chunk_duration_s`` by looking up a different chunk
+    layout per cap (simulating OOM-backoff re-splits), and honours
+    ``start_offset_s`` by dropping chunks entirely before it and
+    trimming chunks that straddle it — matching the real VadChunker's
+    resume-boundary semantics.
     """
 
     scenarios: dict[float, list[tuple[float, float]]] = {}
@@ -87,7 +90,12 @@ class _FakeVadChunker:
     def __init__(self, max_chunk_duration_s: float = 1500.0, **_: Any) -> None:
         self.max_chunk_duration_s = max_chunk_duration_s
 
-    def split(self, audio_path: Path, temp_dir: Path) -> list[_FakeChunk]:
+    def split(
+        self,
+        audio_path: Path,
+        temp_dir: Path,
+        start_offset_s: float = 0.0,
+    ) -> list[_FakeChunk]:
         temp_dir.mkdir(parents=True, exist_ok=True)
         raw = self.scenarios.get(self.max_chunk_duration_s)
         if raw is None:
@@ -96,9 +104,16 @@ class _FakeVadChunker:
             )
         chunks: list[_FakeChunk] = []
         for i, (offset, duration) in enumerate(raw):
+            end = offset + duration
+            if end <= start_offset_s + 1e-3:
+                continue
+            trimmed_offset = max(offset, start_offset_s)
+            trimmed_duration = end - trimmed_offset
             p = temp_dir / f"chunk_{i:04d}.wav"
             p.write_bytes(b"")  # presence only — we never decode in tests
-            chunks.append(_FakeChunk(p, offset=offset, duration=duration))
+            chunks.append(
+                _FakeChunk(p, offset=trimmed_offset, duration=trimmed_duration)
+            )
         return chunks
 
 
@@ -316,6 +331,75 @@ class TestOomBackoff:
         assert len(engine._calls) == 3
         assert engine._chunked_oom_cap_s == 600.0
         assert result.data.text == "retry zero retry one"
+
+    def test_shifted_boundaries_trim_straddling_chunk(self, tmp_path: Path) -> None:
+        """Regression for a subtle mid-stream OOM bug.
+
+        When pass 2 halves ``max_chunk_s``, the new VAD grouping can
+        produce a chunk that *starts before* the OOM boundary but
+        *ends past it* — i.e., it straddles the resume boundary. An
+        earlier implementation filtered chunks by ``offset >= boundary``
+        and silently dropped such chunks, losing the failed audio.
+
+        The fix is to push the boundary into ``VadChunker.split`` as
+        ``start_offset_s`` so straddling chunks get **trimmed** at the
+        boundary rather than dropped. This test exercises that path.
+        """
+        audio = tmp_path / "long.wav"
+        audio.write_bytes(b"")
+
+        # Pass 1 (max=1200): chunk 0 covers [0-1000], chunk 1 at
+        # offset=1100 OOMs after processing ~300s.
+        # Pass 2 (max=600): VAD regrouping at the smaller cap produces
+        # a chunk at offset=900 covering [900-1400]. That chunk
+        # *straddles* the OOM boundary (1100) — pre-fix it was dropped.
+        _FakeVadChunker.scenarios = {
+            1200.0: [(0.0, 1000.0), (1100.0, 300.0), (1600.0, 800.0)],
+            600.0: [(0.0, 600.0), (900.0, 500.0), (1600.0, 600.0)],
+        }
+
+        oom = RuntimeError("CUDA out of memory")
+        chunk_0 = _make_transcript(
+            "alpha", [(0.0, 1.0, "alpha")], engine_id="spy-engine"
+        )
+        retry_trimmed = _make_transcript(
+            "gamma", [(0.0, 1.0, "gamma")], engine_id="spy-engine"
+        )
+        retry_tail = _make_transcript(
+            "delta", [(0.0, 1.0, "delta")], engine_id="spy-engine"
+        )
+
+        engine = _SpyEngine(
+            max_chunk_s=1200.0,
+            side_effects=[chunk_0, oom, retry_trimmed, retry_tail],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=2400.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+        ):
+            result = engine.process(request, _ctx())
+
+        # 4 calls total:
+        #   1. pass 1 chunk 0 (success)
+        #   2. pass 1 chunk 1 (OOM)
+        #   3. pass 2 trimmed chunk at offset=1100 (the straddling [900-1400]
+        #      chunk gets trimmed to start at 1100, covering [1100-1400])
+        #   4. pass 2 tail chunk at offset=1600
+        assert len(engine._calls) == 4
+
+        # Critical: the retry result for the straddling chunk must be
+        # placed at offset=1100, not offset=900. If the chunker filtered
+        # instead of trimmed, the [1100-1400] region would be missing.
+        merged_segments = result.data.segments
+        assert len(merged_segments) == 3
+        assert merged_segments[0].start == pytest.approx(0.0, abs=1e-3)
+        assert merged_segments[1].start == pytest.approx(1100.0, abs=1e-3)
+        assert merged_segments[2].start == pytest.approx(1600.0, abs=1e-3)
+        assert result.data.text == "alpha gamma delta"
 
     def test_mid_stream_oom_skips_completed_chunks(self, tmp_path: Path) -> None:
         """Pass 1 completes chunk 0, chunk 1 OOMs.

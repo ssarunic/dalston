@@ -177,6 +177,53 @@ class TestSplit:
         for s, _ in speech:
             assert _covered(s), f"speech start {s} not covered by any chunk"
 
+    def test_start_offset_drops_chunks_fully_before(self, tmp_path: Path) -> None:
+        """Groups ending at or before ``start_offset_s`` are skipped entirely."""
+        audio = tmp_path / "speech.wav"
+        _write_silent_wav(audio, duration_s=60.0)
+
+        chunker = VadChunker(max_chunk_duration_s=30.0)
+        _install_fake_vad(chunker, [(5.0, 10.0), (40.0, 50.0)])
+
+        chunks = chunker.split(audio, tmp_path / "chunks", start_offset_s=20.0)
+
+        assert len(chunks) == 1
+        assert chunks[0].offset == pytest.approx(40.0, abs=1e-3)
+        assert chunks[0].duration == pytest.approx(10.0, abs=1e-3)
+
+    def test_start_offset_trims_straddling_chunk(self, tmp_path: Path) -> None:
+        """A group that starts before ``start_offset_s`` but ends after it
+        is trimmed — its offset becomes the boundary and its audio slice
+        starts there, so unprocessed audio past the boundary is preserved
+        without reprocessing the head.
+        """
+        audio = tmp_path / "speech.wav"
+        _write_silent_wav(audio, duration_s=60.0)
+
+        chunker = VadChunker(max_chunk_duration_s=30.0)
+        # Two speech spans grouped into one chunk spanning [5, 25]:
+        _install_fake_vad(chunker, [(5.0, 10.0), (20.0, 25.0), (40.0, 50.0)])
+
+        chunks = chunker.split(audio, tmp_path / "chunks", start_offset_s=15.0)
+
+        # First group [5, 25] straddles boundary 15 → trimmed to [15, 25].
+        # Second group [40, 50] starts well past the boundary → unchanged.
+        assert len(chunks) == 2
+        assert chunks[0].offset == pytest.approx(15.0, abs=1e-3)
+        assert chunks[0].duration == pytest.approx(10.0, abs=1e-3)
+        assert chunks[1].offset == pytest.approx(40.0, abs=1e-3)
+        assert chunks[1].duration == pytest.approx(10.0, abs=1e-3)
+
+    def test_start_offset_past_all_speech_returns_empty(self, tmp_path: Path) -> None:
+        audio = tmp_path / "speech.wav"
+        _write_silent_wav(audio, duration_s=60.0)
+
+        chunker = VadChunker(max_chunk_duration_s=30.0)
+        _install_fake_vad(chunker, [(5.0, 10.0), (20.0, 25.0)])
+
+        chunks = chunker.split(audio, tmp_path / "chunks", start_offset_s=30.0)
+        assert chunks == []
+
     def test_chunk_files_written_and_distinct(self, tmp_path: Path) -> None:
         audio = tmp_path / "speech.wav"
         _write_silent_wav(audio, duration_s=200.0)

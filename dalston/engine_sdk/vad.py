@@ -296,12 +296,20 @@ class VadChunker:
         if audio.size == 0:
             return audio, []
 
-        import torch
-
-        audio_tensor = torch.from_numpy(audio)
         assert self._get_speech_timestamps is not None
+        # The ``silero_vad`` pip package and ``torch.hub`` paths require a
+        # torch tensor; the onnxruntime fallback (``_get_speech_timestamps_offline``)
+        # accepts the numpy array directly so the chunker can run in
+        # environments that don't ship torch at all.
+        if self._get_speech_timestamps is _get_speech_timestamps_offline:
+            audio_input: Any = audio
+        else:
+            import torch
+
+            audio_input = torch.from_numpy(audio)
+
         raw_segments = self._get_speech_timestamps(
-            audio_tensor,
+            audio_input,
             self._model,
             threshold=self.vad_threshold,
             sampling_rate=_SAMPLE_RATE,
@@ -326,6 +334,7 @@ class VadChunker:
         self,
         audio_path: Path,
         temp_dir: Path,
+        start_offset_s: float = 0.0,
     ) -> list[AudioChunk]:
         """Split audio into chunks at speech boundaries.
 
@@ -340,10 +349,18 @@ class VadChunker:
             temp_dir: Directory to write chunk WAV files into. Must
                 exist and be writable. Caller is responsible for
                 cleanup.
+            start_offset_s: Resume boundary in seconds. Groups that end
+                before it are skipped; groups that straddle it are
+                **trimmed** at the boundary so the resulting chunk's
+                ``offset`` equals ``start_offset_s`` and its audio slice
+                starts there. Used by
+                :meth:`BaseBatchTranscribeEngine._transcribe_chunks_with_backoff`
+                on OOM retry to resume from the last failed chunk
+                without reprocessing or dropping audio at the seam.
 
         Returns:
             List of :class:`AudioChunk` in temporal order. Empty list
-            if the source has no speech.
+            if the source has no speech past ``start_offset_s``.
         """
         temp_dir.mkdir(parents=True, exist_ok=True)
         audio_full, segments = self._load_and_detect(audio_path)
@@ -393,6 +410,14 @@ class VadChunker:
         for idx, group in enumerate(groups):
             start_s = group[0].start
             end_s = group[-1].end
+
+            # Apply the resume boundary: drop groups fully before it,
+            # trim groups that straddle it.
+            if end_s <= start_offset_s + 1e-3:
+                continue
+            if start_s < start_offset_s:
+                start_s = start_offset_s
+
             start_sample = max(0, int(round(start_s * _SAMPLE_RATE)))
             end_sample = min(total_samples, int(round(end_s * _SAMPLE_RATE)))
             if end_sample <= start_sample:
@@ -414,6 +439,7 @@ class VadChunker:
             chunk_count=len(chunks),
             total_audio_s=round(total_samples / _SAMPLE_RATE, 3),
             max_chunk_duration_s=self.max_chunk_duration_s,
+            start_offset_s=round(start_offset_s, 3),
         )
         return chunks
 
