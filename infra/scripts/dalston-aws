@@ -330,19 +330,10 @@ def aws_account_id(region: str) -> str:
 def describe_instance(region: str, instance_id: str) -> dict | None:
     """Describe a single EC2 instance.
 
-    Returns the instance dict if it exists, or None **only** when AWS
-    definitively reports the instance does not exist
-    (``InvalidInstanceID.NotFound``). Every other error — credentials,
-    throttling, network, malformed ID, etc. — propagates to the caller.
-
-    The old behaviour of catching every ``ClientError`` and returning
-    ``None`` was a data-loss footgun: callers like ``_launch_gpu``'s
-    reaping loop and ``cmd_terminate``'s skip-if-gone check interpret
-    ``None`` (via ``get_instance_state`` -> ``"terminated"``) as "the
-    instance is gone, drop it from state." An auth failure — e.g. from
-    a shell that accidentally sourced dummy ``AWS_ACCESS_KEY_ID``
-    variables meant for local MinIO — would then silently wipe working
-    resources out of state.yaml. Failing loudly is strictly better.
+    Returns ``None`` only on ``InvalidInstanceID.NotFound``. Every other
+    ``ClientError`` propagates — callers use the result to reap state
+    entries and skip terminate calls, so mapping transient/auth errors
+    to "not found" is a data-loss path.
     """
     try:
         resp = ec2_client(region).describe_instances(InstanceIds=[instance_id])
@@ -357,14 +348,7 @@ def describe_instance(region: str, instance_id: str) -> dict | None:
 
 
 def get_instance_state(region: str, instance_id: str) -> str:
-    """Return the instance state, or ``"terminated"`` if AWS says it is gone.
-
-    Since ``describe_instance`` now re-raises on any error other than
-    ``InvalidInstanceID.NotFound``, a ``None`` result here unambiguously
-    means "AWS confirms the instance does not exist" — not "couldn't
-    reach AWS." Callers that use this value to reap state entries or
-    skip termination calls can trust it.
-    """
+    """Return the instance state, or ``"terminated"`` if AWS confirms it is gone."""
     inst = describe_instance(region, instance_id)
     return inst["State"]["Name"] if inst else "terminated"
 
@@ -783,32 +767,13 @@ def _tailscale_cloud_init_block(hostname: str) -> str:
     cleans up stale nodes and re-joins via auth key from SSM.
     """
     return f"""\
-# On Ubuntu (GPU workers), make apt wait for the dpkg frontend lock
-# instead of failing immediately. `curl | sh` below runs apt-get
-# install internally, and unattended-upgrades racing it for the lock
-# is the #1 cause of silently-broken GPU workers. DPkg::Lock::Timeout
-# is honoured by any apt invocation on the system, including the one
-# inside the Tailscale installer script.
+# Make apt wait for the dpkg frontend lock instead of failing immediately
+# when unattended-upgrades is running. Guard: control plane is AL2023/dnf,
+# config file is harmless but pointless there.
 if command -v apt-get >/dev/null 2>&1; then
   mkdir -p /etc/apt/apt.conf.d
   echo 'DPkg::Lock::Timeout "600";' > /etc/apt/apt.conf.d/99-dalston-lock-timeout
 fi
-
-# Opportunistically wait up to 3 minutes for the dpkg frontend lock
-# before even starting the tailscale install. Belt-and-suspenders with
-# the DPkg::Lock::Timeout above — the timeout handles the TOCTOU race
-# where the lock gets re-acquired between check and install, this
-# loop just avoids sitting in that retry window if we can help it.
-dpkg_wait=0
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-  dpkg_wait=$((dpkg_wait + 1))
-  if [ $dpkg_wait -gt 36 ]; then
-    echo "WARNING: dpkg lock not released after 3 minutes, proceeding anyway"
-    break
-  fi
-  echo "Waiting for dpkg lock ($dpkg_wait/36)..."
-  sleep 5
-done
 
 # Install and auto-join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -1323,12 +1288,6 @@ OBSERVABILITY="{"true" if observability else "false"}"
     # Part 3: body
     body = (
         r"""
-# Wait for any unattended-upgrades to finish
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-  echo "Waiting for dpkg lock (unattended-upgrades)..."
-  sleep 5
-done
-
 # Ensure Docker is running (pre-installed on DL AMI)
 systemctl start docker
 systemctl enable docker
