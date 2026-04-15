@@ -192,11 +192,14 @@ class VadChunker:
         ...
 ```
 
-**VAD backend:** Use `torch.hub.load("snakers4/silero-vad")` which is
-pure PyTorch (no `onnxruntime` dependency). This avoids packaging
-conflicts — every engine that imports `torch` already has what it needs.
-For Docker images that bake the model, honour `DALSTON_SILERO_VAD_PATH`
-env var to skip the download.
+**VAD backend:** Resolution order (revised after review), first success wins:
+
+1. **`silero_vad` pip package** — bundled JIT + ONNX weights, fully offline once installed. Added to `engines/stt-transcribe/nemo/requirements.txt` and `docker/Dockerfile.base-nemo`. This is the preferred path for shipped images.
+2. **`DALSTON_SILERO_VAD_ONNX`** env var — path to a pre-baked silero v5 ONNX file. Matches the contract that `docker/Dockerfile.base-nemo` already bakes (`/models/silero-vad/silero_vad.onnx`) and that the realtime SDK and vLLM-ASR image already set. Loaded via `onnxruntime` through a minimal `_OnnxSileroAdapter` + standalone `_get_speech_timestamps_offline` scanner. Also fully offline.
+3. **`DALSTON_SILERO_VAD_PATH`** env var — legacy local torch JIT file. Kept for operators who stash a custom snapshot.
+4. **`torch.hub.load("snakers4/silero-vad")`** — last-resort online fallback for dev environments without the package or the baked-in model.
+
+**Historical note:** an earlier draft of this step assumed `torch.hub.load` would be the primary loader. That was wrong for offline workers: the existing `docker/Dockerfile.base-nemo` already bakes the ONNX model and sets `DALSTON_SILERO_VAD_ONNX`, so the chunker needs to honour that env var (and the preferred pip package) rather than hitting torch.hub. See `tests/unit/test_vad_chunker.py::TestLoaderResolutionOrder`.
 
 **Force-split policy:** When a speech region exceeds `max_chunk_duration_s`
 and contains no internal silence, split at the limit boundary. The last
@@ -391,18 +394,23 @@ A fixed `max_chunk_s` cannot anticipate every runtime pressure situation: two re
 
 On `CUDA out of memory` from a chunk's `transcribe_audio()`:
 
-1. Log `chunked_oom_backoff` with old/new chunk sizes.
+1. Log `chunked_oom_backoff` with old/new chunk sizes and the absolute `remaining_start_s` boundary.
 2. Halve the effective `max_chunk_s` for the engine instance (cached so subsequent tasks skip failed sizes).
-3. Re-split the *remaining* audio (not the whole file — already-successful chunks stay done).
-4. Retry.
-5. Floor at 60s — below that, raise rather than slice into confetti.
+3. Re-split the **original source file** at the smaller cap. Every chunk produced by that split carries an absolute offset in the source's timeline.
+4. **Filter** the new chunks: drop any whose `offset < remaining_start_s`. Those regions were already transcribed by an earlier pass and must not be re-processed.
+5. Transcribe the surviving chunks. Completed transcripts record `chunk.offset` directly — absolute offsets flow through to the merge unchanged, so no per-pass offset bookkeeping is needed.
+6. Floor at 60s — below that, raise rather than slice into confetti.
 
 Uses the existing `dalston.engine_sdk.inference.gpu_guard.is_oom_error` helper so the detection logic is shared with ONNX / faster-whisper.
 
+**Correctness note (added after review):** an earlier draft of this step tracked a `pending_audio_path` + `pending_offset` pair and tried to advance the offset across passes. That was wrong: `pending_audio_path` was never updated, the retry pass re-split the full source, and adding `pending_offset` to chunks that already carried absolute offsets produced double-shifted timestamps plus duplicated inference work on the region before the OOM boundary. The current `remaining_start_s` filter design is the correction — see test `test_mid_stream_oom_skips_completed_chunks`.
+
 **Tests:**
 
-- Monkeypatch `transcribe_audio` to raise CUDA OOM once, assert backoff halves `max_chunk_s` and the retry succeeds.
+- Single OOM then success: assert backoff halves `max_chunk_s`, the retry succeeds, cached cap persists.
+- Mid-stream OOM: pass 1 completes chunk 0 and OOMs on chunk 1; pass 2 must re-split the full source at the smaller cap and filter out the already-completed region. Assert exactly 3 `transcribe_audio` calls for a scenario with 2 successful + 1 OOM + 2 retries (not 4, which would indicate double-processing).
 - Monkeypatch to OOM repeatedly until floor, assert a loud failure once the floor is hit.
+- Non-OOM exceptions must propagate unchanged (no backoff on unrelated errors).
 
 ---
 
@@ -415,17 +423,19 @@ Uses the existing `dalston.engine_sdk.inference.gpu_guard.is_oom_error` helper s
 
 **Motivation:**
 
-Naively calling `transcribe_audio()` N times per chunked request would emit N `engine.recognize` spans and N `engine_recognize_seconds` metric observations in Prometheus. In observability, one chunked job would look like N separate requests, skewing latency dashboards and RTF calculations.
+Naively calling `transcribe_audio()` N times per chunked request produces N per-call `engine.recognize` spans from the inference layer. An initial sketch of this step tried to add *another* `engine.recognize` span and per-request metric emission at the chunked wrapper level — that duplicated both the span name and the Prometheus histogram observations, inflating counts on chunked requests relative to non-chunked ones.
 
-**Contract:**
+**Contract (revised after review):**
 
-- Top-level span `engine.recognize` with attributes:
+- **One** `engine.chunked_request` span per chunked request, distinct from `engine.recognize`. Attributes:
   - `dalston.chunked=true`
   - `dalston.chunk_count=N`
-  - `dalston.chunk_max_s=<effective_max_s>`
-  - `dalston.audio_duration_s=<total_s>` (full audio, not per-chunk sum)
-- Per-chunk work lives in child spans named `engine.chunk_recognize` with `dalston.chunk_index` and `dalston.chunk_duration_s` attributes.
-- `engine_recognize_seconds` / `engine_realtime_factor` metrics emit **once** at aggregate level with the total wall time and total audio duration.
+  - `dalston.chunk_max_s=<requested_max_s>`
+  - `dalston.chunk_max_s_final=<effective_max_s_after_oom_backoff>`
+  - `dalston.audio_duration_s=<total_s>` (full audio)
+- Per-chunk work lives in nested `engine.chunk_recognize` spans with `dalston.chunk_index`, `dalston.chunk_duration_s`, and `dalston.chunk_offset_s` attributes.
+- Each chunk's own `transcribe_audio()` call is free to emit its per-call `engine.recognize` span and per-call `engine_recognize_seconds` / `engine_realtime_factor` metrics — those are valuable at chunk granularity (one inference call per observation).
+- The chunked wrapper **does not** emit aggregate `engine_recognize_seconds` or `engine_realtime_factor`. Per-call emission from the inference layer is the single source of truth for both metrics.
 
 Non-chunked requests keep their current single-span, single-metric contract untouched.
 
@@ -496,10 +506,22 @@ At 1500s per chunk, peak ≈ 11 GB on L4 — half of the 22 GB budget. Leaves re
 Standard rolling deploy. No migration required — `get_max_audio_duration_s()`
 defaults to `None`, so existing engines are unaffected until they opt in.
 
-The Silero VAD model is loaded via `torch.hub` (pure PyTorch, no
-`onnxruntime` dependency). Every engine that imports `torch` already has
-what it needs. Docker images that bake the model set
-`DALSTON_SILERO_VAD_PATH` to skip the runtime download.
+**Silero VAD availability.** The base-engine `VadChunker` resolves the
+VAD model in this order: `silero_vad` pip package → `DALSTON_SILERO_VAD_ONNX`
+→ `DALSTON_SILERO_VAD_PATH` → `torch.hub`. For shipped images both of the
+first two paths are available:
+
+- `engines/stt-transcribe/nemo/requirements.txt` declares
+  `silero-vad>=5.1`, pip-installed at engine build time. Bundled JIT +
+  ONNX weights, no internet required. This is the preferred loader path.
+- `docker/Dockerfile.base-nemo` already bakes `/models/silero-vad/silero_vad.onnx`
+  and sets `DALSTON_SILERO_VAD_ONNX` to that path. Serves as the offline
+  fallback when the pip package is missing and also covers the realtime
+  SDK's existing VAD needs.
+
+Other engines that want to opt into chunking should follow the same
+pattern: add `silero-vad` to their engine requirements and inherit the
+baked ONNX file from whichever base image they extend.
 
 **NeMo defaults.** `DALSTON_NEMO_MAX_CHUNK_S=1500`. Override per
 deployment if the GPU tier changes (A100: try 3000+; T4: try 900). The
@@ -552,13 +574,17 @@ curl -F "file=@/tmp/original.mp3" -F "model=parakeet-tdt-0.6b-v3" \
   jq '.segments | length, .[-1].end'
 # Expected: ~2-3 chunks, segments[-1].end >= 2050 (full 34-min preserved)
 
-# 5. NeMo chunked request reports as a single engine.recognize span
+# 5. NeMo chunked request reports as a single engine.chunked_request span
 # Check Jaeger / OTLP backend for the chunked trace:
-#   span engine.recognize attributes:
+#   span engine.chunked_request attributes:
 #     dalston.chunked = true
 #     dalston.chunk_count = 2 or 3
+#     dalston.chunk_max_s = 1500
+#     dalston.chunk_max_s_final = 1500      (or lower if OOM backoff fired)
 #     dalston.audio_duration_s ≈ 2057
-# Plus child spans engine.chunk_recognize for each chunk.
+# Plus nested engine.chunk_recognize spans for each chunk, and the
+# inference layer's own engine.recognize spans + engine_recognize_seconds
+# metric observations at chunk granularity (one per chunk, not aggregate).
 ```
 
 ---
