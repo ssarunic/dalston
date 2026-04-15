@@ -51,10 +51,16 @@ RUN pip install --no-cache-dir --break-system-packages \
     "numpy>=1.22.0,<3.0.0" \
     "librosa>=0.10.1"
 
-# Silero VAD model — baked in to eliminate runtime download
+# Silero VAD — baked ONNX file (for realtime streaming VAD and the
+# VadChunker's onnxruntime fallback) AND the silero-vad Python package
+# (preferred loader path for the base-engine batch chunker in M86).
+# Keeping both means the batch chunker works fully offline whether the
+# worker reaches the pip package first or falls through to the ONNX
+# file via DALSTON_SILERO_VAD_ONNX.
 RUN mkdir -p /models/silero-vad \
     && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+RUN pip install --no-cache-dir --break-system-packages "silero-vad>=5.1"
 
 # Model cache
 ENV HF_HOME=/models/huggingface

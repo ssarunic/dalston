@@ -14,3 +14,9 @@ soundfile>=0.12.0
 
 # Required by Silero VAD (realtime adapter)
 torchaudio
+
+# Batch VAD chunking (M86) — bundles the Silero model so the base-engine
+# VadChunker runs fully offline once installed. Used by long-audio
+# requests that exceed DALSTON_NEMO_MAX_CHUNK_S. Small pure-Python
+# package (~8 MB) with the JIT and ONNX weights embedded.
+silero-vad>=5.1

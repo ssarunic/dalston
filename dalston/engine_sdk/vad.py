@@ -1,9 +1,8 @@
 """VAD-based audio chunker for long-audio transcription.
 
-Wraps Silero VAD (loaded via torch.hub or the ``silero_vad`` pip package)
-and exposes a chunk-oriented API to :class:`BaseBatchTranscribeEngine`
-so any engine can opt into long-audio chunking by overriding
-``get_max_audio_duration_s()``.
+Wraps Silero VAD and exposes a chunk-oriented API to
+:class:`BaseBatchTranscribeEngine` so any engine can opt into
+long-audio chunking by overriding ``get_max_audio_duration_s()``.
 
 Key invariants:
 
@@ -17,11 +16,22 @@ Key invariants:
 - The Silero VAD model is loaded lazily on first use and cached on the
   chunker instance. Subsequent calls reuse the loaded model.
 
-Environment variables:
+Model loader resolution order (first one that works wins):
 
-- ``DALSTON_SILERO_VAD_PATH``: local path to a prebuilt silero-vad model
-  (JIT-compiled ``.pt`` or a torch.hub-style directory). When set, the
-  chunker loads from disk and skips the torch.hub download path.
+1. ``silero_vad`` pip package (**preferred**). Bundles both JIT and
+   ONNX weights internally — fully offline once installed. This is
+   what shipped images should depend on; it's listed in the relevant
+   engine requirements.txt files.
+2. ``DALSTON_SILERO_VAD_ONNX``: path to a prebuilt silero-vad ONNX
+   file. Baked into images via ``docker/Dockerfile.base-nemo`` (and
+   the vLLM ASR image). Loaded with :mod:`onnxruntime` by wrapping
+   the raw windowed inference behind a ``get_speech_timestamps``
+   helper. No internet required, no pip package required.
+3. ``DALSTON_SILERO_VAD_PATH``: local path to a torch JIT ``.pt`` file
+   or a torch.hub-style directory. For workers that stash a custom
+   snapshot.
+4. ``torch.hub.load("snakers4/silero-vad")``: online fallback for dev
+   environments without the package or the baked-in model.
 """
 
 from __future__ import annotations
@@ -109,7 +119,15 @@ class VadChunker:
     # ------------------------------------------------------------------
 
     def _ensure_model(self) -> None:
-        """Lazy-load the Silero VAD model on first use."""
+        """Lazy-load the Silero VAD model on first use.
+
+        Resolution order (first success wins):
+
+        1. ``silero_vad`` pip package (offline, preferred)
+        2. ``DALSTON_SILERO_VAD_ONNX`` env var (offline, pre-baked)
+        3. ``DALSTON_SILERO_VAD_PATH`` env var (local torch JIT)
+        4. ``torch.hub.load`` (online fallback)
+        """
         if self._model is not None:
             return
 
@@ -117,71 +135,148 @@ class VadChunker:
             if self._model is not None:
                 return
 
-            try:
-                import torch
-            except ImportError as exc:
-                raise RuntimeError(
-                    "VadChunker requires torch. Install torch in the engine image."
-                ) from exc
+            if self._try_load_silero_package():
+                return
+            if self._try_load_onnx_env():
+                return
+            if self._try_load_torch_path_env():
+                return
+            self._load_from_torch_hub()
 
-            override_path = os.environ.get("DALSTON_SILERO_VAD_PATH")
-            if override_path:
-                model, utils = self._load_from_path(torch, override_path)
-            else:
-                try:
-                    model, utils = torch.hub.load(
-                        repo_or_dir="snakers4/silero-vad",
-                        model="silero_vad",
-                        force_reload=False,
-                        onnx=False,
-                        trust_repo=True,
-                    )
-                except Exception as hub_exc:
-                    try:
-                        from silero_vad import (
-                            get_speech_timestamps,
-                            load_silero_vad,
-                        )
-                    except ImportError as pkg_exc:
-                        raise RuntimeError(
-                            "Failed to load Silero VAD from torch.hub and the "
-                            "'silero_vad' package is not installed. Install it "
-                            "with: pip install silero-vad"
-                        ) from pkg_exc
-                    model = load_silero_vad()
-                    self._model = model
-                    self._get_speech_timestamps = get_speech_timestamps
-                    logger.info(
-                        "silero_vad_loaded",
-                        backend="silero_vad_pkg",
-                        hub_error=str(hub_exc)[:200],
-                    )
-                    return
+    def _try_load_silero_package(self) -> bool:
+        """Load via the bundled silero_vad pip package (offline)."""
+        try:
+            from silero_vad import get_speech_timestamps, load_silero_vad
+        except ImportError:
+            return False
+        try:
+            self._model = load_silero_vad()
+        except Exception as exc:
+            logger.warning("silero_vad_pkg_load_failed", error=str(exc)[:200])
+            return False
+        self._get_speech_timestamps = get_speech_timestamps
+        logger.info("silero_vad_loaded", backend="silero_vad_pkg")
+        return True
 
-            self._model = model
-            self._get_speech_timestamps = utils[0]
-            logger.info("silero_vad_loaded", backend="torch_hub")
+    def _try_load_onnx_env(self) -> bool:
+        """Load the pre-baked ONNX model via env var + onnxruntime.
 
-    def _load_from_path(self, torch: Any, path: str) -> tuple[Any, Any]:
-        """Load a cached Silero VAD snapshot from disk (env override)."""
-        p = Path(path)
+        Matches the image contract documented in
+        ``docker/Dockerfile.base-nemo`` which bakes
+        ``/models/silero-vad/silero_vad.onnx`` and sets
+        ``DALSTON_SILERO_VAD_ONNX`` to that path.
+
+        Because ``silero_vad.get_speech_timestamps`` works on torch
+        models, we wrap the raw onnxruntime session in a minimal
+        callable that exposes the same ``model(wav_batch, sr)``
+        surface, then run the package's ``get_speech_timestamps`` on
+        top. If the package is unavailable we fall through to the
+        custom offline scanner.
+        """
+        onnx_path = os.environ.get("DALSTON_SILERO_VAD_ONNX")
+        if not onnx_path:
+            return False
+        path = Path(onnx_path)
+        if not path.is_file():
+            logger.warning(
+                "silero_vad_onnx_env_missing",
+                path=onnx_path,
+                message="DALSTON_SILERO_VAD_ONNX does not point to a file",
+            )
+            return False
+        try:
+            import onnxruntime as ort
+        except ImportError as exc:
+            logger.warning(
+                "silero_vad_onnx_runtime_missing",
+                error=str(exc),
+                message="onnxruntime not installed; cannot use ONNX VAD path",
+            )
+            return False
+        try:
+            session = ort.InferenceSession(
+                str(path),
+                providers=["CPUExecutionProvider"],
+            )
+        except Exception as exc:
+            logger.warning("silero_vad_onnx_session_failed", error=str(exc)[:200])
+            return False
+        self._model = _OnnxSileroAdapter(session)
+        self._get_speech_timestamps = _get_speech_timestamps_offline
+        logger.info("silero_vad_loaded", backend="onnxruntime", path=str(path))
+        return True
+
+    def _try_load_torch_path_env(self) -> bool:
+        """Load a torch JIT file via ``DALSTON_SILERO_VAD_PATH``."""
+        raw = os.environ.get("DALSTON_SILERO_VAD_PATH")
+        if not raw:
+            return False
+        try:
+            import torch
+        except ImportError:
+            return False
+        p = Path(raw)
         if not p.exists():
-            raise RuntimeError(f"DALSTON_SILERO_VAD_PATH={path} does not exist")
+            logger.warning("silero_vad_torch_path_missing", path=raw)
+            return False
+        try:
+            if p.is_file():
+                model = torch.jit.load(str(p), map_location="cpu")
+                utils: tuple[Any, ...] = ()
+            else:
+                model, utils = torch.hub.load(
+                    repo_or_dir=str(p),
+                    source="local",
+                    model="silero_vad",
+                    onnx=False,
+                    trust_repo=True,
+                )
+        except Exception as exc:
+            logger.warning("silero_vad_torch_path_failed", error=str(exc)[:200])
+            return False
+        self._model = model
+        if utils:
+            self._get_speech_timestamps = utils[0]
+        else:
+            try:
+                from silero_vad import get_speech_timestamps
+            except ImportError:
+                logger.warning(
+                    "silero_vad_torch_path_missing_helper",
+                    message="Loaded torch JIT model but silero_vad package is "
+                    "missing for get_speech_timestamps",
+                )
+                return False
+            self._get_speech_timestamps = get_speech_timestamps
+        logger.info("silero_vad_loaded", backend="torch_path")
+        return True
 
-        if p.is_file():
-            model = torch.jit.load(str(p), map_location="cpu")
-            from silero_vad import get_speech_timestamps
-
-            return model, (get_speech_timestamps,)
-
-        model, utils = torch.hub.load(
-            repo_or_dir=str(p),
-            source="local",
-            model="silero_vad",
-            onnx=False,
-            trust_repo=True,
-        )
-        return model, utils
+    def _load_from_torch_hub(self) -> None:
+        """Final fallback: load via torch.hub (requires internet)."""
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "VadChunker requires torch. Install torch in the engine image."
+            ) from exc
+        try:
+            model, utils = torch.hub.load(
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                force_reload=False,
+                onnx=False,
+                trust_repo=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "VadChunker could not load Silero VAD. Install the 'silero-vad' "
+                "pip package, or set DALSTON_SILERO_VAD_ONNX to a baked model "
+                "file, or ensure network access to torch.hub. Last error: "
+                f"{exc}"
+            ) from exc
+        self._model = model
+        self._get_speech_timestamps = utils[0]
+        logger.info("silero_vad_loaded", backend="torch_hub")
 
     # ------------------------------------------------------------------
     # Speech detection
@@ -365,3 +460,130 @@ class VadChunker:
             wf.setsampwidth(2)
             wf.setframerate(_SAMPLE_RATE)
             wf.writeframes(pcm.tobytes())
+
+
+# ---------------------------------------------------------------------------
+# ONNX runtime fallback adapter
+#
+# When the pre-baked ``silero_vad.onnx`` is all that's available (per
+# ``docker/Dockerfile.base-nemo``), we run the model window-by-window
+# and reduce the frame-level speech probabilities to speech regions
+# with the same API shape that ``silero_vad.get_speech_timestamps``
+# provides: a list of ``{"start": sample, "end": sample}`` dicts.
+#
+# We implement a minimal standalone scanner here rather than calling
+# into the silero_vad package, because by definition this path is only
+# reached when the package is *not* importable.
+# ---------------------------------------------------------------------------
+
+
+_WINDOW_SAMPLES = 512  # Silero v5 16kHz frame size
+
+
+class _OnnxSileroAdapter:
+    """Adapt an ONNX Runtime session to the silero-vad model surface.
+
+    Exposes a ``__call__(wav, sr)`` that returns the per-frame speech
+    probability, mirroring the Python model's API well enough for
+    :func:`_get_speech_timestamps_offline` to scan windows.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros((1, 64), dtype=np.float32)
+
+    def reset_states(self) -> None:
+        self._state = np.zeros_like(self._state)
+        self._context = np.zeros_like(self._context)
+
+    def __call__(self, wav: np.ndarray, sr: int) -> float:
+        if wav.ndim == 1:
+            wav = wav.reshape(1, -1)
+        wav = wav.astype(np.float32, copy=False)
+        # The v5 model expects a concatenation of the rolling context
+        # (64 samples) and the new 512-sample frame.
+        frame = np.concatenate([self._context, wav], axis=1)
+        ort_inputs = {
+            "input": frame,
+            "state": self._state,
+            "sr": np.array(sr, dtype=np.int64),
+        }
+        out, new_state = self._session.run(None, ort_inputs)
+        self._state = new_state
+        self._context = wav[:, -64:]
+        return float(out[0][0])
+
+
+def _get_speech_timestamps_offline(
+    audio: Any,
+    model: Any,
+    *,
+    threshold: float = 0.5,
+    sampling_rate: int = _SAMPLE_RATE,
+    min_speech_duration_ms: int = 250,
+    min_silence_duration_ms: int = 300,
+    return_seconds: bool = False,
+    **_: Any,
+) -> list[dict[str, int]]:
+    """Minimal stand-in for ``silero_vad.get_speech_timestamps``.
+
+    Scans ``audio`` (torch tensor or numpy array) in 512-sample windows,
+    queries ``model(window, sampling_rate)`` to get a speech probability
+    per frame, and merges frames into speech regions subject to the
+    duration/silence thresholds. Used only when the silero_vad pip
+    package isn't importable and we're falling back to an onnxruntime
+    session loaded from ``DALSTON_SILERO_VAD_ONNX``.
+    """
+    # Accept either a torch tensor or a numpy array.
+    if hasattr(audio, "detach"):
+        audio_np = audio.detach().cpu().numpy()
+    else:
+        audio_np = np.asarray(audio)
+    if audio_np.ndim > 1:
+        audio_np = audio_np.reshape(-1)
+    audio_np = audio_np.astype(np.float32, copy=False)
+
+    if hasattr(model, "reset_states"):
+        model.reset_states()
+
+    total = audio_np.size
+    min_speech_samples = int(min_speech_duration_ms * sampling_rate / 1000)
+    min_silence_samples = int(min_silence_duration_ms * sampling_rate / 1000)
+
+    probs: list[float] = []
+    for start in range(0, total - _WINDOW_SAMPLES + 1, _WINDOW_SAMPLES):
+        window = audio_np[start : start + _WINDOW_SAMPLES]
+        probs.append(model(window, sampling_rate))
+
+    regions: list[dict[str, int]] = []
+    in_speech = False
+    region_start = 0
+    silence_run = 0
+    for i, p in enumerate(probs):
+        frame_start = i * _WINDOW_SAMPLES
+        if p >= threshold:
+            if not in_speech:
+                in_speech = True
+                region_start = frame_start
+            silence_run = 0
+        elif in_speech:
+            silence_run += _WINDOW_SAMPLES
+            if silence_run >= min_silence_samples:
+                region_end = frame_start - silence_run + _WINDOW_SAMPLES
+                if region_end - region_start >= min_speech_samples:
+                    regions.append({"start": region_start, "end": region_end})
+                in_speech = False
+                silence_run = 0
+
+    if in_speech:
+        region_end = len(probs) * _WINDOW_SAMPLES
+        if region_end - region_start >= min_speech_samples:
+            regions.append({"start": region_start, "end": region_end})
+
+    if return_seconds:
+        regions = [
+            {"start": r["start"] / sampling_rate, "end": r["end"] / sampling_rate}
+            for r in regions
+        ]
+    return regions

@@ -202,3 +202,122 @@ class TestAudioChunkDataclass:
     def test_speech_segment_duration(self) -> None:
         seg = SpeechSegment(start=2.0, end=7.5)
         assert seg.duration == pytest.approx(5.5)
+
+
+class TestLoaderResolutionOrder:
+    """Verify the loader prefers silero_vad pkg > ONNX env > torch path > hub.
+
+    This exercises the priority order without actually loading any model —
+    each _try_* hook is stubbed to return True or False to simulate its
+    availability and assert the method dispatches correctly.
+    """
+
+    def _build(self) -> VadChunker:
+        return VadChunker(max_chunk_duration_s=60.0)
+
+    def test_prefers_silero_package_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        chunker = self._build()
+        calls: list[str] = []
+
+        def _pkg() -> bool:
+            calls.append("pkg")
+            return True
+
+        def _onnx() -> bool:
+            calls.append("onnx")
+            return True
+
+        def _path() -> bool:
+            calls.append("path")
+            return True
+
+        def _hub() -> None:
+            calls.append("hub")
+
+        monkeypatch.setattr(chunker, "_try_load_silero_package", _pkg)
+        monkeypatch.setattr(chunker, "_try_load_onnx_env", _onnx)
+        monkeypatch.setattr(chunker, "_try_load_torch_path_env", _path)
+        monkeypatch.setattr(chunker, "_load_from_torch_hub", _hub)
+
+        chunker._ensure_model()
+
+        assert calls == ["pkg"]  # stop at first success
+
+    def test_falls_through_to_onnx_when_package_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        chunker = self._build()
+        calls: list[str] = []
+
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_silero_package",
+            lambda: (calls.append("pkg"), False)[1],
+        )
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_onnx_env",
+            lambda: (calls.append("onnx"), True)[1],
+        )
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_torch_path_env",
+            lambda: (calls.append("path"), True)[1],
+        )
+        monkeypatch.setattr(
+            chunker,
+            "_load_from_torch_hub",
+            lambda: calls.append("hub"),
+        )
+
+        chunker._ensure_model()
+
+        assert calls == ["pkg", "onnx"]
+
+    def test_torch_hub_is_last_resort(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        chunker = self._build()
+        calls: list[str] = []
+
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_silero_package",
+            lambda: (calls.append("pkg"), False)[1],
+        )
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_onnx_env",
+            lambda: (calls.append("onnx"), False)[1],
+        )
+        monkeypatch.setattr(
+            chunker,
+            "_try_load_torch_path_env",
+            lambda: (calls.append("path"), False)[1],
+        )
+
+        def _hub() -> None:
+            calls.append("hub")
+            chunker._model = object()  # mark as loaded
+
+        monkeypatch.setattr(chunker, "_load_from_torch_hub", _hub)
+
+        chunker._ensure_model()
+
+        assert calls == ["pkg", "onnx", "path", "hub"]
+
+    def test_onnx_env_missing_file_logs_and_returns_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        chunker = self._build()
+        monkeypatch.setenv(
+            "DALSTON_SILERO_VAD_ONNX", str(tmp_path / "does-not-exist.onnx")
+        )
+        assert chunker._try_load_onnx_env() is False
+
+    def test_onnx_env_unset_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        chunker = self._build()
+        monkeypatch.delenv("DALSTON_SILERO_VAD_ONNX", raising=False)
+        assert chunker._try_load_onnx_env() is False
