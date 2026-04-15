@@ -263,6 +263,7 @@ Most transcription and diarization engines require NVIDIA GPU with CUDA. CPU-onl
 - **Multi-stage**: Integrated pipeline (e.g., whisperx-full does transcribe+align+diarize)
 - **Batch engines**: Redis queue polling, file I/O
 - **Real-time engines**: WebSocket servers, streaming audio processing
+- **Duration-limited engines**: Override `get_max_audio_duration_s()` in your batch engine class to opt into base-engine VAD chunking. Used by engines with per-request audio caps (hard model limits, GPU VRAM ceilings). Base class auto-chunks via Silero VAD, runs OOM backoff, and emits a single aggregate `engine.recognize` span per chunked request. See `docs/plan/milestones/M86-shared-vad-chunking.md`.
 
 ### Data Flow
 

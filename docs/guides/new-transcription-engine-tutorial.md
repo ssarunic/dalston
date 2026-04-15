@@ -154,6 +154,30 @@ Notes:
 1. Transcribe engines usually return no `produced_artifacts` (payload-only output).
 2. Use `ctx` for metadata/logging context only.
 
+### 3.1 Handling audio duration limits (optional)
+
+If your engine has a per-request audio duration ceiling — either a hard
+model cap (audio LLMs like Gemma 4 E4B with a 30s encoder limit) or a
+VRAM-driven soft ceiling (e.g. NeMo Parakeet on L4, which linearly grows
+activation beyond ~100 minutes) — override
+`get_max_audio_duration_s(task_request)` in your engine class. When the
+input audio exceeds that limit, the base engine auto-chunks via Silero
+VAD, runs `transcribe_audio()` per chunk, and merges results
+transparently. The chunked path also has OOM backoff and aggregate
+telemetry, so you get safety and observability for free.
+
+```python
+class MyAsrEngine(BaseBatchTranscribeEngine):
+    def get_max_audio_duration_s(self, task_request):
+        return 1500  # per-chunk ceiling in seconds
+```
+
+Return `None` (or omit the override — that's the default) for engines
+that handle any length natively (HF-ASR, faster-whisper, ONNX, and the
+majority of transcribe engines). See
+[M86](../plan/milestones/M86-shared-vad-chunking.md) for the full
+chunking contract.
+
 ## 4. Write Tests First (Recommended Minimal Set)
 
 Create a focused unit test for your new engine:

@@ -63,7 +63,6 @@ Audio preprocessing and analysis.
 |-----------|-------------|-----|
 | `audio-prepare` | Analyze, convert, resample audio to 16kHz/16-bit | No |
 | `channel-splitter` | Split multichannel into separate mono files | No |
-| `vad-chunker` | Split long audio at silence points using VAD | No |
 
 ### TRANSCRIBE
 
@@ -262,10 +261,22 @@ the source of resource hints.
 | Field | Type | Description |
 |-------|------|-------------|
 | `languages` | list/null | Language codes, or `null` for all |
-| `max_audio_duration` | int | Max seconds |
+| `max_audio_duration` | int | Advertised max seconds (see runtime hook below) |
 | `streaming` | bool | Supports streaming? |
 | `word_timestamps` | bool | Produces accurate word-level timestamps? |
 | `includes_diarization` | bool | Output includes speaker labels? |
+
+##### Runtime Duration Hook
+
+`capabilities.max_audio_duration` is *advertised* to clients for display
+and routing. For engines whose actual handleable duration depends on
+runtime factors (GPU VRAM, per-model limits, co-located replicas), the
+engine implementation overrides
+`BaseBatchTranscribeEngine.get_max_audio_duration_s(task_request)`. When
+this returns a non-`None` value and the input audio exceeds it, the base
+engine auto-chunks via Silero VAD and merges results transparently. See
+[M86](../../plan/milestones/M86-shared-vad-chunking.md) for the full
+chunking contract, OOM backoff, and aggregate telemetry rules.
 
 #### hf_compat (Optional)
 
