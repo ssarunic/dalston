@@ -6,12 +6,14 @@ No Terraform required — just the AWS CLI.
 ## Prerequisites
 
 1. **AWS CLI** configured with credentials:
+
    ```bash
    aws sts get-caller-identity
    # Should print your account ID. If not: aws configure
    ```
 
 2. **The script** lives at `infra/scripts/dalston-aws`. Make it easy to run:
+
    ```bash
    # Option A: symlink to your PATH
    ln -s $(pwd)/infra/scripts/dalston-aws /usr/local/bin/dalston-aws
@@ -72,6 +74,7 @@ dalston-aws setup
 ```
 
 Output:
+
 ```
 [dalston-aws] Setting up Dalston on AWS
 [dalston-aws]   Region:   eu-west-2
@@ -271,33 +274,28 @@ sudo systemctl status dalston-tailscale-serve
 tailscale serve status
 ```
 
-### Persistence limitation: cert re-issue on spot rotation
+### Cert lifecycle
 
-`tailscale serve` keeps its config and Let's Encrypt cert under
-`/var/lib/tailscale/`, which lives on the **ephemeral root volume** — not
-the `/data` EBS volume. When a spot instance is replaced, the new node
-reclaims the `dalston-control-plane` hostname and requests a **new** cert
-from Let's Encrypt on first boot.
+The control plane runs on-demand, so the routine `dalston-aws down`/`up`
+cycle is `stop_instances` / `start_instances` — the instance (including
+the ephemeral root volume holding `/var/lib/tailscale/`) is preserved,
+and the Let's Encrypt cert survives trivially. tailscaled auto-renews
+it every ~60 days in place.
 
-For typical usage this is fine. Let's Encrypt's duplicate-certificate rate
-limit is 5 identical certs per 168 hours per exact hostname, and normal spot
-rotation (minutes to hours of downtime per week at most) stays well below
-it. You'd have to rotate the control plane more than 5 times a week to hit
-the limit.
+Instance replacement only happens in uncommon situations: AMI upgrades,
+force-termination by AWS, or accidental console termination. When
+that happens, the next launch boots a fresh root volume, tailscaled
+starts with empty state, and a new Let's Encrypt cert is issued — one
+additional entry in the Certificate Transparency log, no rate-limit
+impact at this frequency. The `/data` EBS volume (postgres, models,
+job artifacts) is separately preserved across instance replacement
+because `dalston-aws` re-attaches the existing volume rather than
+creating a new one; see [Day-to-day operations](#day-to-day-operations)
+for the `launch`/`up`/`terminate` semantics.
 
-If you rotate aggressively (e.g. chaos testing, frequent redeploys), the
-symptoms are:
-
-- `tailscale serve status` shows the config applied.
-- Browsers get a cert error, or the TLS handshake hangs.
-- `/var/log/user-data.log` (or `journalctl -u dalston-tailscale-serve`)
-  shows Let's Encrypt rate-limit errors.
-
-Workarounds: either wait for the weekly window to roll over, or bind-mount
-`/var/lib/tailscale/` onto the persistent `/data` EBS volume so cert state
-survives rotation. The bind mount is **not** currently automated by
-`dalston-aws`; if you need it, add it manually on the instance after first
-boot and restart `tailscaled`.
+GPU workers don't run `tailscale serve`, don't get HTTPS, and don't
+have a persistent `/data` volume — their tailnet identity is ephemeral
+by design, which is the right choice for workers rotated on spot.
 
 ### Other notes
 
@@ -314,6 +312,51 @@ boot and restart `tailscaled`.
 - **If you later front this with an ALB** (for non-tailnet access), bump the
   idle timeout from the default 60s — long-lived WebSocket sessions will
   otherwise be killed mid-stream.
+
+### Summary: choosing the right access method
+
+The Tailscale+HTTPS setup above is the right default when your control plane
+is long-lived and you access it from any device on your tailnet. If your
+usage looks different, here is a quick decision guide:
+
+- **Trying Dalston locally on your own laptop** → open
+  `http://localhost:8000`. Browsers grant `localhost` the secure-context
+  exemption, so in-browser microphone capture works with no cert at all.
+  See [self-hosted-deployment-tutorial.md](self-hosted-deployment-tutorial.md#7-access-services).
+- **Running Dalston on a remote box, browsing from a different machine**
+  → SSH-tunnel the gateway port back to your laptop
+  (`ssh -L 8000:localhost:8000 you@remote-box`) and open
+  `http://localhost:8000`. Same loopback exemption, no certs, no Tailscale.
+  This is the recommended path for trial users who run `make dev` on a
+  homelab box or cloud VM.
+- **Deploying to AWS via `dalston-aws`** → the default setup in this
+  section is the right path. The only operator action is the one-time
+  tailnet admin toggle. See [Cert lifecycle](#cert-lifecycle) for what
+  happens on the rare occasions the instance is rebuilt.
+- **Zero Certificate Transparency exposure required** → run a private CA
+  (e.g. `step-ca`), issue your own cert, and install its root on every
+  device that connects. Significantly more setup and every new device
+  needs the trust anchor; only worth it if CT leakage is a specific
+  concern in your threat model.
+
+### What Certificate Transparency publishes
+
+Every Let's Encrypt cert obtained by `tailscale serve` is submitted to
+public, append-only [Certificate Transparency logs](https://certificate.transparency.dev/)
+and becomes permanently searchable (e.g. via [crt.sh](https://crt.sh/)).
+This leaks:
+
+- Your tailnet suffix (the randomized `tailXXXXXX` string Tailscale uses
+  to obfuscate your organization).
+- Your machine naming scheme and which hosts have enabled HTTPS.
+- A historical record of cert issuance — one CT entry per issuance.
+
+It does **not** leak any IPs, ports, or content, and it does **not** make
+the control plane publicly reachable — `tailscale serve` still binds to
+`tailscale0` only. The risk is metadata/recon, not network exposure. For
+generic names like `dalston-control-plane` the exposure is minimal; avoid
+putting tenant, customer, or environment-identifying strings in machine
+names.
 
 ---
 
@@ -430,6 +473,7 @@ docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 ### Instance won't start
 
 Check if your region has the instance type available:
+
 ```bash
 aws ec2 describe-instance-type-offerings \
   --filters Name=instance-type,Values=g5.xlarge \
@@ -441,6 +485,7 @@ aws ec2 describe-instance-type-offerings \
 
 AWS stops spot instances (doesn't terminate) when it needs capacity back.
 Just start it again:
+
 ```bash
 dalston-aws up
 ```

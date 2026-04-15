@@ -47,6 +47,7 @@ AUDIT_LOG = STATE_DIR / "audit.log"
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 NAME_PREFIX = "dalston"
 DATA_VOLUME_SIZE = 50
+DATA_DEVICE_NAME = "/dev/xvdf"
 ROOT_VOLUME_SIZE = 100  # 100 GB — GPU instances without NVMe need space for model cache
 REPO_URL = "https://github.com/ssarunic/dalston.git"
 REPO_BRANCH = "main"
@@ -937,7 +938,7 @@ echo "Starting Dalston bootstrap at $(date)"
 
     # Part 2: variables (f-string interpolation)
     variables = f"""\
-DATA_DEVICE="/dev/xvdf"
+DATA_DEVICE="{DATA_DEVICE_NAME}"
 DATA_MOUNT="/data"
 S3_BUCKET="{s3_bucket}"
 AWS_REGION="{region}"
@@ -1000,9 +1001,14 @@ fi
 
 # Wait for data volume
 echo "Waiting for data volume..."
-while [ ! -e "$DATA_DEVICE" ]; do
+for i in $(seq 1 60); do
+  [ -e "$DATA_DEVICE" ] && break
   sleep 5
 done
+if [ ! -e "$DATA_DEVICE" ]; then
+  echo "ERROR: data volume $DATA_DEVICE did not appear within 5 minutes" >&2
+  exit 1
+fi
 
 # Format if needed
 if ! blkid "$DATA_DEVICE" | grep -q ext4; then
@@ -1464,8 +1470,15 @@ def launch_instance(
     key_name: str,
     instance_profile: str,
     ami_id: str | None = None,
+    allowed_azs: list[str] | None = None,
 ) -> str:
     """Launch an EC2 instance, trying each AZ in the default VPC.
+
+    If ``allowed_azs`` is set, only those AZs are tried (still in
+    cheapest-spot-first order). Used to pin a launch to the AZ of an
+    existing ``/data`` EBS volume that the caller intends to re-attach —
+    EBS is AZ-locked so the instance must come up in the same AZ as the
+    volume or the persisted state is unreachable.
 
     Returns the instance ID on success or raises on failure.
     """
@@ -1480,6 +1493,16 @@ def launch_instance(
     ]
     if not subnet_list:
         die(f"No subnets found in VPC {vpc_id}")
+
+    if allowed_azs is not None:
+        subnet_list = [s for s in subnet_list if s[1] in allowed_azs]
+        if not subnet_list:
+            die(
+                f"No subnets in default VPC {vpc_id} match allowed AZs "
+                f"{allowed_azs}. Cannot launch — an existing /data volume "
+                f"is pinned to one of these AZs and we can't re-attach "
+                f"it from another AZ."
+            )
 
     # Sort AZs by current spot price (cheapest first)
     if use_spot:
@@ -1833,9 +1856,73 @@ def create_and_attach_data_volume(
     ec2.attach_volume(
         VolumeId=vol_id,
         InstanceId=instance_id,
-        Device="/dev/xvdf",
+        Device=DATA_DEVICE_NAME,
     )
 
+    return vol_id
+
+
+def _reattach_or_create_data_volume(
+    region: str,
+    instance_id: str,
+    existing_volume: dict | None,
+    size_gb: int,
+) -> str:
+    """Re-attach an existing ``/data`` volume or create a fresh one.
+
+    ``existing_volume`` is the raw ``describe_volumes`` dict the caller
+    already fetched (to pin the launch AZ). Passing it here avoids a
+    second round-trip. ``None`` means "no volume recorded, create fresh."
+
+    The ``/data`` volume is attached via ``attach_volume`` rather than a
+    launch-time block-device mapping, so it auto-detaches when the
+    previous instance terminates and lingers in ``available`` state with
+    all data intact. Reusing it preserves postgres, redis, the model
+    cache, and ``/data/tailscale`` (which holds the Let's Encrypt cert
+    used by ``tailscale serve`` on the control plane).
+    """
+    if existing_volume is None:
+        return create_and_attach_data_volume(region, instance_id, size_gb)
+
+    ec2 = ec2_client(region)
+    vol_id = existing_volume["VolumeId"]
+    vol_state = existing_volume["State"]
+    vol_az = existing_volume["AvailabilityZone"]
+
+    if vol_state == "in-use":
+        log(f"Volume {vol_id} still in-use by previous instance; waiting for detach...")
+        waiter = ec2.get_waiter("volume_available")
+        try:
+            waiter.wait(
+                VolumeIds=[vol_id],
+                WaiterConfig={"Delay": 10, "MaxAttempts": 60},
+            )
+        except Exception as e:
+            # Do NOT silently fall back to creating a fresh volume — that
+            # would orphan the persisted state (cert, postgres, models)
+            # while still leaving the "stuck" volume lingering in the AWS
+            # account. Force the operator to investigate.
+            die(
+                f"Volume {vol_id} did not detach within 10 minutes ({e}). "
+                f"The previous instance may be stuck in 'shutting-down'. "
+                f"Investigate via the EC2 console; once the volume is "
+                f"'available', re-run 'dalston-aws launch control-plane'."
+            )
+    elif vol_state != "available":
+        die(
+            f"Data volume {vol_id} is in state {vol_state!r}, not "
+            f"reusable. Investigate via the EC2 console; once the volume "
+            f"is 'available', re-run 'dalston-aws launch control-plane'. "
+            f"If the volume is unrecoverable, run 'dalston-aws terminate' "
+            f"to drop it from state and start fresh."
+        )
+
+    log(f"Re-attaching existing data volume {vol_id} ({vol_az})...")
+    ec2.attach_volume(
+        VolumeId=vol_id,
+        InstanceId=instance_id,
+        Device=DATA_DEVICE_NAME,
+    )
     return vol_id
 
 
@@ -2005,6 +2092,32 @@ def _launch_control_plane(
         else f"{NAME_PREFIX}-server"
     )
 
+    # Pin the launch to the existing data volume's AZ — EBS is AZ-locked
+    # and an instance in a different AZ cannot re-attach the persisted
+    # state (postgres, models, tailscale cert).
+    existing_volume: dict | None = None
+    allowed_azs: list[str] | None = None
+    if st.data_volume_id:
+        try:
+            existing_volume = ec2_client(st.region).describe_volumes(
+                VolumeIds=[st.data_volume_id]
+            )["Volumes"][0]
+            allowed_azs = [existing_volume["AvailabilityZone"]]
+            log(
+                f"Pinning launch to {allowed_azs[0]} to re-attach existing "
+                f"data volume {st.data_volume_id}."
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "InvalidVolume.NotFound":
+                warn(
+                    f"Recorded data volume {st.data_volume_id} not found "
+                    f"in AWS. Will create a fresh volume — any persisted "
+                    f"state is already lost."
+                )
+                st.data_volume_id = ""
+            else:
+                raise
+
     obs_suffix = " with observability" if observability else ""
     log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}...")
     ud = generate_user_data(
@@ -2025,10 +2138,11 @@ def _launch_control_plane(
         cp.spot,
         st.key_name,
         st.instance_profile,
+        allowed_azs=allowed_azs,
     )
     wait_instance_running(st.region, st.instance_id)
-    st.data_volume_id = create_and_attach_data_volume(
-        st.region, st.instance_id, cp.data_volume_gb
+    st.data_volume_id = _reattach_or_create_data_volume(
+        st.region, st.instance_id, existing_volume, cp.data_volume_gb
     )
     save_state(st)
 
@@ -2383,8 +2497,14 @@ def cmd_up(args: argparse.Namespace) -> None:
     cp_state = get_instance_state(st.region, st.instance_id)
     if cp_state == "terminated":
         warn(f"Control plane {st.instance_id} was terminated.")
-        _terminate_control_plane(st)
-        die("Run 'dalston-aws launch control-plane' to launch a new one.")
+        # Keep `/data` so the next launch can re-attach it.
+        st.instance_id = ""
+        save_state(st)
+        die(
+            "Run 'dalston-aws launch control-plane' to launch a "
+            "replacement. The existing /data volume will be re-attached "
+            "automatically."
+        )
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
 
     for w in st.gpu_workers or []:

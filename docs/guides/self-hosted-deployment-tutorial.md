@@ -238,6 +238,40 @@ asyncio.run(create_key())
 | Web Console | <http://localhost:8000> | Management UI (login with API key) |
 | MinIO Console | <http://localhost:9001> | Object storage admin |
 
+### Browser microphone access (in-browser recording)
+
+The web console can record audio directly from your microphone, but browsers
+only grant microphone access in a "secure context" — i.e. over HTTPS, or
+over plain HTTP when the origin is `localhost` / `127.0.0.1`. Depending on
+where you are running Dalston, one of these paths applies:
+
+- **Running `make dev` on your own laptop** → open `http://localhost:8000`.
+  Loopback is always a secure context, so microphone capture works with no
+  certificate and no extra setup. This is the simplest path and covers
+  most trial usage.
+- **Running Dalston on a remote machine (homelab, cloud VM, dev server)
+  and browsing from a different device** → SSH-tunnel the gateway port
+  back to your local machine:
+
+  ```bash
+  ssh -L 8000:localhost:8000 you@remote-host
+  ```
+
+  Then open `http://localhost:8000` in your **local** browser. Because the
+  browser sees `localhost`, the loopback secure-context exemption applies
+  and microphone capture works — no certificates, no browser warnings,
+  no new tooling.
+- **Deploying to AWS via `dalston-aws`** → the control plane serves the web
+  console over real HTTPS via Tailscale automatically. See
+  [aws-deploy.md → Accessing the control plane over HTTPS](aws-deploy.md#accessing-the-control-plane-over-https).
+- **Deploying to your own server with a public domain** → terminate TLS
+  with a reverse proxy (Caddy's automatic HTTPS is the easiest option).
+  See [section 10 below](#10-setup-reverse-proxy-production).
+
+API and CLI clients (the Dalston CLI, the Python SDK, `curl`) do not care
+about secure context — they work fine over plain HTTP regardless of
+origin. The microphone restriction only applies to the in-browser console.
+
 ## 8. Test Transcription
 
 ### Submit a test job
