@@ -4,17 +4,16 @@ Provides speech detection and endpoint detection for streaming audio,
 determining when to trigger ASR transcription.
 
 Uses ONNX Runtime for Silero VAD inference, eliminating the PyTorch
-dependency. The ONNX model is downloaded on first use and cached locally.
+dependency. The low-level ONNX session wrapper lives in
+``dalston.engine_sdk.silero_vad`` and is shared with the batch VAD
+chunker.
 """
 
 from __future__ import annotations
 
-import os
-import urllib.request
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import structlog
@@ -25,128 +24,14 @@ from dalston.common.audio_defaults import (
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
 )
+from dalston.engine_sdk.silero_vad import SileroOnnxModel, load_silero_session
 
 logger = structlog.get_logger()
 
-# Pinned Silero VAD ONNX model URL (v5.1.2) for reproducible builds.
-_SILERO_VAD_ONNX_URL = (
-    "https://github.com/snakers4/silero-vad/raw/v5.1.2"
-    "/src/silero_vad/data/silero_vad.onnx"
-)
-
-# Cache directory for the downloaded model file.
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "dalston" / "silero-vad"
-
-
-def _get_model_path() -> Path:
-    """Resolve and ensure the Silero VAD ONNX model is available.
-
-    Checks (in order):
-    1. ``DALSTON_SILERO_VAD_ONNX`` env var pointing to a local file.
-    2. Cached download under ``~/.cache/dalston/silero-vad/silero_vad.onnx``.
-    3. Downloads from GitHub if not cached.
-
-    Returns:
-        Path to the ONNX model file.
-
-    Raises:
-        RuntimeError: If the model cannot be obtained.
-    """
-    # Allow explicit override for containerised / air-gapped deployments.
-    env_path = os.environ.get("DALSTON_SILERO_VAD_ONNX")
-    if env_path:
-        p = Path(env_path)
-        if p.is_file():
-            return p
-        raise RuntimeError(
-            f"DALSTON_SILERO_VAD_ONNX={env_path} does not exist or is not a file"
-        )
-
-    cache_dir = Path(os.environ.get("DALSTON_MODEL_CACHE", _DEFAULT_CACHE_DIR))
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    model_path = cache_dir / "silero_vad.onnx"
-
-    if model_path.is_file():
-        return model_path
-
-    logger.info("downloading_silero_vad_onnx", url=_SILERO_VAD_ONNX_URL)
-    try:
-        urllib.request.urlretrieve(_SILERO_VAD_ONNX_URL, str(model_path))
-    except Exception as exc:
-        # Clean up partial download.
-        model_path.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"Failed to download Silero VAD ONNX model from {_SILERO_VAD_ONNX_URL}: {exc}"
-        ) from exc
-
-    logger.info("silero_vad_onnx_downloaded", path=str(model_path))
-    return model_path
-
-
-class _SileroOnnxModel:
-    """Thin wrapper around the Silero VAD v5 ONNX model.
-
-    Manages the ONNX Runtime session and the recurrent hidden state /
-    context window that must be carried across successive chunk calls.
-    """
-
-    def __init__(self, session: Any) -> None:
-        self._session = session
-        self._state: np.ndarray = np.zeros((2, 1, 128), dtype=np.float32)
-        self._context: np.ndarray = np.zeros(0, dtype=np.float32)
-        self._last_sr: int = 0
-        self._last_batch_size: int = 0
-
-    # -- public API used by VADProcessor ------------------------------------
-
-    def __call__(self, audio: np.ndarray, sample_rate: int) -> float:
-        """Return speech probability for a single audio window.
-
-        Args:
-            audio: 1-D float32 array of ``window_size`` samples
-                   (512 @ 16 kHz, 256 @ 8 kHz).
-            sample_rate: 16000 or 8000.
-
-        Returns:
-            Speech probability in [0.0, 1.0].
-        """
-        if audio.ndim == 1:
-            audio = audio.reshape(1, -1)
-
-        batch_size = audio.shape[0]
-        context_size = 64 if sample_rate == 16000 else 32
-
-        # Reset internal state when sample rate or batch size changes.
-        if sample_rate != self._last_sr or batch_size != self._last_batch_size:
-            self.reset_states(batch_size)
-            self._last_sr = sample_rate
-            self._last_batch_size = batch_size
-
-        # Initialise context on the very first call.
-        if self._context.size == 0:
-            self._context = np.zeros((batch_size, context_size), dtype=np.float32)
-
-        # Prepend context from the previous chunk (Silero v5 requirement).
-        x = np.concatenate([self._context, audio.astype(np.float32)], axis=1)
-
-        ort_inputs = {
-            "input": x,
-            "state": self._state,
-            "sr": np.array(sample_rate, dtype=np.int64),
-        }
-
-        out, state = self._session.run(None, ort_inputs)
-        self._state = state
-        self._context = x[..., -context_size:]
-
-        return float(out[0][0])
-
-    def reset_states(self, batch_size: int = 1) -> None:
-        """Reset recurrent state for a new audio stream."""
-        self._state = np.zeros((2, batch_size, 128), dtype=np.float32)
-        self._context = np.zeros(0, dtype=np.float32)
-        self._last_sr = 0
-        self._last_batch_size = 0
+# Legacy aliases — the class + loader now live in engine_sdk.silero_vad.
+# Realtime code historically referenced ``_SileroOnnxModel``; keeping the
+# alias avoids churn for external callers that may have imported it.
+_SileroOnnxModel = SileroOnnxModel
 
 
 @dataclass
@@ -245,24 +130,13 @@ class VADProcessor:
             return
 
         try:
-            import onnxruntime as ort
-        except ImportError as e:
-            raise RuntimeError(
-                "onnxruntime is required for Silero VAD but not installed. "
-                "Install with: pip install onnxruntime (CPU) or onnxruntime-gpu (GPU)"
-            ) from e
-
-        try:
-            model_path = _get_model_path()
-            session = ort.InferenceSession(
-                str(model_path),
-                providers=["CPUExecutionProvider"],
-            )
-            self._model = _SileroOnnxModel(session)
-            logger.info("silero_vad_loaded", backend="onnxruntime")
-        except Exception as e:
+            session = load_silero_session()
+        except RuntimeError as e:
             logger.error("silero_vad_load_failed", error=str(e))
-            raise RuntimeError(f"Failed to load Silero VAD model: {e}") from e
+            raise
+
+        self._model = SileroOnnxModel(session)
+        logger.info("silero_vad_loaded", backend="onnxruntime")
 
     def _get_speech_prob(self, audio: np.ndarray) -> float:
         """Get speech probability for audio chunk.

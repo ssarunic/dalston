@@ -50,6 +50,11 @@ from dalston.common.audio_defaults import (
     DEFAULT_VAD_THRESHOLD,
 )
 from dalston.engine_sdk.audio import write_wav_file
+from dalston.engine_sdk.silero_vad import (
+    WINDOW_SAMPLES_16K,
+    SileroOnnxModel,
+    load_silero_session,
+)
 
 logger = structlog.get_logger()
 
@@ -160,14 +165,9 @@ class VadChunker:
         Matches the image contract documented in
         ``docker/Dockerfile.base-nemo`` which bakes
         ``/models/silero-vad/silero_vad.onnx`` and sets
-        ``DALSTON_SILERO_VAD_ONNX`` to that path.
-
-        Because ``silero_vad.get_speech_timestamps`` works on torch
-        models, we wrap the raw onnxruntime session in a minimal
-        callable that exposes the same ``model(wav_batch, sr)``
-        surface, then run the package's ``get_speech_timestamps`` on
-        top. If the package is unavailable we fall through to the
-        custom offline scanner.
+        ``DALSTON_SILERO_VAD_ONNX`` to that path. Reuses the shared
+        :class:`SileroOnnxModel` from :mod:`dalston.engine_sdk.silero_vad`
+        so batch and realtime paths run identical inference code.
         """
         onnx_path = os.environ.get("DALSTON_SILERO_VAD_ONNX")
         if not onnx_path:
@@ -181,23 +181,13 @@ class VadChunker:
             )
             return False
         try:
-            import onnxruntime as ort
-        except ImportError as exc:
-            logger.warning(
-                "silero_vad_onnx_runtime_missing",
-                error=str(exc),
-                message="onnxruntime not installed; cannot use ONNX VAD path",
-            )
-            return False
-        try:
-            session = ort.InferenceSession(
-                str(path),
-                providers=["CPUExecutionProvider"],
-            )
-        except Exception as exc:
+            session = load_silero_session(path)
+        except RuntimeError as exc:
             logger.warning("silero_vad_onnx_session_failed", error=str(exc)[:200])
             return False
-        self._model = _OnnxSileroAdapter(session)
+        model = SileroOnnxModel(session)
+        model.reset_states(batch_size=1)
+        self._model = model
         self._get_speech_timestamps = _get_speech_timestamps_offline
         logger.info("silero_vad_loaded", backend="onnxruntime", path=str(path))
         return True
@@ -459,56 +449,19 @@ class VadChunker:
 
 
 # ---------------------------------------------------------------------------
-# ONNX runtime fallback adapter
+# Offline speech-timestamp scanner
 #
 # When the pre-baked ``silero_vad.onnx`` is all that's available (per
-# ``docker/Dockerfile.base-nemo``), we run the model window-by-window
-# and reduce the frame-level speech probabilities to speech regions
-# with the same API shape that ``silero_vad.get_speech_timestamps``
-# provides: a list of ``{"start": sample, "end": sample}`` dicts.
-#
-# We implement a minimal standalone scanner here rather than calling
-# into the silero_vad package, because by definition this path is only
-# reached when the package is *not* importable.
+# ``docker/Dockerfile.base-nemo``) and the ``silero_vad`` pip package is
+# not importable, we scan the whole file window-by-window through the
+# shared :class:`SileroOnnxModel` and reduce the frame-level speech
+# probabilities to speech regions with the same API shape that
+# ``silero_vad.get_speech_timestamps`` provides: a list of
+# ``{"start": sample, "end": sample}`` dicts.
 # ---------------------------------------------------------------------------
 
 
-_WINDOW_SAMPLES = 512  # Silero v5 16kHz frame size
-
-
-class _OnnxSileroAdapter:
-    """Adapt an ONNX Runtime session to the silero-vad model surface.
-
-    Exposes a ``__call__(wav, sr)`` that returns the per-frame speech
-    probability, mirroring the Python model's API well enough for
-    :func:`_get_speech_timestamps_offline` to scan windows.
-    """
-
-    def __init__(self, session: Any) -> None:
-        self._session = session
-        self._state = np.zeros((2, 1, 128), dtype=np.float32)
-        self._context = np.zeros((1, 64), dtype=np.float32)
-
-    def reset_states(self) -> None:
-        self._state = np.zeros_like(self._state)
-        self._context = np.zeros_like(self._context)
-
-    def __call__(self, wav: np.ndarray, sr: int) -> float:
-        if wav.ndim == 1:
-            wav = wav.reshape(1, -1)
-        wav = wav.astype(np.float32, copy=False)
-        # The v5 model expects a concatenation of the rolling context
-        # (64 samples) and the new 512-sample frame.
-        frame = np.concatenate([self._context, wav], axis=1)
-        ort_inputs = {
-            "input": frame,
-            "state": self._state,
-            "sr": np.array(sr, dtype=np.int64),
-        }
-        out, new_state = self._session.run(None, ort_inputs)
-        self._state = new_state
-        self._context = wav[:, -64:]
-        return float(out[0][0])
+_WINDOW_SAMPLES = WINDOW_SAMPLES_16K  # Silero v5 16kHz frame size
 
 
 def _get_speech_timestamps_offline(
