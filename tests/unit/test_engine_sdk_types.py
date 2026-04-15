@@ -62,6 +62,47 @@ class TestTaskInputBasics:
         )
         assert "prepare" in task_request.previous_responses
 
+    def test_replace_returns_copy_with_overridden_fields(self):
+        """TaskRequest.replace(**kwargs) returns a shallow copy.
+
+        Used by BaseBatchTranscribeEngine._process_chunked to build
+        per-chunk sub-requests sharing everything except audio_path.
+        """
+        original = TaskRequest(
+            task_id="task-123",
+            job_id="job-456",
+            audio_path=Path("/tmp/full.wav"),
+            config={"language": "en"},
+            previous_responses={"prepare": {"duration": 1800.0}},
+        )
+
+        chunk = original.replace(audio_path=Path("/tmp/chunk0.wav"))
+
+        assert chunk.task_id == "task-123"
+        assert chunk.job_id == "job-456"
+        assert chunk.audio_path == Path("/tmp/chunk0.wav")
+        assert chunk.config == {"language": "en"}
+        assert chunk.previous_responses == {"prepare": {"duration": 1800.0}}
+        # Original must be untouched
+        assert original.audio_path == Path("/tmp/full.wav")
+
+    def test_replace_shares_mutable_defaults_by_reference(self):
+        """Shallow copy: config/previous_responses are shared, not copied.
+
+        Callers must not mutate these in sub-requests. Documented
+        contract in TaskRequest.replace docstring.
+        """
+        original = TaskRequest(
+            task_id="task-123",
+            job_id="job-456",
+            audio_path=Path("/tmp/full.wav"),
+            config={"language": "en"},
+        )
+        chunk = original.replace(audio_path=Path("/tmp/chunk0.wav"))
+
+        # Same object reference — not a deep copy
+        assert chunk.config is original.config
+
 
 class TestTaskInputGetPreparationResponse:
     """Tests for TaskRequest.get_prepare_response()."""

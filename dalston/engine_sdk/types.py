@@ -179,6 +179,19 @@ class TaskRequest(Generic[PayloadT]):
     def get_raw_response(self, key: str) -> dict[str, Any] | None:
         return self.previous_responses.get(key)
 
+    def replace(self, **kwargs: Any) -> TaskRequest[PayloadT]:
+        """Return a shallow copy with the given fields replaced.
+
+        Used by ``BaseBatchTranscribeEngine._process_chunked`` to build
+        per-chunk sub-requests that share everything except the
+        ``audio_path``. Uses ``dataclasses.replace`` so mutable defaults
+        (config, previous_responses, metadata, materialized_artifacts)
+        are shared by reference — caller must avoid mutating them.
+        """
+        import dataclasses
+
+        return dataclasses.replace(self, **kwargs)
+
 
 @dataclass
 class TaskResponse(Generic[OutputT]):

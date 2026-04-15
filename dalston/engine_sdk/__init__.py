@@ -99,6 +99,7 @@ from dalston.engine_sdk.types import (
     TaskRequest,
     TaskResponse,
 )
+from dalston.engine_sdk.vad import AudioChunk, SpeechSegment, VadChunker
 
 
 def __getattr__(name: str):
@@ -147,6 +148,10 @@ __all__ = [
     "BatchTaskContext",
     # Composite engine
     "CompositeEngine",
+    # VAD chunking (M86)
+    "AudioChunk",
+    "SpeechSegment",
+    "VadChunker",
     # HTTP servers (M79)
     "AlignHTTPServer",
     "CombinedHTTPServer",
