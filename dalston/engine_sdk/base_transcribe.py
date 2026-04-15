@@ -3,11 +3,28 @@
 Provides ``_to_dalston_transcript()`` to eliminate per-engine mapping
 boilerplate. Concrete engines implement ``transcribe_audio()`` and return
 the canonical type directly.
+
+Long-audio chunking (M86): subclasses may override
+``get_max_audio_duration_s(task_request)`` to return a per-request audio
+duration ceiling. When the input audio exceeds that value, ``process()``
+dispatches to a chunked path that uses :class:`VadChunker` to split at
+speech boundaries, calls ``transcribe_audio()`` per chunk, halves the
+chunk cap and retries on CUDA OOM, and merges the resulting transcripts
+with timestamps offset to the original timeline.
 """
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import structlog
+
+import dalston.metrics
+import dalston.telemetry
 
 if TYPE_CHECKING:
     from dalston.engine_sdk.http_server import EngineHTTPServer
@@ -23,7 +40,14 @@ from dalston.common.pipeline_types import (
 )
 from dalston.engine_sdk.base import Engine
 from dalston.engine_sdk.context import BatchTaskContext
+from dalston.engine_sdk.inference.gpu_guard import clear_gpu_cache, is_oom_error
 from dalston.engine_sdk.types import TaskRequest, TaskResponse
+from dalston.engine_sdk.vad import VadChunker
+
+logger = structlog.get_logger()
+
+
+_MIN_CHUNK_FLOOR_S = 60.0
 
 
 class BaseBatchTranscribeEngine(Engine):
@@ -43,18 +67,52 @@ class BaseBatchTranscribeEngine(Engine):
 
         return TranscribeHTTPServer(engine=self, port=port)
 
+    def get_max_audio_duration_s(
+        self,
+        task_request: TaskRequest,
+    ) -> float | None:
+        """Return the per-request audio duration limit, or None.
+
+        Subclasses override this to opt into base-engine VAD chunking.
+        The default returns ``None``, meaning no chunking — ``process()``
+        calls ``transcribe_audio()`` directly with the full input.
+
+        When this returns a non-None value and the input audio exceeds
+        it, ``process()`` dispatches to :meth:`_process_chunked`, which
+        splits the audio at speech boundaries via :class:`VadChunker`,
+        runs ``transcribe_audio()`` per chunk with OOM backoff, and
+        merges the results.
+
+        Args:
+            task_request: The incoming task request.
+
+        Returns:
+            Duration cap in seconds, or ``None`` for no chunking.
+        """
+        return None
+
     def process(
         self,
         task_request: TaskRequest,
         ctx: BatchTaskContext,
     ) -> TaskResponse:
-        """Process a task by delegating to ``transcribe_audio``.
+        """Process a task, chunking long audio when the engine opts in.
 
-        Subclasses should not override this. Override ``transcribe_audio``
-        instead.
+        Subclasses should not override this. Override
+        ``transcribe_audio`` for per-chunk inference logic and
+        ``get_max_audio_duration_s`` to declare the chunking limit.
         """
-        transcript = self.transcribe_audio(task_request, ctx)
-        return TaskResponse(data=transcript)
+        max_s = self.get_max_audio_duration_s(task_request)
+        if max_s is None or task_request.audio_path is None:
+            transcript = self.transcribe_audio(task_request, ctx)
+            return TaskResponse(data=transcript)
+
+        audio_duration = self._audio_duration_s(task_request.audio_path)
+        if audio_duration is None or audio_duration <= max_s:
+            transcript = self.transcribe_audio(task_request, ctx)
+            return TaskResponse(data=transcript)
+
+        return self._process_chunked(task_request, ctx, max_s, audio_duration)
 
     def transcribe_audio(
         self,
@@ -73,6 +131,285 @@ class BaseBatchTranscribeEngine(Engine):
             Canonical transcript output
         """
         raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Chunked path (M86)
+    # ------------------------------------------------------------------
+
+    def _process_chunked(
+        self,
+        task_request: TaskRequest,
+        ctx: BatchTaskContext,
+        max_chunk_s: float,
+        audio_duration_s: float,
+    ) -> TaskResponse:
+        """Split long audio, transcribe each chunk, merge the results.
+
+        Wraps the whole run in a single top-level ``engine.recognize``
+        span so chunked requests report as one inference in observability
+        (M86.6). Halves ``max_chunk_s`` on CUDA OOM and retries the
+        remaining chunks (M86.5).
+        """
+        start_wall = time.monotonic()
+        engine_id = getattr(self, "engine_id", "unknown")
+        effective_max_s = self._effective_chunk_cap(max_chunk_s)
+
+        with dalston.telemetry.create_span(
+            "engine.recognize",
+            attributes={
+                "dalston.chunked": True,
+                "dalston.chunk_max_s": effective_max_s,
+                "dalston.audio_duration_s": round(audio_duration_s, 3),
+            },
+        ):
+            with tempfile.TemporaryDirectory(prefix="dalston_chunks_") as tmp_str:
+                tmp_dir = Path(tmp_str)
+                merged = self._transcribe_chunks_with_backoff(
+                    task_request,
+                    ctx,
+                    effective_max_s,
+                    tmp_dir,
+                )
+
+            wall_time = time.monotonic() - start_wall
+            dalston.telemetry.set_span_attribute(
+                "dalston.chunk_count", merged["chunk_count"]
+            )
+            dalston.telemetry.set_span_attribute(
+                "dalston.chunk_max_s_final", merged["final_max_s"]
+            )
+
+            dalston.metrics.observe_engine_recognize(
+                engine_id, "", "cpu-or-gpu", wall_time
+            )
+            if audio_duration_s > 0:
+                rtf = wall_time / audio_duration_s
+                dalston.metrics.observe_engine_realtime_factor(
+                    engine_id, "", "cpu-or-gpu", rtf
+                )
+                dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+
+            return TaskResponse(data=merged["transcript"])
+
+    def _transcribe_chunks_with_backoff(
+        self,
+        task_request: TaskRequest,
+        ctx: BatchTaskContext,
+        max_chunk_s: float,
+        tmp_dir: Path,
+    ) -> dict[str, Any]:
+        """Run VAD chunking + per-chunk transcribe + OOM backoff.
+
+        Returns a dict with ``transcript`` (merged Transcript),
+        ``chunk_count`` (total chunks processed), and ``final_max_s``
+        (the effective chunk cap after any OOM halving).
+        """
+        assert task_request.audio_path is not None
+
+        completed_transcripts: list[tuple[Transcript, float]] = []
+        current_max_s = max_chunk_s
+        pending_audio_path: Path | None = task_request.audio_path
+        pending_offset: float = 0.0
+        total_chunks = 0
+
+        while pending_audio_path is not None:
+            chunker = VadChunker(max_chunk_duration_s=current_max_s)
+            sub_tmp = tmp_dir / f"pass_{int(current_max_s)}"
+            sub_tmp.mkdir(parents=True, exist_ok=True)
+            try:
+                chunks = chunker.split(pending_audio_path, sub_tmp)
+            except Exception:
+                logger.exception(
+                    "vad_split_failed",
+                    audio_path=str(pending_audio_path),
+                    max_chunk_s=current_max_s,
+                )
+                raise
+
+            if not chunks:
+                break
+
+            oom_index: int | None = None
+            for idx, chunk in enumerate(chunks):
+                chunk_request = task_request.replace(audio_path=chunk.audio_path)
+                try:
+                    with dalston.telemetry.create_span(
+                        "engine.chunk_recognize",
+                        attributes={
+                            "dalston.chunk_index": total_chunks + idx,
+                            "dalston.chunk_duration_s": round(chunk.duration, 3),
+                            "dalston.chunk_offset_s": round(
+                                pending_offset + chunk.offset, 3
+                            ),
+                        },
+                    ):
+                        transcript = self.transcribe_audio(chunk_request, ctx)
+                except Exception as exc:
+                    if not is_oom_error(exc):
+                        raise
+                    oom_index = idx
+                    clear_gpu_cache()
+                    break
+                completed_transcripts.append(
+                    (transcript, pending_offset + chunk.offset)
+                )
+
+            total_chunks += idx + 1 if oom_index is None else oom_index
+
+            if oom_index is None:
+                pending_audio_path = None
+                break
+
+            new_max_s = max(current_max_s / 2.0, _MIN_CHUNK_FLOOR_S)
+            if new_max_s >= current_max_s:
+                logger.error(
+                    "chunked_oom_floor_reached",
+                    floor_s=_MIN_CHUNK_FLOOR_S,
+                    chunk_index=total_chunks,
+                )
+                raise RuntimeError(
+                    "CUDA OOM at chunk floor "
+                    f"{_MIN_CHUNK_FLOOR_S}s — cannot reduce chunk size further"
+                )
+            logger.warning(
+                "chunked_oom_backoff",
+                old_max_s=current_max_s,
+                new_max_s=new_max_s,
+                chunk_index=total_chunks,
+            )
+            self._cache_chunk_cap(new_max_s)
+            current_max_s = new_max_s
+            pending_offset = pending_offset + chunks[oom_index].offset
+
+        merged = self._merge_chunk_transcripts(completed_transcripts)
+        return {
+            "transcript": merged,
+            "chunk_count": total_chunks,
+            "final_max_s": current_max_s,
+        }
+
+    def _merge_chunk_transcripts(
+        self,
+        chunk_results: list[tuple[Transcript, float]],
+    ) -> Transcript:
+        """Merge N chunk transcripts into one canonical Transcript.
+
+        Offsets segment and word timestamps by the chunk offset, then
+        concatenates text with a space separator. See M86 §86.2 for the
+        full merge contract.
+        """
+        if not chunk_results:
+            return self.build_transcript(
+                text="",
+                segments=[],
+                language="en",
+                engine_id=getattr(self, "engine_id", "unknown"),
+            )
+
+        first_transcript = chunk_results[0][0]
+        language = first_transcript.language
+        alignment_method = first_transcript.alignment_method
+        engine_id = first_transcript.engine_id
+        channel = first_transcript.channel
+
+        language_confidences = [
+            float(t.language_confidence)
+            for t, _ in chunk_results
+            if t.language_confidence is not None
+        ]
+        if language_confidences:
+            language_confidence: float | None = sum(language_confidences) / len(
+                language_confidences
+            )
+        else:
+            language_confidence = None
+
+        all_segments: list[TranscriptSegment] = []
+        all_text: list[str] = []
+        all_warnings: list[str] = []
+        seen_warnings: set[str] = set()
+
+        for transcript, offset in chunk_results:
+            if transcript.text:
+                all_text.append(transcript.text.strip())
+            for warn in transcript.warnings or []:
+                if warn not in seen_warnings:
+                    seen_warnings.add(warn)
+                    all_warnings.append(warn)
+
+            for seg in transcript.segments:
+                shifted_words: list[TranscriptWord] | None = None
+                if seg.words is not None:
+                    shifted_words = [
+                        self.build_word(
+                            text=w.text,
+                            start=round(w.start + offset, 3),
+                            end=round(w.end + offset, 3),
+                            confidence=w.confidence,
+                            alignment_method=w.alignment_method,
+                            characters=w.characters,
+                            phonemes=w.phonemes,
+                            **(w.metadata or {}),
+                        )
+                        for w in seg.words
+                    ]
+
+                all_segments.append(
+                    self.build_segment(
+                        start=round(seg.start + offset, 3),
+                        end=round(seg.end + offset, 3),
+                        text=seg.text,
+                        words=shifted_words,
+                        language=seg.language,
+                        confidence=seg.confidence,
+                        segment_id=seg.id,
+                        is_final=seg.is_final,
+                        is_speech=seg.is_speech,
+                        **(seg.metadata or {}),
+                    )
+                )
+
+        return self.build_transcript(
+            text=" ".join(all_text).strip(),
+            segments=all_segments,
+            language=language,
+            engine_id=engine_id,
+            language_confidence=language_confidence,
+            alignment_method=alignment_method,
+            channel=channel,
+            warnings=all_warnings or None,
+        )
+
+    # ------------------------------------------------------------------
+    # Chunk cap caching + audio duration probing
+    # ------------------------------------------------------------------
+
+    def _effective_chunk_cap(self, requested_max_s: float) -> float:
+        """Return the chunk cap to use, clamping to any OOM-cached floor."""
+        cached = getattr(self, "_chunked_oom_cap_s", None)
+        if cached is not None and cached < requested_max_s:
+            return float(cached)
+        return requested_max_s
+
+    def _cache_chunk_cap(self, new_max_s: float) -> None:
+        """Cache a safe chunk cap after OOM so subsequent tasks skip it."""
+        self._chunked_oom_cap_s = new_max_s
+
+    @staticmethod
+    def _audio_duration_s(audio_path: Path) -> float | None:
+        """Probe audio duration in seconds without decoding the full file.
+
+        Uses ``soundfile.info()`` (fast, no decode). Returns None if the
+        file can't be inspected — the caller falls back to the
+        non-chunked path.
+        """
+        with contextlib.suppress(Exception):
+            import soundfile as sf
+
+            info = sf.info(str(audio_path))
+            if info.samplerate > 0:
+                return float(info.frames) / float(info.samplerate)
+        return None
 
     # ------------------------------------------------------------------
     # Adaptive parameter helpers
