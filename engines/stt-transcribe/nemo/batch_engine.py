@@ -357,13 +357,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 vocabulary_enabled=vocabulary_enabled,
             )
 
-            self._core._current_model_id = model_id
-            try:
-                core_result = self._core.transcribe_with_model(
-                    model, str(audio_path), batch_size=adaptive_batch_size
-                )
-            finally:
-                self._core._current_model_id = None
+            core_result = self._core.transcribe_with_model(
+                model,
+                str(audio_path),
+                batch_size=adaptive_batch_size,
+                model_id=model_id,
+            )
         finally:
             if vocab_file is not None:
                 try:

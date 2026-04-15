@@ -37,7 +37,6 @@ Model loader resolution order (first one that works wins):
 from __future__ import annotations
 
 import os
-import threading
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,10 +45,15 @@ from typing import Any
 import numpy as np
 import structlog
 
+from dalston.common.audio_defaults import (
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VAD_THRESHOLD,
+)
+
 logger = structlog.get_logger()
 
-
-_SAMPLE_RATE = 16000
+_SAMPLE_RATE = DEFAULT_SAMPLE_RATE
 
 
 @dataclass
@@ -85,9 +89,11 @@ class AudioChunk:
 class VadChunker:
     """Split audio into speech-bounded chunks using Silero VAD.
 
-    Lazy-loads the Silero VAD model on first use. Thread-safe: concurrent
-    ``split()`` calls share the same loaded model via a double-checked
-    lock.
+    Instances are single-threaded and per-request — the base engine
+    creates a fresh chunker for each chunked task and discards it after
+    ``split()`` returns. The Silero VAD model is lazy-loaded on first
+    use; callers that want to avoid the repeated load cost should cache
+    the ``VadChunker`` instance themselves.
 
     Invariant: every returned chunk has ``duration <= max_chunk_duration_s``.
     When a single speech span exceeds the limit (no internal silence),
@@ -98,9 +104,9 @@ class VadChunker:
     def __init__(
         self,
         max_chunk_duration_s: float = 1500.0,
-        min_speech_duration_s: float = 0.25,
+        min_speech_duration_s: float = DEFAULT_MIN_SPEECH_MS / 1000,
         min_silence_duration_s: float = 0.3,
-        vad_threshold: float = 0.5,
+        vad_threshold: float = DEFAULT_VAD_THRESHOLD,
     ) -> None:
         if max_chunk_duration_s <= 0:
             raise ValueError(
@@ -112,11 +118,6 @@ class VadChunker:
         self.vad_threshold = vad_threshold
         self._model: Any | None = None
         self._get_speech_timestamps: Any | None = None
-        self._load_lock = threading.Lock()
-
-    # ------------------------------------------------------------------
-    # Model loading
-    # ------------------------------------------------------------------
 
     def _ensure_model(self) -> None:
         """Lazy-load the Silero VAD model on first use.
@@ -130,18 +131,13 @@ class VadChunker:
         """
         if self._model is not None:
             return
-
-        with self._load_lock:
-            if self._model is not None:
-                return
-
-            if self._try_load_silero_package():
-                return
-            if self._try_load_onnx_env():
-                return
-            if self._try_load_torch_path_env():
-                return
-            self._load_from_torch_hub()
+        if self._try_load_silero_package():
+            return
+        if self._try_load_onnx_env():
+            return
+        if self._try_load_torch_path_env():
+            return
+        self._load_from_torch_hub()
 
     def _try_load_silero_package(self) -> bool:
         """Load via the bundled silero_vad pip package (offline)."""
@@ -293,10 +289,22 @@ class VadChunker:
             List of :class:`SpeechSegment` in ascending time order.
             Empty list if no speech is detected.
         """
+        _, segments = self._load_and_detect(audio_path)
+        return segments
+
+    def _load_and_detect(
+        self, audio_path: Path
+    ) -> tuple[np.ndarray, list[SpeechSegment]]:
+        """Decode the audio file once and run VAD on it.
+
+        Returns both the decoded f32 mono 16 kHz array and the speech
+        regions so that :meth:`split` can reuse the array for slicing
+        without a second decode pass.
+        """
         self._ensure_model()
         audio = self._load_audio_f32_mono_16k(audio_path)
         if audio.size == 0:
-            return []
+            return audio, []
 
         import torch
 
@@ -318,7 +326,7 @@ class VadChunker:
             end_s = float(seg["end"]) / _SAMPLE_RATE
             if end_s > start_s:
                 segments.append(SpeechSegment(start=start_s, end=end_s))
-        return segments
+        return audio, segments
 
     # ------------------------------------------------------------------
     # Chunking
@@ -348,12 +356,11 @@ class VadChunker:
             if the source has no speech.
         """
         temp_dir.mkdir(parents=True, exist_ok=True)
-        segments = self.detect_speech(audio_path)
+        audio_full, segments = self._load_and_detect(audio_path)
         if not segments:
             logger.info("vad_no_speech_detected", audio_path=str(audio_path))
             return []
 
-        audio_full = self._load_audio_f32_mono_16k(audio_path)
         total_samples = audio_full.size
 
         capped: list[SpeechSegment] = []

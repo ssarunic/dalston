@@ -147,23 +147,23 @@ class NemoInference:
         model: Any,
         audio: str | np.ndarray,
         batch_size: int | None = None,
+        model_id: str | None = None,
     ) -> NeMoTranscriptionResult:
         """Run transcription on a single audio input with a held model.
-
-        Thin wrapper around :meth:`transcribe_batch_with_model` — use this
-        when you hold the model reference directly (e.g. for vocabulary
-        boosting) and are processing one file at a time.
 
         Args:
             model: An acquired NeMo ASRModel instance
             audio: File path string or numpy float32 array
             batch_size: Override for NeMo batch_size (default: from env or 1).
+            model_id: Model identifier for metrics/span labels. When omitted,
+                falls back to ``self._current_model_id`` which is set by the
+                high-level ``transcribe()`` path.
 
         Returns:
             NeMoTranscriptionResult with text, segments, and words.
         """
         results = self.transcribe_batch_with_model(
-            model, [audio], batch_size=batch_size
+            model, [audio], batch_size=batch_size, model_id=model_id
         )
         return results[0] if results else NeMoTranscriptionResult()
 
@@ -172,23 +172,24 @@ class NemoInference:
         model: Any,
         audio_list: list[str | np.ndarray],
         batch_size: int | None = None,
+        model_id: str | None = None,
     ) -> list[NeMoTranscriptionResult]:
         """Run transcription on a batch of audio inputs with a held model.
 
-        Each input (file path or numpy array) produces one
-        NeMoTranscriptionResult. Results are returned in input order.
-
-        Telemetry: one ``engine.recognize`` span per call with
-        ``dalston.batch_size`` set to the number of inputs and
-        ``dalston.audio_duration_s`` set to the sum of per-input durations.
-        The recognize metric and RTF metric emit once per call with those
-        aggregate values — matching the contract used by the chunked path
-        in ``BaseBatchTranscribeEngine._process_chunked``.
+        One ``engine.recognize`` span per call with ``dalston.batch_size`` set
+        to the number of inputs and ``dalston.audio_duration_s`` set to the
+        sum of per-input durations. The recognize and RTF metrics emit once
+        per call.
 
         Args:
             model: An acquired NeMo ASRModel instance
             audio_list: List of file paths or numpy float32 arrays
             batch_size: Override for NeMo batch_size (default: from env or 1).
+            model_id: Model identifier for metrics/span labels. When omitted,
+                falls back to ``self._current_model_id``. Callers that hold
+                the model directly (e.g. batch engine vocabulary boosting)
+                should pass this explicitly so telemetry isn't labelled with
+                a stale id from an earlier task.
 
         Returns:
             List of NeMoTranscriptionResult, one per input, in order.
@@ -209,7 +210,7 @@ class NemoInference:
             prepared.append(item)
 
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
-        model_id = self._current_model_id or ""
+        resolved_model_id = model_id or self._current_model_id or ""
 
         if batch_size is None:
             batch_size = int(os.environ.get("DALSTON_NEMO_BATCH_SIZE", "1"))
@@ -224,7 +225,7 @@ class NemoInference:
             "engine.recognize",
             attributes={
                 "dalston.device": self.device,
-                "dalston.model_id": model_id,
+                "dalston.model_id": resolved_model_id,
                 "dalston.batch_size": batch_size,
                 "dalston.input_count": len(prepared),
             },
@@ -239,16 +240,13 @@ class NemoInference:
         recognize_time = time.monotonic() - start
 
         dalston.metrics.observe_engine_recognize(
-            engine_id, model_id, self.device, recognize_time
+            engine_id, resolved_model_id, self.device, recognize_time
         )
 
         if not transcriptions:
             return [NeMoTranscriptionResult() for _ in prepared]
 
         results = [self._result_from_nemo_entry(entry) for entry in transcriptions]
-
-        # Pad with empty results if NeMo returned fewer than requested
-        # (shouldn't happen in practice but defend against it).
         while len(results) < len(prepared):
             results.append(NeMoTranscriptionResult())
 
@@ -259,7 +257,7 @@ class NemoInference:
         if total_audio_s > 0:
             rtf = recognize_time / total_audio_s
             dalston.metrics.observe_engine_realtime_factor(
-                engine_id, model_id, self.device, rtf
+                engine_id, resolved_model_id, self.device, rtf
             )
             dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
             dalston.telemetry.set_span_attribute(

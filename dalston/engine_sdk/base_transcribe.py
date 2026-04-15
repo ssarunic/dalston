@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,15 @@ logger = structlog.get_logger()
 
 
 _MIN_CHUNK_FLOOR_S = 60.0
+
+
+@dataclass(frozen=True)
+class _ChunkedRunResult:
+    """Outcome of a chunked transcribe pass: merged transcript + stats."""
+
+    transcript: Transcript
+    chunk_count: int
+    final_max_s: float
 
 
 class BaseBatchTranscribeEngine(Engine):
@@ -143,29 +153,11 @@ class BaseBatchTranscribeEngine(Engine):
     ) -> TaskResponse:
         """Split long audio, transcribe each chunk, merge the results.
 
-        Wraps the whole run in a single top-level
-        ``engine.chunked_request`` span (named distinctly from the inner
-        ``engine.recognize`` spans that the inference layer emits per
-        model.transcribe call, so the aggregate does not double-count
-        recognize metrics).
-
-        Halves ``max_chunk_s`` on CUDA OOM and retries the remaining
-        chunks via :meth:`_transcribe_chunks_with_backoff` (M86.5).
-
-        Telemetry contract (M86.6, revised):
-
-        - One ``engine.chunked_request`` span per request with
-          ``dalston.chunked=true``, ``dalston.chunk_count``,
-          ``dalston.chunk_max_s``, ``dalston.chunk_max_s_final``, and
-          total ``dalston.audio_duration_s`` attributes.
-        - Per-chunk work lives in nested ``engine.chunk_recognize``
-          spans (one per chunk).
-        - Each chunk's ``transcribe_audio()`` call is free to emit its
-          own ``engine.recognize`` span and per-call
-          ``engine_recognize_seconds`` / ``engine_realtime_factor``
-          metrics at chunk granularity — exactly as the non-chunked
-          path does. No aggregate metric is emitted here, to avoid
-          inflating Prometheus counts for chunked requests.
+        The outer span is named ``engine.chunked_request`` (not
+        ``engine.recognize``) so it does not clash with per-call recognize
+        spans emitted by the inference layer. Aggregate metric emission
+        is deliberately skipped here — per-chunk metrics from the inner
+        ``transcribe_audio`` calls remain the single source of truth.
         """
         effective_max_s = self._effective_chunk_cap(max_chunk_s)
 
@@ -178,22 +170,21 @@ class BaseBatchTranscribeEngine(Engine):
             },
         ):
             with tempfile.TemporaryDirectory(prefix="dalston_chunks_") as tmp_str:
-                tmp_dir = Path(tmp_str)
-                merged = self._transcribe_chunks_with_backoff(
+                result = self._transcribe_chunks_with_backoff(
                     task_request,
                     ctx,
                     effective_max_s,
-                    tmp_dir,
+                    Path(tmp_str),
                 )
 
             dalston.telemetry.set_span_attribute(
-                "dalston.chunk_count", merged["chunk_count"]
+                "dalston.chunk_count", result.chunk_count
             )
             dalston.telemetry.set_span_attribute(
-                "dalston.chunk_max_s_final", merged["final_max_s"]
+                "dalston.chunk_max_s_final", result.final_max_s
             )
 
-            return TaskResponse(data=merged["transcript"])
+            return TaskResponse(data=result.transcript)
 
     def _transcribe_chunks_with_backoff(
         self,
@@ -201,7 +192,7 @@ class BaseBatchTranscribeEngine(Engine):
         ctx: BatchTaskContext,
         max_chunk_s: float,
         tmp_dir: Path,
-    ) -> dict[str, Any]:
+    ) -> _ChunkedRunResult:
         """Run VAD chunking + per-chunk transcribe + OOM backoff.
 
         Every pass splits the *original* source file from scratch. The
@@ -294,12 +285,11 @@ class BaseBatchTranscribeEngine(Engine):
             current_max_s = new_max_s
             remaining_start_s = chunks[oom_index].offset
 
-        merged = self._merge_chunk_transcripts(completed_transcripts)
-        return {
-            "transcript": merged,
-            "chunk_count": total_chunks,
-            "final_max_s": current_max_s,
-        }
+        return _ChunkedRunResult(
+            transcript=self._merge_chunk_transcripts(completed_transcripts),
+            chunk_count=total_chunks,
+            final_max_s=current_max_s,
+        )
 
     def _merge_chunk_transcripts(
         self,
@@ -308,8 +298,7 @@ class BaseBatchTranscribeEngine(Engine):
         """Merge N chunk transcripts into one canonical Transcript.
 
         Offsets segment and word timestamps by the chunk offset, then
-        concatenates text with a space separator. See M86 §86.2 for the
-        full merge contract.
+        concatenates text with a space separator.
         """
         if not chunk_results:
             return self.build_transcript(
@@ -410,18 +399,16 @@ class BaseBatchTranscribeEngine(Engine):
 
     @staticmethod
     def _audio_duration_s(audio_path: Path) -> float | None:
-        """Probe audio duration in seconds without decoding the full file.
+        """Probe audio duration in seconds; return None on failure.
 
-        Uses ``soundfile.info()`` (fast, no decode). Returns None if the
-        file can't be inspected — the caller falls back to the
-        non-chunked path.
+        Delegates to :func:`dalston.engine_sdk.diarize_chunking.get_audio_duration`,
+        which tries the stdlib ``wave`` module first (fast for 16 kHz PCM,
+        the common post-prepare case) and falls back to ``soundfile``.
         """
-        with contextlib.suppress(Exception):
-            import soundfile as sf
+        from dalston.engine_sdk.diarize_chunking import get_audio_duration
 
-            info = sf.info(str(audio_path))
-            if info.samplerate > 0:
-                return float(info.frames) / float(info.samplerate)
+        with contextlib.suppress(Exception):
+            return get_audio_duration(audio_path)
         return None
 
     # ------------------------------------------------------------------

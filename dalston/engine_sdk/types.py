@@ -182,11 +182,9 @@ class TaskRequest(Generic[PayloadT]):
     def replace(self, **kwargs: Any) -> TaskRequest[PayloadT]:
         """Return a shallow copy with the given fields replaced.
 
-        Used by ``BaseBatchTranscribeEngine._process_chunked`` to build
-        per-chunk sub-requests that share everything except the
-        ``audio_path``. Uses ``dataclasses.replace`` so mutable defaults
-        (config, previous_responses, metadata, materialized_artifacts)
-        are shared by reference — caller must avoid mutating them.
+        Mutable defaults (``config``, ``previous_responses``, ``metadata``,
+        ``materialized_artifacts``) are shared by reference with the
+        original; callers must avoid mutating them on the copy.
         """
         import dataclasses
 
