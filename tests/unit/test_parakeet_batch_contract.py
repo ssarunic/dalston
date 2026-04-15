@@ -13,6 +13,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -426,3 +427,46 @@ class TestTranscribeBatchWithModel:
         # Confirm the single input was wrapped in a list when passed to NeMo.
         call_args = mock_model.transcribe.call_args
         assert len(call_args.args[0]) == 1
+
+
+class TestNemoMaxAudioDurationOptIn:
+    """Verify step 86.7 — NeMoBatchEngine opts into base-engine chunking.
+
+    Constructs the engine without the real NemoInference (mocked) and
+    exercises get_max_audio_duration_s in isolation.
+    """
+
+    def _build_engine(self) -> Any:
+        """Instantiate NemoBatchEngine without invoking __init__."""
+        engine = _ParakeetEngine.__new__(_ParakeetEngine)
+        engine._core = MagicMock()
+        engine._default_model_id = "nvidia/parakeet-tdt-0.6b-v3"
+        engine.engine_id = "nemo"
+        engine.logger = MagicMock()
+        return engine
+
+    def test_default_returns_1500(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DALSTON_NEMO_MAX_CHUNK_S", raising=False)
+        engine = self._build_engine()
+        request = TaskRequest(task_id="t", job_id="j", audio_path=Path("/tmp/x.wav"))
+        assert engine.get_max_audio_duration_s(request) == 1500.0
+
+    def test_env_override_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DALSTON_NEMO_MAX_CHUNK_S", "3000")
+        engine = self._build_engine()
+        request = TaskRequest(task_id="t", job_id="j", audio_path=Path("/tmp/x.wav"))
+        assert engine.get_max_audio_duration_s(request) == 3000.0
+
+    def test_zero_disables_chunking(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DALSTON_NEMO_MAX_CHUNK_S", "0")
+        engine = self._build_engine()
+        request = TaskRequest(task_id="t", job_id="j", audio_path=Path("/tmp/x.wav"))
+        assert engine.get_max_audio_duration_s(request) is None
+
+    def test_invalid_env_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DALSTON_NEMO_MAX_CHUNK_S", "not-a-number")
+        engine = self._build_engine()
+        request = TaskRequest(task_id="t", job_id="j", audio_path=Path("/tmp/x.wav"))
+        assert engine.get_max_audio_duration_s(request) == 1500.0

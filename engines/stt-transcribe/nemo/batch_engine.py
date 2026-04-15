@@ -46,6 +46,12 @@ from dalston.engine_sdk import (
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.inference.nemo_inference import NemoInference
 
+# Default per-chunk audio ceiling on L4-class GPUs. Parakeet with local
+# attention grows activation linearly at ~3 MB/audio-s, peaking near
+# 12 GB at 1800s on a 22 GB L4. 1500s sits at ~10-11 GB peak, leaving
+# real headroom for co-located replicas and the base-engine OOM backoff.
+_DEFAULT_NEMO_MAX_CHUNK_S = 1500.0
+
 
 class NemoBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine with engine_id model swapping.
@@ -109,6 +115,38 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             device=self._core.device,
             shared_core=core is not None,
         )
+
+    def get_max_audio_duration_s(
+        self,
+        task_request: TaskRequest,
+    ) -> float | None:
+        """Opt into base-engine VAD chunking with a VRAM-safe default.
+
+        Files longer than ``DALSTON_NEMO_MAX_CHUNK_S`` seconds (default
+        1500 = 25 min) are auto-chunked by ``BaseBatchTranscribeEngine``
+        via Silero VAD at speech boundaries, with OOM backoff halving
+        the cap on CUDA failure. Files at or under the cap hit the fast
+        path and run through ``transcribe_audio`` unchanged.
+
+        The default is tuned for a 22 GB L4 (g6.xlarge): measured peaks
+        are ~12 GB at 1800s and ~10-11 GB at 1500s. Override per
+        deployment on bigger or smaller GPUs.
+        """
+        raw = os.environ.get("DALSTON_NEMO_MAX_CHUNK_S")
+        if raw is None:
+            return _DEFAULT_NEMO_MAX_CHUNK_S
+        try:
+            value = float(raw)
+        except ValueError:
+            self.logger.warning(
+                "invalid_max_chunk_s_env",
+                value=raw,
+                fallback=_DEFAULT_NEMO_MAX_CHUNK_S,
+            )
+            return _DEFAULT_NEMO_MAX_CHUNK_S
+        if value <= 0:
+            return None  # disable chunking when set to 0 or negative
+        return value
 
     def _normalize_model_id(self, loaded_model_id: str) -> str:
         """Normalize NGC model IDs to NeMoModelManager format.
