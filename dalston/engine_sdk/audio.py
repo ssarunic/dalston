@@ -7,6 +7,11 @@ In a normal pipeline the prepare stage already converts to the standard
 format, so this utility is a cheap no-op (header check only).  When
 engines run standalone or receive unexpected input, the slow path
 converts via ffmpeg.
+
+Also provides the shared numpy→PCM16 WAV helpers used by several
+engines (vLLM-ASR bridges its realtime numpy buffers into vLLM's
+file-URL multimodal input; the batch VAD chunker writes VAD-bounded
+chunks back to disk for per-chunk transcribe calls).
 """
 
 from __future__ import annotations
@@ -14,9 +19,14 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import tempfile
+import wave
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import structlog
 
 logger = structlog.get_logger()
@@ -188,3 +198,56 @@ def ensure_audio_format(
         raise EngineAudioError(f"ffmpeg did not produce output file: {output_path}")
 
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Numpy -> PCM16 WAV helpers
+# ---------------------------------------------------------------------------
+
+
+def normalize_mono_audio(audio: np.ndarray) -> np.ndarray:
+    """Return clipped mono float32 audio in range [-1, 1]."""
+    samples = np.asarray(audio)
+    if samples.ndim == 0:
+        raise ValueError("Audio must be a 1D mono numpy array")
+
+    if samples.ndim > 1:
+        samples = np.squeeze(samples)
+        if samples.ndim != 1:
+            raise ValueError("Audio must be mono")
+
+    if samples.dtype != np.float32:
+        samples = samples.astype(np.float32)
+
+    return np.clip(samples, -1.0, 1.0)
+
+
+def write_wav_file(path: Path, audio: np.ndarray, sample_rate: int = 16000) -> None:
+    """Write mono PCM16 WAV to ``path`` from numpy audio samples."""
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be a positive integer")
+
+    samples = normalize_mono_audio(audio)
+    pcm16 = (samples * 32767.0).astype(np.int16)
+
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)  # PCM16
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm16.tobytes())
+
+
+@contextmanager
+def temporary_wav_file(
+    audio: np.ndarray,
+    sample_rate: int = 16000,
+) -> Iterator[Path]:
+    """Create a temporary WAV file from numpy audio and clean it up."""
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        write_wav_file(tmp_path, audio=audio, sample_rate=sample_rate)
+        yield tmp_path
+    finally:
+        tmp_path.unlink(missing_ok=True)

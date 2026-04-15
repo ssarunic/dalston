@@ -37,7 +37,6 @@ Model loader resolution order (first one that works wins):
 from __future__ import annotations
 
 import os
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +49,7 @@ from dalston.common.audio_defaults import (
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
 )
+from dalston.engine_sdk.audio import write_wav_file
 
 logger = structlog.get_logger()
 
@@ -409,7 +409,7 @@ class VadChunker:
                 continue
             slice_ = audio_full[start_sample:end_sample]
             out_path = temp_dir / f"chunk_{idx:04d}.wav"
-            self._write_wav(out_path, slice_)
+            write_wav_file(out_path, slice_, sample_rate=_SAMPLE_RATE)
             chunks.append(
                 AudioChunk(
                     audio_path=out_path,
@@ -456,17 +456,6 @@ class VadChunker:
             data = librosa.resample(data, orig_sr=sr, target_sr=_SAMPLE_RATE)
             data = data.astype(np.float32, copy=False)
         return data
-
-    @staticmethod
-    def _write_wav(path: Path, audio: np.ndarray) -> None:
-        """Write a float32 mono array as 16-bit PCM WAV at 16 kHz."""
-        pcm = np.clip(audio, -1.0, 1.0)
-        pcm = (pcm * 32767.0).astype(np.int16)
-        with wave.open(str(path), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(_SAMPLE_RATE)
-            wf.writeframes(pcm.tobytes())
 
 
 # ---------------------------------------------------------------------------

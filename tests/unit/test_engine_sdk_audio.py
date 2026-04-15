@@ -20,6 +20,9 @@ from dalston.engine_sdk.audio import (
     EngineAudioError,
     _probe_format,
     ensure_audio_format,
+    normalize_mono_audio,
+    temporary_wav_file,
+    write_wav_file,
 )
 
 
@@ -203,3 +206,91 @@ class TestEngineBaseAudioFormat:
                 pass
 
         assert MergeEngine.audio_format is None
+
+
+class TestNormalizeMonoAudio:
+    def test_float32_passthrough(self):
+        audio = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+        out = normalize_mono_audio(audio)
+        assert out.dtype == np.float32
+        np.testing.assert_allclose(out, audio)
+
+    def test_non_float32_dtype_is_cast(self):
+        """Non-float32 input is cast via ``astype(np.float32)``.
+
+        Note: this does not rescale — int16 callers are expected to
+        divide by 32768 themselves before calling. The function's job is
+        clipping + dtype, not sample-range conversion.
+        """
+        audio = np.array([0.0, 0.5, -0.5], dtype=np.float64)
+        out = normalize_mono_audio(audio)
+        assert out.dtype == np.float32
+        np.testing.assert_allclose(out, [0.0, 0.5, -0.5])
+
+    def test_stereo_squeezed_to_mono_raises(self):
+        audio = np.zeros((2, 100), dtype=np.float32)
+        with pytest.raises(ValueError, match="mono"):
+            normalize_mono_audio(audio)
+
+    def test_singleton_stereo_squeezes(self):
+        """Shape (1, N) is a degenerate case and is treated as mono."""
+        audio = np.ones((1, 100), dtype=np.float32) * 0.5
+        out = normalize_mono_audio(audio)
+        assert out.ndim == 1
+        assert out.shape == (100,)
+
+    def test_clipped_to_unit_range(self):
+        audio = np.array([-2.0, -0.5, 0.0, 0.5, 2.0], dtype=np.float32)
+        out = normalize_mono_audio(audio)
+        np.testing.assert_allclose(out, [-1.0, -0.5, 0.0, 0.5, 1.0])
+
+    def test_zero_dim_rejected(self):
+        with pytest.raises(ValueError, match="1D"):
+            normalize_mono_audio(np.float32(0.5))
+
+
+class TestWriteWavFile:
+    def test_writes_pcm16_mono_16k(self, tmp_path: Path):
+        path = tmp_path / "out.wav"
+        audio = np.linspace(-0.5, 0.5, 16000, dtype=np.float32)
+        write_wav_file(path, audio, sample_rate=16000)
+
+        assert path.exists()
+        with sf.SoundFile(str(path)) as f:
+            assert f.samplerate == 16000
+            assert f.channels == 1
+            assert f.subtype == "PCM_16"
+            assert f.frames == 16000
+
+    def test_rejects_zero_sample_rate(self, tmp_path: Path):
+        path = tmp_path / "out.wav"
+        with pytest.raises(ValueError, match="sample_rate"):
+            write_wav_file(path, np.zeros(100, dtype=np.float32), sample_rate=0)
+
+    def test_normalizes_before_write(self, tmp_path: Path):
+        path = tmp_path / "out.wav"
+        audio = np.array([2.0, -2.0, 0.0], dtype=np.float32)  # out of range
+        write_wav_file(path, audio, sample_rate=16000)
+        read, _ = sf.read(str(path), dtype="float32")
+        # 2.0 clipped to 1.0 ≈ 32767/32768 after int16 round-trip
+        assert read[0] == pytest.approx(1.0, abs=1e-3)
+        assert read[1] == pytest.approx(-1.0, abs=1e-3)
+
+
+class TestTemporaryWavFile:
+    def test_yields_existing_path_then_cleans_up(self):
+        audio = np.zeros(8000, dtype=np.float32)
+        with temporary_wav_file(audio, sample_rate=16000) as path:
+            assert path.exists()
+            assert path.suffix == ".wav"
+            cached = path
+        assert not cached.exists()
+
+    def test_cleanup_on_exception(self):
+        audio = np.zeros(8000, dtype=np.float32)
+        cached: Path | None = None
+        with pytest.raises(RuntimeError, match="boom"):
+            with temporary_wav_file(audio, sample_rate=16000) as path:
+                cached = path
+                raise RuntimeError("boom")
+        assert cached is not None and not cached.exists()
