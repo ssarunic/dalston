@@ -118,16 +118,16 @@ class NemoInference:
 
     def transcribe(
         self,
-        audio: str | np.ndarray | list,
+        audio: str | np.ndarray,
         model_id: str,
         batch_size: int | None = None,
     ) -> NeMoTranscriptionResult:
-        """Run transcription on audio input.
+        """Run transcription on a single audio input.
 
         Works with both file paths (batch) and numpy arrays (realtime).
 
         Args:
-            audio: File path string, numpy float32 array, or list of either
+            audio: File path string or numpy float32 array
             model_id: Model identifier (e.g. "parakeet-tdt-1.1b")
             batch_size: Override for NeMo batch_size (default: from env or 1).
 
@@ -145,32 +145,61 @@ class NemoInference:
     def transcribe_with_model(
         self,
         model: Any,
-        audio: str | np.ndarray | list,
+        audio: str | np.ndarray,
         batch_size: int | None = None,
     ) -> NeMoTranscriptionResult:
-        """Run transcription with an already-acquired model.
+        """Run transcription on a single audio input with a held model.
 
-        Use this when you need direct model access (e.g., for vocabulary
-        boosting) and manage the acquire/release lifecycle yourself.
+        Thin wrapper around :meth:`transcribe_batch_with_model` — use this
+        when you hold the model reference directly (e.g. for vocabulary
+        boosting) and are processing one file at a time.
 
         Args:
             model: An acquired NeMo ASRModel instance
-            audio: File path string, numpy float32 array, or list of either
+            audio: File path string or numpy float32 array
             batch_size: Override for NeMo batch_size (default: from env or 1).
 
         Returns:
             NeMoTranscriptionResult with text, segments, and words.
         """
+        results = self.transcribe_batch_with_model(
+            model, [audio], batch_size=batch_size
+        )
+        return results[0] if results else NeMoTranscriptionResult()
+
+    def transcribe_batch_with_model(
+        self,
+        model: Any,
+        audio_list: list[str | np.ndarray],
+        batch_size: int | None = None,
+    ) -> list[NeMoTranscriptionResult]:
+        """Run transcription on a batch of audio inputs with a held model.
+
+        Each input (file path or numpy array) produces one
+        NeMoTranscriptionResult. Results are returned in input order.
+
+        Telemetry: one ``engine.recognize`` span per call with
+        ``dalston.batch_size`` set to the number of inputs and
+        ``dalston.audio_duration_s`` set to the sum of per-input durations.
+        The recognize metric and RTF metric emit once per call with those
+        aggregate values — matching the contract used by the chunked path
+        in ``BaseBatchTranscribeEngine._process_chunked``.
+
+        Args:
+            model: An acquired NeMo ASRModel instance
+            audio_list: List of file paths or numpy float32 arrays
+            batch_size: Override for NeMo batch_size (default: from env or 1).
+
+        Returns:
+            List of NeMoTranscriptionResult, one per input, in order.
+            Empty list if ``audio_list`` is empty.
+        """
         import torch
 
-        # Normalize audio input to list format expected by NeMo
-        if isinstance(audio, str | np.ndarray):
-            audio_list = [audio]
-        else:
-            audio_list = audio
+        if not audio_list:
+            return []
 
-        # Prepare numpy arrays
-        prepared = []
+        prepared: list[Any] = []
         for item in audio_list:
             if isinstance(item, np.ndarray):
                 if item.dtype != np.float32:
@@ -182,11 +211,9 @@ class NemoInference:
         engine_id = os.environ.get("DALSTON_ENGINE_ID", "nemo")
         model_id = self._current_model_id or ""
 
-        # Resolve batch_size: explicit arg > env var > default 1
         if batch_size is None:
             batch_size = int(os.environ.get("DALSTON_NEMO_BATCH_SIZE", "1"))
 
-        # Run inference with appropriate context manager
         autocast_ctx = (
             torch.amp.autocast("cuda")
             if self.device == "cuda"
@@ -199,6 +226,7 @@ class NemoInference:
                 "dalston.device": self.device,
                 "dalston.model_id": model_id,
                 "dalston.batch_size": batch_size,
+                "dalston.input_count": len(prepared),
             },
         ):
             with autocast_ctx:
@@ -215,18 +243,42 @@ class NemoInference:
         )
 
         if not transcriptions:
-            return NeMoTranscriptionResult()
+            return [NeMoTranscriptionResult() for _ in prepared]
 
-        # Handle NeMo API: transcriptions[batch][strategy] or transcriptions[batch]
-        first_result = transcriptions[0]
-        if isinstance(first_result, list):
-            hypothesis = first_result[0]
-        else:
-            hypothesis = first_result
+        results = [self._result_from_nemo_entry(entry) for entry in transcriptions]
 
+        # Pad with empty results if NeMo returned fewer than requested
+        # (shouldn't happen in practice but defend against it).
+        while len(results) < len(prepared):
+            results.append(NeMoTranscriptionResult())
+
+        total_audio_s = 0.0
+        for r in results:
+            if r.segments:
+                total_audio_s += max(s.end for s in r.segments)
+        if total_audio_s > 0:
+            rtf = recognize_time / total_audio_s
+            dalston.metrics.observe_engine_realtime_factor(
+                engine_id, model_id, self.device, rtf
+            )
+            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
+            dalston.telemetry.set_span_attribute(
+                "dalston.audio_duration_s", round(total_audio_s, 3)
+            )
+
+        return results
+
+    def _result_from_nemo_entry(self, entry: Any) -> NeMoTranscriptionResult:
+        """Parse one NeMo transcription list entry into a neutral result.
+
+        NeMo's ``model.transcribe(..., return_hypotheses=True)`` returns a
+        list where each element is either a ``Hypothesis`` (default strategy)
+        or a list of hypotheses (when multiple decoding strategies are
+        configured). We always take the best hypothesis.
+        """
+        hypothesis = entry[0] if isinstance(entry, list) else entry
         full_text = hypothesis.text if hasattr(hypothesis, "text") else str(hypothesis)
 
-        # Parse timestamps from hypothesis
         with dalston.telemetry.create_span("engine.parse_result") as span:
             segments, all_words = self._parse_hypothesis(hypothesis, full_text)
             if hasattr(span, "set_attributes"):
@@ -237,20 +289,6 @@ class NemoInference:
                         "dalston.char_count": len(full_text),
                     }
                 )
-
-        # Compute RTF from audio duration if available
-        audio_duration_s = 0.0
-        if segments:
-            audio_duration_s = max(s.end for s in segments) if segments else 0.0
-        if audio_duration_s > 0:
-            rtf = recognize_time / audio_duration_s
-            dalston.metrics.observe_engine_realtime_factor(
-                engine_id, model_id, self.device, rtf
-            )
-            dalston.telemetry.set_span_attribute("dalston.rtf", round(rtf, 4))
-            dalston.telemetry.set_span_attribute(
-                "dalston.audio_duration_s", round(audio_duration_s, 3)
-            )
 
         return NeMoTranscriptionResult(
             text=full_text.strip(),

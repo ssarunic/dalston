@@ -294,3 +294,135 @@ class TestParakeetBatchTimestampGranularity:
         )
 
         assert result.data.timestamp_granularity.value == "segment"
+
+
+class TestTranscribeBatchWithModel:
+    """Verify NemoInference.transcribe_batch_with_model list-in/list-out contract.
+
+    Step 86.0 — the original implementation only parsed transcriptions[0],
+    silently discarding results for batch inputs with N > 1. These tests
+    guard that a list of N inputs yields N independent results in order.
+    """
+
+    def _make_hyp(
+        self, text: str, words: list[tuple[str, float, float]]
+    ) -> SimpleNamespace:
+        ts = {
+            "word": [{"word": w, "start": s, "end": e} for w, s, e in words],
+            "segment": [
+                {
+                    "segment": text,
+                    "start": words[0][1] if words else 0.0,
+                    "end": words[-1][2] if words else 0.0,
+                }
+            ],
+        }
+        return SimpleNamespace(text=text, timestamp=ts)
+
+    def _make_core(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        from dalston.engine_sdk.inference.nemo_inference import NemoInference
+
+        # Stub torch.amp.autocast to be a no-op context manager so we don't
+        # need a CUDA device for the test.
+        class _NoopCtx:
+            def __enter__(self) -> None:
+                return None
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        # NemoInference uses `torch.amp.autocast("cuda")` on CUDA and
+        # `torch.inference_mode()` on CPU. For CPU device (test default),
+        # inference_mode already works — no monkeypatch needed.
+
+        core = NemoInference.__new__(NemoInference)
+        core._manager = MagicMock()
+        core._current_model_id = "parakeet-tdt-0.6b-v3"
+        core._device = "cpu"  # avoid CUDA autocast branch
+        # Need the real device property — patch the underlying manager
+        core._manager.device = "cpu"
+        return core
+
+    def test_transcribe_batch_returns_one_result_per_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A list of 3 inputs yields 3 independent NeMoTranscriptionResult objects."""
+        core = self._make_core(monkeypatch)
+
+        hyp_a = self._make_hyp(
+            "hello alpha", [("hello", 0.0, 0.5), ("alpha", 0.5, 1.0)]
+        )
+        hyp_b = self._make_hyp("hello beta", [("hello", 0.0, 0.5), ("beta", 0.5, 1.0)])
+        hyp_c = self._make_hyp(
+            "hello gamma", [("hello", 0.0, 0.5), ("gamma", 0.5, 1.0)]
+        )
+
+        mock_model = MagicMock()
+        # NeMo returns a list matching the input list — one entry per input.
+        mock_model.transcribe.return_value = [hyp_a, hyp_b, hyp_c]
+
+        results = core.transcribe_batch_with_model(
+            mock_model,
+            ["/tmp/a.wav", "/tmp/b.wav", "/tmp/c.wav"],
+            batch_size=3,
+        )
+
+        assert len(results) == 3
+        assert results[0].text == "hello alpha"
+        assert results[1].text == "hello beta"
+        assert results[2].text == "hello gamma"
+
+        # NeMo was called with the full batch, not just [0]
+        call_args = mock_model.transcribe.call_args
+        assert len(call_args.args[0]) == 3
+        assert call_args.kwargs["batch_size"] == 3
+
+    def test_transcribe_batch_handles_nested_hypothesis_lists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """NeMo with multiple decoding strategies wraps hypotheses in an extra list."""
+        core = self._make_core(monkeypatch)
+
+        hyp_a = self._make_hyp("a", [("a", 0.0, 0.1)])
+        hyp_b = self._make_hyp("b", [("b", 0.0, 0.1)])
+
+        mock_model = MagicMock()
+        # Nested: one list per input, each with one hypothesis.
+        mock_model.transcribe.return_value = [[hyp_a], [hyp_b]]
+
+        results = core.transcribe_batch_with_model(
+            mock_model, ["/tmp/a.wav", "/tmp/b.wav"], batch_size=2
+        )
+
+        assert len(results) == 2
+        assert results[0].text == "a"
+        assert results[1].text == "b"
+
+    def test_transcribe_batch_empty_input_returns_empty_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty input → empty output, no model invocation."""
+        core = self._make_core(monkeypatch)
+        mock_model = MagicMock()
+
+        results = core.transcribe_batch_with_model(mock_model, [], batch_size=1)
+
+        assert results == []
+        mock_model.transcribe.assert_not_called()
+
+    def test_transcribe_with_model_single_delegates_to_batch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Single-input wrapper unwraps the list result correctly."""
+        core = self._make_core(monkeypatch)
+
+        hyp = self._make_hyp("only one", [("only", 0.0, 0.3), ("one", 0.3, 0.6)])
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = [hyp]
+
+        result = core.transcribe_with_model(mock_model, "/tmp/single.wav")
+
+        assert result.text == "only one"
+        # Confirm the single input was wrapped in a list when passed to NeMo.
+        call_args = mock_model.transcribe.call_args
+        assert len(call_args.args[0]) == 1
