@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
 import json
 import os
 import shlex
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -79,8 +81,11 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         "engine_id": "pyannote-4.0",
         "container": "stt-diarize-pyannote-4-0",
         "needs_hf_token": True,
+        # DALSTON_WORKER_ID is injected per-instance from IMDSv2 in
+        # gpu-start.sh so every replica registers distinctly. Do not
+        # hardcode one here — two replicas with the same ID would
+        # collide on the Redis registry key and XREADGROUP consumer name.
         "extra_env": {
-            "DALSTON_WORKER_ID": "pyannote-gpu-1",
             "DALSTON_MAX_DIARIZE_CHUNK_S": "3600",
         },
     },
@@ -206,9 +211,16 @@ def load_template(path: str | Path) -> DeploymentTemplate:
 
 @dataclass
 class GpuWorker:
-    """State for a single GPU worker instance."""
+    """State for a single GPU worker instance.
+
+    `name` is the engine-derived label and may repeat across replicas. The
+    canonical identifier for SSH/Prometheus/terminate lookups is `hostname`
+    (the actual Tailscale node name, with `-1`/`-2` suffix for replicas).
+    Empty hostname means "unresolved" — run `dalston-aws reconcile`.
+    """
 
     name: str = ""  # e.g., "onnx", "pyannote"
+    hostname: str = ""  # e.g., "dalston-gpu-pyannote" or "...-pyannote-1"
     instance_id: str = ""
     instance_type: str = ""
     spot: bool = True
@@ -245,7 +257,18 @@ def load_state() -> DeploymentState | None:
         return None
     data = yaml.safe_load(STATE_FILE.read_text())
     known = set(DeploymentState.__dataclass_fields__)
-    return DeploymentState(**{k: v for k, v in data.items() if k in known})
+    state = DeploymentState(**{k: v for k, v in data.items() if k in known})
+
+    # Migration: pre-replica state files do not have a per-worker `hostname`
+    # field at all. Backfill from the legacy convention so callers can read
+    # `w["hostname"]` unconditionally. Must use `"hostname" not in w` rather
+    # than `not w.get("hostname")` — an empty string is the deliberate
+    # "unresolved" sentinel set by `_gpu_hostname_fallback`, and
+    # overwriting it would silently break the `cmd_reconcile` recovery path.
+    for w in state.gpu_workers or []:
+        if "hostname" not in w:
+            w["hostname"] = f"dalston-gpu-{w['name']}"
+    return state
 
 
 def require_state() -> DeploymentState:
@@ -1188,6 +1211,7 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
   -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
+  -e DALSTON_WORKER_ID="$DALSTON_WORKER_ID" \\
   -e REDIS_URL="redis://${{CTRL_PLANE_HOST}}:6379" \\
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
   -e DALSTON_S3_REGION="$AWS_REGION" \\
@@ -1345,6 +1369,16 @@ source /opt/dalston/gpu-env.sh
 {rm_line}
 
 HOST_HOSTNAME=$(hostname)
+
+# Fetch the EC2 instance ID via IMDSv2 and use it as DALSTON_WORKER_ID.
+# This makes every replica register with a unique worker ID even when
+# two launches share an engine label (e.g. two 'pyannote' GPUs). Without
+# this, the engine SDK's generate_instance_id() would hash both replicas
+# to the same Redis registry key and XREADGROUP consumer name, causing
+# registry overwrites and task-pickup races.
+IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+DALSTON_WORKER_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || hostname)
+echo "DALSTON_WORKER_ID=$DALSTON_WORKER_ID"
 
 # Build observability flags for docker run
 OTEL_FLAGS=""
@@ -2057,15 +2091,19 @@ def cmd_status_impl(st: DeploymentState) -> None:
 
     if st.scenario == "split" and st.gpu_workers:
         for w in st.gpu_workers:
-            gpu_inst = describe_instance(st.region, w["instance_id"])
+            w_region = w.get("region", st.region)
+            gpu_inst = describe_instance(w_region, w["instance_id"])
             gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
             gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
             engines = ",".join(w.get("engines") or [])
             pricing = "spot" if w.get("spot", True) else "on-demand"
             itype = w.get("instance_type", "")
+            host = w.get("hostname") or "(unresolved — run reconcile)"
+            region_suffix = f" region={w_region}" if w_region != st.region else ""
             log(
-                f"  GPU '{w['name']}':  {w['instance_id']}  state={gpu_state}  "
-                f"ip={gpu_ip or 'none'}  {itype} ({pricing})  engines={engines}"
+                f"  GPU '{w['name']}' [{host}]:  {w['instance_id']}  "
+                f"state={gpu_state}  ip={gpu_ip or 'none'}  {itype} ({pricing})  "
+                f"engines={engines}{region_suffix}"
             )
     print()
 
@@ -2161,9 +2199,21 @@ def _write_gpu_prometheus_targets(
     """
     # Build targets using Tailscale IPs (Docker's DNS can't resolve
     # Tailscale hostnames). IPs are stable for the instance lifetime.
+    # Use the per-worker `hostname` field set at launch time so replicas
+    # of the same engine get distinct Prometheus series. Workers with an
+    # empty hostname are deliberately unresolved — skip them rather than
+    # guessing via `_resolve_tailscale_host`, which would map duplicate
+    # labels to the same peer and produce wrong scrape mappings.
     target_groups = []
     for w in workers:
-        ts_host = _resolve_tailscale_host(f"dalston-gpu-{w['name']}")
+        ts_host = w.get("hostname") or ""
+        if not ts_host:
+            warn(
+                f"Worker '{w['name']}' ({w['instance_id']}) has no resolved "
+                f"hostname, skipping Prometheus target. Run "
+                f"'dalston-aws reconcile' once the worker is on the tailnet."
+            )
+            continue
         ts_ip = _resolve_tailscale_ip(ts_host)
         if not ts_ip:
             warn(f"Could not resolve Tailscale IP for {ts_host}, skipping")
@@ -2176,7 +2226,8 @@ def _write_gpu_prometheus_targets(
                 "labels": {
                     "instance_group": "gpu-worker",
                     "host": ts_host,
-                    "worker": w["name"],
+                    "worker": ts_host,  # unique per replica
+                    "worker_label": w["name"],  # engine label, may repeat
                 },
             }
         )
@@ -2226,22 +2277,25 @@ def _launch_gpu(
     engines = engines or list(GPU_ENGINE_PRESETS.keys())
     worker_name = "-".join(engines) if len(engines) < 3 else "combo"
 
-    # Check for name collision with existing workers
+    # Reap any state entries for terminated workers with the same label so
+    # we don't accumulate stale rows. Live workers with the same label are
+    # allowed — they become replicas, distinguished by `hostname`.
     if st.gpu_workers:
+        kept = []
         for w in st.gpu_workers:
             if w["name"] == worker_name:
-                w_state = get_instance_state(st.region, w["instance_id"])
+                w_region = w.get("region", st.region)
+                w_state = get_instance_state(w_region, w["instance_id"])
                 if w_state in ("terminated", "shutting-down"):
                     log(
-                        f"Previous worker '{worker_name}' ({w['instance_id']}) is {w_state}, replacing..."
+                        f"Reaping terminated worker '{worker_name}' "
+                        f"({w['instance_id']}, state={w_state})"
                     )
-                    st.gpu_workers.remove(w)
-                    save_state(st)
-                    break
-                else:
-                    die(
-                        f"GPU worker '{worker_name}' already exists ({w['instance_id']}, state={w_state})."
-                    )
+                    continue
+            kept.append(w)
+        if len(kept) != len(st.gpu_workers):
+            st.gpu_workers = kept
+            save_state(st)
 
     if not st.instance_id:
         die("Control plane not launched. Run 'dalston-aws launch control-plane' first.")
@@ -2280,6 +2334,13 @@ def _launch_gpu(
         registry=tmpl.registry,
         observability=st.observability,
     )
+
+    # Snapshot existing tailnet peers matching this base name *before*
+    # launching, so we can identify the new replica by set difference once
+    # cloud-init finishes and Tailscale registers the node.
+    existing_workers = list(st.gpu_workers or [])
+    ts_peers_before = _snapshot_ts_peers(f"dalston-gpu-{worker_name}")
+
     instance_id = launch_gpu_interactive(
         gpu_region,
         gpu_sg_id,
@@ -2296,9 +2357,16 @@ def _launch_gpu(
     gpu_inst = describe_instance(gpu_region, instance_id)
     gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
 
+    # Wait for the new node to register with Tailscale and resolve its
+    # actual hostname (which may have a `-1`/`-2` suffix when replicas
+    # collide). Empty string means "unresolved, run reconcile".
+    log("Waiting for Tailscale registration to resolve worker hostname...")
+    hostname = _resolve_new_gpu_hostname(worker_name, ts_peers_before, existing_workers)
+
     worker = asdict(
         GpuWorker(
             name=worker_name,
+            hostname=hostname,
             instance_id=instance_id,
             instance_type=gpu_type,
             spot=use_spot,
@@ -2318,8 +2386,10 @@ def _launch_gpu(
         gpu_type=gpu_type,
         ip=gpu_ip,
         worker=worker_name,
+        hostname=hostname,
     )
-    log(f"GPU worker '{worker_name}' running: {instance_id} ({gpu_ip})")
+    label = hostname or f"{worker_name} (unresolved)"
+    log(f"GPU worker '{label}' running: {instance_id} ({gpu_ip})")
 
     # Register all GPU worker metrics with Prometheus on the control plane.
     # Always write targets — harmless if Prometheus isn't running, and
@@ -2342,14 +2412,15 @@ def cmd_launch(args: argparse.Namespace) -> None:
     if target in ("gpu", None):
         if tmpl.gpu_worker:
             engines = args.engines.split(",") if args.engines else None
-            _launch_gpu(
-                st,
-                tmpl,
-                spot=spot_override,
-                gpu_type=args.gpu_type,
-                engines=engines,
-                region=args.region,
-            )
+            with _launch_lock():
+                _launch_gpu(
+                    st,
+                    tmpl,
+                    spot=spot_override,
+                    gpu_type=args.gpu_type,
+                    engines=engines,
+                    region=args.region,
+                )
         elif target == "gpu":
             die("Template has no gpu_worker config.")
 
@@ -2357,43 +2428,69 @@ def cmd_launch(args: argparse.Namespace) -> None:
 
 
 def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
-    """Terminate GPU worker(s). If name is None, terminate all."""
+    """Terminate GPU worker(s). If name is None, terminate all.
+
+    Each `--name` token may match either the worker label (e.g. `pyannote`)
+    or the full Tailscale hostname (e.g. `dalston-gpu-pyannote-1`). Matching
+    against `name` is the only way to terminate *all* replicas of an
+    engine in one call; matching against `hostname` targets a single replica.
+    """
     if not st.gpu_workers:
         log("No GPU workers to terminate.")
         return
 
-    names: set[str] | None = None
+    keys: set[str] | None = None
     if name is not None:
-        names = {n.strip() for n in name.split(",")}
+        keys = {n.strip() for n in name.split(",") if n.strip()}
+
+    def _matches(w: dict[str, Any]) -> bool:
+        if keys is None:
+            return True
+        return w["name"] in keys or w.get("hostname", "") in keys
+
+    if keys is not None:
+        # Validate every key matches at least one worker so a typo doesn't
+        # silently no-op.
+        unmatched = {
+            k
+            for k in keys
+            if not any(w["name"] == k or w.get("hostname") == k for w in st.gpu_workers)
+        }
+        if unmatched:
+            avail = sorted(
+                {w["name"] for w in st.gpu_workers}
+                | {w.get("hostname", "") for w in st.gpu_workers if w.get("hostname")}
+            )
+            die(f"Unknown GPU worker key(s): {sorted(unmatched)}. Available: {avail}")
 
     to_remove = []
 
     for w in st.gpu_workers:
-        if names is not None and w["name"] not in names:
+        if not _matches(w):
             continue
         iid = w["instance_id"]
-        wname = w["name"]
+        label = _worker_label(w)
         w_region = w.get("region", st.region)
         state = get_instance_state(w_region, iid)
         if state in ("terminated", "shutting-down"):
             to_remove.append(w)
             continue
-        audit("terminate.gpu", gpu_instance=iid, worker=wname)
+        audit("terminate.gpu", gpu_instance=iid, worker=label)
         cancel_spot_requests_for_instances(w_region, [iid])
-        log(f"Terminating GPU worker '{wname}' ({iid})...")
+        log(f"Terminating GPU worker '{label}' ({iid})...")
         try:
             ec2_client(w_region).terminate_instances(InstanceIds=[iid])
             to_remove.append(w)
         except ClientError as e:
-            warn(f"Failed to terminate '{wname}' ({iid}): {e}")
+            warn(f"Failed to terminate '{label}' ({iid}): {e}")
 
     for w in to_remove:
         st.gpu_workers.remove(w)
     if not st.gpu_workers:
         st.gpu_workers = None
     save_state(st)
-    if names:
-        log(f"GPU worker(s) {', '.join(sorted(names))} terminated.")
+    if keys:
+        log(f"GPU worker(s) {', '.join(sorted(keys))} terminated.")
     else:
         log("All GPU workers terminated.")
 
@@ -2508,11 +2605,16 @@ def cmd_up(args: argparse.Namespace) -> None:
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
 
     for w in st.gpu_workers or []:
-        gpu_state = get_instance_state(st.region, w["instance_id"])
+        # Cross-region workers need their own EC2 client; default to the
+        # control-plane region for backwards compatibility with old state.
+        w_region = w.get("region", st.region)
+        w_ec2 = ec2_client(w_region)
+        label = _worker_label(w)
+        gpu_state = get_instance_state(w_region, w["instance_id"])
         if gpu_state == "terminated":
-            warn(f"GPU worker '{w['name']}' ({w['instance_id']}) was terminated.")
+            warn(f"GPU worker '{label}' ({w['instance_id']}) was terminated.")
         else:
-            retry_aws(ec2.start_instances, InstanceIds=[w["instance_id"]])
+            retry_aws(w_ec2.start_instances, InstanceIds=[w["instance_id"]])
     log("Start command sent. Instances booting...")
 
     if args.pull:
@@ -2561,14 +2663,19 @@ def cmd_down(args: argparse.Namespace) -> None:
     ec2 = ec2_client(st.region)
     _stop_instance(ec2, st.region, st.instance_id)
     for w in st.gpu_workers or []:
-        _stop_instance(ec2, st.region, w["instance_id"])
+        w_region = w.get("region", st.region)
+        _stop_instance(ec2_client(w_region), w_region, w["instance_id"])
     log("Done. Use 'dalston-aws up' to restart.")
 
 
-def _resolve_tailscale_host(base_hostname: str) -> str:
-    """Find the actual Tailscale hostname, handling -1/-2 suffixes."""
-    import subprocess
+def _tailscale_peers() -> dict[str, Any] | None:
+    """Return the parsed Tailscale `Peer` dict, or None if Tailscale is unavailable.
 
+    Distinguishes "no matching peers" (empty dict) from "Tailscale CLI not
+    available" (None) so polling callers can short-circuit instead of
+    burning a 5-minute timeout when the operator simply isn't on the
+    tailnet.
+    """
     try:
         result = subprocess.run(
             ["tailscale", "status", "--json"],
@@ -2576,42 +2683,216 @@ def _resolve_tailscale_host(base_hostname: str) -> str:
             text=True,
             timeout=5,
         )
-        if result.returncode == 0:
-            import re
-
-            status = json.loads(result.stdout)
-            pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
-            for peer in (status.get("Peer") or {}).values():
-                name = peer.get("HostName", "")
-                if pattern.match(name) and peer.get("Online"):
-                    if name != base_hostname:
-                        warn(f"Tailscale node is '{name}' (not '{base_hostname}')")
-                    return name
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout).get("Peer") or {}
     except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
+        return None
+
+
+def _peer_shortname(peer: dict[str, Any]) -> str:
+    """Return a peer's unique short name — the label before the tailnet suffix.
+
+    Matching on the JSON `HostName` field is wrong for replicas: Tailscale
+    disambiguates name collisions on `DNSName` only. Two nodes that both
+    run `tailscale up --hostname=foo` when `foo` is already online report
+    the same `HostName='foo'` but different `DNSName`s
+    (`foo.<tailnet>.ts.net.` vs `foo-1.<tailnet>.ts.net.`). Use the first
+    label of `DNSName` so replicas get distinct short names.
+    """
+    dns = peer.get("DNSName", "")
+    if dns:
+        return dns.split(".", 1)[0]
+    return str(peer.get("HostName", ""))
+
+
+def _resolve_tailscale_host(base_hostname: str) -> str:
+    """Find the actual Tailscale hostname, handling -1/-2 suffixes.
+
+    Returns the first online peer whose short DNS name matches
+    `base_hostname` optionally followed by a `-N` suffix. Used for the
+    control plane and as a fallback for GPU workers that have no recorded
+    hostname.
+    """
+    import re
+
+    peers = _tailscale_peers()
+    if peers is None:
+        return base_hostname
+    pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
+    for peer in peers.values():
+        name = _peer_shortname(peer)
+        if pattern.match(name) and peer.get("Online"):
+            if name != base_hostname:
+                warn(f"Tailscale node is '{name}' (not '{base_hostname}')")
+            return name
     return base_hostname
 
 
-def _resolve_tailscale_ip(hostname: str) -> str | None:
-    """Resolve a Tailscale hostname to its 100.x.y.z IP."""
-    import subprocess
+def _snapshot_ts_peers(base_hostname: str) -> set[str] | None:
+    """Return Tailscale short DNS names matching `base_hostname[-N]`.
 
-    try:
-        result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5,
+    Returns None when Tailscale itself is unavailable so callers can
+    distinguish "no matching peers" from "tailnet not reachable" — the
+    latter means polling is futile. Used by `_launch_gpu` to diff peers
+    before/after launch and by `cmd_reconcile`.
+    """
+    import re
+
+    peers = _tailscale_peers()
+    if peers is None:
+        return None
+    pattern = re.compile(rf"^{re.escape(base_hostname)}(-\d+)?$")
+    return {
+        _peer_shortname(peer)
+        for peer in peers.values()
+        if pattern.match(_peer_shortname(peer))
+    }
+
+
+def _gpu_hostname_fallback(
+    base_host: str, existing_workers: list[dict[str, Any]], reason: str
+) -> str:
+    """Compute the fallback hostname when a new GPU's tailnet name can't be resolved.
+
+    Returns the base hostname if no sibling already holds it; otherwise
+    returns "" so the caller records an unresolved entry that
+    `dalston-aws reconcile` can fix later.
+    """
+    sibling_hosts = {w.get("hostname") or "" for w in existing_workers}
+    if base_host in sibling_hosts:
+        warn(
+            f"Could not resolve Tailscale hostname for new GPU worker "
+            f"({reason}); '{base_host}' is already in use by another worker. "
+            f"Recording unresolved entry — run 'dalston-aws reconcile' once "
+            f"the worker is online."
         )
-        if result.returncode == 0:
-            status = json.loads(result.stdout)
-            for peer in (status.get("Peer") or {}).values():
-                if peer.get("HostName") == hostname and peer.get("Online"):
-                    ips = peer.get("TailscaleIPs", [])
-                    if ips:
-                        return ips[0]
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
+        return ""
+    warn(
+        f"Could not resolve Tailscale hostname for new GPU worker "
+        f"({reason}); falling back to '{base_host}'. Run "
+        f"'dalston-aws reconcile' to verify."
+    )
+    return base_host
+
+
+def _resolve_new_gpu_hostname(
+    base_name: str,
+    peers_before: set[str] | None,
+    existing_workers: list[dict[str, Any]],
+    wait_seconds: int = 300,
+) -> str:
+    """Wait for a freshly-launched GPU to appear on the tailnet and return its hostname.
+
+    `peers_before` is the snapshot taken before the launch (or None if
+    Tailscale was already unreachable). The function polls `tailscale
+    status` for up to `wait_seconds` and picks the new peer that wasn't
+    in the snapshot. If Tailscale is unavailable or no new peer appears,
+    falls back via `_gpu_hostname_fallback`.
+    """
+    base_host = f"dalston-gpu-{base_name}"
+    if peers_before is None:
+        return _gpu_hostname_fallback(
+            base_host, existing_workers, "Tailscale unavailable on operator host"
+        )
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        after = _snapshot_ts_peers(base_host)
+        if after is None:
+            return _gpu_hostname_fallback(
+                base_host, existing_workers, "Tailscale became unavailable mid-poll"
+            )
+        new = sorted(after - peers_before)
+        if new:
+            return new[0]
+        time.sleep(5)
+
+    return _gpu_hostname_fallback(
+        base_host, existing_workers, f"no new peer after {wait_seconds}s"
+    )
+
+
+@contextmanager
+def _launch_lock() -> Any:
+    """Serialize concurrent `dalston-aws launch gpu` invocations.
+
+    Without this, two near-simultaneous launches would compute their peer
+    snapshots before either new node has registered with Tailscale, causing
+    both to claim the same hostname.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / "launch.lock"
+    f = open(lock_path, "w")
+    try:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            die(
+                f"Another dalston-aws launch is in progress (lock at {lock_path}). "
+                f"Wait for it to finish, or remove the lock file if stale."
+            )
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        f.close()
+
+
+def _worker_label(w: dict[str, Any]) -> str:
+    """Human-readable label for a GPU worker entry.
+
+    Prefers the resolved Tailscale hostname (unique per replica) and falls
+    back to the engine label when the hostname is unresolved. Use this in
+    log/warn/error messages and operator-facing lists.
+    """
+    return str(w.get("hostname") or w["name"])
+
+
+def _match_gpu_worker(workers: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
+    """Look up a single worker by hostname (unique) or label `name` (may repeat).
+
+    Hostname matches are always unambiguous and take precedence. Label
+    matches are only resolved if exactly one worker bears that label —
+    otherwise the function calls `die()` so the operator must use a full
+    hostname instead of silently routing admin commands to the wrong
+    replica. Returns None only when there is no match at all.
+    """
+    for w in workers:
+        if w.get("hostname") == key:
+            return w
+    label_matches = [w for w in workers if w.get("name") == key]
+    if len(label_matches) == 1:
+        return label_matches[0]
+    if len(label_matches) > 1:
+        hosts = [w.get("hostname") or "(unresolved)" for w in label_matches]
+        die(
+            f"GPU label '{key}' matches {len(label_matches)} replicas: {hosts}. "
+            f"Use a full Tailscale hostname (e.g. '{hosts[0]}') to disambiguate."
+        )
+    return None
+
+
+def _resolve_tailscale_ip(hostname: str) -> str | None:
+    """Resolve a Tailscale short DNS name to its 100.x.y.z IP.
+
+    Matches on the short DNS name (first label of `DNSName`) rather than
+    `HostName` — replicas share the same `HostName` but have unique
+    `DNSName`s, so a `HostName`-based lookup would non-deterministically
+    return whichever replica's peer iterated first.
+    """
+    peers = _tailscale_peers()
+    if peers is None:
+        return None
+    for peer in peers.values():
+        if _peer_shortname(peer) == hostname and peer.get("Online"):
+            ips = peer.get("TailscaleIPs", [])
+            if ips:
+                return str(ips[0])
     return None
 
 
@@ -2621,21 +2902,22 @@ def cmd_ssh(args: argparse.Namespace) -> None:
     if args.target == "gpu":
         if not st.gpu_workers:
             die("No GPU workers found. Use 'dalston-aws ssh' for the main instance.")
-        # If multiple workers, pick by --name or default to first
+        # Lookup by --name (matches either label or hostname); default to first
         gpu_name = getattr(args, "name", None)
         if gpu_name:
-            worker = next((w for w in st.gpu_workers if w["name"] == gpu_name), None)
+            worker = _match_gpu_worker(st.gpu_workers, gpu_name)
             if not worker:
-                names = [w["name"] for w in st.gpu_workers]
-                die(f"GPU worker '{gpu_name}' not found. Available: {names}")
+                avail = [_worker_label(w) for w in st.gpu_workers]
+                die(f"GPU worker '{gpu_name}' not found. Available: {avail}")
         else:
             worker = st.gpu_workers[0]
             if len(st.gpu_workers) > 1:
-                names = [w["name"] for w in st.gpu_workers]
+                avail = [_worker_label(w) for w in st.gpu_workers]
                 warn(
-                    f"Multiple GPU workers: {names}. Connecting to '{worker['name']}'. Use --name to choose."
+                    f"Multiple GPU workers: {avail}. Connecting to "
+                    f"'{_worker_label(worker)}'. Use --name to choose."
                 )
-        base_hostname = f"dalston-gpu-{worker['name']}"
+        base_hostname = worker.get("hostname") or f"dalston-gpu-{worker['name']}"
         user = "ubuntu"  # DL AMI is Ubuntu-based
     else:
         base_hostname = "dalston-control-plane"
@@ -2651,6 +2933,84 @@ def cmd_ssh(args: argparse.Namespace) -> None:
 
     log(f"Connecting to {hostname}...")
     os.execvp("ssh", ssh_args)
+
+
+def cmd_reconcile(args: argparse.Namespace) -> None:
+    """Re-resolve Tailscale hostnames for GPU workers with unresolved entries.
+
+    Runs `tailscale status` and matches live peers to state entries that
+    have an empty `hostname` field. Auto-assigns only when a base label has
+    exactly one unresolved entry *and* exactly one unclaimed peer — any
+    other shape is ambiguous and reported so the operator can re-launch
+    the affected worker. Snapshots Tailscale once per unique base label,
+    not once per unresolved entry.
+    """
+    st = require_state()
+    if not st.gpu_workers:
+        log("No GPU workers to reconcile.")
+        return
+
+    unresolved = [w for w in st.gpu_workers if not w.get("hostname")]
+    if not unresolved:
+        log("All GPU workers have resolved hostnames.")
+        return
+
+    log(f"Reconciling {len(unresolved)} unresolved worker(s)...")
+    claimed = {w.get("hostname") for w in st.gpu_workers if w.get("hostname")}
+
+    by_base: dict[str, list[dict[str, Any]]] = {}
+    for w in unresolved:
+        by_base.setdefault(f"dalston-gpu-{w['name']}", []).append(w)
+
+    resolved = 0
+    for base_host, group in by_base.items():
+        peers = _snapshot_ts_peers(base_host)
+        if peers is None:
+            for w in group:
+                warn(
+                    f"Worker '{w['name']}' ({w['instance_id']}): Tailscale "
+                    f"is unavailable on this host. Run "
+                    f"'tailscale status' to verify connectivity, then retry."
+                )
+            continue
+        candidates = sorted(peers - claimed)
+        if len(group) == 1 and len(candidates) == 1:
+            w = group[0]
+            chosen = candidates[0]
+            w["hostname"] = chosen
+            claimed.add(chosen)
+            resolved += 1
+            log(f"Resolved '{w['name']}' ({w['instance_id']}) -> {chosen}")
+            continue
+        if not candidates:
+            for w in group:
+                warn(
+                    f"Worker '{w['name']}' ({w['instance_id']}): no matching "
+                    f"Tailscale peer found. The worker may still be booting "
+                    f"or may have failed to join the tailnet. Check "
+                    f"'tailscale status' on the worker, or terminate and "
+                    f"re-launch it."
+                )
+            continue
+        # N entries vs M candidates with N>1 or M>1: cannot reliably map
+        # which EC2 instance corresponds to which Tailscale peer.
+        for w in group:
+            warn(
+                f"Worker '{w['name']}' ({w['instance_id']}): {len(group)} "
+                f"unresolved entries vs {len(candidates)} unclaimed Tailscale "
+                f"peer(s) {candidates} — cannot disambiguate. Terminate and "
+                f"re-launch the affected workers to fix."
+            )
+
+    if resolved:
+        save_state(st)
+        log(f"Reconciled {resolved} worker(s).")
+        # Workers that had unresolved hostnames were skipped from the
+        # Prometheus targets file at launch time; rewrite it now so
+        # observability is restored without waiting for the next launch.
+        _write_gpu_prometheus_targets(st.gpu_workers, key_name=st.key_name)
+    else:
+        warn("No workers could be reconciled.")
 
 
 def cmd_patch(args: argparse.Namespace) -> None:
@@ -2886,7 +3246,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ssh.add_argument(
         "--name",
         default=None,
-        help="GPU worker name (e.g., 'onnx', 'pyannote') when target=gpu",
+        help=(
+            "GPU worker label (e.g. 'pyannote') or full Tailscale hostname "
+            "(e.g. 'dalston-gpu-pyannote-1'). Hostname is required to pick "
+            "between replicas of the same engine."
+        ),
     )
     p_ssh.set_defaults(func=cmd_ssh)
 
@@ -2947,9 +3311,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_term.add_argument(
         "--name",
         default=None,
-        help="Terminate specific GPU worker(s) by name, comma-separated (e.g., 'onnx,pyannote')",
+        help=(
+            "Terminate specific GPU worker(s), comma-separated. Each token "
+            "matches either an engine label (e.g. 'pyannote' — terminates "
+            "all replicas) or a full Tailscale hostname (e.g. "
+            "'dalston-gpu-pyannote-1' — terminates one replica)."
+        ),
     )
     p_term.set_defaults(func=cmd_terminate)
+
+    # reconcile
+    p_reconcile = sub.add_parser(
+        "reconcile",
+        help="Re-resolve Tailscale hostnames for GPU workers with unresolved entries",
+    )
+    p_reconcile.set_defaults(func=cmd_reconcile)
 
     return parser
 
