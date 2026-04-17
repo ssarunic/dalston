@@ -152,11 +152,11 @@ class TestOpenAITranscriptions:
         with wav_file.open("rb") as f:
             resp = client.post(
                 "/v1/audio/transcriptions",
-                data=[
-                    ("model", "whisper-1"),
-                    ("response_format", "verbose_json"),
-                    ("timestamp_granularities", "word"),
-                ],
+                data={
+                    "model": "whisper-1",
+                    "response_format": "verbose_json",
+                    "timestamp_granularities": ["word"],
+                },
                 files={"file": ("audio.wav", f, "audio/wav")},
             )
         assert resp.status_code == 200
@@ -184,10 +184,10 @@ class TestOpenAITranscriptions:
         with wav_file.open("rb") as f:
             resp = client.post(
                 "/v1/audio/transcriptions",
-                data=[
-                    ("model", "whisper-1"),
-                    ("timestamp_granularities", "word"),
-                ],
+                data={
+                    "model": "whisper-1",
+                    "timestamp_granularities": ["word"],
+                },
                 files={"file": ("audio.wav", f, "audio/wav")},
             )
         assert resp.status_code == 400

@@ -51,7 +51,7 @@ def _register_openai_transcriptions(
     engine: Engine,
     engine_id: str,
 ) -> None:
-    @app.post("/v1/audio/transcriptions")
+    @app.post("/v1/audio/transcriptions", response_model=None)
     async def openai_transcriptions(
         file: Annotated[UploadFile | None, File()] = None,
         model: Annotated[str | None, Form()] = None,
