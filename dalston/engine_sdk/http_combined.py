@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
+from dalston.engine_sdk.http_compat import register_compat_endpoints
 from dalston.engine_sdk.http_server import (
     EngineHTTPServer,
     resolve_audio,
@@ -44,6 +45,9 @@ class CombinedHTTPServer(EngineHTTPServer):
 
         if "transcribe" in stages and "diarize" in stages:
             self._register_combined(app, engine, engine_id)
+
+        if "transcribe" in stages:
+            register_compat_endpoints(app, engine, engine_id)
 
     # ------------------------------------------------------------------
     # Individual stage endpoints
