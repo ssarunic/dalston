@@ -2,13 +2,9 @@
 
 Covers the two hardcoded 600s fallbacks that surfaced when a pyannote
 diarize task hit ``Task processing exceeded 600s timeout`` — one on the
-engine SDK runner (DEFAULT_TASK_TIMEOUT) and one on the orchestrator
-reconciler (re-enqueue timeout).
-
-These are module-constant reads at import time, so we re-import the
-module fresh to exercise the env-var path without relying on
-``importlib.reload`` (which is fragile in pytest when the autouse env
-restore fixture has already run).
+engine SDK runner (``DEFAULT_TASK_TIMEOUT``) and one on the orchestrator
+reconciler (``REENQUEUE_TIMEOUT_S``). Both now default to the shared
+``TASK_UNKNOWN_DURATION_TIMEOUT_S`` (1h) and accept env overrides.
 """
 
 from __future__ import annotations
@@ -16,36 +12,63 @@ from __future__ import annotations
 import importlib
 import sys
 
+import pytest
+
 
 def _fresh_import(dotted: str):
-    """Drop the module from sys.modules and re-import it."""
+    """Drop the module from sys.modules and re-import it.
+
+    Module-level constants that read env at import time need a fresh
+    module load per test; ``importlib.reload`` is fragile in pytest
+    when autouse fixtures have already touched the environment.
+    """
     sys.modules.pop(dotted, None)
     return importlib.import_module(dotted)
 
 
-def test_engine_sdk_runner_default_is_1h(monkeypatch) -> None:
-    """DEFAULT_TASK_TIMEOUT defaults to 3600 when env var is unset."""
+@pytest.mark.parametrize(
+    "env_value,expected",
+    [(None, 3600), ("900", 900)],
+)
+def test_engine_sdk_default_task_timeout(
+    monkeypatch, env_value: str | None, expected: int
+) -> None:
+    """``DEFAULT_TASK_TIMEOUT`` honours ``DALSTON_DEFAULT_TASK_TIMEOUT_S``."""
+    if env_value is None:
+        monkeypatch.delenv("DALSTON_DEFAULT_TASK_TIMEOUT_S", raising=False)
+    else:
+        monkeypatch.setenv("DALSTON_DEFAULT_TASK_TIMEOUT_S", env_value)
+
+    runner = _fresh_import("dalston.engine_sdk.runner")
+    assert runner.EngineRunner.DEFAULT_TASK_TIMEOUT == expected
+
+
+@pytest.mark.parametrize(
+    "env_value,expected",
+    [(None, 3600), ("1800", 1800)],
+)
+def test_reconciler_reenqueue_timeout(
+    monkeypatch, env_value: str | None, expected: int
+) -> None:
+    """``REENQUEUE_TIMEOUT_S`` honours ``DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S``."""
+    if env_value is None:
+        monkeypatch.delenv("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", raising=False)
+    else:
+        monkeypatch.setenv("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", env_value)
+
+    reconciler = _fresh_import("dalston.orchestrator.reconciler")
+    assert reconciler.REENQUEUE_TIMEOUT_S == expected
+
+
+def test_shared_constant_is_used_by_both_fallbacks(monkeypatch) -> None:
+    """Without env overrides, both fallbacks match the shared constant."""
     monkeypatch.delenv("DALSTON_DEFAULT_TASK_TIMEOUT_S", raising=False)
-    runner = _fresh_import("dalston.engine_sdk.runner")
-    assert runner.EngineRunner.DEFAULT_TASK_TIMEOUT == 3600
-
-
-def test_engine_sdk_runner_timeout_env_override(monkeypatch) -> None:
-    """DALSTON_DEFAULT_TASK_TIMEOUT_S overrides the class attribute."""
-    monkeypatch.setenv("DALSTON_DEFAULT_TASK_TIMEOUT_S", "900")
-    runner = _fresh_import("dalston.engine_sdk.runner")
-    assert runner.EngineRunner.DEFAULT_TASK_TIMEOUT == 900
-
-
-def test_reconciler_reenqueue_timeout_default_is_1h(monkeypatch) -> None:
-    """Reconciler's re-enqueue timeout defaults to 3600."""
     monkeypatch.delenv("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", raising=False)
-    reconciler = _fresh_import("dalston.orchestrator.reconciler")
-    assert reconciler._REENQUEUE_TIMEOUT_S == 3600
 
+    from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 
-def test_reconciler_reenqueue_timeout_env_override(monkeypatch) -> None:
-    """DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S overrides the module constant."""
-    monkeypatch.setenv("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", "1800")
+    runner = _fresh_import("dalston.engine_sdk.runner")
     reconciler = _fresh_import("dalston.orchestrator.reconciler")
-    assert reconciler._REENQUEUE_TIMEOUT_S == 1800
+
+    assert runner.EngineRunner.DEFAULT_TASK_TIMEOUT == TASK_UNKNOWN_DURATION_TIMEOUT_S
+    assert reconciler.REENQUEUE_TIMEOUT_S == TASK_UNKNOWN_DURATION_TIMEOUT_S

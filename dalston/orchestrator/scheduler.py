@@ -25,6 +25,7 @@ from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import add_task, add_task_once
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
+from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 from dalston.config import Settings
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog, get_catalog
 from dalston.orchestrator.exceptions import (
@@ -147,9 +148,7 @@ def calculate_task_timeout(
         144  # 60 * 0.8 * 3 = 144s (but min 60s)
     """
     if audio_duration_s is None or audio_duration_s <= 0:
-        # Default timeout for unknown duration — must be generous enough
-        # for long-audio stages (diarize can take 15+ min on 2hr audio)
-        return 3600  # 1 hour
+        return TASK_UNKNOWN_DURATION_TIMEOUT_S
 
     # Select RTF based on hardware preference
     rtf = None

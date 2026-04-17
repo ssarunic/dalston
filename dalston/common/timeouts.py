@@ -40,3 +40,13 @@ REALTIME_SESSION_TTL_SECONDS = 300  # 5 minutes - session key TTL in Redis
 
 REDIS_RECONNECT_DELAY_SECONDS = 5  # wait before reconnecting to Redis
 ERROR_RETRY_DELAY_SECONDS = 1  # wait before retrying after generic errors
+
+# =============================================================================
+# Task Processing Timeouts
+# =============================================================================
+# Fallback used when the scheduler can't compute a duration-aware timeout
+# (audio_duration unknown) or when the engine/reconciler recovers a task
+# whose original timeout_at metadata isn't available. 1 hour covers
+# long-audio diarize/transcribe runs including cold-start model downloads.
+
+TASK_UNKNOWN_DURATION_TIMEOUT_S = 3600

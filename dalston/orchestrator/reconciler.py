@@ -39,6 +39,7 @@ from dalston.common.streams import (
     is_engine_alive,
 )
 from dalston.common.streams_types import CONSUMER_GROUP, PendingTask
+from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 from dalston.config import Settings
 from dalston.db.models import TaskModel
 
@@ -49,13 +50,16 @@ DEFAULT_RECONCILE_INTERVAL_SECONDS = 300  # 5 minutes
 ORPHAN_THRESHOLD_SECONDS = 600  # 10 minutes - only reconcile tasks older than this
 READY_TASK_RECOVERY_THRESHOLD_SECONDS = 120
 
-# Timeout used when re-enqueueing a task on the recovery path. The original
-# per-duration timeout isn't available here (audio_duration/rtf info lives
-# on the scheduler side), so we use a generous default that's roomy enough
-# for long-audio diarize/transcribe runs. Override via
+# Timeout for tasks re-enqueued on the recovery path. The scheduler's
+# duration-aware formula isn't available here (audio_duration lives in
+# task metadata, not always readable at recovery time), so we fall back
+# to the shared long-audio default. Override via
 # ``DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S``.
-_REENQUEUE_TIMEOUT_S = int(
-    os.environ.get("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", "3600")
+REENQUEUE_TIMEOUT_S = int(
+    os.environ.get(
+        "DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S",
+        str(TASK_UNKNOWN_DURATION_TIMEOUT_S),
+    )
 )
 
 # Leader election (separate from scanner to allow independent operation)
@@ -589,7 +593,7 @@ class ReconciliationSweeper:
                     stage=stage,
                     task_id=task_id,
                     job_id=str(task.job_id),
-                    timeout_s=_REENQUEUE_TIMEOUT_S,
+                    timeout_s=REENQUEUE_TIMEOUT_S,
                 )
 
                 # Now ACK old PEL entry to clear it
@@ -662,7 +666,7 @@ class ReconciliationSweeper:
                 stage=queue_id,
                 task_id=task_id,
                 job_id=str(task.job_id),
-                timeout_s=_REENQUEUE_TIMEOUT_S,
+                timeout_s=REENQUEUE_TIMEOUT_S,
             )
             await self._redis.hset(
                 metadata_key,

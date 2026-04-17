@@ -498,14 +498,14 @@ class TestReadyTaskRecovery:
             count = await sweeper._reconcile_ready_tasks_with_consumed_messages(mock_db)
 
         assert count == 1
-        from dalston.orchestrator.reconciler import _REENQUEUE_TIMEOUT_S
+        from dalston.orchestrator.reconciler import REENQUEUE_TIMEOUT_S
 
         mock_add_task.assert_called_once_with(
             mock_redis,
             stage=queue_id,
             task_id=str(task_id),
             job_id=str(job_id),
-            timeout_s=_REENQUEUE_TIMEOUT_S,
+            timeout_s=REENQUEUE_TIMEOUT_S,
         )
         mock_redis.hset.assert_called_once()
 

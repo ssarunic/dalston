@@ -39,6 +39,7 @@ from dalston.common.streams_sync import (
     read_task,
 )
 from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
+from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 from dalston.engine_sdk import io
 from dalston.engine_sdk.admission import TaskDeferredError
 from dalston.engine_sdk.context import BatchTaskContext
@@ -78,13 +79,16 @@ class EngineRunner:
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
     DURABLE_EVENT_MAX_RETRIES = 5
     DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
-    # Fallback timeout when the task metadata has no parseable ``timeout_at``.
-    # Matches the scheduler's "unknown audio duration" default (1 hour). A
-    # diarize task on a 1-hour file can legitimately need 10-15 min plus
-    # cold-start HF downloads, so 600s (the previous default) was a false
-    # floor that killed legitimate long-running tasks on the reconciler
-    # retry path. Override via ``DALSTON_DEFAULT_TASK_TIMEOUT_S``.
-    DEFAULT_TASK_TIMEOUT = int(os.environ.get("DALSTON_DEFAULT_TASK_TIMEOUT_S", "3600"))
+    # Fallback when the task metadata has no parseable ``timeout_at``.
+    # Matches ``TASK_UNKNOWN_DURATION_TIMEOUT_S`` so the fallback path
+    # doesn't artificially cap long-audio diarize/transcribe runs.
+    # Override via ``DALSTON_DEFAULT_TASK_TIMEOUT_S``.
+    DEFAULT_TASK_TIMEOUT = int(
+        os.environ.get(
+            "DALSTON_DEFAULT_TASK_TIMEOUT_S",
+            str(TASK_UNKNOWN_DURATION_TIMEOUT_S),
+        )
+    )
 
     # Temp directory purge policy: sweep orphaned dalston_task_* dirs on startup
     # and periodically.  Default max age = 30 days; override with env var (seconds).
