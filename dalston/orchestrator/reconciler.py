@@ -49,6 +49,15 @@ DEFAULT_RECONCILE_INTERVAL_SECONDS = 300  # 5 minutes
 ORPHAN_THRESHOLD_SECONDS = 600  # 10 minutes - only reconcile tasks older than this
 READY_TASK_RECOVERY_THRESHOLD_SECONDS = 120
 
+# Timeout used when re-enqueueing a task on the recovery path. The original
+# per-duration timeout isn't available here (audio_duration/rtf info lives
+# on the scheduler side), so we use a generous default that's roomy enough
+# for long-audio diarize/transcribe runs. Override via
+# ``DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S``.
+_REENQUEUE_TIMEOUT_S = int(
+    os.environ.get("DALSTON_RECONCILER_REENQUEUE_TIMEOUT_S", "3600")
+)
+
 # Leader election (separate from scanner to allow independent operation)
 RECONCILER_LOCK_KEY = "dalston:reconciler:leader"
 RECONCILER_LOCK_TTL_SECONDS = 120
@@ -580,7 +589,7 @@ class ReconciliationSweeper:
                     stage=stage,
                     task_id=task_id,
                     job_id=str(task.job_id),
-                    timeout_s=600,  # 10 minute default timeout
+                    timeout_s=_REENQUEUE_TIMEOUT_S,
                 )
 
                 # Now ACK old PEL entry to clear it
@@ -653,7 +662,7 @@ class ReconciliationSweeper:
                 stage=queue_id,
                 task_id=task_id,
                 job_id=str(task.job_id),
-                timeout_s=600,
+                timeout_s=_REENQUEUE_TIMEOUT_S,
             )
             await self._redis.hset(
                 metadata_key,

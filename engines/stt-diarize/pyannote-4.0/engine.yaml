@@ -132,6 +132,11 @@ hardware:
   min_ram_gb: 6
 
 performance:
-  rtf_gpu: 0.08
+  # rtf_gpu bumped from 0.08 -> 0.15 after observed production timeouts
+  # on pyannote-community-1: measured ~0.13-0.17 on T4 including the
+  # clustering stage, and cold starts pay an extra HF download.
+  # Scheduler uses this * 3 (TIMEOUT_SAFETY_FACTOR) to compute task
+  # timeout, so 0.15 gives a 1-hour file ~27min of runway.
+  rtf_gpu: 0.15
   rtf_cpu: 1.2
   warm_start_latency_ms: 500

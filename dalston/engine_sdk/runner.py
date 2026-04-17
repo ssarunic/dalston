@@ -78,7 +78,13 @@ class EngineRunner:
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
     DURABLE_EVENT_MAX_RETRIES = 5
     DURABLE_EVENT_BASE_BACKOFF_SECONDS = 0.1
-    DEFAULT_TASK_TIMEOUT = 600  # seconds — fallback if no timeout_at in task
+    # Fallback timeout when the task metadata has no parseable ``timeout_at``.
+    # Matches the scheduler's "unknown audio duration" default (1 hour). A
+    # diarize task on a 1-hour file can legitimately need 10-15 min plus
+    # cold-start HF downloads, so 600s (the previous default) was a false
+    # floor that killed legitimate long-running tasks on the reconciler
+    # retry path. Override via ``DALSTON_DEFAULT_TASK_TIMEOUT_S``.
+    DEFAULT_TASK_TIMEOUT = int(os.environ.get("DALSTON_DEFAULT_TASK_TIMEOUT_S", "3600"))
 
     # Temp directory purge policy: sweep orphaned dalston_task_* dirs on startup
     # and periodically.  Default max age = 30 days; override with env var (seconds).
