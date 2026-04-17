@@ -1,6 +1,9 @@
 """HTTP server subclass for transcription engines.
 
-Adds ``POST /v1/transcribe`` to the base ``EngineHTTPServer`` endpoints.
+Adds ``POST /v1/transcribe`` plus OpenAI- and ElevenLabs-compatible
+transcription routes to the base ``EngineHTTPServer`` endpoints, so a
+single engine container can answer native, OpenAI SDK, and ElevenLabs SDK
+calls without the gateway.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, UploadFile
 
+from dalston.engine_sdk.http_compat import register_compat_endpoints
 from dalston.engine_sdk.http_server import (
     EngineHTTPServer,
     resolve_audio,
@@ -23,7 +27,10 @@ class TranscribeHTTPServer(EngineHTTPServer):
 
     Extends the base server with ``POST /v1/transcribe`` which accepts
     either a file upload or an audio URL, delegates to
-    ``engine.process()``, and returns the result.
+    ``engine.process()``, and returns the result. Also mounts
+    OpenAI-compatible ``POST /v1/audio/transcriptions`` and
+    ElevenLabs-compatible ``POST /v1/speech-to-text`` so the engine can
+    be called directly by the OpenAI and ElevenLabs SDKs.
     """
 
     def _register_stage_endpoints(self, app: FastAPI) -> None:
@@ -92,3 +99,5 @@ class TranscribeHTTPServer(EngineHTTPServer):
                 task_request=task_request,
                 stage="transcribe",
             )
+
+        register_compat_endpoints(app, engine, engine_id)
