@@ -166,6 +166,26 @@ class TestOpenAITranscriptions:
             {"word": "world", "start": 0.55, "end": 1.0},
         ]
 
+    def test_bracketed_timestamp_granularities_from_openai_sdk(
+        self, client: TestClient, wav_file: Path
+    ) -> None:
+        with wav_file.open("rb") as f:
+            resp = client.post(
+                "/v1/audio/transcriptions",
+                data={
+                    "model": "whisper-1",
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "word",
+                },
+                files={"file": ("audio.wav", f, "audio/wav")},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["words"] == [
+            {"word": "Hello", "start": 0.0, "end": 0.45},
+            {"word": "world", "start": 0.55, "end": 1.0},
+        ]
+
     def test_invalid_response_format_returns_400(
         self, client: TestClient, wav_file: Path
     ) -> None:

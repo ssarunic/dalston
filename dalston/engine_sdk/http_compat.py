@@ -60,7 +60,13 @@ def _register_openai_transcriptions(
         response_format: Annotated[str, Form()] = "json",
         temperature: Annotated[float | None, Form()] = None,  # noqa: ARG001
         timestamp_granularities: Annotated[list[str] | None, Form()] = None,
+        timestamp_granularities_bracket: Annotated[
+            list[str] | None, Form(alias="timestamp_granularities[]")
+        ] = None,
     ) -> Response | dict[str, Any]:
+        # OpenAI SDK sends ``timestamp_granularities[]=``; curl sends the
+        # unbracketed repeated field. Accept both.
+        granularities = timestamp_granularities or timestamp_granularities_bracket
         if response_format not in _OPENAI_RESPONSE_FORMATS:
             raise HTTPException(
                 status_code=400,
@@ -76,7 +82,7 @@ def _register_openai_transcriptions(
                     }
                 },
             )
-        if timestamp_granularities and response_format != "verbose_json":
+        if granularities and response_format != "verbose_json":
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -115,7 +121,7 @@ def _register_openai_transcriptions(
         return _format_openai(
             transcript,
             response_format=response_format,
-            timestamp_granularities=timestamp_granularities,
+            timestamp_granularities=granularities,
             requested_model=model,
         )
 
