@@ -3287,10 +3287,15 @@ def cmd_patch(args: argparse.Namespace) -> None:
 def cmd_teardown(args: argparse.Namespace) -> None:
     st = require_state()
     gpu_ids = [w["instance_id"] for w in (st.gpu_workers or [])]
+    engine_dep = load_engine_state()
+    engine_id = (
+        engine_dep.instance_id if engine_dep and engine_dep.instance_id else None
+    )
     audit(
         "teardown",
         instance=st.instance_id,
         gpu_instances=gpu_ids or None,
+        engine_instance=engine_id,
         s3_bucket=st.s3_bucket,
     )
 
@@ -3299,6 +3304,8 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     instance_list = st.instance_id
     for gid in gpu_ids:
         instance_list += f" {gid}"
+    if engine_id:
+        instance_list += f" {engine_id} (single-engine: {engine_dep.preset})"
     warn(f"  - EC2 instance(s): {instance_list}")
     volume_list = st.data_volume_id
     warn(f"  - EBS volumes: {volume_list}")
@@ -3313,7 +3320,27 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     if confirm != "yes":
         die("Aborted.")
 
-    # Terminate instances and clean up volumes
+    # Terminate instances and clean up volumes. Terminate the single-engine
+    # deployment first — it uses the shared GPU SG that we're about to delete,
+    # and AWS refuses to drop an SG that still has network interfaces attached.
+    if engine_dep and engine_dep.instance_id:
+        state = get_instance_state(engine_dep.region, engine_dep.instance_id)
+        if state not in ("terminated", "shutting-down"):
+            log(
+                f"Terminating single-engine '{engine_dep.preset}' "
+                f"({engine_dep.instance_id})..."
+            )
+            cancel_spot_requests_for_instances(
+                engine_dep.region, [engine_dep.instance_id]
+            )
+            try:
+                ec2_client(engine_dep.region).terminate_instances(
+                    InstanceIds=[engine_dep.instance_id]
+                )
+                wait_instance_terminated(engine_dep.region, engine_dep.instance_id)
+            except ClientError as e:
+                warn(f"Failed to terminate {engine_dep.instance_id}: {e}")
+        ENGINE_STATE_FILE.unlink(missing_ok=True)
     _terminate_gpu(st)
     _terminate_control_plane(st)
 
@@ -3400,7 +3427,11 @@ def cmd_engine_up(args: argparse.Namespace) -> None:
     existing = load_engine_state()
     if existing and existing.instance_id:
         state = get_instance_state(existing.region, existing.instance_id)
-        if state not in ("terminated", "shutting-down", "stopped"):
+        if state not in ("terminated", "shutting-down"):
+            # 'stopped' is included: reusing the state file for a new
+            # instance would orphan the stopped one (still billable for EBS).
+            # Force the user to either terminate it first or delete the
+            # state file intentionally.
             die(
                 f"Engine '{existing.preset}' is already deployed as "
                 f"{existing.instance_id} ({state}). Run 'dalston-aws engine "
@@ -3479,23 +3510,33 @@ def cmd_engine_down(args: argparse.Namespace) -> None:
         return
 
     state = get_instance_state(dep.region, dep.instance_id)
-    if state not in ("terminated", "shutting-down"):
-        audit(
-            "engine.down",
-            preset=dep.preset,
-            instance_id=dep.instance_id,
-        )
-        log(f"Terminating engine '{dep.preset}' ({dep.instance_id})...")
-        cancel_spot_requests_for_instances(dep.region, [dep.instance_id])
-        try:
-            ec2_client(dep.region).terminate_instances(InstanceIds=[dep.instance_id])
-        except ClientError as e:
-            warn(f"Failed to terminate {dep.instance_id}: {e}")
-    else:
-        log(f"Engine '{dep.preset}' already {state}.")
 
-    if ENGINE_STATE_FILE.exists():
-        ENGINE_STATE_FILE.unlink()
+    # Already gone — or the describe returned nothing because the instance
+    # has fallen out of the EC2 control plane. Safe to drop local state.
+    if (
+        state in ("terminated", "shutting-down")
+        or describe_instance(dep.region, dep.instance_id) is None
+    ):
+        log(f"Engine '{dep.preset}' already {state or 'not found'}.")
+        ENGINE_STATE_FILE.unlink(missing_ok=True)
+        log("Engine deployment removed.")
+        return
+
+    audit("engine.down", preset=dep.preset, instance_id=dep.instance_id)
+    log(f"Terminating engine '{dep.preset}' ({dep.instance_id})...")
+    cancel_spot_requests_for_instances(dep.region, [dep.instance_id])
+    try:
+        ec2_client(dep.region).terminate_instances(InstanceIds=[dep.instance_id])
+    except ClientError as e:
+        # Keep local state so the user can retry. Dropping it here would
+        # orphan a still-running billable instance.
+        die(
+            f"Failed to terminate {dep.instance_id}: {e}\n"
+            f"Local state retained so you can retry 'dalston-aws engine down' "
+            f"or fix permissions and retry. To force-drop state, delete "
+            f"{ENGINE_STATE_FILE} manually."
+        )
+    ENGINE_STATE_FILE.unlink(missing_ok=True)
     log("Engine deployment removed.")
 
 
