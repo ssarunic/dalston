@@ -209,7 +209,7 @@ def _init_engine_metrics() -> None:
         "dalston_engine_task_duration_seconds",
         "Task processing time (excludes queue wait)",
         ["engine_id", "model", "execution_profile"],
-        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
     )
 
     _engine_metrics["queue_wait_seconds"] = Histogram(
@@ -270,7 +270,7 @@ def _init_engine_metrics() -> None:
         "dalston_engine_recognize_seconds",
         "Wall-clock time for the recognize/transcribe call",
         ["engine_id", "model", "device"],
-        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
     )
 
     _engine_metrics["realtime_factor_ratio"] = Histogram(
@@ -291,7 +291,7 @@ def _init_engine_metrics() -> None:
         "dalston_engine_direct_request_seconds",
         "Total HTTP request duration for direct engine calls (M79 leaf API)",
         ["engine_id", "endpoint", "status_code"],
-        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300),
+        buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600),
     )
 
     _engine_metrics["direct_requests_total"] = Counter(
