@@ -35,18 +35,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # PyTorch + pyannote.audio (the heavy part — 2-3GB)
-# torchcodec from PyPI links against CUDA 13 NPP libs — use PyTorch's
-# own index for CUDA 12 compatible wheels.
+# torch + torchcodec must match ABI (torchcodec 0.10 vs torch 2.11 gives
+# undefined c10::MessageLogger symbol). Pin the torch minor so rebuilds
+# can't silently mix; torchcodec from PyPI links against CUDA 13 NPP, use
+# PyTorch's own index for CUDA 12 compatible wheels.
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
             --extra-index-url https://download.pytorch.org/whl/cu126 \
+            "torch>=2.11,<2.12" "torchaudio>=2.11,<2.12" \
+            "torchcodec>=0.11,<0.12" \
             "pyannote.audio>=4.0.0,<5.0.0" \
-            "torchcodec>=0.11.0" \
             "huggingface_hub>=1.0.0"; \
     else \
         pip install --no-cache-dir --break-system-packages \
+            "torch>=2.11,<2.12" "torchaudio>=2.11,<2.12" \
+            "torchcodec>=0.11,<0.12" \
             "pyannote.audio>=4.0.0,<5.0.0" \
-            "torchcodec>=0.11.0" \
             "huggingface_hub>=1.0.0"; \
     fi
 
