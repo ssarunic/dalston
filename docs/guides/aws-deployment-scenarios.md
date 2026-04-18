@@ -16,6 +16,7 @@ The engine_id-based engine architecture loads models dynamically from HuggingFac
 | 4. Multi-GPU | g5.12xlarge | 4x A10G 96GB | ~$500 | ~$170 | Full parallel pipeline + vllm-asr |
 | 5. Split CPU/GPU | t3.medium + g5.xlarge | 1x A10G 24GB | ~$87 (spot) | GPU spot | Always-on API + GPU on demand |
 | 6. Auto-scaling | ECS + g5 | Varies | ~$200+ | Mixed | Auto-scaling engines |
+| 0. Single engine, Tailscale | g4dn.xlarge / g5.xlarge | 1x T4 or A10G | pay-per-session | spot default | One engine only, one job at a time — SDK talks directly, no Gateway |
 
 Spot instances save ~65% on GPU instances. See [Spot Instances](#spot-instances) below.
 
@@ -51,6 +52,101 @@ Runtimes are inference engines that load models dynamically. Each engine_id is a
 | **voxtral** (Mini 4B) | 13 langs | **Yes** | <500ms | Native streaming LLM, ~16 GB VRAM |
 
 The engine selector automatically picks the best engine_id for each pipeline stage based on job language, requested model, and what's currently running. See `dalston/orchestrator/engine_selector.py`.
+
+---
+
+## Scenario 0: Single Engine over Tailscale (no Gateway)
+
+**For**: Solo user, private tailnet, one engine at a time, pay only while the box is on. "Replace my OpenAI / ElevenLabs bill" use case.
+
+```
+┌──────────────────────────────────────────────┐
+│  EC2: g4dn.xlarge or g5.xlarge               │
+│  (spot by default; --on-demand available)    │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │  One engine container (GPU)            │  │
+│  │  DALSTON_TOTAL_CAPACITY=1              │  │
+│  │  DALSTON_BATCH_MAX_INFLIGHT=1          │  │
+│  │  DALSTON_MAX_LOADED_MODELS=1  (LRU)    │  │
+│  │  DALSTON_MODEL_SOURCE=hf               │  │
+│  │                                        │  │
+│  │  Endpoints on port 9100 (tailnet):     │  │
+│  │  • POST /v1/transcribe       (native)  │  │
+│  │  • POST /v1/audio/transcriptions       │  │
+│  │  • POST /v1/speech-to-text             │  │
+│  └────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────┐  │
+│  │  redis:7-alpine (sidecar, localhost)   │  │
+│  └────────────────────────────────────────┘  │
+│                                              │
+│  HF_HOME on instance-store NVMe              │
+│  (ephemeral — re-downloaded on restart)      │
+│                                              │
+│  + Tailscale (41641/UDP outbound only)       │
+└──────────────────────────────────────────────┘
+```
+
+### What you get
+
+- **One container, one job at a time.** A second concurrent request gets rejected with `TaskDeferredError` (HTTP 503). Queueing is the caller's job.
+- **OpenAI and ElevenLabs SDKs talk to the engine directly.** Compat routes are mounted on the engine's FastAPI server. Point your client's `base_url` at `http://dalston-engine-<preset>:9100/v1` and transcribe.
+- **Model swapping via LRU.** `DALSTON_MAX_LOADED_MODELS=1` — request a different model and the resident one is unloaded, the new one is downloaded from HF and loaded into VRAM. First request with a new model pays the HF download (1–3 min for large Whisper variants).
+- **Private by default.** No ALB, no public IP, no ACM cert. Reachable only from the tailnet.
+- **Explicit lifecycle.** `dalston-aws engine up` starts the box, `engine down` terminates it. No auto-off.
+
+### What you don't get (use Gateway if you need these)
+
+- Async jobs + webhooks, job history, export formats (SRT/VTT/docx/pdf)
+- Diarization over the OpenAI / ElevenLabs compat routes (native `/v1/transcribe_and_diarize` on composite engines works, but the SDK routes intentionally reject `diarize=true`)
+- API-key auth, rate limiting, PII detection, audio redaction
+- Speaker ID, multi-channel, `additional_formats`
+- Multi-engine fan-out and queue scheduling
+
+### Launching it
+
+```bash
+# One-time AWS infra setup (S3 bucket is unused in this mode; SG/keypair/IAM are)
+dalston-aws setup -t gpu
+
+export HF_TOKEN=hf_...                  # required for pyannote; ignored by others
+dalston-aws engine up faster-whisper    # spot g4dn.xlarge by default
+dalston-aws engine status
+# Preset:      faster-whisper
+# Instance:    i-... (g4dn.xlarge)
+# Pricing:     spot
+# Tailscale:   dalston-engine-faster-whisper
+# Engine URL:  http://dalston-engine-faster-whisper:9100
+```
+
+Then from any tailnet member:
+
+```python
+# OpenAI SDK
+from openai import OpenAI
+client = OpenAI(base_url="http://dalston-engine-faster-whisper:9100/v1", api_key="not-needed")
+client.audio.transcriptions.create(
+    model="Systran/faster-whisper-large-v3",
+    file=open("audio.wav", "rb"),
+    response_format="verbose_json",
+    timestamp_granularities=["word"],
+)
+
+# ElevenLabs SDK
+from elevenlabs import ElevenLabs
+e = ElevenLabs(base_url="http://dalston-engine-faster-whisper:9100", api_key="not-needed")
+e.speech_to_text.convert(file=open("audio.wav","rb"), model_id="scribe_v1", language_code="en")
+```
+
+When done:
+
+```bash
+dalston-aws engine down
+```
+
+Available presets (keys of `GPU_ENGINE_PRESETS`): `faster-whisper`, `nemo`, `onnx`, `hf-asr`, `vllm-asr`, `pyannote`. Use `--on-demand` if you need the box to survive a spot reclaim, `--gpu-type` to override `g4dn.xlarge`.
+
+See [M88 milestone](../plan/milestones/M88-naked-engine-sdk-compat.md) for the design.
 
 ---
 

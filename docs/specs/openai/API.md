@@ -6,6 +6,15 @@ Dalston provides OpenAI-compatible endpoints for audio transcription, allowing e
 
 **Compatibility Target**: OpenAI Audio API (March 2025)
 
+### Where the endpoint lives
+
+`POST /v1/audio/transcriptions` is mounted in two places:
+
+1. **Gateway** (`dalston/gateway`) — full-featured: API keys, async jobs, webhooks, multi-channel, export formats, PII, diarization, rate limits.
+2. **Engine container itself** (since M88) — sync-only, single-job, no persistence, no webhooks. Reachable directly from the OpenAI SDK when the engine exposes `TranscribeHTTPServer` (any leaf transcribe engine) or `CombinedHTTPServer` (any composite that covers the `transcribe` stage). Used by the "single engine on a tailnet" deployment — see [Scenario 0 in aws-deployment-scenarios.md](../../guides/aws-deployment-scenarios.md#scenario-0-single-engine-over-tailscale-no-gateway).
+
+The endpoint's request/response contract is identical between the two mounts; what differs is which optional features return 400. The engine mount rejects `timestamp_granularities` on non-`verbose_json` responses and accepts both the unbracketed and OpenAI-SDK-style bracketed (`timestamp_granularities[]`) form encodings.
+
 ---
 
 ## Authentication

@@ -45,6 +45,7 @@ from botocore.exceptions import ClientError, WaiterError
 
 STATE_DIR = Path.home() / ".dalston"
 STATE_FILE = STATE_DIR / "aws-state.yaml"
+ENGINE_STATE_FILE = STATE_DIR / "engine-state.yaml"
 AUDIT_LOG = STATE_DIR / "audit.log"
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 NAME_PREFIX = "dalston"
@@ -276,6 +277,40 @@ def require_state() -> DeploymentState:
     if st is None:
         die("No deployment found. Run 'dalston-aws setup' first.")
     return st
+
+
+# ---------------------------------------------------------------------------
+# Single-engine deployment (explicit up/down, no control plane, Tailscale-only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class EngineDeployment:
+    preset: str = ""
+    region: str = DEFAULT_REGION
+    instance_id: str = ""
+    instance_type: str = ""
+    use_spot: bool = True
+    tailscale_hostname: str = ""
+    sg_id: str = ""
+    key_name: str = ""
+    instance_profile: str = ""
+    launched_at: str = ""
+
+
+def save_engine_state(state: EngineDeployment) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ENGINE_STATE_FILE.write_text(
+        yaml.dump(asdict(state), default_flow_style=False, sort_keys=False)
+    )
+
+
+def load_engine_state() -> EngineDeployment | None:
+    if not ENGINE_STATE_FILE.exists():
+        return None
+    data = yaml.safe_load(ENGINE_STATE_FILE.read_text()) or {}
+    known = set(EngineDeployment.__dataclass_fields__)
+    return EngineDeployment(**{k: v for k, v in data.items() if k in known})
 
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1263,161 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
 {extra_lines}  $OTEL_FLAGS $LOG_FLAGS \\
   "$GHCR_REGISTRY/{image}:latest"
 """
+
+
+def _single_engine_docker_run_block(engine_name: str, port: int = 9100) -> str:
+    """Docker-run for a single-engine, single-job GPU deployment.
+
+    Capacity is pinned to 1 (TOTAL_CAPACITY=BATCH_MAX_INFLIGHT=1,
+    RT_RESERVATION=0) so a second concurrent request is rejected by the
+    admission controller — queueing is the caller's responsibility.
+    MAX_LOADED_MODELS=1 forces LRU eviction so switching model swaps the
+    resident one out. Model source is HF (no S3 bucket needed).
+    """
+    preset = GPU_ENGINE_PRESETS[engine_name]
+    container = preset["container"]
+    engine_id = preset["engine_id"]
+    image = preset["image"]
+    extra_env = preset.get("extra_env", {})
+
+    # Always pass HF_TOKEN — pyannote needs it, other engines ignore the env
+    # var, and this keeps the docker-run uniform across presets.
+    extra_lines = '  -e HF_TOKEN="$HF_TOKEN" \\\n'
+    for k, v in extra_env.items():
+        extra_lines += f'  -e {k}="{v}" \\\n'
+
+    return f"""\
+docker run -d --name {container} --gpus all --network host --restart unless-stopped \\
+  --shm-size=8g \\
+  -v /data/models:/data/models \\
+  -e DALSTON_ENGINE_ID={engine_id} \\
+  -e DALSTON_DEPLOY_ENV=aws \\
+  -e DALSTON_DEVICE=cuda \\
+  -e DALSTON_VRAM_SHARE=1.0 \\
+  -e DALSTON_METRICS_PORT={port} \\
+  -e REDIS_URL=redis://localhost:6379 \\
+  -e HF_HOME=/data/models \\
+  -e DALSTON_MODEL_SOURCE=hf \\
+  -e DALSTON_MAX_LOADED_MODELS=1 \\
+  -e DALSTON_TOTAL_CAPACITY=1 \\
+  -e DALSTON_BATCH_MAX_INFLIGHT=1 \\
+  -e DALSTON_RT_RESERVATION=0 \\
+  -e DALSTON_MAX_SESSIONS=1 \\
+  -e DALSTON_WORKER_ID="$DALSTON_WORKER_ID" \\
+{extra_lines}  "$GHCR_REGISTRY/{image}:latest"
+"""
+
+
+def generate_single_engine_user_data(
+    preset_name: str,
+    region: str,
+    ts_hostname: str,
+    registry: str | None = None,
+) -> str:
+    """Cloud-init for a single-engine, Tailscale-only GPU box.
+
+    No control plane, no orchestrator, no shared Redis. A local redis:alpine
+    sidecar satisfies the engine SDK registry heartbeat. Model cache lives
+    on instance-store NVMe (ephemeral — re-downloaded each boot from HF).
+    """
+    if preset_name not in GPU_ENGINE_PRESETS:
+        raise ValueError(
+            f"Unknown engine '{preset_name}'. Available: {list(GPU_ENGINE_PRESETS)}"
+        )
+    preset = GPU_ENGINE_PRESETS[preset_name]
+    ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
+    hf_token = os.environ.get("HF_TOKEN", "")
+    if preset.get("needs_hf_token") and not hf_token:
+        die(
+            f"Engine '{preset_name}' needs HF_TOKEN for gated models. "
+            f"Set it with: export HF_TOKEN=hf_..."
+        )
+
+    run_block = _single_engine_docker_run_block(preset_name, port=9100)
+
+    header = """\
+#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/user-data.log) 2>&1
+echo "Starting Dalston single-engine bootstrap at $(date)"
+"""
+
+    variables = f"""\
+AWS_REGION="{region}"
+GHCR_REGISTRY="{ghcr_registry}"
+HF_TOKEN="{hf_token}"
+"""
+
+    body = (
+        r"""
+# DLAMI has Docker pre-installed — ensure it's up
+systemctl start docker
+systemctl enable docker
+usermod -aG docker ubuntu
+
+"""
+        + _tailscale_cloud_init_block(ts_hostname)
+        + r"""
+# NVIDIA Container Toolkit
+for attempt in 1 2 3; do
+  apt-get update && break
+  echo "apt-get update failed (attempt $attempt/3), retrying in 10s..."
+  sleep 10
+done
+apt-get install -y nvidia-container-toolkit || true
+if command -v nvidia-ctk >/dev/null 2>&1; then
+  nvidia-ctk runtime configure --runtime=docker
+  systemctl restart docker
+fi
+
+# Mount instance-store NVMe at /data/models for ephemeral model cache.
+# Survives only the instance lifetime — which matches the "re-download on
+# restart" semantics we want for single-engine deployments.
+NVME_DEV=""
+for dev in /dev/nvme*n1; do
+  [ -b "$dev" ] || continue
+  MODEL=$(lsblk -n -o MODEL "$dev" 2>/dev/null | head -1)
+  if echo "$MODEL" | grep -qi "Instance Storage"; then
+    NVME_DEV="$dev"; break
+  fi
+done
+if [ -n "$NVME_DEV" ]; then
+  EXISTING_MOUNT=$(lsblk -n -o MOUNTPOINT "$NVME_DEV" 2>/dev/null | grep -v '^$' | head -1 || true)
+  if [ -n "$EXISTING_MOUNT" ]; then
+    mkdir -p /data
+    rm -rf /data/models
+    ln -s "$EXISTING_MOUNT" /data/models
+  else
+    mkfs.xfs "$NVME_DEV"
+    mkdir -p /data/models
+    mount "$NVME_DEV" /data/models
+  fi
+else
+  mkdir -p /data/models
+fi
+chown -R 1000:1000 /data/models
+
+# Unique worker ID from the EC2 instance-id so the engine SDK's Redis
+# registry entries don't alias each other if the user restarts.
+IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+DALSTON_WORKER_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || hostname)
+export DALSTON_WORKER_ID
+echo "DALSTON_WORKER_ID=$DALSTON_WORKER_ID"
+"""
+        + f"""
+# Pull the engine image
+docker pull "$GHCR_REGISTRY/{preset["image"]}:latest"
+
+# Local redis — engine SDK wants one for heartbeats even in standalone mode
+docker run -d --name redis --network host --restart unless-stopped redis:7-alpine
+
+# The single engine (capacity=1, one job at a time, LRU-evict on model swap)
+{run_block}
+echo "Single-engine bootstrap completed at $(date)"
+"""
+    )
+
+    return header + variables + body
 
 
 def generate_gpu_worker_user_data(
@@ -3097,10 +3287,15 @@ def cmd_patch(args: argparse.Namespace) -> None:
 def cmd_teardown(args: argparse.Namespace) -> None:
     st = require_state()
     gpu_ids = [w["instance_id"] for w in (st.gpu_workers or [])]
+    engine_dep = load_engine_state()
+    engine_id = (
+        engine_dep.instance_id if engine_dep and engine_dep.instance_id else None
+    )
     audit(
         "teardown",
         instance=st.instance_id,
         gpu_instances=gpu_ids or None,
+        engine_instance=engine_id,
         s3_bucket=st.s3_bucket,
     )
 
@@ -3109,6 +3304,8 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     instance_list = st.instance_id
     for gid in gpu_ids:
         instance_list += f" {gid}"
+    if engine_id:
+        instance_list += f" {engine_id} (single-engine: {engine_dep.preset})"
     warn(f"  - EC2 instance(s): {instance_list}")
     volume_list = st.data_volume_id
     warn(f"  - EBS volumes: {volume_list}")
@@ -3123,7 +3320,27 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     if confirm != "yes":
         die("Aborted.")
 
-    # Terminate instances and clean up volumes
+    # Terminate instances and clean up volumes. Terminate the single-engine
+    # deployment first — it uses the shared GPU SG that we're about to delete,
+    # and AWS refuses to drop an SG that still has network interfaces attached.
+    if engine_dep and engine_dep.instance_id:
+        state = get_instance_state(engine_dep.region, engine_dep.instance_id)
+        if state not in ("terminated", "shutting-down"):
+            log(
+                f"Terminating single-engine '{engine_dep.preset}' "
+                f"({engine_dep.instance_id})..."
+            )
+            cancel_spot_requests_for_instances(
+                engine_dep.region, [engine_dep.instance_id]
+            )
+            try:
+                ec2_client(engine_dep.region).terminate_instances(
+                    InstanceIds=[engine_dep.instance_id]
+                )
+                wait_instance_terminated(engine_dep.region, engine_dep.instance_id)
+            except ClientError as e:
+                warn(f"Failed to terminate {engine_dep.instance_id}: {e}")
+        ENGINE_STATE_FILE.unlink(missing_ok=True)
     _terminate_gpu(st)
     _terminate_control_plane(st)
 
@@ -3185,6 +3402,163 @@ def cmd_teardown(args: argparse.Namespace) -> None:
     # Clean up state
     STATE_FILE.unlink(missing_ok=True)
     log("Teardown complete.")
+
+
+# ---------------------------------------------------------------------------
+# Single-engine commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_engine_up(args: argparse.Namespace) -> None:
+    preset = args.preset
+    if preset not in GPU_ENGINE_PRESETS:
+        die(f"Unknown engine '{preset}'. Available: {list(GPU_ENGINE_PRESETS)}")
+
+    st = load_state()
+    if st is None:
+        die(
+            "Run 'dalston-aws setup -t gpu' first — 'engine up' reuses its "
+            "keypair, GPU security group, and IAM instance profile. The S3 "
+            "bucket that setup creates is unused in single-engine mode."
+        )
+
+    region = os.environ.get("AWS_REGION", st.region)
+
+    existing = load_engine_state()
+    if existing and existing.instance_id:
+        state = get_instance_state(existing.region, existing.instance_id)
+        if state not in ("terminated", "shutting-down"):
+            # 'stopped' is included: reusing the state file for a new
+            # instance would orphan the stopped one (still billable for EBS).
+            # Force the user to either terminate it first or delete the
+            # state file intentionally.
+            die(
+                f"Engine '{existing.preset}' is already deployed as "
+                f"{existing.instance_id} ({state}). Run 'dalston-aws engine "
+                f"down' first."
+            )
+
+    # Default to spot — overridable
+    use_spot = True
+    if args.on_demand:
+        use_spot = False
+    elif args.spot:
+        use_spot = True
+
+    instance_type = args.gpu_type or GPU_INSTANCE_TYPE
+    _check_gpu_compat([preset], instance_type)
+
+    sg_id = st.gpu_sg_id or st.sg_id
+    if not sg_id:
+        die("No GPU security group in state. Run 'dalston-aws setup -t gpu' first.")
+
+    ts_hostname = f"dalston-engine-{preset}"
+    user_data = generate_single_engine_user_data(
+        preset_name=preset,
+        region=region,
+        ts_hostname=ts_hostname,
+    )
+
+    log(
+        f"Launching {preset} on {instance_type} "
+        f"({'spot' if use_spot else 'on-demand'}) in {region}..."
+    )
+    instance_id = launch_gpu_interactive(
+        region=region,
+        sg_id=sg_id,
+        user_data=user_data,
+        name_tag=f"{NAME_PREFIX}-engine-{preset}",
+        use_spot=use_spot,
+        key_name=st.key_name,
+        instance_profile=st.instance_profile,
+        gpu_type=instance_type,
+        engines=[preset],
+    )
+    wait_instance_running(region, instance_id)
+
+    dep = EngineDeployment(
+        preset=preset,
+        region=region,
+        instance_id=instance_id,
+        instance_type=instance_type,
+        use_spot=use_spot,
+        tailscale_hostname=ts_hostname,
+        sg_id=sg_id,
+        key_name=st.key_name,
+        instance_profile=st.instance_profile,
+        launched_at=datetime.now(UTC).isoformat(),
+    )
+    save_engine_state(dep)
+    audit(
+        "engine.up",
+        preset=preset,
+        instance_id=instance_id,
+        instance_type=instance_type,
+        spot=use_spot,
+    )
+
+    log(f"Engine '{preset}' launched: {instance_id}")
+    log(f"Tailscale hostname: {ts_hostname}")
+    log(f"Engine URL: http://{ts_hostname}:9100")
+    log("Bootstrap takes ~3-5 minutes. Track with 'dalston-aws engine status'.")
+
+
+def cmd_engine_down(args: argparse.Namespace) -> None:
+    dep = load_engine_state()
+    if not dep or not dep.instance_id:
+        log("No single-engine deployment to tear down.")
+        return
+
+    state = get_instance_state(dep.region, dep.instance_id)
+
+    # Already gone — or the describe returned nothing because the instance
+    # has fallen out of the EC2 control plane. Safe to drop local state.
+    if (
+        state in ("terminated", "shutting-down")
+        or describe_instance(dep.region, dep.instance_id) is None
+    ):
+        log(f"Engine '{dep.preset}' already {state or 'not found'}.")
+        ENGINE_STATE_FILE.unlink(missing_ok=True)
+        log("Engine deployment removed.")
+        return
+
+    audit("engine.down", preset=dep.preset, instance_id=dep.instance_id)
+    log(f"Terminating engine '{dep.preset}' ({dep.instance_id})...")
+    cancel_spot_requests_for_instances(dep.region, [dep.instance_id])
+    try:
+        ec2_client(dep.region).terminate_instances(InstanceIds=[dep.instance_id])
+    except ClientError as e:
+        # Keep local state so the user can retry. Dropping it here would
+        # orphan a still-running billable instance.
+        die(
+            f"Failed to terminate {dep.instance_id}: {e}\n"
+            f"Local state retained so you can retry 'dalston-aws engine down' "
+            f"or fix permissions and retry. To force-drop state, delete "
+            f"{ENGINE_STATE_FILE} manually."
+        )
+    ENGINE_STATE_FILE.unlink(missing_ok=True)
+    log("Engine deployment removed.")
+
+
+def cmd_engine_status(args: argparse.Namespace) -> None:
+    dep = load_engine_state()
+    if not dep or not dep.instance_id:
+        print("No single-engine deployment.")
+        return
+
+    state = get_instance_state(dep.region, dep.instance_id)
+    print(f"Preset:      {dep.preset}")
+    print(f"Instance:    {dep.instance_id} ({dep.instance_type})")
+    print(f"Pricing:     {'spot' if dep.use_spot else 'on-demand'}")
+    print(f"Region:      {dep.region}")
+    print(f"State:       {state}")
+    print(f"Tailscale:   {dep.tailscale_hostname}")
+    print(f"Engine URL:  http://{dep.tailscale_hostname}:9100")
+    print(f"Launched at: {dep.launched_at}")
+
+
+def cmd_engine_noop(args: argparse.Namespace) -> None:
+    build_parser().parse_args(["engine", "--help"])
 
 
 # ---------------------------------------------------------------------------
@@ -3328,6 +3702,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-resolve Tailscale hostnames for GPU workers with unresolved entries",
     )
     p_reconcile.set_defaults(func=cmd_reconcile)
+
+    # engine — single-engine, Tailscale-only GPU deployment (no control plane)
+    p_engine = sub.add_parser(
+        "engine",
+        help=(
+            "Run a single GPU engine on one EC2 box, reachable over "
+            "Tailscale. One job at a time; no orchestrator."
+        ),
+    )
+    eng_sub = p_engine.add_subparsers(dest="engine_command")
+    p_engine.set_defaults(func=cmd_engine_noop)
+
+    p_eng_up = eng_sub.add_parser(
+        "up",
+        help="Launch a single GPU engine (requires 'setup -t gpu' to have run)",
+    )
+    p_eng_up.add_argument(
+        "preset",
+        choices=sorted(GPU_ENGINE_PRESETS),
+        help="Engine preset to launch (see keys of GPU_ENGINE_PRESETS)",
+    )
+    p_eng_up.add_argument(
+        "--gpu-type",
+        default=None,
+        help=f"GPU instance type (default: {GPU_INSTANCE_TYPE})",
+    )
+    eng_spot = p_eng_up.add_mutually_exclusive_group()
+    eng_spot.add_argument(
+        "--spot",
+        action="store_true",
+        help="Use spot pricing (default)",
+    )
+    eng_spot.add_argument(
+        "--on-demand",
+        action="store_true",
+        help="Use on-demand pricing (~3x spot, no reclaim)",
+    )
+    p_eng_up.set_defaults(func=cmd_engine_up)
+
+    p_eng_down = eng_sub.add_parser(
+        "down",
+        help="Terminate the single engine (also cancels spot request)",
+    )
+    p_eng_down.set_defaults(func=cmd_engine_down)
+
+    p_eng_status = eng_sub.add_parser(
+        "status",
+        help="Show instance id / state / Tailscale hostname",
+    )
+    p_eng_status.set_defaults(func=cmd_engine_status)
 
     return parser
 

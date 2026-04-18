@@ -347,3 +347,55 @@ class TestCombinedEndpointNotRegisteredForSingleStage:
                 files={"file": ("audio.wav", f, "audio/wav")},
             )
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# OpenAI / ElevenLabs compat routes
+# ---------------------------------------------------------------------------
+
+
+class TestCompatEndpoints:
+    def test_openai_transcriptions_registered_when_transcribe_stage(
+        self, wav_file: Path
+    ) -> None:
+        engine = _make_engine(stages=["transcribe"])
+        engine.process.return_value = TaskResponse(data=_TRANSCRIBE_RESULT)
+        client = TestClient(CombinedHTTPServer(engine=engine, port=9103).app)
+        with wav_file.open("rb") as f:
+            resp = client.post(
+                "/v1/audio/transcriptions",
+                data={"model": "whisper-1"},
+                files={"file": ("audio.wav", f, "audio/wav")},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"text": "Hello world"}
+
+    def test_elevenlabs_speech_to_text_registered_when_transcribe_stage(
+        self, wav_file: Path
+    ) -> None:
+        engine = _make_engine(stages=["transcribe"])
+        engine.process.return_value = TaskResponse(data=_TRANSCRIBE_RESULT)
+        client = TestClient(CombinedHTTPServer(engine=engine, port=9103).app)
+        with wav_file.open("rb") as f:
+            resp = client.post(
+                "/v1/speech-to-text",
+                data={"model_id": "scribe_v1"},
+                files={"file": ("audio.wav", f, "audio/wav")},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["text"] == "Hello world"
+        assert body["language_code"] == "en"
+
+    def test_compat_not_registered_for_diarize_only_engine(
+        self, wav_file: Path
+    ) -> None:
+        engine = _make_engine(stages=["diarize"])
+        client = TestClient(CombinedHTTPServer(engine=engine, port=9103).app)
+        with wav_file.open("rb") as f:
+            resp = client.post(
+                "/v1/audio/transcriptions",
+                data={"model": "whisper-1"},
+                files={"file": ("audio.wav", f, "audio/wav")},
+            )
+        assert resp.status_code == 404
