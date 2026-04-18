@@ -20,6 +20,21 @@ Prerequisites:
 
 from __future__ import annotations
 
+import sys
+
+# Fail fast with a helpful message if invoked under the system Python.
+# macOS ships 3.9 at /usr/bin/python3, which chokes on `datetime.UTC`
+# (added in 3.11) and several match/walrus patterns below.
+if sys.version_info < (3, 11):  # noqa: UP036 — runtime guard against 3.9 shebang pickup
+    sys.stderr.write(
+        "dalston-aws requires Python >= 3.11 "
+        f"(got {sys.version_info.major}.{sys.version_info.minor}).\n"
+        "Invoke with a newer interpreter, e.g.\n"
+        "  .venv/bin/python ./infra/scripts/dalston-aws ...\n"
+        "or put python3.11+ first on your PATH.\n"
+    )
+    sys.exit(1)
+
 import argparse
 import base64
 import fcntl
@@ -27,7 +42,6 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
