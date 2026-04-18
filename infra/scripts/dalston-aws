@@ -112,6 +112,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
             "DALSTON_DEFAULT_MODEL": "nvidia/parakeet-tdt-0.6b-v3",
             "DALSTON_MODEL_PRELOAD": "nvidia/parakeet-tdt-0.6b-v3",
             "NEMO_CACHE": "/data/models",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         },
     },
     "vllm-asr": {

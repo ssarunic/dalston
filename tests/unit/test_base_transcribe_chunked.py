@@ -515,6 +515,112 @@ class TestOomBackoff:
                 engine.process(request, _ctx())
 
 
+class TestDirectPathOomFallthrough:
+    """Short-audio direct path must recover from OOM by dispatching to
+    the chunked path — matches the OOM backoff already guarding the
+    long-audio case.
+    """
+
+    def test_direct_oom_falls_through_to_chunked(self, tmp_path: Path) -> None:
+        audio = tmp_path / "short.wav"
+        audio.write_bytes(b"")
+
+        # Audio is 300s, max_s is 1500s → direct path would normally run.
+        # The direct call OOMs; fallthrough caps at audio_duration / 2 = 150s.
+        _FakeVadChunker.scenarios = {
+            150.0: [(0.0, 150.0), (150.0, 150.0)],
+        }
+
+        oom = RuntimeError("CUDA out of memory. Tried to allocate 4.25 GiB")
+        retry0 = _make_transcript(
+            "alpha", [(0.0, 2.0, "alpha")], engine_id="spy-engine"
+        )
+        retry1 = _make_transcript("beta", [(0.0, 2.0, "beta")], engine_id="spy-engine")
+
+        engine = _SpyEngine(
+            max_chunk_s=1500.0,
+            side_effects=[oom, retry0, retry1],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=300.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+        ):
+            result = engine.process(request, _ctx())
+
+        # 3 calls: direct OOM, then two chunked retries
+        assert len(engine._calls) == 3
+        assert result.data.text == "alpha beta"
+        # Chunk 1 offset by 150s
+        assert result.data.segments[1].start == pytest.approx(150.0, abs=1e-3)
+
+    def test_direct_oom_floors_at_min_chunk(self, tmp_path: Path) -> None:
+        """Very short audio still clamps the fallback cap at the 60s floor."""
+        audio = tmp_path / "tiny.wav"
+        audio.write_bytes(b"")
+
+        # 90s audio → audio/2 = 45s, clamp to 60s floor.
+        _FakeVadChunker.scenarios = {60.0: [(0.0, 60.0), (60.0, 30.0)]}
+
+        oom = RuntimeError("CUDA out of memory")
+        retry0 = _make_transcript("a", [(0.0, 1.0, "a")], engine_id="spy-engine")
+        retry1 = _make_transcript("b", [(0.0, 1.0, "b")], engine_id="spy-engine")
+
+        engine = _SpyEngine(
+            max_chunk_s=1500.0,
+            side_effects=[oom, retry0, retry1],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with (
+            patch.object(
+                BaseBatchTranscribeEngine, "_audio_duration_s", return_value=90.0
+            ),
+            patch("dalston.engine_sdk.base_transcribe.VadChunker", _FakeVadChunker),
+        ):
+            result = engine.process(request, _ctx())
+
+        assert result.data.text == "a b"
+        assert len(engine._calls) == 3
+
+    def test_direct_non_oom_does_not_fall_through(self, tmp_path: Path) -> None:
+        """A non-OOM error from the direct path must propagate unchanged."""
+        audio = tmp_path / "short.wav"
+        audio.write_bytes(b"")
+
+        engine = _SpyEngine(
+            max_chunk_s=1500.0,
+            side_effects=[ValueError("bad codec")],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with patch.object(
+            BaseBatchTranscribeEngine, "_audio_duration_s", return_value=300.0
+        ):
+            with pytest.raises(ValueError, match="bad codec"):
+                engine.process(request, _ctx())
+
+    def test_direct_oom_without_duration_reraises(self, tmp_path: Path) -> None:
+        """If audio duration can't be probed, we can't chunk — re-raise."""
+        audio = tmp_path / "short.wav"
+        audio.write_bytes(b"")
+
+        engine = _SpyEngine(
+            max_chunk_s=1500.0,
+            side_effects=[RuntimeError("CUDA out of memory")],
+        )
+        request = TaskRequest(task_id="t", job_id="j", audio_path=audio)
+
+        with patch.object(
+            BaseBatchTranscribeEngine, "_audio_duration_s", return_value=None
+        ):
+            with pytest.raises(RuntimeError, match="out of memory"):
+                engine.process(request, _ctx())
+
+
 class TestTelemetryContract:
     """86.6 telemetry: outer span is engine.chunked_request (not recognize),
     and no aggregate engine_recognize/engine_realtime_factor metric emission

@@ -117,8 +117,23 @@ class BaseBatchTranscribeEngine(Engine):
 
         audio_duration = self._audio_duration_s(task_request.audio_path)
         if audio_duration is None or audio_duration <= max_s:
-            transcript = self.transcribe_audio(task_request, ctx)
-            return TaskResponse(data=transcript)
+            try:
+                transcript = self.transcribe_audio(task_request, ctx)
+                return TaskResponse(data=transcript)
+            except Exception as exc:
+                if not is_oom_error(exc) or audio_duration is None:
+                    raise
+                clear_gpu_cache()
+                fallback_max_s = max(audio_duration / 2.0, _MIN_CHUNK_FLOOR_S)
+                logger.warning(
+                    "direct_path_oom_fallback",
+                    audio_duration_s=round(audio_duration, 3),
+                    fallback_max_s=fallback_max_s,
+                    error=str(exc)[:200],
+                )
+                return self._process_chunked(
+                    task_request, ctx, fallback_max_s, audio_duration
+                )
 
         return self._process_chunked(task_request, ctx, max_s, audio_duration)
 
