@@ -7,7 +7,14 @@ Deploy Dalston transcription engines on a single AWS instance. Three paths:
 | **A** | ONNX Parakeet + Pyannote 4.0 | No (but faster with GPU) | ~1GB + ~2GB | Lightweight, cost-effective |
 | **B** | NeMo Parakeet + NeMo MSDD | Yes (strongly recommended) | ~12GB + ~8GB | Full NVIDIA stack, no HF token |
 
-Both paths give you transcription + speaker diarization. Pick one.
+Both paths give you transcription + speaker diarization with the Dalston Gateway in front. Pick one.
+
+> **Skipping the Gateway?** If you want to point your OpenAI or ElevenLabs
+> SDK at a single engine on your tailnet (no Gateway, no orchestrator),
+> use `dalston-aws engine up <preset>` instead. See
+> [Scenario 0](aws-deployment-scenarios.md#scenario-0-single-engine-over-tailscale-no-gateway)
+> and the [M88 milestone](../plan/milestones/M88-naked-engine-sdk-compat.md).
+> One container, one job at a time — no jobs DB, no webhooks, no diarization over the SDK routes.
 
 ---
 
