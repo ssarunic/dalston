@@ -183,7 +183,9 @@ class TestGetNodes:
         assert engine_ids == {"faster-whisper", "pyannote"}
 
     async def test_gpu_aggregation(self):
-        """GPU used is summed, GPU total is max across engines on a node."""
+        """GPU used and total are max across engines on a node — runners share
+        one physical GPU, and nvidia-smi memory.used is a node-wide reading, so
+        summing would double-count."""
         redis = AsyncMock()
         redis.smembers = AsyncMock(return_value={"fw-1", "pa-2"})
 
@@ -211,7 +213,7 @@ class TestGetNodes:
         result = await self._call_endpoint(redis)
 
         node = result.nodes[0]
-        assert node.gpu_memory_used_gb == pytest.approx(6.3, abs=0.01)
+        assert node.gpu_memory_used_gb == pytest.approx(4.2, abs=0.01)
         assert node.gpu_memory_total_gb == pytest.approx(16.0)
 
     async def test_sorting_aws_before_local(self):

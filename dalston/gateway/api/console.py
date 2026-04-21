@@ -714,7 +714,7 @@ async def get_nodes(
     node_views = []
     for node_data in nodes.values():
         engines: list[NodeEngine] = node_data["engines"]
-        used_gb = sum(_parse_gb(e.gpu_memory_used) for e in engines)
+        used_gb = max((_parse_gb(e.gpu_memory_used) for e in engines), default=0.0)
         total_gb = max((_parse_gb(e.gpu_memory_total) for e in engines), default=0.0)
         node_views.append(
             NodeView(

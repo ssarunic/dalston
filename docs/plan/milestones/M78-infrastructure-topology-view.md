@@ -171,7 +171,7 @@ class NodeRecord(BaseModel):
     deploy_env: str                  # "aws" | "local"
     aws_az: str | None
     aws_instance_type: str | None
-    gpu_memory_used_gb: float        # sum across engines on this node
+    gpu_memory_used_gb: float        # max across engines (nvidia-smi reading is node-wide)
     gpu_memory_total_gb: float       # max across engines (all share the same GPU)
     engine_count: int
     engines: list[NodeEngine]
