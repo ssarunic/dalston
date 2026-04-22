@@ -57,7 +57,7 @@ No production architecture change in this milestone — the spike runs in a thro
 
 **Deliverables:**
 
-A standalone script that loads the pyannote Community-1 pipeline, runs it over a fixed audio corpus (10 files spanning 30s–20min), and records:
+A standalone script that loads the pyannote Community-1 pipeline, runs it over the corpus defined below, and records:
 
 - Wall-clock ms per audio-second
 - Peak CUDA memory via `torch.cuda.max_memory_allocated()`
@@ -83,6 +83,25 @@ tuned = bench(tuned_pipeline, corpus)
 
 ---
 
+**Corpus:**
+
+| Tier | Source | Files | Length | Purpose |
+| ---- | ------ | ----- | ------ | ------- |
+| Smoke | `tests/audio/test_stereo_speakers.wav`, `tests/audio/test_merged.wav` | 2 | <1min | Pipeline wiring / sanity check; too short for throughput numbers |
+| Primary | AMI Meeting Corpus headset-mix, `test` split (ES2004a, ES2014a, IS1009a, TS3003a, TS3007a) | 5 | ~20–30min each | Main throughput + DER measurement; same split pyannote uses for its published scores, so baseline DER ≈ 22% is a known anchor |
+| Long-tail stress | AMI `ES2004b` full meeting | 1 | ~40min | Exercises chunked path + VRAM ceiling |
+
+For dev-loop iteration, pass `--first-seconds 300` to crop AMI files to their first 5 minutes. Full-length is only required for the final results table. AMI is CC-BY 4.0 — download script sketch:
+
+```bash
+# tests/audio/ami/ is gitignored; fetched on the GPU host
+scripts/fetch_ami_spike.sh  # wgets 6 .wav files (~300MB total) to tests/audio/ami/
+```
+
+We deliberately avoid VoxConverse (licence requires per-user registration, awkward for a CI-adjacent benchmark) and DIHARD (gated). If AMI throughput improves but we want a second dataset before adopting, add one in the follow-up milestone, not here.
+
+---
+
 ### 89.2: Correctness check
 
 **Files modified:**
@@ -91,7 +110,7 @@ tuned = bench(tuned_pipeline, corpus)
 
 **Deliverables:**
 
-Compare diarization output before/after tuning on each corpus file. Accept if DER drift ≤ 0.5 absolute on the aggregate. Reject outright if AITune changes speaker count on any file — the VBx clustering head is numerically sensitive and a silent regression there would not surface until customers complain.
+Compare diarization output before/after tuning on each corpus file. AMI ships reference RTTMs, so compute absolute DER via `pyannote.metrics` rather than just pre/post drift. Accept if DER drift ≤ 0.5 absolute on the aggregate. Reject outright if AITune changes speaker count on any file — the VBx clustering head is numerically sensitive and a silent regression there would not surface until customers complain.
 
 ---
 
@@ -128,7 +147,11 @@ A short results table (baseline vs. each backend: ms/audio-s, peak VRAM, DER dri
 export HF_TOKEN=hf_xxx
 cd engines/stt-diarize/pyannote-4.0
 pip install aitune  # plus TensorRT 10.5+, PyTorch 2.7+
-python spike_aitune.py --corpus /path/to/audio --out results.json
+scripts/fetch_ami_spike.sh            # populates tests/audio/ami/
+python spike_aitune.py \
+  --corpus ../../../tests/audio/ami \
+  --first-seconds 300 \
+  --out results.json
 
 # Expect a results.json with three rows (baseline, inductor, torch_tensorrt)
 # and a DER-drift column per backend.
