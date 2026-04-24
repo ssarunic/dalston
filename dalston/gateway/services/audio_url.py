@@ -22,12 +22,25 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import structlog
 
+from dalston import __version__ as _dalston_version
+
 logger = structlog.get_logger()
 
 # Configuration
 MAX_DOWNLOAD_SIZE_BYTES = 3 * 1024 * 1024 * 1024  # 3GB max
 DOWNLOAD_TIMEOUT_SECONDS = 300  # 5 minutes
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+
+# Branded User-Agent so CDN/anti-bot rules (e.g. Cloudflare on Buzzsprout) don't
+# reject us as a bare library default. Identifying contact URL keeps us on the
+# right side of crawler-friendly hosts.
+DEFAULT_USER_AGENT = (
+    f"Dalston/{_dalston_version} (+https://github.com/ssarunic/dalston)"
+)
+DEFAULT_REQUEST_HEADERS = {
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept": "audio/*,*/*;q=0.8",
+}
 
 # Supported audio content types
 AUDIO_CONTENT_TYPES = {
@@ -87,9 +100,23 @@ class InvalidUrlError(AudioUrlError):
 
 
 class DownloadError(AudioUrlError):
-    """Failed to download audio from URL."""
+    """Failed to download audio from URL.
 
-    pass
+    When the failure is an HTTP error from the upstream server,
+    ``upstream_status`` and ``upstream_url`` are set so callers can distinguish
+    "upstream rejected us" (should surface as 502) from "bad client request".
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        upstream_status: int | None = None,
+        upstream_url: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.upstream_status = upstream_status
+        self.upstream_url = upstream_url
 
 
 class FileTooLargeError(AudioUrlError):
@@ -331,13 +358,19 @@ async def download_audio_from_url(
             timeout=httpx.Timeout(timeout),
             follow_redirects=True,
             max_redirects=10,
+            headers=DEFAULT_REQUEST_HEADERS,
         ) as client:
             # Start streaming download
             async with client.stream("GET", normalized_url) as response:
                 # Check for HTTP errors
                 if response.status_code >= 400:
+                    # Strip query + fragment — signed S3/GCS URLs carry creds
+                    # (X-Amz-Signature, X-Goog-Signature, …) in the query.
+                    safe_url = response.url.copy_with(query=None, fragment=None)
                     raise DownloadError(
-                        f"HTTP {response.status_code}: Failed to download from URL"
+                        f"HTTP {response.status_code}: Failed to download from URL",
+                        upstream_status=response.status_code,
+                        upstream_url=str(safe_url)[:200],
                     )
 
                 # Check Content-Length if available

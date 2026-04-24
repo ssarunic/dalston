@@ -1,8 +1,12 @@
 """Unit tests for audio URL download service."""
 
+from urllib.parse import urlparse
+
 import pytest
 
 from dalston.gateway.services.audio_url import (
+    DEFAULT_USER_AGENT,
+    DownloadError,
     InvalidUrlError,
     UnsupportedContentTypeError,
     _convert_dropbox_url,
@@ -11,6 +15,7 @@ from dalston.gateway.services.audio_url import (
     _extract_google_drive_file_id,
     _normalize_url,
     _validate_content_type,
+    download_audio_from_url,
 )
 
 
@@ -210,3 +215,64 @@ class TestFilenameExtraction:
             MockResponse(), "https://example.com/"
         )
         assert filename == "audio.bin"
+
+
+@pytest.mark.asyncio
+class TestDownloadRequestHeaders:
+    """Verify outgoing request headers and upstream error surfacing."""
+
+    async def test_sends_branded_user_agent(self, httpx_mock) -> None:
+        """Outgoing requests carry a Dalston/<version> User-Agent.
+
+        Regression guard: httpx default UA (`python-httpx/X`) is blocked by
+        Cloudflare rules used by hosts like Buzzsprout.
+        """
+        httpx_mock.add_response(
+            url="https://audio.example.com/clip.mp3",
+            status_code=200,
+            headers={"content-type": "audio/mpeg"},
+            content=b"\x00" * 16,
+        )
+
+        await download_audio_from_url("https://audio.example.com/clip.mp3")
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        ua = request.headers["user-agent"]
+        assert ua.startswith("Dalston/"), ua
+        assert ua == DEFAULT_USER_AGENT
+        assert request.headers["accept"] == "audio/*,*/*;q=0.8"
+
+    async def test_upstream_403_raises_download_error_with_status(
+        self, httpx_mock
+    ) -> None:
+        """4xx from upstream surfaces as DownloadError carrying upstream_status."""
+        httpx_mock.add_response(
+            url="https://audio.example.com/blocked.mp3",
+            status_code=403,
+        )
+
+        with pytest.raises(DownloadError) as exc_info:
+            await download_audio_from_url("https://audio.example.com/blocked.mp3")
+
+        assert exc_info.value.upstream_status == 403
+        assert exc_info.value.upstream_url is not None
+        parsed = urlparse(exc_info.value.upstream_url)
+        assert parsed.hostname == "audio.example.com"
+
+    async def test_upstream_url_strips_signed_query_params(self, httpx_mock) -> None:
+        """Signed-URL credentials (X-Amz-Signature, etc.) must not leak into errors."""
+        signed_url = (
+            "https://s3.example.com/bucket/clip.mp3"
+            "?X-Amz-Signature=deadbeef&X-Amz-Credential=AKIA123"
+        )
+        httpx_mock.add_response(url=signed_url, status_code=403)
+
+        with pytest.raises(DownloadError) as exc_info:
+            await download_audio_from_url(signed_url)
+
+        reported = exc_info.value.upstream_url or ""
+        assert "X-Amz-Signature" not in reported
+        assert "X-Amz-Credential" not in reported
+        assert "AKIA123" not in reported
+        assert reported.endswith("/bucket/clip.mp3")

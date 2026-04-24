@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from dalston.gateway.services.audio_url import DownloadedAudio
+from dalston.gateway.services.audio_url import (
+    DownloadedAudio,
+    DownloadError,
+    InvalidUrlError,
+)
 from dalston.gateway.services.ingestion import AudioIngestionService
 
 
@@ -57,6 +61,50 @@ async def test_download_from_url_uses_settings_limit_by_default() -> None:
         await service._download_from_url("https://example.com/audio.wav")
 
     assert mock_download.await_args.kwargs["max_size"] == int(1.5 * 1024 * 1024 * 1024)
+
+
+@pytest.mark.asyncio
+async def test_download_from_url_maps_upstream_error_to_502() -> None:
+    """Upstream HTTP failures surface as 502 with structured detail, not 400."""
+    settings = SimpleNamespace(audio_url_max_size_gb=3.0, audio_url_timeout_seconds=10)
+    service = AudioIngestionService(settings)
+
+    with patch(
+        "dalston.gateway.services.ingestion.download_audio_from_url",
+        new=AsyncMock(
+            side_effect=DownloadError(
+                "HTTP 403: Failed to download from URL",
+                upstream_status=403,
+                upstream_url="https://audio.buzzsprout.com/clip.mp3",
+            )
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await service._download_from_url("https://www.buzzsprout.com/clip.mp3")
+
+    assert exc_info.value.status_code == 502
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "upstream_fetch_failed"
+    assert detail["upstream_status"] == "403"
+    assert detail["upstream_url"] == "https://audio.buzzsprout.com/clip.mp3"
+    assert "message" in detail
+
+
+@pytest.mark.asyncio
+async def test_download_from_url_maps_non_upstream_error_to_400() -> None:
+    """Client-side errors (invalid URL, etc.) still come back as 400."""
+    settings = SimpleNamespace(audio_url_max_size_gb=3.0, audio_url_timeout_seconds=10)
+    service = AudioIngestionService(settings)
+
+    with patch(
+        "dalston.gateway.services.ingestion.download_audio_from_url",
+        new=AsyncMock(side_effect=InvalidUrlError("Unsupported URL scheme: ftp")),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await service._download_from_url("ftp://example.com/audio.mp3")
+
+    assert exc_info.value.status_code == 400
 
 
 class _FakeUploadFile:

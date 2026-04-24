@@ -18,6 +18,7 @@ from dalston.gateway.services.audio_probe import (
 )
 from dalston.gateway.services.audio_url import (
     AudioUrlError,
+    DownloadError,
     download_audio_from_url,
 )
 
@@ -127,6 +128,17 @@ class AudioIngestionService:
                 timeout=self.settings.audio_url_timeout_seconds,
             )
             return downloaded.content, downloaded.filename
+        except DownloadError as e:
+            if e.upstream_status is not None:
+                raise HTTPException(
+                    status_code=502,
+                    detail=Err.structured(
+                        "upstream_fetch_failed",
+                        upstream_status=str(e.upstream_status),
+                        upstream_url=e.upstream_url or "",
+                    ),
+                ) from e
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except AudioUrlError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
