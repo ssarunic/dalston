@@ -254,8 +254,7 @@ class TestDownloadRequestHeaders:
             await download_audio_from_url("https://audio.example.com/blocked.mp3")
 
         assert exc_info.value.upstream_status == 403
-        assert exc_info.value.upstream_url is not None
-        assert "audio.example.com" in exc_info.value.upstream_url
+        assert exc_info.value.upstream_url == "https://audio.example.com/blocked.mp3"
 
     async def test_upstream_url_strips_signed_query_params(self, httpx_mock) -> None:
         """Signed-URL credentials (X-Amz-Signature, etc.) must not leak into errors."""
