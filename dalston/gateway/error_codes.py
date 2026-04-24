@@ -156,6 +156,11 @@ class Err:
     TRANSCRIPTION_FAILED = "Transcription failed: {error}"
 
     # -------------------------------------------------------------------------
+    # 502 Bad Gateway
+    # -------------------------------------------------------------------------
+    UPSTREAM_FETCH_FAILED = "Upstream server rejected audio_url fetch"
+
+    # -------------------------------------------------------------------------
     # 503 Service Unavailable
     # -------------------------------------------------------------------------
     SESSION_ROUTER_NOT_INITIALIZED = "Session router not initialized"
@@ -176,6 +181,7 @@ class Err:
         "no_artifacts": "Task has not started yet",
         "audio_deleted": AUDIO_DELETED,
         "audio_purged": AUDIO_PURGED,
+        "upstream_fetch_failed": UPSTREAM_FETCH_FAILED,
     }
 
     @classmethod
