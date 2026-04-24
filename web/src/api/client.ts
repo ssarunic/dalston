@@ -55,7 +55,7 @@ function createClient(apiKey?: string | null): KyInstance {
   }
 
   return ky.create({
-    prefixUrl: '/',
+    prefix: '/',
     timeout: REQUEST_TIMEOUT_MS,
     retry: QUERY_RETRY_COUNT,
     headers,
@@ -273,7 +273,7 @@ export const apiClient = {
   validateKey: async (apiKey: string): Promise<{ valid: boolean; isAdmin: boolean }> => {
     try {
       const response = await ky.get('auth/me', {
-        prefixUrl: '/',
+        prefix: '/',
         headers: { 'Authorization': `Bearer ${apiKey}` },
       })
       const data = await response.json<{ scopes: string[] }>()
