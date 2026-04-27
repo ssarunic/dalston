@@ -4,15 +4,15 @@ version = "0.1.0"
 description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "pydantic==2.13.2",
-    "pydantic-settings==2.13.1",
+    "pydantic==2.13.3",
+    "pydantic-settings==2.14.0",
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
     # Loose ranges cause pip resolver backtracking (20+ min in CI).
-    "opentelemetry-api==1.41.0",
-    "opentelemetry-sdk==1.41.0",
-    "opentelemetry-exporter-otlp-proto-grpc==1.41.0",
+    "opentelemetry-api==1.41.1",
+    "opentelemetry-sdk==1.41.1",
+    "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
     # Prometheus metrics (M20)
     "prometheus-client==0.25.0",
 ]
@@ -109,7 +109,7 @@ dev = [
     # Pinned OpenAI SDK for M61 contract suite
     "openai==2.32.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.43.0",
+    "elevenlabs==2.44.0",
 ]
 
 [build-system]
