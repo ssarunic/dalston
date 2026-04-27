@@ -62,7 +62,7 @@ engine-sdk = [
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
     "opentelemetry-instrumentation-redis==0.62b0",
-    "opentelemetry-instrumentation-boto3sqs==0.62b0",
+    "opentelemetry-instrumentation-boto3sqs==0.62b1",
     # HTTP server for engine interface contract (M79)
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
