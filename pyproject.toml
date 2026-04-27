@@ -105,7 +105,7 @@ dev = [
     "soundfile>=0.12.0",  # For audio format tests (M81)
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
-    "opentelemetry-test-utils==0.62b0",
+    "opentelemetry-test-utils==0.62b1",
     # Pinned OpenAI SDK for M61 contract suite
     "openai==2.32.0",
     # Pinned ElevenLabs SDK for M62 contract suite
