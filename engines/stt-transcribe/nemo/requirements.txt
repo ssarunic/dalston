@@ -1,7 +1,7 @@
 # Unified NeMo Engine Dependencies (batch + realtime)
 
 # Pin NeMo to a stable 2.7.x line for cache-aware RNNT streaming.
-nemo_toolkit[asr]>=2.7.0,<2.8.0
+nemo_toolkit[asr]>=2.7.3,<2.8.0
 
 # Align key transitive deps with NeMo 2.7 ASR metadata.
 lhotse>=1.32.2
