@@ -2,5 +2,5 @@
 
 # NVIDIA Riva client for gRPC communication with NIM sidecar
 nvidia-riva-client>=2.14.0
-grpcio>=1.60.0
+grpcio>=1.80.0
 protobuf>=4.25.0
