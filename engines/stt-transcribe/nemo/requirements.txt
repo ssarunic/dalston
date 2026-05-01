@@ -19,4 +19,4 @@ torchaudio
 # VadChunker runs fully offline once installed. Used by long-audio
 # requests that exceed DALSTON_NEMO_MAX_CHUNK_S. Small pure-Python
 # package (~8 MB) with the JIT and ONNX weights embedded.
-silero-vad>=5.1
+silero-vad>=6.2.1
