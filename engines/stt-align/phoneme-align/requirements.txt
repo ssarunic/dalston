@@ -2,7 +2,7 @@
 
 # PyTorch for model inference
 torch>=2.0.0
-torchaudio>=2.0.0
+torchaudio>=2.11.0
 
 # Audio loading backend (soundfile is cross-platform: ARM64, x86_64, with/without CUDA)
 soundfile>=0.12.0
