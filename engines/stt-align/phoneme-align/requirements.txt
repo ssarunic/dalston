@@ -1,7 +1,7 @@
 # Phoneme Forced Alignment Engine Dependencies
 
 # PyTorch for model inference
-torch>=2.0.0
+torch>=2.11.0
 torchaudio>=2.0.0
 
 # Audio loading backend (soundfile is cross-platform: ARM64, x86_64, with/without CUDA)
