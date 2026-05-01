@@ -4,7 +4,7 @@
 faster-whisper>=1.0.0
 
 # PyTorch for GPU support, model handling, and Silero VAD
-torch>=2.0.0
+torch>=2.11.0
 torchaudio>=2.0.0
 
 # Audio processing
