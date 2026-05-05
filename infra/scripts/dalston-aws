@@ -102,6 +102,11 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         # collide on the Redis registry key and XREADGROUP consumer name.
         "extra_env": {
             "DALSTON_MAX_DIARIZE_CHUNK_S": "3600",
+            # 4 GB of L4's 24 GB. Pyannote 4.0 peaks ~1.4 GB; this leaves
+            # headroom for fragmentation. Co-located with NeMo (20 GB).
+            "DALSTON_VRAM_BUDGET_MB": "4000",
+            "DALSTON_VRAM_PROFILE_DIR": "/data/vram_profiles",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         },
     },
     "nemo": {
@@ -112,7 +117,14 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
             "DALSTON_DEFAULT_MODEL": "nvidia/parakeet-tdt-0.6b-v3",
             "DALSTON_MODEL_PRELOAD": "nvidia/parakeet-tdt-0.6b-v3",
             "NEMO_CACHE": "/data/models",
-            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True,max_split_size_mb:512",
+            # 20 GB of L4's 24 GB when co-located with pyannote (4 GB).
+            # Hard caps below bound the actual working set so a runaway
+            # request can't eat into pyannote's slice.
+            "DALSTON_VRAM_BUDGET_MB": "20000",
+            "DALSTON_VRAM_PROFILE_DIR": "/data/vram_profiles",
+            "DALSTON_BATCH_MAX_INFLIGHT": "1",
+            "DALSTON_NEMO_MAX_CHUNK_S": "300",
         },
     },
     "vllm-asr": {
@@ -1244,6 +1256,34 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
     return header + variables + body
 
 
+_BUDGET_OVERRIDABLE_KEYS: tuple[str, ...] = (
+    "DALSTON_VRAM_BUDGET_MB",
+    "DALSTON_VRAM_PROFILE_DIR",
+    "DALSTON_BATCH_MAX_INFLIGHT",
+    "DALSTON_NEMO_MAX_CHUNK_S",
+)
+
+
+def _apply_budget_overrides(engine_name: str, extra_env: dict) -> dict:
+    """Layer per-engine shell env overrides on top of the preset's extra_env.
+
+    Format: ``DALSTON_OVERRIDE__<engine>__<KEY_WITHOUT_DALSTON_PREFIX>``,
+    e.g. ``DALSTON_OVERRIDE__nemo__VRAM_BUDGET_MB=18000``.
+
+    Only keys in ``_BUDGET_OVERRIDABLE_KEYS`` are honored — other env
+    vars stay locked in the preset to keep one source of truth for
+    container wiring (image, ports, model preload, etc.).
+    """
+    merged = dict(extra_env)
+    for key in _BUDGET_OVERRIDABLE_KEYS:
+        short = key.removeprefix("DALSTON_")
+        env_name = f"DALSTON_OVERRIDE__{engine_name}__{short}"
+        value = os.environ.get(env_name)
+        if value:
+            merged[key] = value
+    return merged
+
+
 def _generate_docker_run_block(engine_name: str, port: int) -> str:
     """Generate a docker run command for a GPU engine preset."""
     preset = GPU_ENGINE_PRESETS[engine_name]
@@ -1251,7 +1291,7 @@ def _generate_docker_run_block(engine_name: str, port: int) -> str:
     engine_id = preset["engine_id"]
     image = preset["image"]
     needs_hf = preset.get("needs_hf_token", False)
-    extra_env = preset.get("extra_env", {})
+    extra_env = _apply_budget_overrides(engine_name, preset.get("extra_env", {}))
 
     extra_lines = ""
     if needs_hf:
@@ -1259,14 +1299,20 @@ def _generate_docker_run_block(engine_name: str, port: int) -> str:
     for k, v in extra_env.items():
         extra_lines += f'  -e {k}="{v}" \\\n'
 
+    # When co-locating engines on a single GPU, set DALSTON_VRAM_BUDGET_MB
+    # per-engine in extra_env (e.g. nemo=20000, pyannote=4000). When alone,
+    # falls back to DALSTON_VRAM_SHARE=1.0 below.
+    has_explicit_budget = "DALSTON_VRAM_BUDGET_MB" in extra_env
+    share_line = "" if has_explicit_budget else "  -e DALSTON_VRAM_SHARE=1.0 \\\n"
+
     return f"""\
 docker run -d --name {container} --gpus all --network host --restart unless-stopped \\
   --shm-size=8g \\
   -v /data/models:/data/models \\
+  -v /data/vram_profiles:/data/vram_profiles:ro \\
   -e DALSTON_METRICS_PORT={port} \\
   -e DALSTON_DEVICE=cuda \\
-  -e DALSTON_VRAM_SHARE=1.0 \\
-  -e DALSTON_ENGINE_ID={engine_id} \\
+{share_line}  -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
   -e DALSTON_WORKER_ID="$DALSTON_WORKER_ID" \\
@@ -1293,7 +1339,7 @@ def _single_engine_docker_run_block(engine_name: str, port: int = 9100) -> str:
     container = preset["container"]
     engine_id = preset["engine_id"]
     image = preset["image"]
-    extra_env = preset.get("extra_env", {})
+    extra_env = _apply_budget_overrides(engine_name, preset.get("extra_env", {}))
 
     # Always pass HF_TOKEN — pyannote needs it, other engines ignore the env
     # var, and this keeps the docker-run uniform across presets.
@@ -1301,15 +1347,18 @@ def _single_engine_docker_run_block(engine_name: str, port: int = 9100) -> str:
     for k, v in extra_env.items():
         extra_lines += f'  -e {k}="{v}" \\\n'
 
+    has_explicit_budget = "DALSTON_VRAM_BUDGET_MB" in extra_env
+    share_line = "" if has_explicit_budget else "  -e DALSTON_VRAM_SHARE=1.0 \\\n"
+
     return f"""\
 docker run -d --name {container} --gpus all --network host --restart unless-stopped \\
   --shm-size=8g \\
   -v /data/models:/data/models \\
+  -v /data/vram_profiles:/data/vram_profiles:ro \\
   -e DALSTON_ENGINE_ID={engine_id} \\
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_DEVICE=cuda \\
-  -e DALSTON_VRAM_SHARE=1.0 \\
-  -e DALSTON_METRICS_PORT={port} \\
+{share_line}  -e DALSTON_METRICS_PORT={port} \\
   -e REDIS_URL=redis://localhost:6379 \\
   -e HF_HOME=/data/models \\
   -e DALSTON_MODEL_SOURCE=hf \\
@@ -1385,32 +1434,47 @@ if command -v nvidia-ctk >/dev/null 2>&1; then
   systemctl restart docker
 fi
 
-# Mount instance-store NVMe at /data/models for ephemeral model cache.
-# Survives only the instance lifetime — which matches the "re-download on
-# restart" semantics we want for single-engine deployments.
-NVME_DEV=""
+# Ephemeral NVMe hosts /data/models + /var/lib/{docker,containerd}.
+NVME_MOUNT=""
 for dev in /dev/nvme*n1; do
   [ -b "$dev" ] || continue
-  MODEL=$(lsblk -n -o MODEL "$dev" 2>/dev/null | head -1)
-  if echo "$MODEL" | grep -qi "Instance Storage"; then
-    NVME_DEV="$dev"; break
+  if lsblk -n -o MODEL "$dev" 2>/dev/null | grep -qi "Instance Storage"; then
+    EXISTING=$(lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -v '^$' | head -1)
+    if [ -n "$EXISTING" ]; then
+      NVME_MOUNT="$EXISTING"
+    else
+      mkfs.xfs "$dev"; mkdir -p /opt/instance-store
+      mount "$dev" /opt/instance-store; NVME_MOUNT="/opt/instance-store"
+    fi
+    break
   fi
 done
-if [ -n "$NVME_DEV" ]; then
-  EXISTING_MOUNT=$(lsblk -n -o MOUNTPOINT "$NVME_DEV" 2>/dev/null | grep -v '^$' | head -1 || true)
-  if [ -n "$EXISTING_MOUNT" ]; then
-    mkdir -p /data
-    rm -rf /data/models
-    ln -s "$EXISTING_MOUNT" /data/models
-  else
-    mkfs.xfs "$NVME_DEV"
-    mkdir -p /data/models
-    mount "$NVME_DEV" /data/models
-  fi
+if [ -z "$NVME_MOUNT" ] && mountpoint -q /opt/dlami/nvme; then
+  NVME_MOUNT="/opt/dlami/nvme"
+fi
+
+if [ -n "$NVME_MOUNT" ]; then
+  mkdir -p "$NVME_MOUNT/models" /data
+  rm -rf /data/models; ln -s "$NVME_MOUNT/models" /data/models
+  systemctl stop docker docker.socket containerd 2>/dev/null || true
+  for d in docker containerd; do
+    if [ -d "/var/lib/$d" ] && [ ! -L "/var/lib/$d" ]; then
+      if [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ]; then
+        mv "/var/lib/$d" "$NVME_MOUNT/$d"
+      else
+        rm -rf "/var/lib/$d"; mkdir -p "$NVME_MOUNT/$d"
+      fi
+      ln -s "$NVME_MOUNT/$d" "/var/lib/$d"
+    fi
+  done
+  systemctl start docker
 else
   mkdir -p /data/models
 fi
 chown -R 1000:1000 /data/models
+
+mkdir -p /data/vram_profiles
+chown -R 1000:1000 /data/vram_profiles
 
 # Unique worker ID from the EC2 instance-id so the engine SDK's Redis
 # registry entries don't alias each other if the user restarts.
@@ -1513,37 +1577,52 @@ if command -v nvidia-ctk >/dev/null 2>&1; then
   systemctl restart docker
 fi
 
-# Mount instance store NVMe for model cache (free 125 GB on g4dn)
-# Device names aren't stable — find instance store by model string.
-NVME_DEV=""
+# Locate ephemeral NVMe for /data/models and /var/lib/docker. Root EBS is
+# only ~75 GB on the DLAMI — too small for co-located multi-engine pulls.
+NVME_MOUNT=""
 for dev in /dev/nvme*n1; do
   [ -b "$dev" ] || continue
-  MODEL=$(lsblk -n -o MODEL "$dev" 2>/dev/null | head -1)
-  if echo "$MODEL" | grep -qi "Instance Storage"; then
-    NVME_DEV="$dev"
+  if lsblk -n -o MODEL "$dev" 2>/dev/null | grep -qi "Instance Storage"; then
+    EXISTING=$(lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -v '^$' | head -1)
+    if [ -n "$EXISTING" ]; then
+      NVME_MOUNT="$EXISTING"
+    else
+      mkfs.xfs "$dev"; mkdir -p /opt/instance-store
+      mount "$dev" /opt/instance-store; NVME_MOUNT="/opt/instance-store"
+    fi
     break
   fi
 done
+if [ -z "$NVME_MOUNT" ] && mountpoint -q /opt/dlami/nvme; then
+  NVME_MOUNT="/opt/dlami/nvme"
+fi
 
-if [ -n "$NVME_DEV" ]; then
-  # Check if already mounted (DL AMI uses LVM on instance store)
-  EXISTING_MOUNT=$(lsblk -n -o MOUNTPOINT "$NVME_DEV" 2>/dev/null | grep -v '^$' | head -1 || true)
-  if [ -n "$EXISTING_MOUNT" ]; then
-    echo "Instance store $NVME_DEV already mounted at $EXISTING_MOUNT, symlinking to /data/models"
-    mkdir -p /data/models
-    rm -rf /data/models
-    ln -s "$EXISTING_MOUNT" /data/models
-  else
-    echo "Mounting instance store $NVME_DEV at /data/models..."
-    mkfs.xfs "$NVME_DEV"
-    mkdir -p /data/models
-    mount "$NVME_DEV" /data/models
-  fi
+if [ -n "$NVME_MOUNT" ]; then
+  mkdir -p "$NVME_MOUNT/models" /data
+  rm -rf /data/models; ln -s "$NVME_MOUNT/models" /data/models
+
+  systemctl stop docker docker.socket containerd 2>/dev/null || true
+  for d in docker containerd; do
+    if [ -d "/var/lib/$d" ] && [ ! -L "/var/lib/$d" ]; then
+      if [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ]; then
+        mv "/var/lib/$d" "$NVME_MOUNT/$d"
+      else
+        rm -rf "/var/lib/$d"; mkdir -p "$NVME_MOUNT/$d"
+      fi
+      ln -s "$NVME_MOUNT/$d" "/var/lib/$d"
+    fi
+  done
+  systemctl start docker
+  echo "NVMe at $NVME_MOUNT hosts /data/models + /var/lib/{docker,containerd}"
 else
-  echo "No instance store NVMe found, using root volume for models"
+  echo "WARN: no NVMe; using root volume (may ENOSPC during multi-engine pull)"
   mkdir -p /data/models
 fi
 chown -R 1000:1000 /data/models
+
+# Calibration profile dir (bind-mounted read-only into engine containers)
+mkdir -p /data/vram_profiles
+chown -R 1000:1000 /data/vram_profiles
 
 """
         + _loki_driver_cloud_init_block()
@@ -1591,7 +1670,7 @@ echo "DALSTON_WORKER_ID=$DALSTON_WORKER_ID"
 OTEL_FLAGS=""
 LOG_FLAGS=""
 if [ "$OBSERVABILITY" = "true" ]; then
-  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${{CTRL_PLANE_HOST}}:4317 -e DALSTON_METRICS_ENABLED=true -e DALSTON_METRICS_PORT=9100"
+  OTEL_FLAGS="-e OTEL_ENABLED=true -e OTEL_EXPORTER_OTLP_ENDPOINT=http://${{CTRL_PLANE_HOST}}:4317 -e DALSTON_METRICS_ENABLED=true"
   LOG_FLAGS="--log-driver=loki --log-opt loki-url=http://${{CTRL_PLANE_HOST}}:3100/loki/api/v1/push --log-opt loki-retries=3 --log-opt max-size=20m --log-opt max-file=2"
 fi
 
