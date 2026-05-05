@@ -1,0 +1,714 @@
+#!/usr/bin/env python3
+"""dalston-cost-correlate — daily cost-per-episode + warmup-overhead report.
+
+Joins three data sources:
+
+  1. AWS Cost Explorer (daily costs, filtered by Project=dalston tag)
+  2. CloudTrail RunInstances/TerminateInstances events (EC2 lifecycles)
+  3. Dalston Postgres DB (jobs + tasks with audio durations and stage timings)
+
+Produces a CSV with one row per day:
+
+  date, jobs_completed, audio_hours, transcribe_s, diarize_s,
+  billed_instance_s, useful_work_s, warmup_overhead_s, warmup_ratio,
+  cost_usd, cost_per_episode, cost_per_audio_hour
+
+Prerequisites:
+  - AWS credentials with Cost Explorer + CloudTrail + EC2 read access
+  - The "Project" tag must be activated as a Cost Allocation Tag in the
+    Billing console:
+      https://console.aws.amazon.com/billing/home#/tags
+    Otherwise Cost Explorer cannot filter by it. Use --no-tag-filter to
+    fall back to total-account costs (less accurate).
+  - DATABASE_URL env var (or --database-url). asyncpg-style URLs from the
+    Dalston .env are normalized automatically.
+  - pip install boto3 'psycopg[binary]'  (or psycopg2-binary)
+
+Examples:
+  # Last 14 days, default region, write to stdout
+  ./infra/scripts/dalston-cost-correlate --days 14
+
+  # Specific window, save to CSV
+  ./infra/scripts/dalston-cost-correlate --start 2026-04-01 --end 2026-04-28 \\
+      --output /tmp/dalston-cost.csv
+
+  # No tag filter (whole account)
+  ./infra/scripts/dalston-cost-correlate --days 30 --no-tag-filter
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import csv
+import os
+import sys
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+if sys.version_info < (3, 11):  # noqa: UP036
+    sys.stderr.write("dalston-cost-correlate requires Python >= 3.11\n")
+    sys.exit(1)
+
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+except ImportError:
+    sys.stderr.write("Missing dependency: pip install boto3\n")
+    sys.exit(1)
+
+# Try psycopg3, then psycopg2, then asyncpg (already in Dalston venv).
+_PG_FLAVOR: str
+try:
+    import psycopg  # type: ignore[import-not-found]
+
+    _PG_FLAVOR = "psycopg3"
+except ImportError:
+    try:
+        import psycopg2  # type: ignore[import-not-found]
+        import psycopg2.extras  # type: ignore[import-not-found]  # noqa: F401
+
+        _PG_FLAVOR = "psycopg2"
+    except ImportError:
+        try:
+            import asyncpg  # type: ignore[import-not-found]
+
+            _PG_FLAVOR = "asyncpg"
+        except ImportError:
+            sys.stderr.write(
+                "Missing dependency: pip install 'psycopg[binary]' "
+                "(or psycopg2-binary, or asyncpg)\n"
+            )
+            sys.exit(1)
+
+
+DEFAULT_REGION = "eu-west-2"
+PROJECT_TAG_KEY = "Project"
+PROJECT_TAG_VALUE = "dalston"
+
+# Engine stages we treat as "useful GPU work" when computing warmup overhead.
+GPU_STAGES = {"transcribe", "align", "diarize", "pii_detect", "audio_redact"}
+
+
+@dataclass
+class Lifetime:
+    instance_id: str
+    instance_type: str
+    launch: datetime
+    terminate: datetime  # current time if still running
+    is_running: bool
+
+
+@dataclass
+class DailyReport:
+    date: date
+    jobs_completed: int = 0
+    audio_seconds: float = 0.0
+    transcribe_s: float = 0.0
+    diarize_s: float = 0.0
+    useful_work_s: float = 0.0
+    billed_instance_s: float = 0.0
+    cost_usd: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Postgres helpers
+# ---------------------------------------------------------------------------
+
+
+def _normalize_database_url(url: str) -> str:
+    """Strip async drivers; return a plain DB-API friendly URL."""
+    if url.startswith("postgresql+asyncpg://"):
+        url = "postgresql://" + url[len("postgresql+asyncpg://") :]
+    elif url.startswith("postgresql+psycopg://"):
+        url = "postgresql://" + url[len("postgresql+psycopg://") :]
+    return url
+
+
+class _AsyncpgConn:
+    """Thin sync wrapper around asyncpg so callers can use one API."""
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+        self._loop = asyncio.new_event_loop()  # type: ignore[name-defined]
+        self._conn = self._loop.run_until_complete(asyncpg.connect(url))  # type: ignore[name-defined]
+
+    def fetch(self, sql: str, params: tuple) -> list[tuple]:
+        # asyncpg uses $1/$2 placeholders, not %s — translate left-to-right.
+        out: list[str] = []
+        idx = 0
+        i = 0
+        while i < len(sql):
+            if sql[i] == "%" and i + 1 < len(sql) and sql[i + 1] == "s":
+                idx += 1
+                out.append(f"${idx}")
+                i += 2
+            else:
+                out.append(sql[i])
+                i += 1
+        translated = "".join(out)
+        records = self._loop.run_until_complete(self._conn.fetch(translated, *params))
+        return [tuple(r) for r in records]
+
+    def close(self) -> None:
+        self._loop.run_until_complete(self._conn.close())
+        self._loop.close()
+
+
+def _pg_connect(url: str) -> Any:
+    url = _normalize_database_url(url)
+    if _PG_FLAVOR == "psycopg3":
+        return psycopg.connect(url)  # type: ignore[name-defined]
+    if _PG_FLAVOR == "psycopg2":
+        return psycopg2.connect(url)  # type: ignore[name-defined]
+    return _AsyncpgConn(url)
+
+
+def _pg_query(conn: Any, sql: str, params: tuple = ()) -> list[tuple]:
+    if isinstance(conn, _AsyncpgConn):
+        return conn.fetch(sql, params)
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# AWS data sources
+# ---------------------------------------------------------------------------
+
+
+def fetch_instance_lifetimes(
+    region: str, start: datetime, end: datetime, *, tag_filter: bool
+) -> list[Lifetime]:
+    """Reconstruct EC2 instance lifetimes from CloudTrail + describe-instances.
+
+    CloudTrail keeps 90 days of events for free. RunInstances gives us
+    launch time; TerminateInstances gives us terminate time. For instances
+    still running, describe-instances provides current state.
+    """
+    ec2 = boto3.client("ec2", region_name=region)
+    ct = boto3.client("cloudtrail", region_name=region)
+
+    # 1. Currently-running instances tagged with Project=dalston (or all).
+    running: dict[str, Lifetime] = {}
+    filters = []
+    if tag_filter:
+        filters.append(
+            {"Name": f"tag:{PROJECT_TAG_KEY}", "Values": [PROJECT_TAG_VALUE]}
+        )
+    filters.append({"Name": "instance-state-name", "Values": ["running", "pending"]})
+
+    paginator = ec2.get_paginator("describe_instances")
+    for page in paginator.paginate(Filters=filters):
+        for reservation in page["Reservations"]:
+            for inst in reservation["Instances"]:
+                running[inst["InstanceId"]] = Lifetime(
+                    instance_id=inst["InstanceId"],
+                    instance_type=inst["InstanceType"],
+                    launch=inst["LaunchTime"],
+                    terminate=datetime.now(UTC),
+                    is_running=True,
+                )
+
+    def _ct_instance_events(event_name: str) -> dict[str, datetime]:
+        out: dict[str, datetime] = {}
+        pages = ct.get_paginator("lookup_events").paginate(
+            LookupAttributes=[
+                {"AttributeKey": "EventName", "AttributeValue": event_name}
+            ],
+            StartTime=start,
+            EndTime=end,
+        )
+        for page in pages:
+            for ev in page["Events"]:
+                for r in ev.get("Resources", []):
+                    if r.get("ResourceType") == "AWS::EC2::Instance":
+                        out[r["ResourceName"]] = ev["EventTime"]
+        return out
+
+    runs = _ct_instance_events("RunInstances")
+    terms = _ct_instance_events("TerminateInstances")
+
+    # describe-instances works for ~1h after termination; use it to recover
+    # instance types for recently-terminated ones, then fall back to "unknown".
+    terminated_ids = [iid for iid in runs if iid in terms and iid not in running]
+    type_lookup: dict[str, str] = {}
+    if terminated_ids:
+        try:
+            for page in paginator.paginate(InstanceIds=terminated_ids):
+                for reservation in page["Reservations"]:
+                    for inst in reservation["Instances"]:
+                        type_lookup[inst["InstanceId"]] = inst["InstanceType"]
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code != "InvalidInstanceID.NotFound":
+                raise
+
+    lifetimes: list[Lifetime] = list(running.values())
+    for iid, launch in runs.items():
+        if iid in running:
+            continue
+        lifetimes.append(
+            Lifetime(
+                instance_id=iid,
+                instance_type=type_lookup.get(iid, "unknown"),
+                launch=launch,
+                terminate=terms.get(iid, datetime.now(UTC)),
+                is_running=iid not in terms,
+            )
+        )
+
+    return lifetimes
+
+
+def _build_ce_filter(
+    *, tag_filter: bool, exclude_services: list[str] | None
+) -> dict[str, Any] | None:
+    parts: list[dict[str, Any]] = []
+    if tag_filter:
+        parts.append(
+            {
+                "Tags": {
+                    "Key": PROJECT_TAG_KEY,
+                    "Values": [PROJECT_TAG_VALUE],
+                    "MatchOptions": ["EQUALS"],
+                }
+            }
+        )
+    if exclude_services:
+        parts.append(
+            {"Not": {"Dimensions": {"Key": "SERVICE", "Values": exclude_services}}}
+        )
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return {"And": parts}
+
+
+def fetch_costs_per_day(
+    start: date,
+    end: date,
+    *,
+    tag_filter: bool,
+    exclude_services: list[str] | None = None,
+) -> dict[date, float]:
+    """Daily total unblended cost from Cost Explorer (USD)."""
+    ce = boto3.client("ce", region_name="us-east-1")  # CE is global; us-east-1 only.
+    kwargs: dict[str, Any] = {
+        "TimePeriod": {
+            "Start": start.isoformat(),
+            "End": (end + timedelta(days=1)).isoformat(),  # CE end is exclusive.
+        },
+        "Granularity": "DAILY",
+        "Metrics": ["UnblendedCost"],
+    }
+    ce_filter = _build_ce_filter(
+        tag_filter=tag_filter, exclude_services=exclude_services
+    )
+    if ce_filter is not None:
+        kwargs["Filter"] = ce_filter
+    out: dict[date, float] = {}
+    next_token: str | None = None
+    while True:
+        if next_token:
+            kwargs["NextPageToken"] = next_token
+        try:
+            resp = ce.get_cost_and_usage(**kwargs)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "DataUnavailableException":
+                sys.stderr.write(
+                    "WARNING: Cost Explorer returned no data. The Project tag may "
+                    "not be activated as a Cost Allocation Tag yet (takes ~24h "
+                    "after activation). Retry with --no-tag-filter.\n"
+                )
+                return out
+            raise
+        for row in resp["ResultsByTime"]:
+            d = date.fromisoformat(row["TimePeriod"]["Start"])
+            out[d] = float(row["Total"]["UnblendedCost"]["Amount"])
+        next_token = resp.get("NextPageToken")
+        if not next_token:
+            return out
+
+
+def fetch_cost_by_service(
+    start: date, end: date, *, tag_filter: bool
+) -> list[tuple[str, float]]:
+    """Total cost in window grouped by AWS service, sorted descending."""
+    ce = boto3.client("ce", region_name="us-east-1")
+    kwargs: dict[str, Any] = {
+        "TimePeriod": {
+            "Start": start.isoformat(),
+            "End": (end + timedelta(days=1)).isoformat(),
+        },
+        "Granularity": "MONTHLY",
+        "Metrics": ["UnblendedCost"],
+        "GroupBy": [{"Type": "DIMENSION", "Key": "SERVICE"}],
+    }
+    ce_filter = _build_ce_filter(tag_filter=tag_filter, exclude_services=None)
+    if ce_filter is not None:
+        kwargs["Filter"] = ce_filter
+    totals: dict[str, float] = defaultdict(float)
+    next_token: str | None = None
+    while True:
+        if next_token:
+            kwargs["NextPageToken"] = next_token
+        resp = ce.get_cost_and_usage(**kwargs)
+        for period in resp["ResultsByTime"]:
+            for group in period["Groups"]:
+                svc = group["Keys"][0]
+                totals[svc] += float(group["Metrics"]["UnblendedCost"]["Amount"])
+        next_token = resp.get("NextPageToken")
+        if not next_token:
+            break
+    return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Postgres queries
+# ---------------------------------------------------------------------------
+
+
+JOBS_SQL = """
+SELECT
+    date_trunc('day', completed_at)::date AS day,
+    COUNT(*) AS n,
+    COALESCE(SUM(audio_duration), 0) AS audio_seconds
+FROM jobs
+WHERE status = 'completed'
+  AND completed_at >= %s
+  AND completed_at < %s
+GROUP BY day
+ORDER BY day
+"""
+
+
+TASKS_SQL = """
+SELECT
+    date_trunc('day', t.completed_at)::date AS day,
+    t.stage AS stage,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (t.completed_at - t.started_at))),
+        0
+    ) AS stage_seconds
+FROM tasks t
+WHERE t.status = 'completed'
+  AND t.started_at IS NOT NULL
+  AND t.completed_at IS NOT NULL
+  AND t.completed_at >= %s
+  AND t.completed_at < %s
+GROUP BY day, stage
+ORDER BY day, stage
+"""
+
+
+def fetch_jobs_per_day(
+    conn: Any, start: datetime, end: datetime
+) -> dict[date, tuple[int, float]]:
+    """Returns {day: (jobs_completed, audio_seconds)}."""
+    return {
+        day: (int(n), float(audio))
+        for day, n, audio in _pg_query(conn, JOBS_SQL, (start, end))
+    }
+
+
+def fetch_stage_seconds_per_day(
+    conn: Any, start: datetime, end: datetime
+) -> dict[date, dict[str, float]]:
+    """Returns {day: {stage: total_seconds}}."""
+    out: dict[date, dict[str, float]] = defaultdict(dict)
+    for day, stage, seconds in _pg_query(conn, TASKS_SQL, (start, end)):
+        out[day][stage] = float(seconds)
+    return dict(out)
+
+
+# ---------------------------------------------------------------------------
+# Aggregation
+# ---------------------------------------------------------------------------
+
+
+def billed_seconds_per_day(
+    lifetimes: list[Lifetime], start: datetime, end: datetime
+) -> dict[date, float]:
+    """For each day in [start, end), sum lifetime overlaps clipped to that day."""
+    out: dict[date, float] = defaultdict(float)
+    cur = start.date()
+    end_date = end.date()
+    while cur < end_date:
+        day_start = datetime.combine(cur, datetime.min.time(), tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        for lt in lifetimes:
+            overlap_start = max(lt.launch, day_start)
+            overlap_end = min(lt.terminate, day_end)
+            if overlap_end > overlap_start:
+                out[cur] += (overlap_end - overlap_start).total_seconds()
+        cur += timedelta(days=1)
+    return dict(out)
+
+
+def build_report(
+    start: date,
+    end: date,
+    jobs: dict[date, tuple[int, float]],
+    stages: dict[date, dict[str, float]],
+    billed: dict[date, float],
+    costs: dict[date, float],
+) -> list[DailyReport]:
+    rows: list[DailyReport] = []
+    cur = start
+    while cur <= end:
+        n, audio = jobs.get(cur, (0, 0.0))
+        by_stage = stages.get(cur, {})
+        useful = sum(secs for stage, secs in by_stage.items() if stage in GPU_STAGES)
+        rows.append(
+            DailyReport(
+                date=cur,
+                jobs_completed=n,
+                audio_seconds=audio,
+                transcribe_s=by_stage.get("transcribe", 0.0),
+                diarize_s=by_stage.get("diarize", 0.0),
+                useful_work_s=useful,
+                billed_instance_s=billed.get(cur, 0.0),
+                cost_usd=costs.get(cur, 0.0),
+            )
+        )
+        cur += timedelta(days=1)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+
+CSV_HEADER_FULL = [
+    "date",
+    "jobs_completed",
+    "audio_hours",
+    "transcribe_s",
+    "diarize_s",
+    "useful_work_s",
+    "billed_instance_s",
+    "warmup_overhead_s",
+    "warmup_ratio",
+    "cost_usd",
+    "cost_per_episode",
+    "cost_per_audio_hour",
+]
+
+CSV_HEADER_AWS_ONLY = ["date", "billed_instance_s", "cost_usd"]
+
+
+def _row_full(r: DailyReport) -> list[str]:
+    audio_hours = r.audio_seconds / 3600.0
+    warmup = max(0.0, r.billed_instance_s - r.useful_work_s)
+    warmup_ratio = warmup / r.billed_instance_s if r.billed_instance_s > 0 else 0.0
+    cost_per_episode = r.cost_usd / r.jobs_completed if r.jobs_completed > 0 else 0.0
+    cost_per_hour = r.cost_usd / audio_hours if audio_hours > 0 else 0.0
+    return [
+        r.date.isoformat(),
+        str(r.jobs_completed),
+        f"{audio_hours:.3f}",
+        f"{r.transcribe_s:.1f}",
+        f"{r.diarize_s:.1f}",
+        f"{r.useful_work_s:.1f}",
+        f"{r.billed_instance_s:.1f}",
+        f"{warmup:.1f}",
+        f"{warmup_ratio:.3f}",
+        f"{r.cost_usd:.4f}",
+        f"{cost_per_episode:.4f}",
+        f"{cost_per_hour:.4f}",
+    ]
+
+
+def _row_aws_only(r: DailyReport) -> list[str]:
+    return [
+        r.date.isoformat(),
+        f"{r.billed_instance_s:.1f}",
+        f"{r.cost_usd:.4f}",
+    ]
+
+
+def write_csv(rows: list[DailyReport], path: str | None, *, no_db: bool) -> None:
+    ctx = open(path, "w", newline="") if path else nullcontext(sys.stdout)
+    header = CSV_HEADER_AWS_ONLY if no_db else CSV_HEADER_FULL
+    row_fn = _row_aws_only if no_db else _row_full
+    with ctx as out:
+        w = csv.writer(out)
+        w.writerow(header)
+        for r in rows:
+            w.writerow(row_fn(r))
+
+
+def print_summary(rows: list[DailyReport], *, no_db: bool) -> None:
+    total_billed = sum(r.billed_instance_s for r in rows)
+    total_cost = sum(r.cost_usd for r in rows)
+    sys.stderr.write("\n--- summary ---\n")
+    sys.stderr.write(f"  days:                 {len(rows)}\n")
+    sys.stderr.write(f"  billed instance time: {total_billed / 3600.0:.1f} h\n")
+    sys.stderr.write(f"  total cost:           ${total_cost:.2f}\n")
+    if no_db:
+        return
+    total_jobs = sum(r.jobs_completed for r in rows)
+    total_audio_h = sum(r.audio_seconds for r in rows) / 3600.0
+    total_useful = sum(r.useful_work_s for r in rows)
+    warmup = max(0.0, total_billed - total_useful)
+    ratio = warmup / total_billed if total_billed > 0 else 0.0
+    sys.stderr.write(f"  jobs completed:       {total_jobs}\n")
+    sys.stderr.write(f"  audio transcribed:    {total_audio_h:.1f} h\n")
+    sys.stderr.write(f"  useful GPU work:      {total_useful / 3600.0:.1f} h\n")
+    sys.stderr.write(
+        f"  warmup overhead:      {warmup / 3600.0:.1f} h ({ratio * 100:.1f}%)\n"
+    )
+    if total_jobs > 0:
+        sys.stderr.write(f"  $/episode (avg):      ${total_cost / total_jobs:.3f}\n")
+    if total_audio_h > 0:
+        sys.stderr.write(f"  $/audio-hour (avg):   ${total_cost / total_audio_h:.3f}\n")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--days", type=int, default=14, help="Window size (default: 14)")
+    p.add_argument(
+        "--start", type=date.fromisoformat, help="YYYY-MM-DD (overrides --days)"
+    )
+    p.add_argument(
+        "--end", type=date.fromisoformat, help="YYYY-MM-DD (defaults to today)"
+    )
+    p.add_argument("--region", default=DEFAULT_REGION)
+    p.add_argument("--database-url", default=os.environ.get("DATABASE_URL"))
+    p.add_argument(
+        "--no-db",
+        action="store_true",
+        help="Skip Postgres queries; emit AWS-only CSV (date, billed_instance_s, cost_usd)",
+    )
+    p.add_argument(
+        "--no-tag-filter",
+        action="store_true",
+        help="Skip Project=dalston tag filter (whole-account costs/instances)",
+    )
+    p.add_argument(
+        "--exclude-services",
+        default="",
+        help=(
+            "Comma-separated AWS service names to exclude from cost totals. "
+            "Common values: 'Amazon Route 53', 'Amazon Elastic Load Balancing', "
+            "'AWS Elastic Beanstalk'. Use --show-services to list all services."
+        ),
+    )
+    p.add_argument(
+        "--show-services",
+        action="store_true",
+        help="List total cost by AWS service for the window, then exit",
+    )
+    p.add_argument("--output", "-o", help="Write CSV to this path (default: stdout)")
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+
+    end_d = args.end or datetime.now(UTC).date()
+    start_d = args.start or (end_d - timedelta(days=args.days))
+    if start_d >= end_d:
+        sys.stderr.write("--start must be before --end\n")
+        return 2
+    start_dt = datetime.combine(start_d, datetime.min.time(), tzinfo=UTC)
+    end_dt = datetime.combine(
+        end_d + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+    )
+
+    tag_filter = not args.no_tag_filter
+    exclude_services = [
+        s.strip() for s in args.exclude_services.split(",") if s.strip()
+    ]
+
+    sys.stderr.write(
+        f"Window: {start_d} → {end_d}  region={args.region}  tag_filter={tag_filter}\n"
+    )
+
+    if args.show_services:
+        sys.stderr.write("Fetching cost-by-service breakdown...\n")
+        breakdown = fetch_cost_by_service(start_d, end_d, tag_filter=tag_filter)
+        total = sum(c for _, c in breakdown)
+        for svc, cost in breakdown:
+            pct = (cost / total * 100) if total > 0 else 0.0
+            sys.stdout.write(f"  {cost:>10.2f} USD  {pct:>5.1f}%  {svc}\n")
+        sys.stdout.write(f"  {total:>10.2f} USD          TOTAL\n")
+        return 0
+
+    if not args.no_db and not args.database_url:
+        sys.stderr.write(
+            "DATABASE_URL not set (and --database-url not provided). "
+            "Use --no-db for AWS-only output.\n"
+        )
+        return 2
+
+    sources = "CloudTrail + Cost Explorer"
+    if not args.no_db:
+        sources += " + Postgres"
+    sys.stderr.write(f"Fetching {sources} in parallel...\n")
+    if exclude_services:
+        sys.stderr.write(f"  excluding services: {', '.join(exclude_services)}\n")
+
+    def _pg_fetches() -> tuple[
+        dict[date, tuple[int, float]], dict[date, dict[str, float]]
+    ]:
+        conn = _pg_connect(args.database_url)
+        try:
+            return (
+                fetch_jobs_per_day(conn, start_dt, end_dt),
+                fetch_stage_seconds_per_day(conn, start_dt, end_dt),
+            )
+        finally:
+            conn.close()
+
+    jobs: dict[date, tuple[int, float]] = {}
+    stages: dict[date, dict[str, float]] = {}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_lifetimes = pool.submit(
+            fetch_instance_lifetimes,
+            args.region,
+            start_dt,
+            end_dt,
+            tag_filter=tag_filter,
+        )
+        f_costs = pool.submit(
+            fetch_costs_per_day,
+            start_d,
+            end_d,
+            tag_filter=tag_filter,
+            exclude_services=exclude_services or None,
+        )
+        f_pg = pool.submit(_pg_fetches) if not args.no_db else None
+        lifetimes = f_lifetimes.result()
+        costs = f_costs.result()
+        if f_pg is not None:
+            jobs, stages = f_pg.result()
+
+    sys.stderr.write(f"  found {len(lifetimes)} instances in window\n")
+    billed = billed_seconds_per_day(lifetimes, start_dt, end_dt)
+
+    rows = build_report(start_d, end_d, jobs, stages, billed, costs)
+    write_csv(rows, args.output, no_db=args.no_db)
+    print_summary(rows, no_db=args.no_db)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

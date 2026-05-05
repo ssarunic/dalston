@@ -543,3 +543,10 @@ dalston-aws ssh gpu                  # SSH to GPU worker
 
 dalston-aws teardown                 # Delete everything (except S3 data)
 ```
+
+---
+
+## See also
+
+- [Correlating AWS Cost with Transcription Activity](aws-cost-correlation.md) — daily cost-per-episode and warmup-overhead reports via `dalston-cost-correlate`
+- [AWS Deployment Scenarios](aws-deployment-scenarios.md) — instance type and spot pricing tradeoffs
