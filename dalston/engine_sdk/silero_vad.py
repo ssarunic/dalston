@@ -28,10 +28,13 @@ from __future__ import annotations
 import os
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import structlog
+
+# numpy is engine-only — see comment in engine_sdk/audio.py.
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = structlog.get_logger()
 
@@ -144,6 +147,8 @@ class SileroOnnxModel:
     """
 
     def __init__(self, session: Any) -> None:
+        import numpy as np
+
         self._session = session
         self._state: np.ndarray = np.zeros((2, 1, 128), dtype=np.float32)
         self._context: np.ndarray = np.zeros(0, dtype=np.float32)
@@ -161,6 +166,8 @@ class SileroOnnxModel:
         Returns:
             Speech probability in [0.0, 1.0].
         """
+        import numpy as np
+
         if audio.ndim == 1:
             audio = audio.reshape(1, -1)
 
@@ -195,6 +202,8 @@ class SileroOnnxModel:
 
     def reset_states(self, batch_size: int = 1) -> None:
         """Reset recurrent state for a new audio stream."""
+        import numpy as np
+
         self._state = np.zeros((2, batch_size, 128), dtype=np.float32)
         self._context = np.zeros(0, dtype=np.float32)
         self._last_sr = 0

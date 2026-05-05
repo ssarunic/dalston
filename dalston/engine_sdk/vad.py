@@ -39,10 +39,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import structlog
+
+# numpy is engine-only — see comment in engine_sdk/audio.py.
+if TYPE_CHECKING:
+    import numpy as np
 
 from dalston.common.audio_defaults import (
     DEFAULT_MIN_SPEECH_MS,
@@ -459,6 +462,8 @@ class VadChunker:
         Uses ``soundfile`` for decode; resamples to 16 kHz via ``librosa``
         if needed. Downmixes multichannel to mono by averaging.
         """
+        import numpy as np
+
         try:
             import soundfile as sf
         except ImportError as exc:
@@ -515,6 +520,8 @@ def _get_speech_timestamps_offline(
     package isn't importable and we're falling back to an onnxruntime
     session loaded from ``DALSTON_SILERO_VAD_ONNX``.
     """
+    import numpy as np
+
     # Accept either a torch tensor or a numpy array.
     if hasattr(audio, "detach"):
         audio_np = audio.detach().cpu().numpy()

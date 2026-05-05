@@ -25,9 +25,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
 import structlog
+
+# numpy is engine-only: keep it out of import-time so the gateway image
+# (which imports engine_sdk.types via orchestrator.catalog but never touches
+# the numpy helpers below) doesn't need numpy installed.
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = structlog.get_logger()
 
@@ -207,6 +213,8 @@ def ensure_audio_format(
 
 def normalize_mono_audio(audio: np.ndarray) -> np.ndarray:
     """Return clipped mono float32 audio in range [-1, 1]."""
+    import numpy as np
+
     samples = np.asarray(audio)
     if samples.ndim == 0:
         raise ValueError("Audio must be a 1D mono numpy array")
@@ -224,6 +232,8 @@ def normalize_mono_audio(audio: np.ndarray) -> np.ndarray:
 
 def write_wav_file(path: Path, audio: np.ndarray, sample_rate: int = 16000) -> None:
     """Write mono PCM16 WAV to ``path`` from numpy audio samples."""
+    import numpy as np
+
     if sample_rate <= 0:
         raise ValueError("sample_rate must be a positive integer")
 
