@@ -1,0 +1,22 @@
+# Dalston GCP — split mode (CPU control plane + optional GPU worker)
+# GCP-native instance types. Consumed by `dalston-gcp`.
+scenario: split
+
+region: europe-west2
+registry: ghcr.io/ssarunic/dalston
+
+control_plane:
+  # e2-standard-4: 4 vCPU, 16 GB RAM — roughly equivalent to t3.large with headroom
+  instance_type: e2-standard-4
+  spot: false
+  compose_profiles:
+    - local-infra
+  data_volume_gb: 50
+
+gpu_worker:
+  # n1-standard-4 + 1x T4 (attached via --accelerator flag at launch time)
+  # Equivalent to AWS g4dn.xlarge
+  instance_type: n1-standard-4
+  spot: true
+  gpu_type: nvidia-tesla-t4
+  gpu_count: 1
