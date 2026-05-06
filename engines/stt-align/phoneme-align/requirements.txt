@@ -8,7 +8,7 @@ torchaudio>=2.11.0
 soundfile>=0.13.1
 
 # HuggingFace transformers for wav2vec2 model loading (5.x required for huggingface_hub 1.x)
-transformers>=5.7.0
+transformers>=5.8.0
 
 # Audio and numerical processing
 numpy>=2.4.4
