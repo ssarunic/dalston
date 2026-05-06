@@ -2,7 +2,7 @@
 
 # Core ML framework
 torch>=2.2.0
-torchaudio>=2.2.0
+torchaudio>=2.11.0
 
 # HuggingFace Transformers for ASR pipeline (5.x required for huggingface_hub 1.x)
 transformers>=5.0.0
