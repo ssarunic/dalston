@@ -8,7 +8,7 @@ torchaudio>=2.2.0
 transformers>=5.0.0
 
 # Model loading acceleration
-accelerate>=0.26.0
+accelerate>=1.13.0
 
 # Audio I/O
 soundfile>=0.12.0
