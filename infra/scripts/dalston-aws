@@ -812,14 +812,12 @@ def ensure_key_pair(region: str, key_name: str) -> str:
 
 
 def _loki_driver_cloud_init_block() -> str:
-    """Return shell snippet that installs the Loki Docker log driver plugin."""
-    return f"""\
-# Install Loki Docker log driver if observability is enabled
-if [ "$OBSERVABILITY" = "true" ]; then
-  echo "Installing Loki Docker log driver..."
-  docker plugin install grafana/loki-docker-driver:{LOKI_DRIVER_VERSION} --alias loki --grant-all-permissions || true
-fi
-"""
+    """Loki driver is installed at gpu-start.sh runtime instead of cloud-init.
+
+    Plugin storage lives on instance-store NVMe and is wiped on stop/start,
+    so the install must happen on every boot, not just first boot.
+    """
+    return ""
 
 
 def _tailscale_cloud_init_block(hostname: str) -> str:
@@ -1458,13 +1456,16 @@ if [ -n "$NVME_MOUNT" ]; then
   rm -rf /data/models; ln -s "$NVME_MOUNT/models" /data/models
   systemctl stop docker docker.socket containerd 2>/dev/null || true
   for d in docker containerd; do
-    if [ -d "/var/lib/$d" ] && [ ! -L "/var/lib/$d" ]; then
+    target="$NVME_MOUNT/$d"
+    if [ -L "/var/lib/$d" ]; then
+      mkdir -p "$target"
+    elif [ -d "/var/lib/$d" ]; then
       if [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ]; then
-        mv "/var/lib/$d" "$NVME_MOUNT/$d"
+        mv "/var/lib/$d" "$target"
       else
-        rm -rf "/var/lib/$d"; mkdir -p "$NVME_MOUNT/$d"
+        rm -rf "/var/lib/$d"; mkdir -p "$target"
       fi
-      ln -s "$NVME_MOUNT/$d" "/var/lib/$d"
+      ln -s "$target" "/var/lib/$d"
     fi
   done
   systemctl start docker
@@ -1603,13 +1604,17 @@ if [ -n "$NVME_MOUNT" ]; then
 
   systemctl stop docker docker.socket containerd 2>/dev/null || true
   for d in docker containerd; do
-    if [ -d "/var/lib/$d" ] && [ ! -L "/var/lib/$d" ]; then
+    target="$NVME_MOUNT/$d"
+    if [ -L "/var/lib/$d" ]; then
+      # Symlink survives stop/start; instance-store wipe leaves it dangling.
+      mkdir -p "$target"
+    elif [ -d "/var/lib/$d" ]; then
       if [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ]; then
-        mv "/var/lib/$d" "$NVME_MOUNT/$d"
+        mv "/var/lib/$d" "$target"
       else
-        rm -rf "/var/lib/$d"; mkdir -p "$NVME_MOUNT/$d"
+        rm -rf "/var/lib/$d"; mkdir -p "$target"
       fi
-      ln -s "$NVME_MOUNT/$d" "/var/lib/$d"
+      ln -s "$target" "/var/lib/$d"
     fi
   done
   systemctl start docker
@@ -1647,6 +1652,11 @@ cat > /opt/dalston/gpu-start.sh << 'STARTEOF'
 #!/bin/bash
 set -euo pipefail
 source /opt/dalston/gpu-env.sh
+
+# Loki plugin lives on NVMe (wiped on stop/start) — re-install if missing.
+if [ "$OBSERVABILITY" = "true" ] && ! docker plugin ls --format '{{{{.Name}}}}' 2>/dev/null | grep -q '^loki:'; then
+  docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions || true
+fi
 
 # Pull images
 {pull_lines}
