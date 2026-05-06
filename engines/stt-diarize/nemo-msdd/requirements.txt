@@ -4,7 +4,7 @@
 nemo_toolkit[asr]>=2.7.0,<2.8.0
 
 # Audio processing
-soundfile>=0.12.0
+soundfile>=0.13.1
 
 # Diarization-specific (explicit for clarity, pulled by nemo)
 omegaconf>=2.3.0
