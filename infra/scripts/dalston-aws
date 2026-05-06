@@ -1602,52 +1602,52 @@ if command -v nvidia-ctk >/dev/null 2>&1; then
   systemctl restart docker
 fi
 
-# Locate ephemeral NVMe for /data/models and /var/lib/docker. Root EBS is
-# only ~75 GB on the DLAMI — too small for co-located multi-engine pulls.
-NVME_MOUNT=""
-for dev in /dev/nvme*n1; do
-  [ -b "$dev" ] || continue
-  if lsblk -n -o MODEL "$dev" 2>/dev/null | grep -qi "Instance Storage"; then
-    EXISTING=$(lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -v '^$' | head -1)
-    if [ -n "$EXISTING" ]; then
-      NVME_MOUNT="$EXISTING"
-    else
-      mkfs.xfs "$dev"; mkdir -p /opt/instance-store
-      mount "$dev" /opt/instance-store; NVME_MOUNT="/opt/instance-store"
-    fi
-    break
+# NVMe-prep service: runs Before=docker.service every boot.
+# Instance-store NVMe is wiped on stop/start; cloud-init only fires once.
+mkdir -p /opt/dalston
+cat > /opt/dalston/nvme-prep.sh << 'X'
+#!/bin/bash
+set -euo pipefail
+M=""
+for d in /dev/nvme*n1; do
+  [ -b "$d" ] && lsblk -n -o MODEL "$d" 2>/dev/null | grep -qi "Instance Storage" || continue
+  E=$(lsblk -n -o MOUNTPOINT "$d" 2>/dev/null | grep -v '^$' | head -1)
+  [ -n "$E" ] && M="$E" || { mkfs.xfs "$d"; mkdir -p /opt/instance-store; mount "$d" /opt/instance-store; M=/opt/instance-store; }
+  break
+done
+[ -z "$M" ] && mountpoint -q /opt/dlami/nvme && M=/opt/dlami/nvme
+[ -z "$M" ] && { mkdir -p /data/models; chown -R 1000:1000 /data/models; exit 0; }
+mkdir -p "$M/models" /data
+rm -rf /data/models; ln -s "$M/models" /data/models
+chown -R 1000:1000 /data/models "$M/models"
+for d in docker containerd; do
+  t="$M/$d"
+  if [ -L "/var/lib/$d" ]; then mkdir -p "$t"
+  elif [ -d "/var/lib/$d" ]; then
+    [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ] && mv "/var/lib/$d" "$t" || { rm -rf "/var/lib/$d"; mkdir -p "$t"; }
+    ln -s "$t" "/var/lib/$d"
   fi
 done
-if [ -z "$NVME_MOUNT" ] && mountpoint -q /opt/dlami/nvme; then
-  NVME_MOUNT="/opt/dlami/nvme"
-fi
-
-if [ -n "$NVME_MOUNT" ]; then
-  mkdir -p "$NVME_MOUNT/models" /data
-  rm -rf /data/models; ln -s "$NVME_MOUNT/models" /data/models
-
-  systemctl stop docker docker.socket containerd 2>/dev/null || true
-  for d in docker containerd; do
-    target="$NVME_MOUNT/$d"
-    if [ -L "/var/lib/$d" ]; then
-      # Symlink survives stop/start; instance-store wipe leaves it dangling.
-      mkdir -p "$target"
-    elif [ -d "/var/lib/$d" ]; then
-      if [ -n "$(ls -A /var/lib/$d 2>/dev/null)" ]; then
-        mv "/var/lib/$d" "$target"
-      else
-        rm -rf "/var/lib/$d"; mkdir -p "$target"
-      fi
-      ln -s "$target" "/var/lib/$d"
-    fi
-  done
-  systemctl start docker
-  echo "NVMe at $NVME_MOUNT hosts /data/models + /var/lib/{docker,containerd}"
-else
-  echo "WARN: no NVMe; using root volume (may ENOSPC during multi-engine pull)"
-  mkdir -p /data/models
-fi
-chown -R 1000:1000 /data/models
+X
+chmod +x /opt/dalston/nvme-prep.sh
+cat > /etc/systemd/system/dalston-nvme-prep.service << 'X'
+[Unit]
+DefaultDependencies=no
+Before=docker.service containerd.service
+After=local-fs.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/dalston/nvme-prep.sh
+[Install]
+WantedBy=multi-user.target
+RequiredBy=docker.service
+X
+systemctl daemon-reload
+systemctl enable dalston-nvme-prep.service
+systemctl stop docker docker.socket containerd 2>/dev/null || true
+systemctl start dalston-nvme-prep.service
+systemctl start docker
 
 # Calibration profile dir (bind-mounted read-only into engine containers)
 mkdir -p /data/vram_profiles
