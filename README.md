@@ -11,6 +11,8 @@
 
 **Drop-in integration** — OpenAI and ElevenLabs compatible APIs mean you can point your existing code at Dalston and it just works. Need more power? The native Dalston API unlocks advanced functionality like multi-engine routing, pipeline customization, and detailed engine metadata.
 
+**Cheap to run** — `make dev` is free. A 1-hour podcast on a spot GPU costs cents. A 24/7 ElevenLabs/OpenAI-compatible API on AWS runs around $87/month all-in. See the [cost estimator](docs/guides/51-aws-cost-estimator.md).
+
 ## What It Does
 
 Transcribe audio files or live streams with speaker diarization, word-level timestamps, and GPU acceleration. Run it on your own infrastructure.
@@ -35,14 +37,11 @@ DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --form
 ## Quick Start
 
 ```bash
-git clone https://github.com/ssarunic/dalston.git
-cd dalston
-pip install -e ".[gateway,orchestrator,dev]"
-pip install -e ./sdk -e ./cli
-DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --format json
+git clone https://github.com/ssarunic/dalston.git && cd dalston
+make dev      # full local stack on Docker
 ```
 
-For distributed Docker deployments, see the [deployment guide](docs/guides/self-hosted-deployment-tutorial.md).
+For zero-Docker single-process mode or AWS deployment, see the [guides](docs/guides/).
 
 ## Features
 
@@ -50,15 +49,20 @@ For distributed Docker deployments, see the [deployment guide](docs/guides/self-
 - **Speaker Diarization** — Identify who said what
 - **Word Timestamps** — Precise timing for every word
 - **OpenAI & ElevenLabs Compatible** — Drop-in replacement for existing integrations
-- **Modular Engines** — Faster Whisper, WhisperX, Pyannote, and more
+- **Modular Engines** — Faster Whisper, NeMo Parakeet, Voxtral, Pyannote, and more
 - **Private by Default** — Runs entirely on your infrastructure, no data leaves your environment
 
 ## Documentation
 
-- [Architecture](docs/specs/ARCHITECTURE.md)
-- [REST API](docs/specs/batch/API.md)
-- [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
-- [Deployment Guide](docs/guides/self-hosted-deployment-tutorial.md)
+**Start here:**
+
+- [Quickstart](docs/guides/01-quickstart.md) — first transcript in 5 minutes
+- [Pick your deployment](docs/guides/02-pick-your-deployment.md) — laptop / spot GPU / 24/7 AWS
+- [All guides →](docs/guides/) — engines, real-time, cost, principles
+
+**Engineering reference:**
+
+- [Architecture](docs/specs/ARCHITECTURE.md) · [REST API](docs/specs/batch/API.md) · [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
 
 ## License
 
