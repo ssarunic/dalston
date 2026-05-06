@@ -261,6 +261,7 @@ class DeploymentState:
     scenario: str = "gpu"
     template: str = ""
     s3_bucket: str = ""
+    api_key: str = ""
     iam_role: str = ""
     instance_profile: str = ""
     sg_id: str = ""
@@ -274,9 +275,17 @@ class DeploymentState:
 
 def save_state(state: DeploymentState) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        STATE_DIR.chmod(0o700)
+    except OSError:
+        pass
     STATE_FILE.write_text(
         yaml.dump(asdict(state), default_flow_style=False, sort_keys=False)
     )
+    try:
+        STATE_FILE.chmod(0o600)
+    except OSError:
+        pass
     log(f"State saved to {STATE_FILE}")
 
 
@@ -304,6 +313,12 @@ def require_state() -> DeploymentState:
     if st is None:
         die("No deployment found. Run 'dalston-aws setup' first.")
     return st
+
+
+def generate_dalston_api_key() -> str:
+    """Generate a Dalston API key compatible with the gateway bootstrap path."""
+    token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+    return f"dk_{token}"
 
 
 # ---------------------------------------------------------------------------
@@ -999,9 +1014,11 @@ def generate_user_data(
     use_ghcr: bool = False,
     registry: str | None = None,
     observability: bool = False,
+    api_key: str = "",
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
+    model_source = os.environ.get("DALSTON_MODEL_SOURCE", "auto")
 
     # Build compose files and services list (controlled here, used as bash vars)
     ctrl_services = "postgres redis gateway orchestrator stt-prepare"
@@ -1038,6 +1055,8 @@ USE_GHCR="{"true" if use_ghcr else "false"}"
 GHCR_REGISTRY="{ghcr_registry}"
 REPO_URL="{REPO_URL}"
 HF_TOKEN="{hf_token}"
+DALSTON_API_KEY="{api_key}"
+DALSTON_MODEL_SOURCE="{model_source}"
 REPO_BRANCH="{REPO_BRANCH}"
 OBSERVABILITY="{"true" if observability else "false"}"
 OTEL_ENABLED="{otel_enabled}"
@@ -1137,6 +1156,8 @@ fi
 cat > "$DATA_MOUNT/dalston/.env.aws" << ENVEOF
 DALSTON_S3_BUCKET=${S3_BUCKET}
 DALSTON_S3_REGION=${AWS_REGION}
+DALSTON_API_KEY=${DALSTON_API_KEY}
+DALSTON_MODEL_SOURCE=${DALSTON_MODEL_SOURCE}
 AWS_REGION=${AWS_REGION}
 REDIS_URL=redis://redis:6379
 DATABASE_URL=postgresql+asyncpg://dalston:password@postgres:5432/dalston
@@ -1317,6 +1338,7 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
   -e REDIS_URL="redis://${{CTRL_PLANE_HOST}}:6379" \\
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
   -e DALSTON_S3_REGION="$AWS_REGION" \\
+  -e DALSTON_MODEL_SOURCE="$DALSTON_MODEL_SOURCE" \\
   -e AWS_REGION="$AWS_REGION" \\
   -e HF_HOME=/data/models \\
 {extra_lines}  $OTEL_FLAGS $LOG_FLAGS \\
@@ -1510,6 +1532,7 @@ def generate_gpu_worker_user_data(
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
+    model_source = os.environ.get("DALSTON_MODEL_SOURCE", "auto")
     ts_hostname = f"dalston-gpu-{worker_name}"
 
     # Validate engines
@@ -1552,6 +1575,7 @@ AWS_REGION="{region}"
 CTRL_PLANE_HOST="dalston-control-plane"
 GHCR_REGISTRY="{ghcr_registry}"
 HF_TOKEN="{hf_token}"
+DALSTON_MODEL_SOURCE="{model_source}"
 OBSERVABILITY="{"true" if observability else "false"}"
 """
 
@@ -2307,6 +2331,15 @@ def cmd_setup(args: argparse.Namespace) -> None:
     existing = load_state()
     if existing:
         log("Existing deployment found. Verifying infrastructure...")
+        if not existing.api_key and not existing.instance_id:
+            existing.api_key = generate_dalston_api_key()
+            log(f"Generated API key and stored it in {STATE_FILE} (api_key).")
+        elif not existing.api_key:
+            warn(
+                "Existing state has no api_key. This usually means the deployment "
+                "predates seeded keys; use the gateway first-run logs or create a "
+                "new key in the web console."
+            )
         vpc_id = get_default_vpc(existing.region)
         existing.s3_bucket = create_s3_bucket(existing.region)
         existing.iam_role, existing.instance_profile = create_iam_role(
@@ -2342,6 +2375,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         region=region,
         scenario=scenario,
         template=args.template,
+        api_key=generate_dalston_api_key(),
         key_name=key_name,
     )
 
@@ -2365,7 +2399,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
     print()
     log("Infrastructure ready.")
-    log("Next: dalston-aws launch control-plane")
+    log(f"API key stored in {STATE_FILE} (api_key).")
+    log("Next: dalston-aws launch")
     cmd_status_impl(st)
 
 
@@ -2461,6 +2496,7 @@ def _launch_control_plane(
         use_ghcr=True,
         registry=tmpl.registry,
         observability=observability,
+        api_key=st.api_key,
     )
     st.observability = observability
     st.instance_id = launch_instance(

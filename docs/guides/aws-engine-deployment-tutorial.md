@@ -1,5 +1,11 @@
 # AWS Engine Deployment Tutorial (For Dummies)
 
+> **Legacy engineering reference:** this predates the current `dalston-aws`
+> template workflow. For the supported user-facing path, use
+> [11-single-engine-tailscale-mode.md](11-single-engine-tailscale-mode.md) for
+> one engine or [21-control-plane-aws-deploy.md](21-control-plane-aws-deploy.md)
+> for the full control plane.
+
 Deploy Dalston transcription engines on a single AWS instance. Three paths:
 
 | Path | Engines | GPU needed? | Image size | Best for |

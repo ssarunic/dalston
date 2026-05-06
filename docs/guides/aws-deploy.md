@@ -3,6 +3,11 @@
 A step-by-step guide to running Dalston on AWS using the `dalston-aws` script.
 No Terraform required — just the AWS CLI.
 
+> **Legacy reference:** this is the older, comprehensive engineering reference.
+> For the current user-facing path, start with
+> [21-control-plane-aws-deploy.md](21-control-plane-aws-deploy.md). New commands
+> use `dalston-aws setup -t <template>` followed by `dalston-aws launch`.
+
 ## Prerequisites
 
 1. **AWS CLI** configured with credentials:
@@ -125,9 +130,10 @@ curl http://100.100.1.5:8000/health
 ### With spot pricing (~65% cheaper)
 
 ```bash
-dalston-aws setup --spot
-# Same g5.xlarge but ~$0.35/hr instead of $1.00/hr
-# AWS may reclaim the instance with 2 min warning — it auto-stops (not terminates)
+dalston-aws setup -t gpu
+dalston-aws launch --spot
+# Same GPU shape at spot pricing instead of on-demand.
+# AWS may reclaim the instance with 2 min warning; one-time spot terminates.
 ```
 
 ---
@@ -156,7 +162,8 @@ enough that CPU transcription speed is acceptable.
 ```
 
 ```bash
-dalston-aws setup --cpu
+dalston-aws setup -t cpu
+dalston-aws launch
 ```
 
 CPU engines are ~5-10x slower than GPU for transcription and diarization, but
@@ -170,13 +177,14 @@ This is the recommended path if you're not sure about costs yet. Start CPU-only,
 then add a GPU worker when you need more throughput.
 
 ```bash
-# Start with CPU
-dalston-aws setup --cpu
+# Start with split infrastructure but launch only the control plane.
+dalston-aws setup -t split
+dalston-aws launch control-plane
 
 # ... use it for a while, transcription is slow ...
 
 # Add a GPU worker (spot = cheap)
-dalston-aws add-gpu --spot
+dalston-aws launch gpu --engines nemo,pyannote --spot
 ```
 
 This creates a second instance:
@@ -199,20 +207,15 @@ private VPC network. The security group is configured automatically to allow
 ports 6379 (Redis) and 5432 (Postgres) between the two instances.
 
 ```bash
-# SSH to the GPU worker to set up Tailscale
-dalston-aws ssh gpu
-sudo tailscale up
-sudo systemctl start dalston-gpu
-
-# Done — GPU engines start polling Redis queues immediately
+dalston-aws status
+# Done — GPU engines join Tailscale and start polling Redis queues automatically.
 ```
 
 ### Removing the GPU worker
 
 ```bash
-dalston-aws remove-gpu
-# Confirms, then terminates instance + deletes volume + security group
-# State reverts to single-instance CPU
+dalston-aws terminate gpu --name nemo-pyannote
+# Terminates the selected GPU worker. The control plane keeps running.
 ```
 
 ---
@@ -524,16 +527,16 @@ Common causes:
 ## Quick reference
 
 ```bash
-dalston-aws setup                    # GPU instance (default)
-dalston-aws setup --cpu              # CPU-only instance
-dalston-aws setup --spot             # GPU with spot pricing
-dalston-aws setup --cpu --spot       # CPU with spot pricing
-dalston-aws setup --split            # CPU control plane + GPU worker
-dalston-aws setup --gpu-type p3.2xlarge  # Different GPU type
+dalston-aws setup -t gpu             # Single GPU template
+dalston-aws setup -t cpu             # CPU-only template
+dalston-aws setup -t split           # CPU control plane + GPU worker
+dalston-aws launch                   # Launch the template's instances
+dalston-aws launch --spot            # Force spot where supported
+dalston-aws launch --gpu-type p3.2xlarge  # Different GPU type
 
-dalston-aws add-gpu                  # Add GPU worker to existing setup
-dalston-aws add-gpu --spot           # Add GPU worker with spot pricing
-dalston-aws remove-gpu               # Remove GPU worker
+dalston-aws launch gpu               # Add GPU worker to split setup
+dalston-aws launch gpu --spot        # Add GPU worker with spot pricing
+dalston-aws terminate gpu --name onnx  # Remove GPU worker
 
 dalston-aws status                   # Show instance state
 dalston-aws up                       # Start instance(s)

@@ -1,5 +1,10 @@
 # AWS Deployment Scenarios
 
+> **Legacy engineering reference:** this predates the current `dalston-aws`
+> template workflow. For the supported user-facing path, start with
+> [02-pick-your-deployment.md](02-pick-your-deployment.md) and
+> [21-control-plane-aws-deploy.md](21-control-plane-aws-deploy.md).
+
 Deployment options for Dalston on AWS, ordered from simplest/cheapest to most capable. Each scenario builds on the previous one.
 
 The engine_id-based engine architecture loads models dynamically from HuggingFace — 12 engine_ids, 18 cataloged models, and any HF-compatible model via `hf-asr`. The orchestrator's engine selector automatically picks the best engine_id and downloaded model for each job based on language, capabilities, and hardware. The core question is: **how much GPU do you need, and which engine_ids do you want running?**
