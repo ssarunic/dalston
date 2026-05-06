@@ -4,7 +4,7 @@
 nemo_toolkit[asr]>=2.7.3,<2.8.0
 
 # Align key transitive deps with NeMo 2.7 ASR metadata.
-lhotse>=1.32.2
+lhotse>=1.33.0
 transformers>=4.57.0,<4.58.0
 
 # Audio processing
