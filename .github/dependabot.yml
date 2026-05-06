@@ -141,6 +141,11 @@ updates:
           - major
           - minor
           - patch
+    # nvidia-riva-client 2.25.1 (latest) pins protobuf==6.33.5. Until a
+    # newer client ships, protobuf 7+ is unsatisfiable in this engine.
+    ignore:
+      - dependency-name: "protobuf"
+        versions: [">=7.0.0"]
     reviewers:
       - sasasarunic
     labels:
@@ -158,6 +163,11 @@ updates:
           - major
           - minor
           - patch
+    # vllm[audio] 0.20.x requires numpy>=1.25,<2.4. Bumping numpy to 2.4+
+    # is unsatisfiable until vllm releases a numpy-2.4-compatible build.
+    ignore:
+      - dependency-name: "numpy"
+        versions: [">=2.4"]
     reviewers:
       - sasasarunic
     labels:
