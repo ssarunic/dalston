@@ -107,6 +107,12 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
             "DALSTON_VRAM_BUDGET_MB": "4000",
             "DALSTON_VRAM_PROFILE_DIR": "/data/vram_profiles",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            # hf-xet 1.5.0 + huggingface_hub 1.14.0 hang silently on
+            # pyannote/speaker-diarization-community-1 model fetch (xet
+            # token returns 200 then transport stalls indefinitely).
+            # Force plain HTTPS download until the xet client is fixed.
+            "HF_HUB_DISABLE_XET": "1",
+            "HF_XET_DISABLED": "1",
         },
     },
     "nemo": {
