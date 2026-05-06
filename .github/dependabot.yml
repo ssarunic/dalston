@@ -7,6 +7,17 @@ updates:
       interval: weekly
       day: monday
     groups:
+      # OpenTelemetry packages must move in lockstep — core 1.X.Y pins
+      # opentelemetry-semantic-conventions==0.(X+21)bY, which every
+      # instrumentation-* and test-utils package also pins. Splitting them
+      # across PRs produces unsatisfiable resolves until all merge.
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"
+        update-types:
+          - major
+          - minor
+          - patch
       minor-and-patch:
         update-types:
           - minor
