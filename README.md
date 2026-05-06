@@ -5,6 +5,8 @@
 
 **Ollama for ASR.** Run open-source speech recognition models on your machine or private cloud. Freedom from proprietary APIs, full privacy, no quality compromise.
 
+![Dalston transcription console — pipeline view with prepare → transcribe → diarize stages and speaker-labeled transcript](docs/assets/console-job-detail.png)
+
 ## Why Dalston
 
 **Pluggable and extensible** — Mix and match transcription, alignment, diarization, and PII detection models. Swap components without breaking your pipeline. Completely open source and free.
