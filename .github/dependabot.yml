@@ -66,7 +66,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/faster-whisper"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -83,7 +84,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/onnx"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -100,7 +102,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/hf-asr"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -117,13 +120,20 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/nemo"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
           - major
           - minor
           - patch
+    # nemo_toolkit[asr]==2.7.3 strict-requires transformers>=4.57.0,<4.58.dev0.
+    # Any transformers bump beyond 4.57.x is unsatisfiable until nemo-toolkit
+    # itself moves. See PR #218 (regression revert).
+    ignore:
+      - dependency-name: "transformers"
+        versions: [">=4.58.0"]
     reviewers:
       - sasasarunic
     labels:
@@ -134,18 +144,19 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/riva"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
           - major
           - minor
           - patch
-    # nvidia-riva-client 2.25.1 (latest) pins protobuf==6.33.5. Until a
-    # newer client ships, protobuf 7+ is unsatisfiable in this engine.
+    # nvidia-riva-client 2.25.1 (latest) pins protobuf==6.33.5 EXACTLY.
+    # Any bump (even patch within 6.33.x) breaks resolution. Ignore all
+    # protobuf updates until a newer riva-client ships.
     ignore:
       - dependency-name: "protobuf"
-        versions: [">=7.0.0"]
     reviewers:
       - sasasarunic
     labels:
@@ -156,7 +167,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/vllm-asr"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -178,7 +190,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-align/phoneme-align"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -195,7 +208,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-diarize/pyannote-4.0"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -212,7 +226,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-diarize/nemo-msdd"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -229,7 +244,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-diarize/nemo-sortformer"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -246,7 +262,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-detect/pii-presidio"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -263,7 +280,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-redact/audio-redactor"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -280,7 +298,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-merge/final-merger"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -297,7 +316,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-prepare/audio-prepare"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
@@ -314,7 +334,8 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-combo/whisper-align-pyannote"
     schedule:
-      interval: monthly
+      interval: weekly
+    open-pull-requests-limit: 1
     groups:
       all:
         update-types:
