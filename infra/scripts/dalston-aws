@@ -1614,11 +1614,14 @@ mkdir -p /opt/dalston
 cat > /opt/dalston/nvme-prep.sh << 'X'
 #!/bin/bash
 set -euo pipefail
+# Wait for udev to settle so lsblk MODEL is populated for instance-store NVMe.
+udevadm settle --timeout=30 2>/dev/null || true
+for _ in $(seq 1 20); do for d in /dev/nvme*n1; do [ -b "$d" ] && lsblk -n -o MODEL "$d" 2>/dev/null | grep -qi "Instance Storage" && break 2; done; sleep 1; done
 M=""
 for d in /dev/nvme*n1; do
   [ -b "$d" ] && lsblk -n -o MODEL "$d" 2>/dev/null | grep -qi "Instance Storage" || continue
   E=$(lsblk -n -o MOUNTPOINT "$d" 2>/dev/null | grep -v '^$' | head -1)
-  [ -n "$E" ] && M="$E" || { mkfs.xfs "$d"; mkdir -p /opt/instance-store; mount "$d" /opt/instance-store; M=/opt/instance-store; }
+  [ -n "$E" ] && M="$E" || { mkfs.xfs -f "$d"; mkdir -p /opt/instance-store; mount "$d" /opt/instance-store; M=/opt/instance-store; }
   break
 done
 [ -z "$M" ] && mountpoint -q /opt/dlami/nvme && M=/opt/dlami/nvme
@@ -1641,10 +1644,14 @@ cat > /etc/systemd/system/dalston-nvme-prep.service << 'X'
 DefaultDependencies=no
 Before=docker.service containerd.service
 After=local-fs.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/dalston/nvme-prep.sh
+Restart=on-failure
+RestartSec=10s
 [Install]
 WantedBy=multi-user.target
 RequiredBy=docker.service
@@ -1725,6 +1732,8 @@ cat > /etc/systemd/system/dalston-gpu.service << SVCEOF
 Description=Dalston GPU Worker ({worker_name})
 Requires=docker.service dalston-tailscale.service
 After=docker.service dalston-tailscale.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
@@ -1732,6 +1741,8 @@ RemainAfterExit=yes
 ExecStart=/opt/dalston/gpu-start.sh
 ExecStop=/usr/bin/docker rm -f {" ".join(containers)}
 TimeoutStartSec=600
+Restart=on-failure
+RestartSec=15s
 
 [Install]
 WantedBy=multi-user.target
