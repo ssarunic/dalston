@@ -583,29 +583,19 @@ class TestStuckRunningJobs:
         return job
 
     def _build_db_with_jobs_and_tasks(self, jobs, tasks_by_job):
-        """Wire up an AsyncMock DB session whose execute() returns the
-        jobs list on first call and the matching tasks on subsequent calls.
+        """Build an AsyncMock DB whose execute() returns eager-loaded jobs.
+
+        The reconciler uses ``selectinload(JobModel.tasks)`` so the related
+        tasks are accessible as ``job.tasks`` after a single query.
         """
-        from dalston.db.models import JobModel
+        for job in jobs:
+            job.tasks = tasks_by_job.get(job.id, [])
 
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = jobs
 
-        tasks_results = []
-        for job in jobs:
-            r = MagicMock()
-            r.scalars.return_value.all.return_value = tasks_by_job.get(job.id, [])
-            tasks_results.append(r)
-
         mock_db = AsyncMock()
-
-        async def execute_side_effect(stmt, *args, **kwargs):
-            target = stmt.column_descriptions[0]["entity"]
-            if target is JobModel:
-                return jobs_result
-            return tasks_results.pop(0)
-
-        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        mock_db.execute = AsyncMock(return_value=jobs_result)
         return mock_db
 
     @pytest.mark.asyncio
@@ -641,7 +631,7 @@ class TestStuckRunningJobs:
         )
 
         with patch(
-            "dalston.orchestrator.handlers._check_job_completion",
+            "dalston.orchestrator.reconciler._check_job_completion",
             new_callable=AsyncMock,
         ) as mock_check:
             count = await sweeper._reconcile_stuck_running_jobs(mock_db)
@@ -676,7 +666,7 @@ class TestStuckRunningJobs:
         )
 
         with patch(
-            "dalston.orchestrator.handlers._check_job_completion",
+            "dalston.orchestrator.reconciler._check_job_completion",
             new_callable=AsyncMock,
         ) as mock_check:
             count = await sweeper._reconcile_stuck_running_jobs(mock_db)
@@ -712,7 +702,7 @@ class TestStuckRunningJobs:
         )
 
         with patch(
-            "dalston.orchestrator.handlers._check_job_completion",
+            "dalston.orchestrator.reconciler._check_job_completion",
             new_callable=AsyncMock,
         ) as mock_check:
             count = await sweeper._reconcile_stuck_running_jobs(mock_db)
@@ -756,7 +746,7 @@ class TestStuckRunningJobs:
         )
 
         with patch(
-            "dalston.orchestrator.handlers._check_job_completion",
+            "dalston.orchestrator.reconciler._check_job_completion",
             new_callable=AsyncMock,
         ) as mock_check:
             count = await sweeper._reconcile_stuck_running_jobs(mock_db)
@@ -797,7 +787,7 @@ class TestStuckRunningJobs:
         )
 
         with patch(
-            "dalston.orchestrator.handlers._check_job_completion",
+            "dalston.orchestrator.reconciler._check_job_completion",
             new_callable=AsyncMock,
             side_effect=[RuntimeError("assembly broke"), None],
         ) as mock_check:

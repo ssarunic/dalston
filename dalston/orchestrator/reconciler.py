@@ -22,9 +22,10 @@ from botocore.exceptions import ClientError
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from dalston.common.events import publish_event
-from dalston.common.models import JobStatus, TaskStatus
+from dalston.common.models import TERMINAL_TASK_STATES, JobStatus, TaskStatus
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
@@ -43,6 +44,8 @@ from dalston.common.streams_types import CONSUMER_GROUP, PendingTask
 from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 from dalston.config import Settings
 from dalston.db.models import JobModel, TaskModel
+from dalston.orchestrator.handlers import _check_job_completion
+from dalston.orchestrator.post_processor import is_post_processing_task
 
 logger = structlog.get_logger()
 
@@ -294,77 +297,62 @@ class ReconciliationSweeper:
         """Recover jobs whose pipeline tasks are all terminal but whose
         ``jobs.status`` is still ``running``.
 
-        The per-task completion handler in ``handlers.py`` calls
-        ``_check_job_completion`` after every ``task.completed`` event, which
-        is supposed to assemble the transcript and emit ``job.completed``.
-        Under some conditions (a stale read after the same-session commit, an
-        async race between concurrent task completions for the same job, or
-        an exception silently bubbling out of the post-mark side effects)
-        that chain has been observed to skip the assembly step. The job's
-        tasks all show ``completed`` in the DB but the job itself stays
-        ``running`` forever — and any caller polling ``jobs.status`` for
-        ``completed`` waits indefinitely.
+        Safety net for the per-task completion handler in ``handlers.py``:
+        if its ``_check_job_completion`` step ever skips assembly (race
+        between concurrent task completions, stale read after same-session
+        commit, etc.), the job tasks all show ``completed`` in the DB but
+        the job itself stays ``running`` and callers polling for
+        ``status='completed'`` wait indefinitely.
 
-        This method is the safety net: scan for ``jobs.status='running'``
-        rows where every pipeline task is terminal and the most recent
-        completion was at least ``STUCK_RUNNING_JOB_THRESHOLD_SECONDS`` ago,
-        then re-run ``_check_job_completion``. The threshold avoids racing
-        the normal completion path on freshly-finished jobs.
+        We wait ``STUCK_RUNNING_JOB_THRESHOLD_SECONDS`` past the latest
+        task completion before stepping in, so we don't race the normal
+        handler firing on a fresh ``task.completed`` event.
 
         Returns:
             Number of jobs whose completion was kicked off here.
         """
-        # Local import keeps reconciler.py importable from contexts that
-        # don't pull in handlers' transitive deps (and avoids a future
-        # circular import if handlers.py ever needs reconciler symbols).
-        from dalston.orchestrator.handlers import _check_job_completion
-        from dalston.orchestrator.post_processor import is_post_processing_task
-
         threshold = datetime.now(UTC) - timedelta(
             seconds=STUCK_RUNNING_JOB_THRESHOLD_SECONDS
         )
 
+        # Eager-load tasks; SQL-level started_at filter eliminates the
+        # majority of healthy in-flight jobs before per-job inspection.
         running_jobs_result = await db.execute(
-            select(JobModel).where(JobModel.status == JobStatus.RUNNING.value)
+            select(JobModel)
+            .options(selectinload(JobModel.tasks))
+            .where(JobModel.status == JobStatus.RUNNING.value)
+            .where(JobModel.started_at < threshold)
         )
         running_jobs = list(running_jobs_result.scalars().all())
 
-        terminal_states = {
-            TaskStatus.COMPLETED.value,
-            TaskStatus.SKIPPED.value,
-            TaskStatus.FAILED.value,
-        }
-
+        registry = UnifiedEngineRegistry(self._redis)
         recovered = 0
 
         for job in running_jobs:
-            tasks_result = await db.execute(
-                select(TaskModel).where(TaskModel.job_id == job.id)
-            )
-            tasks = list(tasks_result.scalars().all())
-            pipeline_tasks = [t for t in tasks if not is_post_processing_task(t)]
+            pipeline_tasks = [t for t in job.tasks if not is_post_processing_task(t)]
 
             if not pipeline_tasks:
                 continue
 
-            if not all(t.status in terminal_states for t in pipeline_tasks):
+            if not all(t.status in TERMINAL_TASK_STATES for t in pipeline_tasks):
                 continue
 
-            # Use the latest pipeline-task completion to gate the trigger.
-            # Tasks with no completed_at don't count as stable terminal state.
+            # handlers.py has paths that set terminal status without
+            # completed_at; treat those as not-yet-stable and skip.
             completion_times = [
                 t.completed_at for t in pipeline_tasks if t.completed_at is not None
             ]
             if len(completion_times) != len(pipeline_tasks):
                 continue
-            if max(completion_times) > threshold:
+            latest_completion = max(completion_times)
+            if latest_completion > threshold:
                 continue
 
             logger.warning(
                 "stuck_running_job_detected",
                 job_id=str(job.id),
                 pipeline_task_count=len(pipeline_tasks),
-                latest_task_completed_at=max(completion_times).isoformat(),
+                latest_task_completed_at=latest_completion.isoformat(),
                 note="all_tasks_terminal_but_job_running_triggering_completion_check",
             )
 
@@ -374,7 +362,7 @@ class ReconciliationSweeper:
                     db,
                     self._redis,
                     self._settings,
-                    registry=UnifiedEngineRegistry(self._redis),
+                    registry=registry,
                 )
                 recovered += 1
             except Exception as e:

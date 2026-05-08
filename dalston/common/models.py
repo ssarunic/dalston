@@ -195,6 +195,15 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+TERMINAL_TASK_STATES: frozenset[str] = frozenset(
+    {
+        TaskStatus.COMPLETED.value,
+        TaskStatus.SKIPPED.value,
+        TaskStatus.FAILED.value,
+    }
+)
+
+
 class Job(BaseModel):
     """Batch transcription job."""
 

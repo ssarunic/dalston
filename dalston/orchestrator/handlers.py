@@ -25,7 +25,12 @@ from dalston.common.events import (
     publish_job_completed,
     publish_job_failed,
 )
-from dalston.common.models import ArtifactOwnerType, JobStatus, TaskStatus
+from dalston.common.models import (
+    TERMINAL_TASK_STATES,
+    ArtifactOwnerType,
+    JobStatus,
+    TaskStatus,
+)
 from dalston.common.registry import UnifiedEngineRegistry
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import mark_job_cancelled
@@ -1311,17 +1316,11 @@ async def _check_job_completion(
     post_proc_tasks = [t for t in all_tasks if is_post_processing_task(t)]
 
     # Check if all pipeline tasks are in a terminal state
-    terminal_states = {
-        TaskStatus.COMPLETED.value,
-        TaskStatus.SKIPPED.value,
-        TaskStatus.FAILED.value,
-    }
-
-    all_done = all(t.status in terminal_states for t in pipeline_tasks)
+    all_done = all(t.status in TERMINAL_TASK_STATES for t in pipeline_tasks)
 
     if not all_done:
         pending_stages = [
-            t.stage for t in pipeline_tasks if t.status not in terminal_states
+            t.stage for t in pipeline_tasks if t.status not in TERMINAL_TASK_STATES
         ]
         log.debug("job_not_complete_yet", pending_stages=pending_stages)
         return
