@@ -24,10 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dalston.common.events import publish_event
-from dalston.common.models import TaskStatus
+from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
+    UnifiedEngineRegistry,
 )
 from dalston.common.s3 import get_s3_client
 from dalston.common.streams import (
@@ -41,7 +42,7 @@ from dalston.common.streams import (
 from dalston.common.streams_types import CONSUMER_GROUP, PendingTask
 from dalston.common.timeouts import TASK_UNKNOWN_DURATION_TIMEOUT_S
 from dalston.config import Settings
-from dalston.db.models import TaskModel
+from dalston.db.models import JobModel, TaskModel
 
 logger = structlog.get_logger()
 
@@ -49,6 +50,12 @@ logger = structlog.get_logger()
 DEFAULT_RECONCILE_INTERVAL_SECONDS = 300  # 5 minutes
 ORPHAN_THRESHOLD_SECONDS = 600  # 10 minutes - only reconcile tasks older than this
 READY_TASK_RECOVERY_THRESHOLD_SECONDS = 120
+
+# Threshold for recovering jobs whose tasks are all terminal but whose
+# `jobs.status` is still 'running'. Wait this many seconds past the latest
+# task completion before stepping in, so we don't race the normal
+# completion handler firing on a `task.completed` event.
+STUCK_RUNNING_JOB_THRESHOLD_SECONDS = 60
 
 # Timeout for tasks re-enqueued on the recovery path. The scheduler's
 # duration-aware formula isn't available here (audio_duration lives in
@@ -210,6 +217,7 @@ class ReconciliationSweeper:
         orphaned_pel_count = 0
         stale_ready_count = 0
         recovered_ready_count = 0
+        stuck_running_jobs_count = 0
 
         # Get all pending entries from all streams
         streams = await discover_streams(self._redis)
@@ -254,6 +262,13 @@ class ReconciliationSweeper:
                 await self._reconcile_ready_tasks_with_consumed_messages(db)
             )
 
+        # Recover jobs whose pipeline tasks are all terminal but whose
+        # jobs.status is still 'running' (the per-task completion handler
+        # didn't reach the assembly step). Without this, callers that poll
+        # for jobs.status='completed' wait forever.
+        async with self._db_session_factory() as db:
+            stuck_running_jobs_count = await self._reconcile_stuck_running_jobs(db)
+
         # Cleanup stale engine registry entries (instances that crashed without unregister)
         stale_engine_count = await self._cleanup_stale_engine_entries()
 
@@ -262,6 +277,7 @@ class ReconciliationSweeper:
             or orphaned_pel_count > 0
             or stale_ready_count > 0
             or recovered_ready_count > 0
+            or stuck_running_jobs_count > 0
             or stale_engine_count > 0
         ):
             logger.info(
@@ -270,8 +286,106 @@ class ReconciliationSweeper:
                 orphaned_pel_entries=orphaned_pel_count,
                 stale_ready_tasks=stale_ready_count,
                 recovered_ready_tasks=recovered_ready_count,
+                stuck_running_jobs=stuck_running_jobs_count,
                 stale_engine_entries=stale_engine_count,
             )
+
+    async def _reconcile_stuck_running_jobs(self, db: AsyncSession) -> int:
+        """Recover jobs whose pipeline tasks are all terminal but whose
+        ``jobs.status`` is still ``running``.
+
+        The per-task completion handler in ``handlers.py`` calls
+        ``_check_job_completion`` after every ``task.completed`` event, which
+        is supposed to assemble the transcript and emit ``job.completed``.
+        Under some conditions (a stale read after the same-session commit, an
+        async race between concurrent task completions for the same job, or
+        an exception silently bubbling out of the post-mark side effects)
+        that chain has been observed to skip the assembly step. The job's
+        tasks all show ``completed`` in the DB but the job itself stays
+        ``running`` forever — and any caller polling ``jobs.status`` for
+        ``completed`` waits indefinitely.
+
+        This method is the safety net: scan for ``jobs.status='running'``
+        rows where every pipeline task is terminal and the most recent
+        completion was at least ``STUCK_RUNNING_JOB_THRESHOLD_SECONDS`` ago,
+        then re-run ``_check_job_completion``. The threshold avoids racing
+        the normal completion path on freshly-finished jobs.
+
+        Returns:
+            Number of jobs whose completion was kicked off here.
+        """
+        # Local import keeps reconciler.py importable from contexts that
+        # don't pull in handlers' transitive deps (and avoids a future
+        # circular import if handlers.py ever needs reconciler symbols).
+        from dalston.orchestrator.handlers import _check_job_completion
+        from dalston.orchestrator.post_processor import is_post_processing_task
+
+        threshold = datetime.now(UTC) - timedelta(
+            seconds=STUCK_RUNNING_JOB_THRESHOLD_SECONDS
+        )
+
+        running_jobs_result = await db.execute(
+            select(JobModel).where(JobModel.status == JobStatus.RUNNING.value)
+        )
+        running_jobs = list(running_jobs_result.scalars().all())
+
+        terminal_states = {
+            TaskStatus.COMPLETED.value,
+            TaskStatus.SKIPPED.value,
+            TaskStatus.FAILED.value,
+        }
+
+        recovered = 0
+
+        for job in running_jobs:
+            tasks_result = await db.execute(
+                select(TaskModel).where(TaskModel.job_id == job.id)
+            )
+            tasks = list(tasks_result.scalars().all())
+            pipeline_tasks = [t for t in tasks if not is_post_processing_task(t)]
+
+            if not pipeline_tasks:
+                continue
+
+            if not all(t.status in terminal_states for t in pipeline_tasks):
+                continue
+
+            # Use the latest pipeline-task completion to gate the trigger.
+            # Tasks with no completed_at don't count as stable terminal state.
+            completion_times = [
+                t.completed_at for t in pipeline_tasks if t.completed_at is not None
+            ]
+            if len(completion_times) != len(pipeline_tasks):
+                continue
+            if max(completion_times) > threshold:
+                continue
+
+            logger.warning(
+                "stuck_running_job_detected",
+                job_id=str(job.id),
+                pipeline_task_count=len(pipeline_tasks),
+                latest_task_completed_at=max(completion_times).isoformat(),
+                note="all_tasks_terminal_but_job_running_triggering_completion_check",
+            )
+
+            try:
+                await _check_job_completion(
+                    job.id,
+                    db,
+                    self._redis,
+                    self._settings,
+                    registry=UnifiedEngineRegistry(self._redis),
+                )
+                recovered += 1
+            except Exception as e:
+                logger.error(
+                    "stuck_running_job_recovery_failed",
+                    job_id=str(job.id),
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+
+        return recovered
 
     async def _check_output_exists_in_s3(
         self, job_id: str, task_id: str

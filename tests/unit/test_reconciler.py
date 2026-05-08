@@ -559,3 +559,249 @@ class TestReadyTaskRecovery:
 
         assert count == 0
         mock_add_task.assert_not_called()
+
+
+class TestStuckRunningJobs:
+    """Tests for recovering jobs whose tasks are all terminal but whose
+    ``jobs.status`` is still ``running`` (Bug A safety net)."""
+
+    def _make_task(self, *, stage, status, completed_at, post_processing=False):
+        task = MagicMock()
+        task.id = uuid4()
+        task.stage = stage
+        task.status = status
+        task.completed_at = completed_at
+        task.config = {"post_processing": True} if post_processing else {}
+        return task
+
+    def _make_job(self, *, status=None):
+        from dalston.common.models import JobStatus
+
+        job = MagicMock()
+        job.id = uuid4()
+        job.status = status or JobStatus.RUNNING.value
+        return job
+
+    def _build_db_with_jobs_and_tasks(self, jobs, tasks_by_job):
+        """Wire up an AsyncMock DB session whose execute() returns the
+        jobs list on first call and the matching tasks on subsequent calls.
+        """
+        from dalston.db.models import JobModel
+
+        jobs_result = MagicMock()
+        jobs_result.scalars.return_value.all.return_value = jobs
+
+        tasks_results = []
+        for job in jobs:
+            r = MagicMock()
+            r.scalars.return_value.all.return_value = tasks_by_job.get(job.id, [])
+            tasks_results.append(r)
+
+        mock_db = AsyncMock()
+
+        async def execute_side_effect(stmt, *args, **kwargs):
+            target = stmt.column_descriptions[0]["entity"]
+            if target is JobModel:
+                return jobs_result
+            return tasks_results.pop(0)
+
+        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        return mock_db
+
+    @pytest.mark.asyncio
+    async def test_recovers_stuck_running_job(self):
+        """All tasks completed past the threshold → trigger _check_job_completion."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        old_completion = datetime.now(UTC) - timedelta(minutes=5)
+        job = self._make_job()
+        tasks = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+            self._make_task(
+                stage="transcribe",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+            self._make_task(
+                stage="diarize",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+        ]
+        mock_db = self._build_db_with_jobs_and_tasks([job], {job.id: tasks})
+
+        sweeper = ReconciliationSweeper(
+            redis=AsyncMock(),
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.handlers._check_job_completion",
+            new_callable=AsyncMock,
+        ) as mock_check:
+            count = await sweeper._reconcile_stuck_running_jobs(mock_db)
+
+        assert count == 1
+        mock_check.assert_called_once()
+        assert mock_check.call_args.args[0] == job.id
+
+    @pytest.mark.asyncio
+    async def test_skips_jobs_with_pending_tasks(self):
+        """At least one task non-terminal → no-op."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        old_completion = datetime.now(UTC) - timedelta(minutes=5)
+        job = self._make_job()
+        tasks = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+            self._make_task(
+                stage="transcribe", status=TaskStatus.PENDING.value, completed_at=None
+            ),
+        ]
+        mock_db = self._build_db_with_jobs_and_tasks([job], {job.id: tasks})
+
+        sweeper = ReconciliationSweeper(
+            redis=AsyncMock(),
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.handlers._check_job_completion",
+            new_callable=AsyncMock,
+        ) as mock_check:
+            count = await sweeper._reconcile_stuck_running_jobs(mock_db)
+
+        assert count == 0
+        mock_check.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_recently_completed_jobs(self):
+        """Latest task completed less than threshold ago → leave to normal handler."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        recent_completion = datetime.now(UTC) - timedelta(seconds=5)
+        job = self._make_job()
+        tasks = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=recent_completion,
+            ),
+            self._make_task(
+                stage="transcribe",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=recent_completion,
+            ),
+        ]
+        mock_db = self._build_db_with_jobs_and_tasks([job], {job.id: tasks})
+
+        sweeper = ReconciliationSweeper(
+            redis=AsyncMock(),
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.handlers._check_job_completion",
+            new_callable=AsyncMock,
+        ) as mock_check:
+            count = await sweeper._reconcile_stuck_running_jobs(mock_db)
+
+        assert count == 0
+        mock_check.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ignores_post_processing_tasks_when_checking_terminal(self):
+        """A pending post-processing task does not block recovery — only
+        pipeline tasks gate the trigger.
+        """
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        old_completion = datetime.now(UTC) - timedelta(minutes=5)
+        job = self._make_job()
+        tasks = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+            self._make_task(
+                stage="transcribe",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+            self._make_task(
+                stage="pii_detect",
+                status=TaskStatus.PENDING.value,
+                completed_at=None,
+                post_processing=True,
+            ),
+        ]
+        mock_db = self._build_db_with_jobs_and_tasks([job], {job.id: tasks})
+
+        sweeper = ReconciliationSweeper(
+            redis=AsyncMock(),
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.handlers._check_job_completion",
+            new_callable=AsyncMock,
+        ) as mock_check:
+            count = await sweeper._reconcile_stuck_running_jobs(mock_db)
+
+        assert count == 1
+        mock_check.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_recovery_failure_does_not_break_loop(self):
+        """If _check_job_completion raises, log and continue — don't crash the sweep."""
+        from dalston.orchestrator.reconciler import ReconciliationSweeper
+
+        old_completion = datetime.now(UTC) - timedelta(minutes=5)
+        job_a = self._make_job()
+        job_b = self._make_job()
+        tasks_a = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+        ]
+        tasks_b = [
+            self._make_task(
+                stage="prepare",
+                status=TaskStatus.COMPLETED.value,
+                completed_at=old_completion,
+            ),
+        ]
+        mock_db = self._build_db_with_jobs_and_tasks(
+            [job_a, job_b], {job_a.id: tasks_a, job_b.id: tasks_b}
+        )
+
+        sweeper = ReconciliationSweeper(
+            redis=AsyncMock(),
+            db_session_factory=MagicMock(),
+            settings=MagicMock(),
+        )
+
+        with patch(
+            "dalston.orchestrator.handlers._check_job_completion",
+            new_callable=AsyncMock,
+            side_effect=[RuntimeError("assembly broke"), None],
+        ) as mock_check:
+            count = await sweeper._reconcile_stuck_running_jobs(mock_db)
+
+        assert count == 1  # job_b succeeded; job_a failed
+        assert mock_check.call_count == 2
