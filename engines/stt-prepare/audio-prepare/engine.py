@@ -272,12 +272,16 @@ class AudioPrepareEngine(Engine):
             sample_rate: Target sample rate
         """
         # Use ffmpeg's pan filter to extract specific channel
-        # pan=mono|c0=c{channel} extracts channel N to mono output
+        # pan=mono|c0=c{channel} extracts channel N to mono output.
+        # -vn disables video so ffmpeg never invokes a video decoder on
+        # user-supplied containers (defense-in-depth against video-decoder
+        # bugs; we are an audio service and never need the video stream).
         cmd = [
             "ffmpeg",
             "-y",
             "-i",
             str(input_path),
+            "-vn",
             "-af",
             f"pan=mono|c0=c{channel}",
             "-ar",
@@ -412,11 +416,15 @@ class AudioPrepareEngine(Engine):
             sample_rate: Target sample rate (e.g., 16000)
             channels: Target number of channels (1=mono, 2=stereo)
         """
+        # -vn disables video so ffmpeg never invokes a video decoder on
+        # user-supplied containers (defense-in-depth against video-decoder
+        # bugs; we are an audio service and never need the video stream).
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output without asking
             "-i",
             str(input_path),
+            "-vn",
             "-ar",
             str(sample_rate),  # Resample
             "-ac",

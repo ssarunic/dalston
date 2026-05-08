@@ -1668,7 +1668,7 @@ chown -R 1000:1000 /data/vram_profiles
 
 """
         + _loki_driver_cloud_init_block()
-        + f"""
+        + rf"""
 # Pull images (no login needed — public repo)
 {pull_lines}
 
@@ -1726,23 +1726,32 @@ echo "GPU engines started at $(date)"
 STARTEOF
 chmod +x /opt/dalston/gpu-start.sh
 
-# GPU worker systemd service
+# GPU worker systemd service.
+#
+# Why Wants= (not Requires=) and runtime polling: dalston-nvme-prep races
+# udev on early boot and may transiently fail. Requires=docker.service
+# would then cascade-abandon this unit's start job, and Restart=on-failure
+# does NOT fire on dependency-cascade failures (only on ExecStart non-zero).
+# So we declare deps softly via Wants= and verify readiness inside
+# ExecStartPre, polling for up to 5 min. Result: stop/start an instance
+# any day and engines come back up automatically.
 cat > /etc/systemd/system/dalston-gpu.service << SVCEOF
 [Unit]
 Description=Dalston GPU Worker ({worker_name})
-Requires=docker.service dalston-tailscale.service
-After=docker.service dalston-tailscale.service
-StartLimitIntervalSec=300
-StartLimitBurst=5
+Wants=docker.service dalston-tailscale.service dalston-nvme-prep.service
+After=docker.service dalston-tailscale.service dalston-nvme-prep.service network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=20
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/bin/bash -c 'for i in \$(seq 1 60); do systemctl is-active --quiet docker.service && [ -d /data/models ] && docker info >/dev/null 2>&1 && exit 0; sleep 5; done; exit 1'
 ExecStart=/opt/dalston/gpu-start.sh
 ExecStop=/usr/bin/docker rm -f {" ".join(containers)}
-TimeoutStartSec=600
+TimeoutStartSec=900
 Restart=on-failure
-RestartSec=15s
+RestartSec=30s
 
 [Install]
 WantedBy=multi-user.target
