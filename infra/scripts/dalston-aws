@@ -38,6 +38,7 @@ if sys.version_info < (3, 11):  # noqa: UP036 — runtime guard against 3.9 sheb
 import argparse
 import base64
 import fcntl
+import gzip
 import json
 import os
 import shlex
@@ -1674,13 +1675,17 @@ chown -R 1000:1000 /data/vram_profiles
 
 mkdir -p /opt/dalston
 
-# Save env for the start script (must exist before gpu-start.sh runs)
+# Save env for the start script (must exist before gpu-start.sh runs).
+# Every variable referenced by gpu-start.sh's docker-run block must be
+# listed here — gpu-start.sh runs under `set -u` so any unset reference
+# aborts the engine before it can launch.
 cat > /opt/dalston/gpu-env.sh << ENVEOF
 S3_BUCKET="${{S3_BUCKET}}"
 AWS_REGION="${{AWS_REGION}}"
 CTRL_PLANE_HOST="${{CTRL_PLANE_HOST}}"
 GHCR_REGISTRY="${{GHCR_REGISTRY}}"
 HF_TOKEN="${{HF_TOKEN}}"
+DALSTON_MODEL_SOURCE="${{DALSTON_MODEL_SOURCE}}"
 OBSERVABILITY="${{OBSERVABILITY}}"
 ENVEOF
 
@@ -1903,7 +1908,29 @@ def launch_instance(
         except Exception:
             pass  # Fall back to arbitrary order
 
-    encoded_user_data = base64.b64encode(user_data.encode()).decode()
+    # EC2 caps UserData at 16,384 base64 bytes. When the plain payload
+    # would exceed that (e.g. co-located GPU engines with two docker-run
+    # blocks), gzip-compress: cloud-init detects the gzip magic bytes and
+    # decompresses transparently before exec. Typical 3-4x reduction on
+    # shell scripts. Plain encoding is kept for the small case so audit
+    # logs stay readable in the EC2 console.
+    raw_bytes = user_data.encode()
+    plain_b64 = base64.b64encode(raw_bytes).decode()
+    if len(plain_b64) <= 16384:
+        encoded_user_data = plain_b64
+    else:
+        gz = gzip.compress(raw_bytes, compresslevel=9)
+        encoded_user_data = base64.b64encode(gz).decode()
+        if len(encoded_user_data) > 16384:
+            die(
+                f"User data is {len(encoded_user_data)} bytes after "
+                f"gzip+base64, still over the 16,384-byte EC2 limit. "
+                f"Reduce engines or move bootstrap scripts to S3."
+            )
+        log(
+            f"User data gzipped: {len(plain_b64)} -> {len(encoded_user_data)} "
+            f"base64 bytes (cloud-init auto-decompresses)."
+        )
 
     for subnet_id, az in subnet_list:
         run_kwargs: dict = {
