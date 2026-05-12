@@ -103,8 +103,9 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         # collide on the Redis registry key and XREADGROUP consumer name.
         "extra_env": {
             "DALSTON_MAX_DIARIZE_CHUNK_S": "3600",
-            # 4 GB of L4's 24 GB. Pyannote 4.0 peaks ~1.4 GB; this leaves
-            # headroom for fragmentation. Co-located with NeMo (20 GB).
+            # Fallback budget for GPUs not listed in vram_budget_by_gpu;
+            # M89.1 picks per-GPU values that override this. Sized for L4
+            # (24 GB) when co-located with NeMo (20 GB).
             "DALSTON_VRAM_BUDGET_MB": "4000",
             "DALSTON_VRAM_PROFILE_DIR": "/data/vram_profiles",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
@@ -114,6 +115,17 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
             # Force plain HTTPS download until the xet client is fixed.
             "HF_HUB_DISABLE_XET": "1",
             "HF_XET_DISABLED": "1",
+        },
+        # Hand-seeded per-GPU budgets (M89.1). Replaced by sync_vram_presets
+        # output once M89.2/89.3 land. Keys are GPU names from
+        # GPU_FAMILY_TO_NAME (T4, A10G, L4, ...); inner keys are "solo" and
+        # "coloc_with_<preset>" matching the other engine's GPU_ENGINE_PRESETS
+        # key. Pyannote 4.0 peak working set ≈ 1.4 GB resident; budgets give
+        # ~2x headroom for activation/fragmentation.
+        "vram_budget_by_gpu": {
+            "T4": {"solo": 3500, "coloc_with_nemo": 3000},
+            "A10G": {"solo": 4000, "coloc_with_nemo": 4000},
+            "L4": {"solo": 4000, "coloc_with_nemo": 4000},
         },
     },
     "nemo": {
@@ -125,13 +137,21 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
             "DALSTON_MODEL_PRELOAD": "nvidia/parakeet-tdt-0.6b-v3",
             "NEMO_CACHE": "/data/models",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True,max_split_size_mb:512",
-            # 20 GB of L4's 24 GB when co-located with pyannote (4 GB).
-            # Hard caps below bound the actual working set so a runaway
-            # request can't eat into pyannote's slice.
+            # Fallback budget for GPUs not listed in vram_budget_by_gpu;
+            # M89.1 picks per-GPU values that override this. Sized for L4
+            # (24 GB) when co-located with pyannote (4 GB).
             "DALSTON_VRAM_BUDGET_MB": "20000",
             "DALSTON_VRAM_PROFILE_DIR": "/data/vram_profiles",
             "DALSTON_BATCH_MAX_INFLIGHT": "1",
             "DALSTON_NEMO_MAX_CHUNK_S": "300",
+        },
+        # Hand-seeded per-GPU budgets (M89.1). Parakeet-TDT-0.6b-v3 resident
+        # ≈ 5 GB; T4 co-located leaves ~5 GB for activations + ~1 GB for
+        # pyannote headroom on the 15 GB card.
+        "vram_budget_by_gpu": {
+            "T4": {"solo": 11000, "coloc_with_pyannote": 9000},
+            "A10G": {"solo": 20000, "coloc_with_pyannote": 18000},
+            "L4": {"solo": 20000, "coloc_with_pyannote": 20000},
         },
     },
     "vllm-asr": {
@@ -1310,14 +1330,72 @@ def _apply_budget_overrides(engine_name: str, extra_env: dict) -> dict:
     return merged
 
 
-def _generate_docker_run_block(engine_name: str, port: int) -> str:
-    """Generate a docker run command for a GPU engine preset."""
+def _resolve_vram_budget(
+    engine_name: str, gpu_type: str, co_engines: list[str]
+) -> int | None:
+    """Pick the right VRAM budget for this engine given the launch shape.
+
+    Looks up ``vram_budget_by_gpu[<gpu>][solo|coloc_with_<other>]`` on the
+    preset. Returns ``None`` if no matching cell — callers fall back to the
+    static ``DALSTON_VRAM_BUDGET_MB`` value in the preset's ``extra_env``.
+
+    Co-location key picks the *first* other engine alphabetically when 2+
+    engines are co-located (deterministic but a simplification — three-way
+    co-location is out of scope for M89.1).
+    """
+    preset = GPU_ENGINE_PRESETS.get(engine_name, {})
+    by_gpu = preset.get("vram_budget_by_gpu")
+    if not by_gpu:
+        return None
+
+    family = gpu_type.split(".")[0]
+    gpu_name = GPU_FAMILY_TO_NAME.get(family, "")
+    cell = by_gpu.get(gpu_name)
+    if not cell:
+        return None
+
+    others = sorted(e for e in co_engines if e != engine_name)
+    if others:
+        key = f"coloc_with_{others[0]}"
+        if key in cell:
+            return int(cell[key])
+        # No specific coloc entry — fall back to solo (and accept the risk).
+    return int(cell["solo"]) if "solo" in cell else None
+
+
+def _generate_docker_run_block(
+    engine_name: str,
+    port: int,
+    *,
+    gpu_type: str = "",
+    co_engines: list[str] | None = None,
+) -> str:
+    """Generate a docker run command for a GPU engine preset.
+
+    ``gpu_type`` (e.g. "g4dn.xlarge") and ``co_engines`` (preset keys of all
+    engines on this box, including ``engine_name`` itself) drive the per-GPU
+    VRAM budget lookup; when omitted, the preset's static
+    ``DALSTON_VRAM_BUDGET_MB`` is used unchanged.
+    """
     preset = GPU_ENGINE_PRESETS[engine_name]
     container = preset["container"]
     engine_id = preset["engine_id"]
     image = preset["image"]
     needs_hf = preset.get("needs_hf_token", False)
     extra_env = _apply_budget_overrides(engine_name, preset.get("extra_env", {}))
+
+    # Per-GPU budget resolution (M89.1). Skipped when the operator already
+    # set DALSTON_OVERRIDE__<engine>__VRAM_BUDGET_MB — that env override
+    # already won inside _apply_budget_overrides above.
+    override_set = bool(
+        os.environ.get(f"DALSTON_OVERRIDE__{engine_name}__VRAM_BUDGET_MB")
+    )
+    if gpu_type and not override_set:
+        budget = _resolve_vram_budget(
+            engine_name, gpu_type, co_engines or [engine_name]
+        )
+        if budget is not None:
+            extra_env["DALSTON_VRAM_BUDGET_MB"] = str(budget)
 
     extra_lines = ""
     if needs_hf:
@@ -1536,6 +1614,7 @@ def generate_gpu_worker_user_data(
     engines: list[str],
     registry: str | None = None,
     observability: bool = False,
+    gpu_type: str = "",
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -1564,7 +1643,11 @@ def generate_gpu_worker_user_data(
 
     run_blocks = []
     for i, eng in enumerate(engines):
-        run_blocks.append(_generate_docker_run_block(eng, 9100 + i))
+        run_blocks.append(
+            _generate_docker_run_block(
+                eng, 9100 + i, gpu_type=gpu_type, co_engines=engines
+            )
+        )
     run_section = "\n".join(run_blocks)
 
     # Part 1: static header
@@ -2718,6 +2801,7 @@ def _launch_gpu(
         engines=engines,
         registry=tmpl.registry,
         observability=st.observability,
+        gpu_type=gpu_type,
     )
 
     # Snapshot existing tailnet peers matching this base name *before*
