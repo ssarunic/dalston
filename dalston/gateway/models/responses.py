@@ -210,6 +210,24 @@ class JobSummary(BaseModel):
     result_segment_count: int | None = None
     result_speaker_count: int | None = None
 
+    # Pipeline timing (computed from tasks; matches the control plane's
+    # /api/console/jobs/{id}/tasks math — total_wait_ms uses the union of
+    # task (ready_at → started_at) intervals so parallel waits are merged,
+    # not double-counted).
+    wait_ms: int | None = Field(
+        default=None,
+        description=(
+            "Total time tasks spent ready-but-not-started, merged across "
+            "parallel stages."
+        ),
+    )
+    processing_ms: int | None = Field(
+        default=None,
+        description=(
+            "Total time tasks spent executing, merged across parallel stages."
+        ),
+    )
+
 
 class JobListResponse(BaseModel):
     """Response for GET /v1/audio/transcriptions."""

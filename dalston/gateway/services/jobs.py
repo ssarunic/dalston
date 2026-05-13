@@ -160,6 +160,49 @@ class JobsService:
         result = await db.execute(query)
         return result.scalar_one_or_none()
 
+    async def compute_job_timings(
+        self,
+        db: AsyncSession,
+        job_ids: list[UUID],
+    ) -> dict[UUID, tuple[int | None, int | None]]:
+        """Compute ``(wait_ms, processing_ms)`` for a batch of jobs.
+
+        Uses the same union-of-intervals math as the control plane's
+        ``/api/console/jobs/{id}/tasks`` endpoint: parallel task waits and
+        parallel task executions are merged so wall-clock pressure isn't
+        double-counted when multiple stages run concurrently.
+        """
+        if not job_ids:
+            return {}
+
+        from dalston.common.utils import compute_interval_union_ms
+
+        rows = await db.execute(
+            select(
+                TaskModel.job_id,
+                TaskModel.ready_at,
+                TaskModel.started_at,
+                TaskModel.completed_at,
+            ).where(TaskModel.job_id.in_(job_ids))
+        )
+        tasks_by_job: dict[UUID, list[tuple]] = {}
+        for job_id, ready_at, started_at, completed_at in rows.all():
+            tasks_by_job.setdefault(job_id, []).append(
+                (ready_at, started_at, completed_at)
+            )
+
+        result: dict[UUID, tuple[int | None, int | None]] = {}
+        for job_id in job_ids:
+            tasks = tasks_by_job.get(job_id, [])
+            wait_ms = compute_interval_union_ms(
+                (ready_at, started_at) for ready_at, started_at, _ in tasks
+            )
+            processing_ms = compute_interval_union_ms(
+                (started_at, completed_at) for _, started_at, completed_at in tasks
+            )
+            result[job_id] = (wait_ms, processing_ms)
+        return result
+
     async def list_jobs(
         self,
         db: AsyncSession,

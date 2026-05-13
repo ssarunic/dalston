@@ -295,14 +295,29 @@ def _format_duration(seconds: float | None) -> str:
 
 
 def _job_wait_seconds(job: JobSummary) -> float | None:
-    """Queue wait: created_at → started_at, in seconds."""
-    if job.started_at is None:
+    """Queue wait across the pipeline.
+
+    Uses the gateway-computed ``wait_ms`` (union of every task's
+    ``ready_at → started_at`` interval, so parallel waits don't get
+    double-counted). The job-level ``started_at − created_at`` would
+    only catch the orchestrator's first-pickup delay, missing the
+    much larger between-stage queueing the user actually cares about.
+    """
+    if job.wait_ms is None:
         return None
-    return max(0.0, (job.started_at - job.created_at).total_seconds())
+    return job.wait_ms / 1000.0
 
 
 def _job_processing_seconds(job: JobSummary) -> float | None:
-    """Engine time: started_at → completed_at, in seconds."""
+    """Engine busy time across the pipeline.
+
+    Uses gateway-computed ``processing_ms`` (union of every task's
+    ``started_at → completed_at``). Falls back to the job-level
+    ``completed_at − started_at`` wall time if tasks haven't been
+    populated yet (e.g. legacy rows).
+    """
+    if job.processing_ms is not None:
+        return job.processing_ms / 1000.0
     if job.started_at is None or job.completed_at is None:
         return None
     return (job.completed_at - job.started_at).total_seconds()
@@ -343,6 +358,8 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
                     if j.completed_at
                     else None,
                     "audio_duration_seconds": j.audio_duration_seconds,
+                    "wait_ms": j.wait_ms,
+                    "processing_ms": j.processing_ms,
                     "wait_seconds": wait_s,
                     "processing_seconds": took_s,
                     "speed_realtime_factor": (

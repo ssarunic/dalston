@@ -1045,6 +1045,10 @@ async def list_transcriptions(
         jobs_service.encode_job_cursor(jobs[-1]) if jobs and has_more else None
     )
 
+    # Batch-fetch pipeline timings (union of task intervals — same math as
+    # the control plane's queue board, so parallel waits don't double-count).
+    timings = await jobs_service.compute_job_timings(db, [j.id for j in jobs])
+
     return JobListResponse(
         jobs=[
             JobSummary(
@@ -1059,6 +1063,8 @@ async def list_transcriptions(
                 result_word_count=job.result_word_count,
                 result_segment_count=job.result_segment_count,
                 result_speaker_count=job.result_speaker_count,
+                wait_ms=timings.get(job.id, (None, None))[0],
+                processing_ms=timings.get(job.id, (None, None))[1],
             )
             for job in jobs
         ],

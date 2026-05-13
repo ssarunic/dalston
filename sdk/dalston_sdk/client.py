@@ -519,6 +519,8 @@ class Dalston:
                     result_word_count=j.get("result_word_count"),
                     result_segment_count=j.get("result_segment_count"),
                     result_speaker_count=j.get("result_speaker_count"),
+                    wait_ms=j.get("wait_ms"),
+                    processing_ms=j.get("processing_ms"),
                 )
                 for j in data["jobs"]
             ],
@@ -1472,6 +1474,8 @@ class AsyncDalston:
                     result_word_count=j.get("result_word_count"),
                     result_segment_count=j.get("result_segment_count"),
                     result_speaker_count=j.get("result_speaker_count"),
+                    wait_ms=j.get("wait_ms"),
+                    processing_ms=j.get("processing_ms"),
                 )
                 for j in data["jobs"]
             ],
