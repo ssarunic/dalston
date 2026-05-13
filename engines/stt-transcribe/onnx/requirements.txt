@@ -2,7 +2,7 @@
 
 # ONNX ASR library - handles model loading, preprocessing, and CTC/TDT/RNNT decoding
 onnx-asr[hub]>=0.11.0
-onnxruntime>=1.25.1
+onnxruntime>=1.26.0
 
 # Audio processing
 soundfile>=0.13.1
