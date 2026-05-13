@@ -175,7 +175,7 @@ class PyannoteEngine(Engine):
                 is_oom_error,
             )
 
-            max_chunk_s = self._max_chunk_s
+            max_chunk_s = params.max_chunk_s or self._max_chunk_s
             use_chunked = duration > max_chunk_s
 
             if not use_chunked:

@@ -52,6 +52,13 @@ config_schema:
         Enable exclusive diarization mode (new in 4.0).
         When enabled, each segment has exactly one speaker assigned,
         making it easier to align with Whisper transcription timestamps.
+    max_chunk_s:
+      type: number
+      minimum: 30
+      description: |
+        Override maximum diarization chunk duration in seconds. Intended for
+        GPU calibration sweeps; production deployments usually set
+        DALSTON_MAX_DIARIZE_CHUNK_S instead.
   additionalProperties: false
 
 output_schema:

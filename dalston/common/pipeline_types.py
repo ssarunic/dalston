@@ -525,6 +525,15 @@ class DiarizationRequest(StageInput):
         default=False,
         description="Single-speaker output per segment (pyannote 4.0)",
     )
+    max_chunk_s: float | None = Field(
+        default=None,
+        ge=30,
+        description=(
+            "Maximum diarization chunk duration in seconds. Primarily used by "
+            "GPU calibration to sweep the pyannote throughput/VRAM tradeoff; "
+            "runtime deployments normally set DALSTON_MAX_DIARIZE_CHUNK_S."
+        ),
+    )
 
 
 class MergeRequest(StageInput):
