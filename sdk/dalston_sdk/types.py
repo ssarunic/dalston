@@ -185,6 +185,17 @@ class JobSummary:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     progress: int | None = None
+    audio_duration_seconds: float | None = None
+    result_language_code: str | None = None
+    result_word_count: int | None = None
+    result_segment_count: int | None = None
+    result_speaker_count: int | None = None
+    # Pipeline timing computed from tasks (union of intervals — matches
+    # the control plane). ``wait_ms`` is total ready→started time across
+    # tasks; ``processing_ms`` is total started→completed time. Parallel
+    # stages are merged, not summed.
+    wait_ms: int | None = None
+    processing_ms: int | None = None
 
 
 @dataclass

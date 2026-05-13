@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -16,6 +18,67 @@ from dalston_cli.output import (
     output_transcript,
     wait_with_progress,
 )
+
+_RELATIVE_SINCE_RE = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
+_RELATIVE_UNITS = {"m": "minutes", "h": "hours", "d": "days"}
+_TIME_OF_DAY_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*$")
+
+
+def _parse_since(value: str) -> datetime:
+    """Parse a ``--since`` value into a timezone-aware UTC datetime.
+
+    Accepts:
+      * ISO 8601 timestamps (``2026-05-13``, ``2026-05-13T17:23:00Z``).
+      * Relative offsets ``Nm`` / ``Nh`` / ``Nd`` (e.g. ``90m``, ``24h``, ``7d``).
+      * Bare time-of-day ``HH:MM`` or ``HH:MM:SS`` (UTC, today; wraps to yesterday if in the future).
+      * ``today`` (UTC midnight) and ``yesterday`` (24h before UTC midnight).
+
+    Naive datetimes are interpreted as UTC.
+    """
+    v = value.strip()
+    lower = v.lower()
+    now = datetime.now(UTC)
+
+    if lower == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if lower == "yesterday":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+            days=1
+        )
+
+    m = _RELATIVE_SINCE_RE.match(lower)
+    if m:
+        amount = int(m.group(1))
+        unit = _RELATIVE_UNITS[m.group(2).lower()]
+        return now - timedelta(**{unit: amount})
+
+    m = _TIME_OF_DAY_RE.match(v)
+    if m:
+        hh, mm = int(m.group(1)), int(m.group(2))
+        ss = int(m.group(3)) if m.group(3) else 0
+        if hh > 23 or mm > 59 or ss > 59:
+            raise typer.BadParameter(
+                f"Invalid --since time-of-day {value!r}: hours <= 23, minutes/seconds <= 59."
+            )
+        candidate = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+        # If the resulting time is still in the future today, interpret as yesterday.
+        if candidate > now:
+            candidate -= timedelta(days=1)
+        return candidate
+
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Invalid --since value {value!r}. Expected ISO 8601, "
+            "a relative offset (e.g. '24h', '7d', '90m'), "
+            "a UTC time-of-day (e.g. '17:23'), "
+            "'today', or 'yesterday'."
+        ) from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
 
 app = typer.Typer(help="Manage transcription jobs.")
 
@@ -39,6 +102,19 @@ def list_jobs(
             help="Maximum number of jobs to return.",
         ),
     ] = 20,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help=(
+                "Only show jobs created at or after this time. "
+                "Accepts ISO 8601 (e.g. '2026-05-13T17:23:00Z'), "
+                "a relative offset ('90m', '24h', '7d'), "
+                "a UTC time-of-day ('17:23'), "
+                "'today', or 'yesterday'."
+            ),
+        ),
+    ] = None,
     as_json: Annotated[
         bool,
         typer.Option(
@@ -49,7 +125,8 @@ def list_jobs(
 ) -> None:
     """List transcription jobs.
 
-    Shows recent jobs with their status and creation time.
+    Shows recent jobs with their status, creation time, and audio duration.
+    The footer summarizes total audio across the listed jobs.
 
     Examples:
 
@@ -58,14 +135,23 @@ def list_jobs(
         dalston jobs list --status running
 
         dalston jobs list --limit 50 --json
+
+        dalston jobs list --since 24h
+
+        dalston jobs list --since 17:23
+
+        dalston jobs list --since today --limit 100
+
+        dalston jobs list --since 2026-05-13T17:23:00Z
     """
     client = state.client
 
     # Convert status string to enum if provided
     status_filter = JobStatus(status) if status else None
+    since_dt = _parse_since(since) if since else None
 
     try:
-        result = client.list_jobs(limit=limit, status=status_filter)
+        result = client.list_jobs(limit=limit, status=status_filter, since=since_dt)
         output_jobs_table(result.jobs, as_json=as_json)
     except Exception as e:
         error_console.print(f"[red]Error:[/red] Failed to list jobs: {e}")

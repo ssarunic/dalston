@@ -1013,6 +1013,12 @@ async def list_transcriptions(
         str | None, Query(description="Pagination cursor from previous response")
     ] = None,
     status: Annotated[JobStatus | None, Query(description="Filter by status")] = None,
+    since: Annotated[
+        datetime | None,
+        Query(
+            description="Only return jobs created at or after this ISO 8601 timestamp"
+        ),
+    ] = None,
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
@@ -1025,6 +1031,7 @@ async def list_transcriptions(
             limit=limit,
             cursor=cursor,
             status=status,
+            since=since,
         )
     except ValueError as e:
         if "cursor" in str(e).lower():
@@ -1037,6 +1044,10 @@ async def list_transcriptions(
     next_cursor = (
         jobs_service.encode_job_cursor(jobs[-1]) if jobs and has_more else None
     )
+
+    # Batch-fetch pipeline timings (union of task intervals — same math as
+    # the control plane's queue board, so parallel waits don't double-count).
+    timings = await jobs_service.compute_job_timings(db, [j.id for j in jobs])
 
     return JobListResponse(
         jobs=[
@@ -1052,6 +1063,8 @@ async def list_transcriptions(
                 result_word_count=job.result_word_count,
                 result_segment_count=job.result_segment_count,
                 result_speaker_count=job.result_speaker_count,
+                wait_ms=timings.get(job.id, (None, None))[0],
+                processing_ms=timings.get(job.id, (None, None))[1],
             )
             for job in jobs
         ],

@@ -144,11 +144,38 @@ dalston jobs list                       # paginated list
 dalston jobs list --status running
 dalston jobs list --limit 100 --json
 
+# Filter by created_at; --since accepts ISO 8601, a relative offset
+# (90m / 24h / 7d), 'today' (UTC midnight), or 'yesterday'.
+dalston jobs list --since 24h
+dalston jobs list --since today --limit 100
+dalston jobs list --since 2026-05-13T17:23:00Z
+
 dalston jobs get JOB_ID                 # full detail
 dalston jobs wait JOB_ID                # block until completed/failed
 dalston jobs cancel JOB_ID
 dalston jobs delete JOB_ID              # also removes S3 artifacts
 ```
+
+The table has columns:
+
+- **Duration** — audio length of the input.
+- **Wait** — total queue time across the pipeline, computed server-side
+  as the **union** of every task's `ready_at → started_at` interval.
+  Parallel waits are merged (not summed) so concurrent stages don't
+  double-count. This is the same math the control plane uses for
+  `total_wait_ms` on the per-job detail view.
+- **Took** — total engine busy time, computed server-side as the union
+  of every task's `started_at → completed_at` interval. Parallel
+  stages merged. Excludes queue wait.
+- **Speed** — realtime factor (`audio_duration / took`). `5.6x` means the
+  pipeline finished 5.6× faster than the audio length. This is the right
+  number for fleet throughput and cost-per-audio-hour math; Wait does
+  not enter the calculation because idle GPUs aren't billable in
+  proportion to queue depth.
+
+The footer summarises totals across the rows
+(e.g. `36 jobs, 36 with duration — total audio: 31h26m (31.44h); total compute: 1h12m (avg speed 26x)`),
+useful for back-of-envelope cost-per-audio-hour calculations.
 
 ---
 
