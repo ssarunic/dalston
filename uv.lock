@@ -587,7 +587,7 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'orchestrator'", specifier = ">=0.31.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'realtime-sdk'", specifier = ">=0.2.1" },
     { name = "boto3", marker = "extra == 'engine-sdk'", specifier = ">=1.35.0" },
-    { name = "elevenlabs", marker = "extra == 'dev'", specifier = "==2.45.0" },
+    { name = "elevenlabs", marker = "extra == 'dev'", specifier = "==2.46.0" },
     { name = "fastapi", marker = "extra == 'engine-sdk'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'gateway'", specifier = ">=0.135.0" },
     { name = "fastapi", marker = "extra == 'orchestrator'", specifier = ">=0.135.0" },
@@ -601,7 +601,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'realtime-sdk'", specifier = ">=1.24.0" },
     { name = "numpy", marker = "extra == 'tools'", specifier = ">=1.24.0" },
     { name = "nvidia-ml-py3", marker = "extra == 'tools'", specifier = ">=7.352.0" },
-    { name = "openai", marker = "extra == 'dev'", specifier = "==2.35.1" },
+    { name = "openai", marker = "extra == 'dev'", specifier = "==2.36.0" },
     { name = "opentelemetry-api", specifier = "==1.41.1" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = "==1.41.1" },
     { name = "opentelemetry-instrumentation-boto3sqs", marker = "extra == 'engine-sdk'", specifier = "==0.62b1" },
@@ -615,7 +615,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "prometheus-client", specifier = "==0.25.0" },
     { name = "pydantic", specifier = "==2.13.4" },
-    { name = "pydantic-settings", specifier = "==2.14.0" },
+    { name = "pydantic-settings", specifier = "==2.14.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.30.0" },
@@ -671,7 +671,7 @@ wheels = [
 
 [[package]]
 name = "elevenlabs"
-version = "2.45.0"
+version = "2.46.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -681,9 +681,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/a3/1696fd5b32e94703ff64b009de49bc5f4909397b5400900e3c5ca10a6499/elevenlabs-2.45.0.tar.gz", hash = "sha256:237eb96508e973393eb273728c562ae1f029764a544ab282acfd5d6d1cb8a043", size = 554966, upload-time = "2026-04-27T09:57:21.439Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/71/62b97757dd3ad34d62d3c1cdbf8f66a5052585213d63ba436bd656f68f81/elevenlabs-2.46.0.tar.gz", hash = "sha256:63f5403ca094ca6a06812216ad89a7299aaac4422973581cfd31187e8c57cf33", size = 572607, upload-time = "2026-05-07T11:28:49.661Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/60/2f/e9136e7b049898fcd8ddf1836d687cac0acc5ed76329740942498fe602e0/elevenlabs-2.45.0-py3-none-any.whl", hash = "sha256:19edf75de4da22b340bd96c833c3589a9871015addc1d487b034b4541c71b0ef", size = 1518097, upload-time = "2026-04-27T09:57:19.102Z" },
+    { url = "https://files.pythonhosted.org/packages/71/79/e5457ebd3e78093960399f819c51c49f52d3bcea04977f9847725aae9e83/elevenlabs-2.46.0-py3-none-any.whl", hash = "sha256:cc9e8b06c3e2adf2ec075bbe3042e18c7e29e3d42b017556af33e7155ff5b004", size = 1567634, upload-time = "2026-05-07T11:28:47.312Z" },
 ]
 
 [[package]]
@@ -1338,7 +1338,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/6d/64/cce82bddb80c0b0f5
 
 [[package]]
 name = "openai"
-version = "2.35.1"
+version = "2.36.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1350,9 +1350,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/33/41d130d33d0ae7d1d8dcd2f61d6ff044e1edcec7246e904f86c684a3dc94/openai-2.35.1.tar.gz", hash = "sha256:ae61ad96c514295476c42fbd61d1f84b2060bc6dd8e4e4a7d85273f089614ce4", size = 752260, upload-time = "2026-05-06T21:38:12.866Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/a1/4d5e84cf51720fc1526cc49e10ac1961abcccb55b0efb3d970db1e9a2728/openai-2.36.0.tar.gz", hash = "sha256:139dea0edd2f1b30c33d46ae1a6929e03906254140318e4608e98fe8c566f2e7", size = 753003, upload-time = "2026-05-07T17:33:17.075Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/89/7f34d7b4ca3b758181166a67fd6a529d127e0817e103a31a3c8948601ea2/openai-2.35.1-py3-none-any.whl", hash = "sha256:38ff2e0394dbf56c3d39151c2aa05f3264223b6a76be2a499e87b466017a1263", size = 1300374, upload-time = "2026-05-06T21:38:10.834Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/1c/5d43735b2553baae2a5e899dcbcd0670a86930d993184d72ca909bf11c9b/openai-2.36.0-py3-none-any.whl", hash = "sha256:143f6194b548dbc2c921af1f1b03b9f14c85fed8a75b5b516f5bcc11a2a50c63", size = 1302361, upload-time = "2026-05-07T17:33:15.063Z" },
 ]
 
 [[package]]
@@ -1803,16 +1803,16 @@ wheels = [
 
 [[package]]
 name = "pydantic-settings"
-version = "2.14.0"
+version = "2.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/98/c8345dccdc31de4228c039a98f6467a941e39558da41c1744fbe29fa5666/pydantic_settings-2.14.0.tar.gz", hash = "sha256:24285fd4b0e0c06507dd9fdfd331ee23794305352aaec8fc4eb92d4047aeb67d", size = 235709, upload-time = "2026-04-20T13:37:40.293Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/60/1d1e59c9c90d54591469ada7d268251f71c24bdb765f1a8a832cee8c6653/pydantic_settings-2.14.1.tar.gz", hash = "sha256:e874d3bec7e787b0c9958277956ed9b4dd5de6a80e162188fdaff7c5e26fd5fa", size = 235551, upload-time = "2026-05-08T13:40:06.542Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/dd/bebff3040138f00ae8a102d426b27349b9a49acc310fcae7f92112d867e3/pydantic_settings-2.14.0-py3-none-any.whl", hash = "sha256:fc8d5d692eb7092e43c8647c1c35a3ecd00e040fcf02ed86f4cb5458ca62182e", size = 60940, upload-time = "2026-04-20T13:37:38.586Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/8d/f1af3832f5e6eb13ba94ee809e72b8ecb5eef226d27ee0bef7d963d943c7/pydantic_settings-2.14.1-py3-none-any.whl", hash = "sha256:6e3c7edfd8277687cdc598f56e5cff0e9bfff0910a3749deaa8d4401c3a2b9de", size = 60964, upload-time = "2026-05-08T13:40:04.958Z" },
 ]
 
 [[package]]
