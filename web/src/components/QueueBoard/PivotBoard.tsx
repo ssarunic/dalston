@@ -174,12 +174,22 @@ function GridLayout({
                 className="border-b border-border/60 last:border-b-0"
               >
                 <td className="sticky left-0 z-10 bg-card px-3 py-2 align-top">
-                  <Link
-                    to={`/jobs/${job.job_id}`}
-                    className="block font-mono text-xs text-foreground hover:underline"
-                  >
-                    {shortJobId(job.job_id)}
-                  </Link>
+                  <div className="flex items-baseline gap-1.5">
+                    <Link
+                      to={`/jobs/${job.job_id}`}
+                      className="font-mono text-xs text-foreground hover:underline"
+                    >
+                      {shortJobId(job.job_id)}
+                    </Link>
+                    {job.audio_duration_seconds != null && (
+                      <span
+                        className="tabular-nums text-[10px] text-muted-foreground"
+                        title="Original audio duration"
+                      >
+                        {formatMs(job.audio_duration_seconds * 1000)}
+                      </span>
+                    )}
+                  </div>
                   {job.display_name && (
                     <div className="mt-0.5 max-w-[180px] truncate text-[10px] text-muted-foreground">
                       {job.display_name}
@@ -364,12 +374,22 @@ function JobStripsLayout({ tasks, jobs, visibleStages }: LayoutProps) {
             className="flex items-stretch gap-3 rounded-lg border border-border bg-card p-3"
           >
             <div className="flex min-w-[160px] max-w-[200px] flex-col justify-center border-r border-border/60 pr-3">
-              <Link
-                to={`/jobs/${job.job_id}`}
-                className="block font-mono text-xs text-foreground hover:underline"
-              >
-                {shortJobId(job.job_id)}
-              </Link>
+              <div className="flex items-baseline gap-1.5">
+                <Link
+                  to={`/jobs/${job.job_id}`}
+                  className="font-mono text-xs text-foreground hover:underline"
+                >
+                  {shortJobId(job.job_id)}
+                </Link>
+                {job.audio_duration_seconds != null && (
+                  <span
+                    className="tabular-nums text-[10px] text-muted-foreground"
+                    title="Original audio duration"
+                  >
+                    {formatMs(job.audio_duration_seconds * 1000)}
+                  </span>
+                )}
+              </div>
               {job.display_name && (
                 <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                   {job.display_name}
