@@ -44,6 +44,7 @@ import os
 import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -505,12 +506,18 @@ def get_default_vpc(region: str) -> str:
     return vpcs[0]["VpcId"]
 
 
+_NON_RETRYABLE_AWS_CODES = frozenset({"VcpuLimitExceeded", "InstanceLimitExceeded"})
+
+
 def retry_aws(func, *args, max_retries: int = 4, **kwargs):
     delay = 2
     for attempt in range(1, max_retries + 1):
         try:
             return func(*args, **kwargs)
         except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in _NON_RETRYABLE_AWS_CODES:
+                raise
             if attempt >= max_retries:
                 raise
             warn(f"Attempt {attempt} failed ({e}), retrying in {delay}s...")
@@ -2270,20 +2277,31 @@ def _ensure_cross_region_sg(region: str, key_name: str) -> str:
 def launch_gpu_interactive(
     region: str,
     sg_id: str,
-    user_data: str,
+    user_data_fn: Callable[[str], str],
     name_tag: str,
     use_spot: bool,
     key_name: str,
     instance_profile: str,
     gpu_type: str,
     engines: list[str] | None = None,
-) -> str:
-    """Launch GPU worker with interactive retry on capacity failure."""
+) -> tuple[str, str]:
+    """Launch GPU worker with interactive retry on capacity failure.
+
+    ``user_data_fn`` is called with the current ``gpu_type`` on each attempt
+    so per-GPU values baked into the cloud-init (e.g. VRAM budgets resolved
+    by :func:`_resolve_vram_budget`) stay consistent with the type that
+    actually gets launched after a retry.
+
+    Returns ``(instance_id, actual_gpu_type)`` — ``actual_gpu_type`` may
+    differ from the original request if the operator picked a different
+    type at the retry prompt.
+    """
     gpu_ami = get_gpu_ami(region)
     log(f"Using Deep Learning AMI: {gpu_ami}")
     while True:
+        user_data = user_data_fn(gpu_type)
         try:
-            return launch_instance(
+            instance_id = launch_instance(
                 region,
                 gpu_type,
                 sg_id,
@@ -2294,6 +2312,7 @@ def launch_gpu_interactive(
                 instance_profile,
                 ami_id=gpu_ami,
             )
+            return instance_id, gpu_type
         except RuntimeError:
             print()
             list_gpu_spot_instances(region, engines=engines)
@@ -2794,15 +2813,16 @@ def _launch_gpu(
         f"engines={engines}, region={gpu_region})..."
     )
 
-    gpu_ud = generate_gpu_worker_user_data(
-        st.s3_bucket,
-        gpu_region,
-        worker_name=worker_name,
-        engines=engines,
-        registry=tmpl.registry,
-        observability=st.observability,
-        gpu_type=gpu_type,
-    )
+    def _build_gpu_ud(active_gpu_type: str) -> str:
+        return generate_gpu_worker_user_data(
+            st.s3_bucket,
+            gpu_region,
+            worker_name=worker_name,
+            engines=engines,
+            registry=tmpl.registry,
+            observability=st.observability,
+            gpu_type=active_gpu_type,
+        )
 
     # Snapshot existing tailnet peers matching this base name *before*
     # launching, so we can identify the new replica by set difference once
@@ -2810,10 +2830,10 @@ def _launch_gpu(
     existing_workers = list(st.gpu_workers or [])
     ts_peers_before = _snapshot_ts_peers(f"dalston-gpu-{worker_name}")
 
-    instance_id = launch_gpu_interactive(
+    instance_id, gpu_type = launch_gpu_interactive(
         gpu_region,
         gpu_sg_id,
-        gpu_ud,
+        _build_gpu_ud,
         f"{NAME_PREFIX}-gpu-{worker_name}",
         use_spot,
         st.key_name,
@@ -3073,18 +3093,44 @@ def cmd_up(args: argparse.Namespace) -> None:
         )
     retry_aws(ec2.start_instances, InstanceIds=[st.instance_id])
 
+    # Reap terminated/shutting-down workers from state so they don't
+    # accumulate. Same logic cmd_launch uses for same-name conflicts.
+    if st.gpu_workers:
+        kept = []
+        for w in st.gpu_workers:
+            w_region = w.get("region", st.region)
+            w_state = get_instance_state(w_region, w["instance_id"])
+            if w_state in ("terminated", "shutting-down"):
+                log(
+                    f"Reaping {w_state} worker '{_worker_label(w)}' "
+                    f"({w['instance_id']})"
+                )
+                continue
+            kept.append(w)
+        if len(kept) != len(st.gpu_workers):
+            st.gpu_workers = kept
+            save_state(st)
+
+    failures: list[tuple[str, str, str]] = []
     for w in st.gpu_workers or []:
         # Cross-region workers need their own EC2 client; default to the
         # control-plane region for backwards compatibility with old state.
         w_region = w.get("region", st.region)
         w_ec2 = ec2_client(w_region)
         label = _worker_label(w)
-        gpu_state = get_instance_state(w_region, w["instance_id"])
-        if gpu_state == "terminated":
-            warn(f"GPU worker '{label}' ({w['instance_id']}) was terminated.")
-        else:
+        try:
             retry_aws(w_ec2.start_instances, InstanceIds=[w["instance_id"]])
+        except ClientError as e:
+            failures.append((label, w["instance_id"], str(e)))
+            warn(f"Failed to start GPU worker '{label}' ({w['instance_id']}): {e}")
     log("Start command sent. Instances booting...")
+
+    if failures:
+        warn(
+            f"{len(failures)} GPU worker(s) failed to start. "
+            "Check Service Quotas (G/VT On-Demand or Spot vCPU limits) "
+            "or remove unused workers from state with 'dalston-aws launch gpu ...'."
+        )
 
     if args.pull:
         key_file = STATE_DIR / f"{st.key_name}.pem"
@@ -3740,10 +3786,10 @@ def cmd_engine_up(args: argparse.Namespace) -> None:
         f"Launching {preset} on {instance_type} "
         f"({'spot' if use_spot else 'on-demand'}) in {region}..."
     )
-    instance_id = launch_gpu_interactive(
+    instance_id, instance_type = launch_gpu_interactive(
         region=region,
         sg_id=sg_id,
-        user_data=user_data,
+        user_data_fn=lambda _gpu_type: user_data,
         name_tag=f"{NAME_PREFIX}-engine-{preset}",
         use_spot=use_spot,
         key_name=st.key_name,

@@ -89,10 +89,11 @@ echo "GPU detected: $GPU_NAME (mode: $MODE)"
 sudo mkdir -p "$PROFILE_DIR"
 sudo chown "$(id -u):$(id -g)" "$PROFILE_DIR"
 
-# Track which containers we paused so the trap can unpause them on any
-# exit path (including Ctrl-C). Setting these to the empty string after
-# unpause keeps the trap idempotent.
+# Track which containers we paused / stopped so the trap can restore
+# them on any exit path (including Ctrl-C). Setting these to empty
+# after the inverse op keeps the trap idempotent.
 PAUSED_CONTAINERS=""
+STOPPED_CONTAINERS=""
 
 cleanup() {
   local rc=$?
@@ -101,6 +102,13 @@ cleanup() {
     echo "Cleanup: unpausing $PAUSED_CONTAINERS"
     for c in $PAUSED_CONTAINERS; do
       docker unpause "$c" >/dev/null 2>&1 || true
+    done
+  fi
+  if [[ -n "$STOPPED_CONTAINERS" ]]; then
+    echo
+    echo "Cleanup: starting $STOPPED_CONTAINERS"
+    for c in $STOPPED_CONTAINERS; do
+      docker start "$c" >/dev/null 2>&1 || true
     done
   fi
   exit "$rc"
@@ -122,6 +130,28 @@ unpause_container() {
   echo "Unpausing $container..."
   docker unpause "$container" >/dev/null
   PAUSED_CONTAINERS="${PAUSED_CONTAINERS// $container/}"
+}
+
+# Stop a container fully so its GPU memory is released. Used to capture
+# a clean "other engine alone" baseline before a solo sweep — pause
+# alone keeps weights resident, so it can't separate engines on the GPU.
+stop_container() {
+  local container="$1"
+  echo "Stopping $container (releases GPU memory; takes ~10s)..."
+  docker stop "$container" >/dev/null
+  STOPPED_CONTAINERS="$STOPPED_CONTAINERS $container"
+  # Wait for nvml to see the freed VRAM before any measurement.
+  sleep 10
+}
+
+start_container() {
+  local container="$1"
+  local port="$2"
+  local label="$3"
+  echo "Starting $container..."
+  docker start "$container" >/dev/null
+  STOPPED_CONTAINERS="${STOPPED_CONTAINERS// $container/}"
+  wait_for_health "$port" "$label"
 }
 
 wait_for_health() {

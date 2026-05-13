@@ -50,6 +50,10 @@ class DiarizeHTTPServer(EngineHTTPServer):
             max_speakers: Annotated[
                 int | None, Form(description="Maximum speakers")
             ] = None,
+            max_chunk_s: Annotated[
+                float | None,
+                Form(description="Maximum diarization chunk duration in seconds"),
+            ] = None,
         ) -> dict:
             audio_path = await resolve_audio(file, audio_url)
 
@@ -62,6 +66,8 @@ class DiarizeHTTPServer(EngineHTTPServer):
                 config["min_speakers"] = min_speakers
             if max_speakers is not None:
                 config["max_speakers"] = max_speakers
+            if max_chunk_s is not None:
+                config["max_chunk_s"] = max_chunk_s
 
             task_id = str(uuid4())
             task_request = TaskRequest(
