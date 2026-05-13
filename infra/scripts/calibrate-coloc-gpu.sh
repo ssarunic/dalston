@@ -15,7 +15,22 @@
 #   5. Restarts both containers via systemd so they pick up the
 #      profiles on next boot.
 #
-# Idempotent: safe to re-run. Existing profiles are overwritten.
+# Modes (set via MODE env var or --mode flag):
+#
+#   solo        Default. Runs each engine in turn with the other still
+#               serving traffic. Emits peak-VRAM data only.
+#
+#   coloc       M89.2.2 subject/background-paused protocol. For each
+#               engine in turn: `docker pause` the other container so
+#               its model weights stay resident but it doesn't compete
+#               for GPU time, then run `--throughput-sweep --mode
+#               coloc:<other_preset_key>` against the subject. Trap
+#               handlers unpause on Ctrl-C / unexpected exit so the
+#               box doesn't end up half-paused.
+#
+# Idempotent: safe to re-run. The calibrator now merges throughput
+# results across modes in the same profile JSON, so re-running this
+# script with MODE=solo and then MODE=coloc populates both blocks.
 
 set -euo pipefail
 
@@ -26,16 +41,88 @@ PYANNOTE_PORT="${PYANNOTE_PORT:-9101}"
 PROFILE_DIR="${PROFILE_DIR:-/data/vram_profiles}"
 NEMO_MODEL="${NEMO_MODEL:-nvidia/parakeet-tdt-0.6b-v3}"
 PYANNOTE_MODEL="${PYANNOTE_MODEL:-pyannote/speaker-diarization-community-1}"
+MODE="${MODE:-solo}"
+SAFETY_MARGIN="${SAFETY_MARGIN:-0.85}"
+
+# Parse --mode <value> if present (overrides env var).
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      MODE="$2"
+      shift 2
+      ;;
+    --mode=*)
+      MODE="${1#--mode=}"
+      shift
+      ;;
+    --safety-margin)
+      SAFETY_MARGIN="$2"
+      shift 2
+      ;;
+    --safety-margin=*)
+      SAFETY_MARGIN="${1#--safety-margin=}"
+      shift
+      ;;
+    -h|--help)
+      sed -n '1,33p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 64
+      ;;
+  esac
+done
+
+if [[ "$MODE" != "solo" && "$MODE" != "coloc" ]]; then
+  echo "MODE must be 'solo' or 'coloc' (got: $MODE)" >&2
+  exit 64
+fi
 
 GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits | head -1 | awk '{print $NF}')"
 if [[ -z "$GPU_NAME" ]]; then
   echo "Could not detect GPU via nvidia-smi" >&2
   exit 1
 fi
-echo "GPU detected: $GPU_NAME"
+echo "GPU detected: $GPU_NAME (mode: $MODE)"
 
 sudo mkdir -p "$PROFILE_DIR"
 sudo chown "$(id -u):$(id -g)" "$PROFILE_DIR"
+
+# Track which containers we paused so the trap can unpause them on any
+# exit path (including Ctrl-C). Setting these to the empty string after
+# unpause keeps the trap idempotent.
+PAUSED_CONTAINERS=""
+
+cleanup() {
+  local rc=$?
+  if [[ -n "$PAUSED_CONTAINERS" ]]; then
+    echo
+    echo "Cleanup: unpausing $PAUSED_CONTAINERS"
+    for c in $PAUSED_CONTAINERS; do
+      docker unpause "$c" >/dev/null 2>&1 || true
+    done
+  fi
+  exit "$rc"
+}
+trap cleanup EXIT INT TERM
+
+pause_container() {
+  local container="$1"
+  echo "Pausing $container (model weights stay resident, no GPU work in flight)..."
+  docker pause "$container" >/dev/null
+  PAUSED_CONTAINERS="$PAUSED_CONTAINERS $container"
+  # Brief settle to let any in-flight HTTP requests finish before the
+  # subject sweep starts measuring.
+  sleep 2
+}
+
+unpause_container() {
+  local container="$1"
+  echo "Unpausing $container..."
+  docker unpause "$container" >/dev/null
+  PAUSED_CONTAINERS="${PAUSED_CONTAINERS// $container/}"
+}
 
 wait_for_health() {
   local port="$1"
@@ -59,6 +146,9 @@ install_calib_deps() {
     --break-system-packages nvidia-ml-py3 requests >/dev/null
 }
 
+# Runs the calibrator inside ``container`` against ``http://localhost:$port``
+# and copies the resulting profile JSON to ``out_host``. Extra args are
+# passed verbatim — used to inject ``--mode`` / ``--throughput-sweep`` etc.
 run_calib() {
   local container="$1"
   local engine_id="$2"
@@ -66,20 +156,29 @@ run_calib() {
   local model_id="$4"
   local port="$5"
   local out_host="$6"
+  shift 6
+  local extra_args=("$@")
 
-  local out_in_container="/data/vram_profiles/$(basename "$out_host")"
+  local basename
+  basename="$(basename "$out_host")"
   echo
-  echo "=== Calibrating $engine_id ($model_id) on $GPU_NAME ==="
+  echo "=== Calibrating $engine_id ($model_id) on $GPU_NAME (${extra_args[*]:-no extra args}) ==="
   # Profile dir is mounted read-only — write to /tmp inside the container,
-  # then cp to the host path with sudo.
+  # then cp to the host path. The calibrator's merge-write step reads the
+  # existing host profile if present, so we also push it in beforehand
+  # to preserve modes from earlier runs.
+  if [[ -f "$out_host" ]]; then
+    docker cp "$out_host" "${container}:/tmp/${basename}"
+  fi
   docker exec "$container" python -m dalston.tools.calibrate_vram \
     --engine-url "http://localhost:${port}" \
     --stage "$stage" \
     --engine-id "$engine_id" \
     --model-id "$model_id" \
     --gpu-id 0 \
-    --output "/tmp/$(basename "$out_host")"
-  docker cp "${container}:/tmp/$(basename "$out_host")" "$out_host"
+    --output "/tmp/${basename}" \
+    "${extra_args[@]}"
+  docker cp "${container}:/tmp/${basename}" "$out_host"
   echo "Wrote $out_host"
 }
 
@@ -89,11 +188,33 @@ wait_for_health "$PYANNOTE_PORT" "Pyannote"
 install_calib_deps "$NEMO_CONTAINER"
 install_calib_deps "$PYANNOTE_CONTAINER"
 
-run_calib "$NEMO_CONTAINER" "nemo" "transcribe" "$NEMO_MODEL" "$NEMO_PORT" \
-  "${PROFILE_DIR}/transcribe-nemo-${GPU_NAME}.json"
+NEMO_PROFILE="${PROFILE_DIR}/transcribe-nemo-${GPU_NAME}.json"
+PYANNOTE_PROFILE="${PROFILE_DIR}/diarize-pyannote-4.0-${GPU_NAME}.json"
 
-run_calib "$PYANNOTE_CONTAINER" "pyannote-4.0" "diarize" "$PYANNOTE_MODEL" \
-  "$PYANNOTE_PORT" "${PROFILE_DIR}/diarize-pyannote-4.0-${GPU_NAME}.json"
+if [[ "$MODE" = "solo" ]]; then
+  # Legacy behaviour: peak-VRAM sweep against each engine in turn. Other
+  # engine keeps serving traffic — peaks reflect coloc reality but no
+  # throughput data is emitted.
+  run_calib "$NEMO_CONTAINER" "nemo" "transcribe" "$NEMO_MODEL" "$NEMO_PORT" \
+    "$NEMO_PROFILE"
+  run_calib "$PYANNOTE_CONTAINER" "pyannote-4.0" "diarize" "$PYANNOTE_MODEL" \
+    "$PYANNOTE_PORT" "$PYANNOTE_PROFILE"
+else
+  # M89.2.2 subject/background-paused protocol.
+  # NeMo subject, pyannote paused.
+  pause_container "$PYANNOTE_CONTAINER"
+  run_calib "$NEMO_CONTAINER" "nemo" "transcribe" "$NEMO_MODEL" "$NEMO_PORT" \
+    "$NEMO_PROFILE" \
+    --throughput-sweep --safety-margin "$SAFETY_MARGIN" --mode "coloc:pyannote"
+  unpause_container "$PYANNOTE_CONTAINER"
+
+  # Pyannote subject, nemo paused.
+  pause_container "$NEMO_CONTAINER"
+  run_calib "$PYANNOTE_CONTAINER" "pyannote-4.0" "diarize" "$PYANNOTE_MODEL" \
+    "$PYANNOTE_PORT" "$PYANNOTE_PROFILE" \
+    --throughput-sweep --safety-margin "$SAFETY_MARGIN" --mode "coloc:nemo"
+  unpause_container "$NEMO_CONTAINER"
+fi
 
 echo
 echo "Profiles written to $PROFILE_DIR:"
