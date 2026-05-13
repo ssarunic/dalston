@@ -1013,6 +1013,12 @@ async def list_transcriptions(
         str | None, Query(description="Pagination cursor from previous response")
     ] = None,
     status: Annotated[JobStatus | None, Query(description="Filter by status")] = None,
+    since: Annotated[
+        datetime | None,
+        Query(
+            description="Only return jobs created at or after this ISO 8601 timestamp"
+        ),
+    ] = None,
     db: AsyncSession = Depends(get_db),
     jobs_service: JobsService = Depends(get_jobs_service),
 ) -> JobListResponse:
@@ -1025,6 +1031,7 @@ async def list_transcriptions(
             limit=limit,
             cursor=cursor,
             status=status,
+            since=since,
         )
     except ValueError as e:
         if "cursor" in str(e).lower():

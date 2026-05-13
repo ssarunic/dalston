@@ -169,6 +169,7 @@ class JobsService:
         status: JobStatus | None = None,
         created_by_key_id: UUID | None = None,
         include_unowned: bool = True,
+        since: datetime | None = None,
     ) -> tuple[list[JobModel], bool]:
         """List jobs for a tenant with cursor-based pagination.
 
@@ -184,6 +185,7 @@ class JobsService:
                 includes jobs with no ownership (created_by_key_id is NULL).
                 This supports backwards compatibility for jobs created before
                 ownership tracking was added.
+            since: Only return jobs created at or after this timestamp.
 
         Returns:
             Tuple of (jobs list, has_more flag)
@@ -196,6 +198,10 @@ class JobsService:
         # Optional status filter
         if status is not None:
             query = query.where(JobModel.status == status.value)
+
+        # Optional created_at lower bound
+        if since is not None:
+            query = query.where(JobModel.created_at >= since)
 
         # Ownership filter - applied at SQL level for correct pagination
         if created_by_key_id is not None:
@@ -877,6 +883,7 @@ class JobsService:
         limit: int = 20,
         cursor: str | None = None,
         status: JobStatus | None = None,
+        since: datetime | None = None,
     ) -> tuple[list[JobModel], bool]:
         """List jobs with authorization check.
 
@@ -890,6 +897,7 @@ class JobsService:
             limit: Maximum number of results
             cursor: Pagination cursor
             status: Optional status filter
+            since: Only return jobs created at or after this timestamp.
 
         Returns:
             Tuple of (jobs list, has_more flag)
@@ -910,4 +918,5 @@ class JobsService:
             status=status,
             created_by_key_id=created_by_key_id,
             include_unowned=False,  # Strict ownership enforcement
+            since=since,
         )

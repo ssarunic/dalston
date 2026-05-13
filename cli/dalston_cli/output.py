@@ -284,6 +284,16 @@ def wait_with_progress(
         )
 
 
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
+    return f"{int(seconds // 3600)}h{int((seconds % 3600) // 60):02d}m"
+
+
 def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     """Display jobs list.
 
@@ -300,7 +310,11 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
                 "created_at": j.created_at.isoformat(),
                 "started_at": j.started_at.isoformat() if j.started_at else None,
                 "completed_at": j.completed_at.isoformat() if j.completed_at else None,
-                "progress": j.progress,
+                "audio_duration_seconds": j.audio_duration_seconds,
+                "result_language_code": j.result_language_code,
+                "result_word_count": j.result_word_count,
+                "result_segment_count": j.result_segment_count,
+                "result_speaker_count": j.result_speaker_count,
             }
             for j in jobs
         ]
@@ -312,7 +326,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     table.add_column("Name", style="white")
     table.add_column("Status")
     table.add_column("Created")
-    table.add_column("Progress")
+    table.add_column("Duration", justify="right")
 
     status_styles = {
         "completed": "green",
@@ -322,23 +336,36 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
         "cancelled": "red",
     }
 
+    total_duration = 0.0
+    n_with_duration = 0
     for job in jobs:
         status_style = status_styles.get(job.status.value, "")
-        progress_str = f"{job.progress}%" if job.progress is not None else "-"
         # Truncate display name if too long
         name = job.display_name or "-"
         if len(name) > 30:
             name = name[:27] + "..."
+
+        if job.audio_duration_seconds is not None:
+            total_duration += job.audio_duration_seconds
+            n_with_duration += 1
 
         table.add_row(
             str(job.id)[:12] + "...",
             name,
             f"[{status_style}]{job.status.value}[/]",
             job.created_at.strftime("%Y-%m-%d %H:%M"),
-            progress_str,
+            _format_duration(job.audio_duration_seconds),
         )
 
     console.print(table)
+    if n_with_duration:
+        console.print(
+            f"[dim]{len(jobs)} jobs, {n_with_duration} with duration — "
+            f"total audio: {_format_duration(total_duration)} "
+            f"({total_duration / 3600:.2f}h)[/dim]"
+        )
+    else:
+        console.print(f"[dim]{len(jobs)} jobs[/dim]")
 
 
 def output_job_detail(job: Job, as_json: bool = False) -> None:

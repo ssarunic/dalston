@@ -465,6 +465,7 @@ class Dalston:
         limit: int = 20,
         cursor: str | None = None,
         status: JobStatus | str | None = None,
+        since: datetime | str | None = None,
     ) -> JobList:
         """List transcription jobs.
 
@@ -472,6 +473,8 @@ class Dalston:
             limit: Maximum number of jobs to return (1-100).
             cursor: Pagination cursor from previous response.
             status: Filter by job status.
+            since: Only return jobs created at or after this ISO 8601 timestamp
+                (``datetime`` or string).
 
         Returns:
             JobList with jobs and pagination info.
@@ -481,6 +484,10 @@ class Dalston:
             params["cursor"] = cursor
         if status is not None:
             params["status"] = status.value if isinstance(status, JobStatus) else status
+        if since is not None:
+            params["since"] = (
+                since.isoformat() if isinstance(since, datetime) else since
+            )
 
         try:
             response = self._client.get(
@@ -507,6 +514,11 @@ class Dalston:
                     started_at=_parse_datetime(j.get("started_at")),
                     completed_at=_parse_datetime(j.get("completed_at")),
                     progress=j.get("progress"),
+                    audio_duration_seconds=j.get("audio_duration_seconds"),
+                    result_language_code=j.get("result_language_code"),
+                    result_word_count=j.get("result_word_count"),
+                    result_segment_count=j.get("result_segment_count"),
+                    result_speaker_count=j.get("result_speaker_count"),
                 )
                 for j in data["jobs"]
             ],
@@ -1406,6 +1418,7 @@ class AsyncDalston:
         limit: int = 20,
         cursor: str | None = None,
         status: JobStatus | str | None = None,
+        since: datetime | str | None = None,
     ) -> JobList:
         """List transcription jobs.
 
@@ -1413,6 +1426,8 @@ class AsyncDalston:
             limit: Maximum number of jobs to return (1-100).
             cursor: Pagination cursor from previous response.
             status: Filter by job status.
+            since: Only return jobs created at or after this ISO 8601 timestamp
+                (``datetime`` or string).
 
         Returns:
             JobList with jobs and pagination info.
@@ -1422,6 +1437,10 @@ class AsyncDalston:
             params["cursor"] = cursor
         if status is not None:
             params["status"] = status.value if isinstance(status, JobStatus) else status
+        if since is not None:
+            params["since"] = (
+                since.isoformat() if isinstance(since, datetime) else since
+            )
 
         try:
             response = await self._client.get(
@@ -1448,6 +1467,11 @@ class AsyncDalston:
                     started_at=_parse_datetime(j.get("started_at")),
                     completed_at=_parse_datetime(j.get("completed_at")),
                     progress=j.get("progress"),
+                    audio_duration_seconds=j.get("audio_duration_seconds"),
+                    result_language_code=j.get("result_language_code"),
+                    result_word_count=j.get("result_word_count"),
+                    result_segment_count=j.get("result_segment_count"),
+                    result_speaker_count=j.get("result_speaker_count"),
                 )
                 for j in data["jobs"]
             ],

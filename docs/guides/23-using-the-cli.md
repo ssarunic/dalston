@@ -144,11 +144,21 @@ dalston jobs list                       # paginated list
 dalston jobs list --status running
 dalston jobs list --limit 100 --json
 
+# Filter by created_at; --since accepts ISO 8601, a relative offset
+# (90m / 24h / 7d), 'today' (UTC midnight), or 'yesterday'.
+dalston jobs list --since 24h
+dalston jobs list --since today --limit 100
+dalston jobs list --since 2026-05-13T17:23:00Z
+
 dalston jobs get JOB_ID                 # full detail
 dalston jobs wait JOB_ID                # block until completed/failed
 dalston jobs cancel JOB_ID
 dalston jobs delete JOB_ID              # also removes S3 artifacts
 ```
+
+The table summarizes total audio across the rows in its footer
+(e.g. `36 jobs, 36 with duration — total audio: 31h26m (31.44h)`),
+useful for back-of-envelope cost-per-audio-hour calculations.
 
 ---
 

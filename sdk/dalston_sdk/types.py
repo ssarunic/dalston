@@ -185,6 +185,11 @@ class JobSummary:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     progress: int | None = None
+    audio_duration_seconds: float | None = None
+    result_language_code: str | None = None
+    result_word_count: int | None = None
+    result_segment_count: int | None = None
+    result_speaker_count: int | None = None
 
 
 @dataclass

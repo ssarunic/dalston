@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+import pytest
 from typer.testing import CliRunner
 
 from dalston_cli.main import app
@@ -53,6 +54,40 @@ def test_jobs_list_help():
     result = runner.invoke(app, ["jobs", "list", "--help"])
     assert result.exit_code == 0
     assert "List transcription jobs" in result.output
+    assert "--since" in result.output
+
+
+def test_jobs_list_since_invalid():
+    """Test --since rejects garbage values with a helpful message."""
+    result = runner.invoke(app, ["jobs", "list", "--since", "garbage"])
+    assert result.exit_code == 2
+    assert "--since" in result.output
+    assert "ISO 8601" in result.output
+
+
+def test_parse_since_relative_and_absolute():
+    """_parse_since handles relative offsets, today/yesterday, and ISO 8601."""
+    from datetime import UTC, datetime, timedelta
+
+    from dalston_cli.commands.jobs import _parse_since
+
+    now = datetime.now(UTC)
+
+    assert (now - _parse_since("24h")).total_seconds() == pytest.approx(
+        24 * 3600, abs=5
+    )
+    assert (now - _parse_since("90m")).total_seconds() == pytest.approx(90 * 60, abs=5)
+    assert (now - _parse_since("7d")).total_seconds() == pytest.approx(7 * 86400, abs=5)
+
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    assert _parse_since("today") == today_midnight
+    assert _parse_since("yesterday") == today_midnight - timedelta(days=1)
+
+    assert _parse_since("2026-05-13T17:23:00Z") == datetime(
+        2026, 5, 13, 17, 23, tzinfo=UTC
+    )
+    # Naive timestamps default to UTC
+    assert _parse_since("2026-05-13").tzinfo is not None
 
 
 def test_export_help():

@@ -663,8 +663,9 @@ List recent transcription jobs.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `limit` | integer | `20` | Max results (1-100) |
-| `offset` | integer | `0` | Pagination offset |
-| `status` | string | `null` | Filter: `pending`, `running`, `completed`, `failed` |
+| `cursor` | string | `null` | Pagination cursor from previous response |
+| `status` | string | `null` | Filter: `pending`, `running`, `completed`, `failed`, `cancelled` |
+| `since` | string | `null` | ISO 8601 timestamp; only return jobs with `created_at >= since`. Naive timestamps are interpreted as UTC. |
 
 ### Response
 
@@ -675,18 +676,21 @@ List recent transcription jobs.
       "id": "job_abc123",
       "status": "completed",
       "created_at": "2025-01-28T12:00:00Z",
-      "completed_at": "2025-01-28T12:02:30Z"
+      "completed_at": "2025-01-28T12:02:30Z",
+      "audio_duration_seconds": 312.4,
+      "result_language_code": "en",
+      "result_word_count": 482,
+      "result_segment_count": 24,
+      "result_speaker_count": 2
     },
     {
       "id": "job_def456",
       "status": "running",
-      "progress": 67,
       "created_at": "2025-01-28T12:05:00Z"
     }
   ],
-  "total": 47,
-  "limit": 20,
-  "offset": 0
+  "cursor": "2025-01-28T12:05:00Z:job_def456",
+  "has_more": false
 }
 ```
 
