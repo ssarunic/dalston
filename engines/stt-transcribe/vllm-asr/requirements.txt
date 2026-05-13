@@ -1,7 +1,7 @@
 # Unified vLLM-ASR Engine Dependencies (batch + realtime)
 
 # vLLM with multimodal audio support
-vllm[audio]>=0.20.1
+vllm[audio]>=0.20.2
 
 # Audio processing
 soundfile>=0.13.1
