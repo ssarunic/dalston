@@ -355,9 +355,9 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     table = Table()
     table.add_column("ID", style="cyan")
     table.add_column("Name", style="white")
+    table.add_column("Duration", justify="right")
     table.add_column("Status")
     table.add_column("Created")
-    table.add_column("Duration", justify="right")
     table.add_column("Took", justify="right")
     table.add_column("Speed", justify="right")
 
@@ -392,9 +392,9 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
         table.add_row(
             str(job.id)[:12] + "...",
             name,
+            _format_duration(job.audio_duration_seconds),
             f"[{status_style}]{job.status.value}[/]",
             job.created_at.strftime("%Y-%m-%d %H:%M"),
-            _format_duration(job.audio_duration_seconds),
             _format_duration(took_s),
             _format_speed(job.audio_duration_seconds, took_s),
         )
