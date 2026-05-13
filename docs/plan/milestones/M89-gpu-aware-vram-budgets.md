@@ -56,9 +56,13 @@ The cost story matters too: a `g4dn.xlarge` spot is ~$0.20/hr vs ~$1.00/hr for t
 │             # "g4dn.xlarge" -> "T4"                              │
 │                                                                  │
 │  cell = preset["vram_budget_by_gpu"].get(gpu_name)               │
-│         # {"solo": 11000, "coloc_with_pyannote-4.0": 9000}       │
+│         # {"solo": 11000, "coloc_with_pyannote": 9000}           │
 │                                                                  │
-│  budget = cell["coloc_with_<other_id>"] if co-located            │
+│  # Co-loc key uses the OTHER engine's GPU_ENGINE_PRESETS KEY,    │
+│  # not its `engine_id`. e.g. preset key "pyannote", not the      │
+│  # engine_id "pyannote-4.0". The resolver only has preset keys   │
+│  # at hand from --engines on the CLI.                            │
+│  budget = cell["coloc_with_<other_preset_key>"] if co-located    │
 │           else cell["solo"]                                      │
 │           else preset["extra_env"]["DALSTON_VRAM_BUDGET_MB"]     │
 │                                                                  │
@@ -98,19 +102,21 @@ The cost story matters too: a `g4dn.xlarge` spot is ~$0.20/hr vs ~$1.00/hr for t
 │  Choose argmax(rtf) s.t. baseline_mb + delta_mb < gpu_vram ×    │
 │  safety_margin (default 0.85).                                   │
 │                                                                  │
-│  Write profile JSON with new `throughput_optimal` block:         │
+│  Write profile JSON with new `throughput_optimal` block.         │
+│  Coloc keys use the OTHER engine's preset key, NOT its engine_id │
+│  (matches what the launch-time resolver consumes):               │
 │      {                                                           │
 │        "throughput_optimal": {                                   │
 │          "solo":      {"axis": "vad_batch", "value": 16,         │
 │                        "rtf": 42.3,                              │
 │                        "delta_mb": 11200, "baseline_mb": 0},     │
-│          "coloc_with_pyannote-4.0":                              │
+│          "coloc_with_pyannote":                                  │
 │                       {"axis": "vad_batch", "value": 8,          │
 │                        "rtf": 28.1,                              │
 │                        "delta_mb": 6100, "baseline_mb": 3300}    │
 │        },                                                        │
 │        "recommended_budget_mb": {                                │
-│          "solo": 12000, "coloc_with_pyannote-4.0": 7000          │
+│          "solo": 12000, "coloc_with_pyannote": 7000              │
 │        }                                                         │
 │      }                                                           │
 └──────────────────────────────────────────────────────────────────┘
@@ -151,9 +157,14 @@ Each preset entry gets an optional `vram_budget_by_gpu` map. Schema:
     },
     "vram_budget_by_gpu": {
         # Hand-seeded conservative values for 89.1; replaced by 89.3 output.
-        "T4":   {"solo": 11000, "coloc_with_pyannote-4.0":  9000},
-        "A10G": {"solo": 20000, "coloc_with_pyannote-4.0": 18000},
-        "L4":   {"solo": 20000, "coloc_with_pyannote-4.0": 20000},
+        # `coloc_with_<key>` uses the OTHER engine's GPU_ENGINE_PRESETS key
+        # (e.g. "pyannote"), not its engine_id (e.g. "pyannote-4.0"). The
+        # CLI's --engines flag and `_launch_gpu`'s engines list both use
+        # preset keys, so keying the map by preset key avoids a
+        # preset-key/engine_id translation step at lookup time.
+        "T4":   {"solo": 11000, "coloc_with_pyannote":  9000},
+        "A10G": {"solo": 20000, "coloc_with_pyannote": 18000},
+        "L4":   {"solo": 20000, "coloc_with_pyannote": 20000},
     },
 },
 "pyannote": {
@@ -169,7 +180,7 @@ Each preset entry gets an optional `vram_budget_by_gpu` map. Schema:
 `_generate_docker_run_block` signature changes to accept `gpu_type: str, co_engines: list[str]`. Resolution order, top-down:
 
 1. `DALSTON_OVERRIDE__<engine>__VRAM_BUDGET_MB` env var (existing behaviour preserved).
-2. `vram_budget_by_gpu[gpu_name][coloc_key]` where `coloc_key = "coloc_with_<other_id>"` if co-located with exactly one other engine, else `"solo"`.
+2. `vram_budget_by_gpu[gpu_name][coloc_key]` where `coloc_key = "coloc_with_<other_preset_key>"` if co-located with exactly one other engine, else `"solo"`.
 3. `vram_budget_by_gpu[gpu_name]["solo"]` if no co-location match.
 4. `extra_env["DALSTON_VRAM_BUDGET_MB"]` (existing fallback).
 
@@ -201,7 +212,7 @@ New CLI flags:
 
 ```
 --throughput-sweep           Enable throughput sweep (default: off, peak-only)
---mode solo|coloc:<other_id> Sweep variant; defaults to solo
+--mode solo|coloc:<other_preset_key>  Sweep variant; defaults to solo
 --sweep-axis auto|<env_var>  Per-engine axis chosen from a built-in map
                              (override only when adding a new engine)
 --sweep-grid 4,8,16,32       Values for the chosen axis
@@ -228,7 +239,7 @@ Per cell, the calibrator:
 
 Selects the best cell as `argmax(rtf) s.t. baseline_mb + delta_mb < gpu_vram_mb × safety_margin`. `recommended_budget_mb` is reported as `round_up(delta_mb, 1000) + headroom` — never `peak_used_mb`, so the background engine's resident weights never leak into the subject's budget.
 
-**Coloc protocol (used by `--mode coloc:<other_id>` and orchestrated by `calibrate-coloc-gpu.sh`):**
+**Coloc protocol (used by `--mode coloc:<other_preset_key>` and orchestrated by `calibrate-coloc-gpu.sh`):**
 
 1. Bring up both engines, let both reach `engine_loop_starting`.
 2. **Pause** task feeding to the background engine (no work in flight — its memory is at model-weights-only steady state).
@@ -272,16 +283,17 @@ Behaviour:
 
 1. Walks `--profiles-dir`, **opens every `*.json` and keys on JSON contents only** — `engine_id`, `model_id`, normalised `gpu` field. Filename is informational metadata, not a parse target (existing profiles like `diarize-pyannote-4.0-T4.json` use a dotted engine_id and slash-bearing `model_id` that can't round-trip through filenames cleanly).
 2. Normalises `gpu` to one of the keys in `GPU_FAMILY_TO_NAME` values (`T4`, `A10G`, `L4`, …) via a case-insensitive lookup; rejects profiles for unknown GPUs with a clear error.
-3. Maps `engine_id` to the matching `GPU_ENGINE_PRESETS` entry by exact-match on the preset's `engine_id` field (already present in every preset). Multiple profiles per engine across GPUs is the expected case.
-4. Builds `vram_budget_by_gpu[<gpu>] = {"solo": p.recommended_budget_mb.solo, "coloc_with_<other_engine_id>": ...}` from each profile, where `<other_engine_id>` matches the preset's `engine_id`, not the filename.
-5. Rewrites the literal `vram_budget_by_gpu` block in `dalston-aws` using `libcst`. Idempotent — re-running on unchanged profiles produces no diff.
+3. Builds a reverse map `engine_id_to_preset_key = {p["engine_id"]: k for k, p in GPU_ENGINE_PRESETS.items()}` and uses it to resolve every profile's `engine_id` (e.g. `"pyannote-4.0"`) back to its preset key (e.g. `"pyannote"`). All map cell names in the emitted Python source — both the *owning* preset selector and the `coloc_with_<…>` keys *inside* each cell — use preset keys, matching what the launch-time resolver consumes.
+4. Profiles for coloc modes are read as `recommended_budget_mb.coloc_with_<other_engine_id>` *inside the JSON* (that's the calibrator's natural unit — engines self-identify by `engine_id`); the sync tool translates each `<other_engine_id>` to `<other_preset_key>` before emitting. The translation lives only in the sync tool, never on disk in `dalston-aws`.
+5. Emits `vram_budget_by_gpu[<gpu>] = {"solo": …, "coloc_with_<other_preset_key>": …}` per preset, rewrites the literal block in `dalston-aws` using `libcst`. Idempotent — re-running on unchanged profiles produces no diff.
 6. `--dry-run` prints the unified diff without writing.
 
 Refusal cases (exit non-zero, no write):
 
 - Profile is missing `recommended_budget_mb` or `engine_id` (older format from 89.2-pre).
 - Profile's `gpu` doesn't normalise to a known `GPU_FAMILY_TO_NAME` value.
-- Two profiles with the same `(engine_id, gpu, mode)` triple disagree on `recommended_budget_mb` — operator picks one by deleting the other before re-running.
+- Profile's `engine_id` (or any `coloc_with_<other_engine_id>` key) has no matching entry in `GPU_ENGINE_PRESETS` — operator added a new engine to the calibrator without adding it to the preset map.
+- Two profiles with the same `(preset_key, gpu, mode)` triple disagree on `recommended_budget_mb` — operator picks one by deleting the other before re-running.
 - Target preset block in `dalston-aws` can't be located unambiguously (libcst match fails).
 
 **Optional follow-up (not in 89.3):** if hand-editing the embedded Python dict proves brittle, lift `GPU_ENGINE_PRESETS` out to `infra/templates/gpu-engine-presets.yaml` and have both the launch script and the sync tool read it. Tracked as M89-follow-up rather than blocking this milestone.
@@ -355,8 +367,8 @@ python -m dalston.tools.sync_vram_presets --dry-run | grep -c '^[+-]'
 - [ ] `vram_budget_by_gpu` field added to each entry in `GPU_ENGINE_PRESETS` with hand-seeded T4 / A10G / L4 values
 - [ ] `_generate_docker_run_block` looks up the right cell from `gpu_type` + co-engines and overrides `DALSTON_VRAM_BUDGET_MB`
 - [ ] `DALSTON_OVERRIDE__<engine>__VRAM_BUDGET_MB` still takes precedence (regression test)
-- [ ] `calibrate_vram.py --throughput-sweep` writes `throughput_optimal` + `recommended_budget_mb` into the profile JSON
-- [ ] `calibrate-coloc-gpu.sh --concurrent` drives realistic contention during the sweep
+- [ ] `calibrate_vram.py --throughput-sweep --mode solo|coloc:<other_preset_key>` writes `throughput_optimal` + `recommended_budget_mb` into the profile JSON
+- [ ] `calibrate-coloc-gpu.sh` orchestrates the subject/background protocol — both engines up, background load paused while the subject is swept, baseline snapshot taken with the background engine's model weights resident
 - [ ] `dalston.tools.sync_vram_presets` rewrites `vram_budget_by_gpu` from profiles, with `--dry-run` and conflict detection
 - [ ] T4 co-location of `nemo,pyannote` succeeds end-to-end at default budgets without any operator env-var override
 - [ ] One full pass executed: launch on T4, sweep, sync, commit, re-launch — re-launch inherits the tuned values from `git`
