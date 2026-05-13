@@ -159,8 +159,18 @@ dalston jobs delete JOB_ID              # also removes S3 artifacts
 The table has columns:
 
 - **Duration** — audio length of the input.
-- **Took** — engine time (`completed_at − started_at`), so queue wait is excluded.
-- **Speed** — realtime factor (`audio / took`); `5.6x` means processed 5.6× faster than realtime.
+- **Wait** — time the job spent queued before an engine picked it up
+  (`started_at − created_at`). High wait + low Took means a backlog;
+  drives queue-pressure decisions.
+- **Took** — engine wall time (`completed_at − started_at`). Covers
+  every stage of the pipeline (prepare → transcribe → align → diarize →
+  pii_detect → merge), including any intra-pipeline gaps. Queue wait is
+  excluded.
+- **Speed** — realtime factor (`audio_duration / took`). `5.6x` means the
+  pipeline finished 5.6× faster than the audio length. This is the right
+  number for fleet throughput and cost-per-audio-hour math; Wait does
+  not enter the calculation because idle GPUs aren't billable in
+  proportion to queue depth.
 
 The footer summarises totals across the rows
 (e.g. `36 jobs, 36 with duration — total audio: 31h26m (31.44h); total compute: 1h12m (avg speed 26x)`),

@@ -294,6 +294,13 @@ def _format_duration(seconds: float | None) -> str:
     return f"{int(seconds // 3600)}h{int((seconds % 3600) // 60):02d}m"
 
 
+def _job_wait_seconds(job: JobSummary) -> float | None:
+    """Queue wait: created_at → started_at, in seconds."""
+    if job.started_at is None:
+        return None
+    return max(0.0, (job.started_at - job.created_at).total_seconds())
+
+
 def _job_processing_seconds(job: JobSummary) -> float | None:
     """Engine time: started_at → completed_at, in seconds."""
     if job.started_at is None or job.completed_at is None:
@@ -323,6 +330,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     if as_json:
         data = []
         for j in jobs:
+            wait_s = _job_wait_seconds(j)
             took_s = _job_processing_seconds(j)
             data.append(
                 {
@@ -335,6 +343,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
                     if j.completed_at
                     else None,
                     "audio_duration_seconds": j.audio_duration_seconds,
+                    "wait_seconds": wait_s,
                     "processing_seconds": took_s,
                     "speed_realtime_factor": (
                         j.audio_duration_seconds / took_s
@@ -358,6 +367,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     table.add_column("Duration", justify="right")
     table.add_column("Status")
     table.add_column("Created")
+    table.add_column("Wait", justify="right")
     table.add_column("Took", justify="right")
     table.add_column("Speed", justify="right")
 
@@ -384,6 +394,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
             total_duration += job.audio_duration_seconds
             n_with_duration += 1
 
+        wait_s = _job_wait_seconds(job)
         took_s = _job_processing_seconds(job)
         if took_s is not None and job.audio_duration_seconds is not None:
             total_processing += took_s
@@ -395,6 +406,7 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
             _format_duration(job.audio_duration_seconds),
             f"[{status_style}]{job.status.value}[/]",
             job.created_at.strftime("%Y-%m-%d %H:%M"),
+            _format_duration(wait_s),
             _format_duration(took_s),
             _format_speed(job.audio_duration_seconds, took_s),
         )
