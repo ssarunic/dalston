@@ -324,6 +324,34 @@ def _resolve_engine(stage: str, engine_id: str | None) -> tuple[str, dict[str, A
     return eid, cal
 
 
+def _parse_mode(value: str) -> tuple[str, str | None]:
+    """Parse the ``--mode`` argument value.
+
+    Returns ``(mode_key, other_preset_key)`` where ``mode_key`` is what
+    will be used to index into ``throughput_optimal`` in the emitted
+    profile (``"solo"`` or ``"coloc_with_<other_preset_key>"``) and
+    ``other_preset_key`` is the GPU_ENGINE_PRESETS key of the other
+    co-located engine (``None`` for solo).
+
+    The key on disk uses the preset key (not the engine_id with version),
+    matching what the launch-time resolver in ``dalston-aws`` consumes —
+    see M89 spec §"Sync tool" for the translation rules.
+    """
+    if value == "solo":
+        return "solo", None
+    if value.startswith("coloc:"):
+        other = value.removeprefix("coloc:").strip()
+        if not other:
+            raise ValueError(
+                "--mode coloc:<other_preset_key> requires a non-empty key, "
+                "e.g. 'coloc:pyannote' when the subject is nemo"
+            )
+        return f"coloc_with_{other}", other
+    raise ValueError(
+        f"--mode must be 'solo' or 'coloc:<other_preset_key>', got: {value!r}"
+    )
+
+
 def _compute_throughput_optimal(
     measurements: list[dict[str, Any]],
     gpu_vram_mb: int,
@@ -404,14 +432,20 @@ def run_calibration(
     audio_file: str | None = None,
     throughput_sweep: bool = False,
     safety_margin: float = 0.85,
+    mode: str = "solo",
 ) -> dict[str, Any]:
     """Run the full calibration sweep and return the profile dict.
 
     When ``throughput_sweep`` is True, an additional ``throughput_optimal``
-    block is added to the returned profile under the ``solo`` key,
-    selecting the highest-RTF measurement that fits under
-    ``gpu_vram_mb * safety_margin``. Coloc-mode emission ships in
-    M89.2.2.
+    block is added to the returned profile keyed by the parsed ``mode``
+    (``"solo"`` or ``"coloc_with_<other_preset_key>"``), selecting the
+    highest-RTF measurement that fits under
+    ``gpu_vram_mb * safety_margin``. ``mode`` defaults to ``"solo"`` so
+    existing call sites keep their previous behaviour.
+
+    The subject/background-paused protocol for coloc is the operator's
+    responsibility (orchestrated by ``calibrate-coloc-gpu.sh``); this
+    function only labels the emitted block.
     """
     eid, cal = _resolve_engine(stage, engine_id)
     endpoint = STAGE_ENDPOINTS.get(stage)
@@ -498,13 +532,54 @@ def run_calibration(
     }
 
     if throughput_sweep:
+        mode_key, _other = _parse_mode(mode)
         optimal = _compute_throughput_optimal(
             measurements, gpu_total_mb, safety_margin=safety_margin
         )
         # Always emit the block (even when None) so consumers can tell
         # "ran a throughput sweep, no cell fit" apart from "didn't sweep".
-        profile["throughput_optimal"] = {"solo": optimal}
+        profile["throughput_optimal"] = {mode_key: optimal}
 
+    return profile
+
+
+def _merge_throughput_into_existing(
+    profile: dict[str, Any], output_path: Path
+) -> dict[str, Any]:
+    """Preserve ``throughput_optimal`` modes from an existing profile.
+
+    If ``output_path`` already holds a profile for the same engine+GPU,
+    keep any ``throughput_optimal`` modes that aren't being overwritten
+    by this run. Lets the operator accumulate ``solo`` + ``coloc_with_X``
+    + ``coloc_with_Y`` across separate calibrator invocations without
+    each one wiping the others.
+
+    Skips the merge (returns ``profile`` unchanged) when the existing
+    file is unreadable, malformed, or doesn't match this profile's
+    ``engine_id`` / ``gpu`` — in those cases the caller is overwriting
+    a different profile and the existing data isn't relevant.
+    """
+    if not output_path.exists():
+        return profile
+    try:
+        existing = json.loads(output_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return profile
+    if not isinstance(existing, dict):
+        return profile
+    if existing.get("engine_id") != profile.get("engine_id"):
+        return profile
+    if existing.get("gpu") != profile.get("gpu"):
+        return profile
+
+    existing_opt = existing.get("throughput_optimal") or {}
+    new_opt = profile.get("throughput_optimal") or {}
+    if not isinstance(existing_opt, dict) or not isinstance(new_opt, dict):
+        return profile
+    # New per-mode results win; modes not touched this run are preserved.
+    merged = {**existing_opt, **new_opt}
+    if merged:
+        profile["throughput_optimal"] = merged
     return profile
 
 
@@ -1640,8 +1715,7 @@ def main() -> None:
         help=(
             "M89.2.1: pick the highest-RTF cell from the sweep that fits "
             "under gpu_vram_mb * safety_margin and emit a "
-            "`throughput_optimal.solo` block in the profile JSON. Coloc "
-            "mode and recommended_budget_mb derivation arrive in M89.2.2."
+            "`throughput_optimal[<mode>]` block in the profile JSON."
         ),
     )
     parser.add_argument(
@@ -1654,8 +1728,27 @@ def main() -> None:
             "is set. Default: 0.85."
         ),
     )
+    parser.add_argument(
+        "--mode",
+        default="solo",
+        help=(
+            "M89.2.2: 'solo' or 'coloc:<other_preset_key>'. Names the key "
+            "under `throughput_optimal` in the output profile. The "
+            "subject/background-paused protocol for coloc mode is the "
+            "orchestrator's responsibility (calibrate-coloc-gpu.sh). "
+            "When this run's --output file already holds a profile for "
+            "the same engine+GPU, modes from previous runs are preserved. "
+            "Default: solo."
+        ),
+    )
 
     args = parser.parse_args()
+
+    # Fail fast on a malformed --mode before doing GPU work.
+    try:
+        _mode_key, _other_preset = _parse_mode(args.mode)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     engine_id = args.engine_id or DEFAULT_ENGINE_FOR_STAGE.get(args.stage)
 
@@ -1693,26 +1786,33 @@ def main() -> None:
             audio_file=args.audio_file,
             throughput_sweep=args.throughput_sweep,
             safety_margin=args.safety_margin,
+            mode=args.mode,
         )
 
         output_path = Path(args.output)
+        # Preserve `throughput_optimal` modes from previous runs of this
+        # same engine+GPU (M89.2.2 — the coloc orchestrator runs the
+        # calibrator twice, once per subject, both writing to the same
+        # profile file).
+        profile = _merge_throughput_into_existing(profile, output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(profile, indent=2) + "\n")
         print(f"\nProfile written to {output_path}")
         print(f"Coefficients: {json.dumps(profile['model']['coefficients'])}")
         print(f"R²: {profile['model']['r_squared']}")
         if args.throughput_sweep:
-            optimal = (profile.get("throughput_optimal") or {}).get("solo")
+            mode_key, _other = _parse_mode(args.mode)
+            optimal = (profile.get("throughput_optimal") or {}).get(mode_key)
             if optimal:
                 print(
-                    f"Throughput-optimal (solo): {optimal['axis']}={optimal['value']} "
+                    f"Throughput-optimal ({mode_key}): {optimal['axis']}={optimal['value']} "
                     f"RTF={optimal['rtf']}x peak={optimal['peak_vram_mb']}MB "
                     f"(threshold {optimal['threshold_mb']}MB at "
                     f"{optimal['safety_margin']:.0%})"
                 )
             else:
                 print(
-                    f"Throughput-optimal (solo): no cell fits under "
+                    f"Throughput-optimal ({mode_key}): no cell fits under "
                     f"{args.safety_margin:.0%} of GPU VRAM."
                 )
 

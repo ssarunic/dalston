@@ -1,15 +1,23 @@
-"""Tests for M89.2.1 throughput-optimal cell selection in calibrate_vram.
+"""Tests for the M89.2 throughput-sweep additions to calibrate_vram.
 
-The helper picks the highest-RTF measurement that fits under
-``gpu_vram_mb * safety_margin``. RTF is ``audio_s / elapsed_s`` from each
-measurement; threshold filtering uses ``peak_vram_mb``.
+Covers the argmax picker (89.2.1) and the mode-parsing + merge-write
+plumbing that lets a single profile JSON accumulate ``throughput_optimal``
+data across multiple modes (89.2.2).
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
-from dalston.tools.calibrate_vram import _compute_throughput_optimal
+import pytest
+
+from dalston.tools.calibrate_vram import (
+    _compute_throughput_optimal,
+    _merge_throughput_into_existing,
+    _parse_mode,
+)
 
 
 def _measurement(
@@ -134,3 +142,188 @@ def test_axis_detection_for_duration_only_sweep() -> None:
     assert optimal["axis"] == ""
     assert optimal["value"] is None
     assert optimal["rtf"] == 600.0
+
+
+# ---------------------------------------------------------------------------
+# M89.2.2: --mode parsing
+# ---------------------------------------------------------------------------
+
+
+def test_parse_mode_solo() -> None:
+    assert _parse_mode("solo") == ("solo", None)
+
+
+def test_parse_mode_coloc_pyannote() -> None:
+    assert _parse_mode("coloc:pyannote") == ("coloc_with_pyannote", "pyannote")
+
+
+def test_parse_mode_coloc_strips_whitespace() -> None:
+    assert _parse_mode("coloc:  nemo  ") == ("coloc_with_nemo", "nemo")
+
+
+def test_parse_mode_rejects_bare_coloc() -> None:
+    with pytest.raises(ValueError, match="non-empty key"):
+        _parse_mode("coloc:")
+
+
+def test_parse_mode_rejects_unknown_form() -> None:
+    with pytest.raises(ValueError, match="solo' or 'coloc"):
+        _parse_mode("with_pyannote")
+
+
+# ---------------------------------------------------------------------------
+# M89.2.2: profile merge-write
+# ---------------------------------------------------------------------------
+
+
+def _profile(
+    *, engine_id: str, gpu: str, throughput_optimal: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    p: dict[str, Any] = {
+        "schema_version": "1.0",
+        "engine_id": engine_id,
+        "model_id": "test-model",
+        "stage": "transcribe",
+        "gpu": gpu,
+        "gpu_vram_mb": 15360,
+        "cuda_overhead_mb": 700,
+        "measurements": [],
+        "model": {
+            "weights_mb": 700,
+            "formula": "S",
+            "coefficients": {},
+            "r_squared": 1.0,
+            "safety_margin": 0.15,
+        },
+    }
+    if throughput_optimal is not None:
+        p["throughput_optimal"] = throughput_optimal
+    return p
+
+
+def test_merge_preserves_modes_not_in_new_profile(tmp_path: Path) -> None:
+    # Pre-existing profile has a solo block from an earlier run.
+    existing = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    # New run only computes coloc_with_pyannote.
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "coloc_with_pyannote": {"axis": "vad_batch_size", "value": 2, "rtf": 22.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert set(merged["throughput_optimal"].keys()) == {"solo", "coloc_with_pyannote"}
+    assert merged["throughput_optimal"]["solo"]["value"] == 4
+    assert merged["throughput_optimal"]["coloc_with_pyannote"]["value"] == 2
+
+
+def test_merge_new_run_overwrites_same_mode(tmp_path: Path) -> None:
+    existing = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    # Re-running solo replaces the old solo block (operator re-ran the sweep).
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 8, "rtf": 38.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert merged["throughput_optimal"]["solo"]["value"] == 8
+    assert merged["throughput_optimal"]["solo"]["rtf"] == 38.0
+
+
+def test_merge_skipped_when_engine_id_differs(tmp_path: Path) -> None:
+    # Existing file is for pyannote, new run is for nemo — no merge, just overwrite.
+    existing = _profile(
+        engine_id="pyannote-4.0",
+        gpu="T4",
+        throughput_optimal={"solo": {"axis": "audio_s", "value": 600, "rtf": 600.0}},
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert merged["throughput_optimal"] == {
+        "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+    }
+
+
+def test_merge_skipped_when_gpu_differs(tmp_path: Path) -> None:
+    existing = _profile(
+        engine_id="nemo",
+        gpu="A10G",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 8, "rtf": 60.0}
+        },
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert merged["throughput_optimal"] == {
+        "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+    }
+
+
+def test_merge_no_op_when_output_missing(tmp_path: Path) -> None:
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, tmp_path / "nope.json")
+    assert merged["throughput_optimal"] == {
+        "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+    }
+
+
+def test_merge_no_op_when_existing_file_is_corrupt(tmp_path: Path) -> None:
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text("not json {{{")
+
+    new_profile = _profile(
+        engine_id="nemo",
+        gpu="T4",
+        throughput_optimal={
+            "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+        },
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert merged["throughput_optimal"] == {
+        "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+    }
