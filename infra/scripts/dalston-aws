@@ -124,7 +124,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         # key. Pyannote 4.0 peak working set ≈ 1.4 GB resident; budgets give
         # ~2x headroom for activation/fragmentation.
         "vram_budget_by_gpu": {
-            "T4": {"solo": 3500, "coloc_with_nemo": 3000},
+            "T4": {"solo": 3500, "coloc_with_nemo": 2000},
             "A10G": {"solo": 4000, "coloc_with_nemo": 4000},
             "L4": {"solo": 4000, "coloc_with_nemo": 4000},
         },
@@ -150,7 +150,7 @@ GPU_ENGINE_PRESETS: dict[str, dict] = {
         # ≈ 5 GB; T4 co-located leaves ~5 GB for activations + ~1 GB for
         # pyannote headroom on the 15 GB card.
         "vram_budget_by_gpu": {
-            "T4": {"solo": 11000, "coloc_with_pyannote": 9000},
+            "T4": {"solo": 11000, "coloc_with_pyannote": 10000},
             "A10G": {"solo": 20000, "coloc_with_pyannote": 18000},
             "L4": {"solo": 20000, "coloc_with_pyannote": 20000},
         },
