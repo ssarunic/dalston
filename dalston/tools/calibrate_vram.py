@@ -324,6 +324,26 @@ def _resolve_engine(stage: str, engine_id: str | None) -> tuple[str, dict[str, A
     return eid, cal
 
 
+def _compute_recommended_budget_mb(peak_vram_mb: int, headroom_mb: int = 500) -> int:
+    """Round up ``peak + headroom`` to the nearest 1000 MB.
+
+    Produces a value sized for ``DALSTON_VRAM_BUDGET_MB`` in the preset.
+
+    Solo mode: the chosen cell's ``peak_vram_mb`` captures
+    ``subject_weights + subject_activations``, so the returned value is
+    the subject's full footprint plus a small buffer — directly usable
+    as ``vram_budget_by_gpu[<gpu>]["solo"]``.
+
+    Coloc mode: ``peak_vram_mb`` also includes the background engine's
+    resident weights (M89.2.2 protocol leaves them on the GPU via
+    ``docker pause``), so this is a *conservative* value. M89.3's sync
+    tool refines coloc budgets by subtracting the other engine's solo
+    baseline before writing to ``vram_budget_by_gpu[<gpu>][coloc_with_X]``.
+    """
+    raw = max(0, peak_vram_mb) + max(0, headroom_mb)
+    return ((raw + 999) // 1000) * 1000
+
+
 def _parse_mode(value: str) -> tuple[str, str | None]:
     """Parse the ``--mode`` argument value.
 
@@ -433,6 +453,7 @@ def run_calibration(
     throughput_sweep: bool = False,
     safety_margin: float = 0.85,
     mode: str = "solo",
+    budget_headroom_mb: int = 500,
 ) -> dict[str, Any]:
     """Run the full calibration sweep and return the profile dict.
 
@@ -540,19 +561,46 @@ def run_calibration(
         # "ran a throughput sweep, no cell fit" apart from "didn't sweep".
         profile["throughput_optimal"] = {mode_key: optimal}
 
+        # M89.2.3: capture baseline at sweep start + emit a budget per mode.
+        # baselines[mode_key].start_mb means different things by mode:
+        #   solo                : GPU memory with only the subject loaded
+        #                         (≈ subject_weights, used by M89.3 sync tool
+        #                         to subtract other engines' weights when
+        #                         deriving their coloc budgets).
+        #   coloc_with_<other>  : both engines loaded, other paused
+        #                         (= subject_weights + other_weights).
+        profile["baselines"] = {mode_key: {"start_mb": baseline_mb}}
+        profile["recommended_budget_mb"] = {
+            mode_key: (
+                _compute_recommended_budget_mb(
+                    optimal["peak_vram_mb"], headroom_mb=budget_headroom_mb
+                )
+                if optimal
+                else None
+            )
+        }
+
     return profile
+
+
+_MERGED_PER_MODE_BLOCKS: tuple[str, ...] = (
+    "throughput_optimal",
+    "baselines",
+    "recommended_budget_mb",
+)
 
 
 def _merge_throughput_into_existing(
     profile: dict[str, Any], output_path: Path
 ) -> dict[str, Any]:
-    """Preserve ``throughput_optimal`` modes from an existing profile.
+    """Preserve per-mode blocks from an existing profile.
 
     If ``output_path`` already holds a profile for the same engine+GPU,
-    keep any ``throughput_optimal`` modes that aren't being overwritten
-    by this run. Lets the operator accumulate ``solo`` + ``coloc_with_X``
-    + ``coloc_with_Y`` across separate calibrator invocations without
-    each one wiping the others.
+    keep any modes in ``throughput_optimal`` / ``baselines`` /
+    ``recommended_budget_mb`` that aren't being overwritten by this run.
+    Lets the operator accumulate ``solo`` + ``coloc_with_X`` + ``coloc_with_Y``
+    across separate calibrator invocations without each one wiping the
+    others.
 
     Skips the merge (returns ``profile`` unchanged) when the existing
     file is unreadable, malformed, or doesn't match this profile's
@@ -572,14 +620,14 @@ def _merge_throughput_into_existing(
     if existing.get("gpu") != profile.get("gpu"):
         return profile
 
-    existing_opt = existing.get("throughput_optimal") or {}
-    new_opt = profile.get("throughput_optimal") or {}
-    if not isinstance(existing_opt, dict) or not isinstance(new_opt, dict):
-        return profile
-    # New per-mode results win; modes not touched this run are preserved.
-    merged = {**existing_opt, **new_opt}
-    if merged:
-        profile["throughput_optimal"] = merged
+    for block in _MERGED_PER_MODE_BLOCKS:
+        existing_block = existing.get(block) or {}
+        new_block = profile.get(block) or {}
+        if not isinstance(existing_block, dict) or not isinstance(new_block, dict):
+            continue
+        merged = {**existing_block, **new_block}
+        if merged:
+            profile[block] = merged
     return profile
 
 
@@ -1741,6 +1789,17 @@ def main() -> None:
             "Default: solo."
         ),
     )
+    parser.add_argument(
+        "--budget-headroom-mb",
+        type=int,
+        default=500,
+        help=(
+            "M89.2.3: headroom in MB added to the throughput-optimal cell's "
+            "peak VRAM before rounding up to the nearest 1000 MB. The "
+            "result is emitted as `recommended_budget_mb[<mode>]` in the "
+            "profile. Default: 500."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1787,6 +1846,7 @@ def main() -> None:
             throughput_sweep=args.throughput_sweep,
             safety_margin=args.safety_margin,
             mode=args.mode,
+            budget_headroom_mb=args.budget_headroom_mb,
         )
 
         output_path = Path(args.output)
@@ -1815,6 +1875,15 @@ def main() -> None:
                     f"Throughput-optimal ({mode_key}): no cell fits under "
                     f"{args.safety_margin:.0%} of GPU VRAM."
                 )
+            budget = (profile.get("recommended_budget_mb") or {}).get(mode_key)
+            if budget is not None:
+                note = (
+                    " (conservative — includes background weights; "
+                    "sync_vram_presets refines)"
+                    if mode_key.startswith("coloc_with_")
+                    else ""
+                )
+                print(f"Recommended budget ({mode_key}): {budget} MB{note}")
 
 
 if __name__ == "__main__":

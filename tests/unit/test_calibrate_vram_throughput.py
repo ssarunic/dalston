@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from dalston.tools.calibrate_vram import (
+    _compute_recommended_budget_mb,
     _compute_throughput_optimal,
     _merge_throughput_into_existing,
     _parse_mode,
@@ -327,3 +328,107 @@ def test_merge_no_op_when_existing_file_is_corrupt(tmp_path: Path) -> None:
     assert merged["throughput_optimal"] == {
         "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
     }
+
+
+# ---------------------------------------------------------------------------
+# M89.2.3: recommended budget derivation
+# ---------------------------------------------------------------------------
+
+
+def test_budget_rounds_up_to_nearest_1000() -> None:
+    # 9000 peak + 500 headroom = 9500 → rounds up to 10000.
+    assert _compute_recommended_budget_mb(9000) == 10000
+    # 10000 peak + 500 = 10500 → 11000.
+    assert _compute_recommended_budget_mb(10000) == 11000
+    # 11999 peak + 500 = 12499 → 13000 (next 1000).
+    assert _compute_recommended_budget_mb(11999) == 13000
+
+
+def test_budget_respects_custom_headroom() -> None:
+    # 5000 peak + 1500 headroom = 6500 → 7000.
+    assert _compute_recommended_budget_mb(5000, headroom_mb=1500) == 7000
+
+
+def test_budget_clamps_negatives_to_zero_before_rounding() -> None:
+    # Defensive: synthetic / malformed peak values shouldn't yield negatives.
+    assert _compute_recommended_budget_mb(-100, headroom_mb=-50) == 0
+
+
+def test_budget_exact_thousand_stays_at_thousand() -> None:
+    # 9500 + 500 = 10000 exactly → ceil-to-1000 returns 10000, not 11000.
+    # Documents the rounding policy: only excess gets bumped.
+    assert _compute_recommended_budget_mb(9500) == 10000
+
+
+# ---------------------------------------------------------------------------
+# M89.2.3: merge-write preserves baselines + recommended_budget_mb
+# ---------------------------------------------------------------------------
+
+
+def test_merge_preserves_baselines_and_recommended_budget(tmp_path: Path) -> None:
+    existing = _profile(engine_id="nemo", gpu="T4")
+    existing.update(
+        {
+            "throughput_optimal": {
+                "solo": {"axis": "vad_batch_size", "value": 4, "rtf": 30.0}
+            },
+            "recommended_budget_mb": {"solo": 11000},
+            "baselines": {"solo": {"start_mb": 5200}},
+        }
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    # Coloc run brings new mode; should merge all three blocks.
+    new_profile = _profile(engine_id="nemo", gpu="T4")
+    new_profile.update(
+        {
+            "throughput_optimal": {
+                "coloc_with_pyannote": {
+                    "axis": "vad_batch_size",
+                    "value": 2,
+                    "rtf": 22.0,
+                }
+            },
+            "recommended_budget_mb": {"coloc_with_pyannote": 11000},
+            "baselines": {"coloc_with_pyannote": {"start_mb": 6800}},
+        }
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+
+    assert set(merged["throughput_optimal"].keys()) == {
+        "solo",
+        "coloc_with_pyannote",
+    }
+    assert merged["recommended_budget_mb"] == {
+        "solo": 11000,
+        "coloc_with_pyannote": 11000,
+    }
+    assert merged["baselines"] == {
+        "solo": {"start_mb": 5200},
+        "coloc_with_pyannote": {"start_mb": 6800},
+    }
+
+
+def test_merge_overwrites_same_mode_in_recommended_budget(tmp_path: Path) -> None:
+    existing = _profile(engine_id="nemo", gpu="T4")
+    existing.update(
+        {
+            "recommended_budget_mb": {"solo": 11000},
+            "baselines": {"solo": {"start_mb": 5200}},
+        }
+    )
+    out = tmp_path / "transcribe-nemo-T4.json"
+    out.write_text(json.dumps(existing))
+
+    # Re-run solo with a different headroom — should overwrite, not stack.
+    new_profile = _profile(engine_id="nemo", gpu="T4")
+    new_profile.update(
+        {
+            "recommended_budget_mb": {"solo": 12000},
+            "baselines": {"solo": {"start_mb": 5300}},
+        }
+    )
+    merged = _merge_throughput_into_existing(new_profile, out)
+    assert merged["recommended_budget_mb"] == {"solo": 12000}
+    assert merged["baselines"] == {"solo": {"start_mb": 5300}}
