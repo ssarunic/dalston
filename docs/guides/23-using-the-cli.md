@@ -156,8 +156,14 @@ dalston jobs cancel JOB_ID
 dalston jobs delete JOB_ID              # also removes S3 artifacts
 ```
 
-The table summarizes total audio across the rows in its footer
-(e.g. `36 jobs, 36 with duration — total audio: 31h26m (31.44h)`),
+The table has columns:
+
+- **Duration** — audio length of the input.
+- **Took** — engine time (`completed_at − started_at`), so queue wait is excluded.
+- **Speed** — realtime factor (`audio / took`); `5.6x` means processed 5.6× faster than realtime.
+
+The footer summarises totals across the rows
+(e.g. `36 jobs, 36 with duration — total audio: 31h26m (31.44h); total compute: 1h12m (avg speed 26x)`),
 useful for back-of-envelope cost-per-audio-hour calculations.
 
 ---

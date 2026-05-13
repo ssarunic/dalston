@@ -65,6 +65,19 @@ def test_jobs_list_since_invalid():
     assert "ISO 8601" in result.output
 
 
+def test_format_speed():
+    """_format_speed renders realtime factor reasonably across ranges."""
+    from dalston_cli.output import _format_speed
+
+    assert _format_speed(125.5, 50) == "2.5x"
+    assert _format_speed(60, 600) == "0.1x"
+    assert _format_speed(60, 6000) == "<0.1x"
+    assert _format_speed(1000, 10) == "100x"
+    assert _format_speed(None, 50) == "-"
+    assert _format_speed(50, None) == "-"
+    assert _format_speed(50, 0) == "-"
+
+
 def test_parse_since_relative_and_absolute():
     """_parse_since handles relative offsets, today/yesterday, ISO 8601, and HH:MM."""
     from datetime import UTC, datetime, timedelta

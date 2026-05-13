@@ -294,6 +294,25 @@ def _format_duration(seconds: float | None) -> str:
     return f"{int(seconds // 3600)}h{int((seconds % 3600) // 60):02d}m"
 
 
+def _job_processing_seconds(job: JobSummary) -> float | None:
+    """Engine time: started_at → completed_at, in seconds."""
+    if job.started_at is None or job.completed_at is None:
+        return None
+    return (job.completed_at - job.started_at).total_seconds()
+
+
+def _format_speed(audio_s: float | None, processing_s: float | None) -> str:
+    """Realtime factor (audio / processing). e.g. ``5.6x``."""
+    if audio_s is None or processing_s is None or processing_s <= 0:
+        return "-"
+    ratio = audio_s / processing_s
+    if ratio < 0.1:
+        return "<0.1x"
+    if ratio < 10:
+        return f"{ratio:.1f}x"
+    return f"{ratio:.0f}x"
+
+
 def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     """Display jobs list.
 
@@ -302,22 +321,34 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
         as_json: Output as JSON if True.
     """
     if as_json:
-        data = [
-            {
-                "id": str(j.id),
-                "status": j.status.value,
-                "display_name": j.display_name,
-                "created_at": j.created_at.isoformat(),
-                "started_at": j.started_at.isoformat() if j.started_at else None,
-                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
-                "audio_duration_seconds": j.audio_duration_seconds,
-                "result_language_code": j.result_language_code,
-                "result_word_count": j.result_word_count,
-                "result_segment_count": j.result_segment_count,
-                "result_speaker_count": j.result_speaker_count,
-            }
-            for j in jobs
-        ]
+        data = []
+        for j in jobs:
+            took_s = _job_processing_seconds(j)
+            data.append(
+                {
+                    "id": str(j.id),
+                    "status": j.status.value,
+                    "display_name": j.display_name,
+                    "created_at": j.created_at.isoformat(),
+                    "started_at": j.started_at.isoformat() if j.started_at else None,
+                    "completed_at": j.completed_at.isoformat()
+                    if j.completed_at
+                    else None,
+                    "audio_duration_seconds": j.audio_duration_seconds,
+                    "processing_seconds": took_s,
+                    "speed_realtime_factor": (
+                        j.audio_duration_seconds / took_s
+                        if j.audio_duration_seconds is not None
+                        and took_s is not None
+                        and took_s > 0
+                        else None
+                    ),
+                    "result_language_code": j.result_language_code,
+                    "result_word_count": j.result_word_count,
+                    "result_segment_count": j.result_segment_count,
+                    "result_speaker_count": j.result_speaker_count,
+                }
+            )
         print(json.dumps(data, indent=2))
         return
 
@@ -327,6 +358,8 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     table.add_column("Status")
     table.add_column("Created")
     table.add_column("Duration", justify="right")
+    table.add_column("Took", justify="right")
+    table.add_column("Speed", justify="right")
 
     status_styles = {
         "completed": "green",
@@ -337,7 +370,9 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
     }
 
     total_duration = 0.0
+    total_processing = 0.0
     n_with_duration = 0
+    n_with_speed = 0
     for job in jobs:
         status_style = status_styles.get(job.status.value, "")
         # Truncate display name if too long
@@ -349,21 +384,34 @@ def output_jobs_table(jobs: list[JobSummary], as_json: bool = False) -> None:
             total_duration += job.audio_duration_seconds
             n_with_duration += 1
 
+        took_s = _job_processing_seconds(job)
+        if took_s is not None and job.audio_duration_seconds is not None:
+            total_processing += took_s
+            n_with_speed += 1
+
         table.add_row(
             str(job.id)[:12] + "...",
             name,
             f"[{status_style}]{job.status.value}[/]",
             job.created_at.strftime("%Y-%m-%d %H:%M"),
             _format_duration(job.audio_duration_seconds),
+            _format_duration(took_s),
+            _format_speed(job.audio_duration_seconds, took_s),
         )
 
     console.print(table)
     if n_with_duration:
-        console.print(
-            f"[dim]{len(jobs)} jobs, {n_with_duration} with duration — "
+        footer = (
+            f"{len(jobs)} jobs, {n_with_duration} with duration — "
             f"total audio: {_format_duration(total_duration)} "
-            f"({total_duration / 3600:.2f}h)[/dim]"
+            f"({total_duration / 3600:.2f}h)"
         )
+        if n_with_speed and total_processing > 0:
+            footer += (
+                f"; total compute: {_format_duration(total_processing)} "
+                f"(avg speed {_format_speed(total_duration, total_processing)})"
+            )
+        console.print(f"[dim]{footer}[/dim]")
     else:
         console.print(f"[dim]{len(jobs)} jobs[/dim]")
 
