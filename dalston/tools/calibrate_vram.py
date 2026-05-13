@@ -324,6 +324,76 @@ def _resolve_engine(stage: str, engine_id: str | None) -> tuple[str, dict[str, A
     return eid, cal
 
 
+def _compute_throughput_optimal(
+    measurements: list[dict[str, Any]],
+    gpu_vram_mb: int,
+    safety_margin: float = 0.85,
+) -> dict[str, Any] | None:
+    """Pick the highest-RTF measurement that fits under the safety budget.
+
+    Reads ``measurements`` produced by ``_sweep_default`` /
+    ``_sweep_faster_whisper`` — each entry must carry ``params`` (with
+    ``audio_s``), ``peak_vram_mb`` and ``elapsed_s``. RTF is computed as
+    ``audio_s / elapsed_s``. The chosen cell is the one with maximum RTF
+    among entries where ``peak_vram_mb <= gpu_vram_mb * safety_margin``;
+    returns ``None`` if nothing fits or no measurements have positive
+    elapsed time (e.g. dry-run synthetic data with zero ``elapsed_s``).
+
+    For coloc mode the caller is responsible for filtering to a
+    background-paused measurement window; this helper is purely
+    arithmetic on whatever it receives. The full subject/background
+    protocol arrives in M89.2.2.
+    """
+    if not measurements or gpu_vram_mb <= 0:
+        return None
+
+    threshold_mb = int(gpu_vram_mb * safety_margin)
+    fits: list[dict[str, Any]] = []
+    for m in measurements:
+        params = m.get("params") or {}
+        audio_s = params.get("audio_s") or params.get("audio_duration_s") or 0
+        elapsed = m.get("elapsed_s") or 0
+        peak_mb = m.get("peak_vram_mb") or m.get("peak_mb") or 0
+        if audio_s <= 0 or elapsed <= 0 or peak_mb <= 0:
+            continue
+        if peak_mb > threshold_mb:
+            continue
+        rtf = audio_s / elapsed
+        fits.append(
+            {
+                "rtf": round(rtf, 3),
+                "peak_vram_mb": peak_mb,
+                "delta_mb": m.get("delta_mb", 0),
+                "elapsed_s": elapsed,
+                "audio_s": audio_s,
+                "params": params,
+            }
+        )
+
+    if not fits:
+        return None
+
+    best = max(fits, key=lambda x: x["rtf"])
+
+    # Identify the swept axis name + value. The sweep params dict has
+    # one varying key beyond audio_s; pick it for human-readable output.
+    axis_name = next(
+        (k for k in best["params"] if k not in ("audio_s", "audio_duration_s")),
+        "",
+    )
+    return {
+        "axis": axis_name,
+        "value": best["params"].get(axis_name) if axis_name else None,
+        "rtf": best["rtf"],
+        "peak_vram_mb": best["peak_vram_mb"],
+        "delta_mb": best["delta_mb"],
+        "audio_s": best["audio_s"],
+        "elapsed_s": best["elapsed_s"],
+        "safety_margin": safety_margin,
+        "threshold_mb": threshold_mb,
+    }
+
+
 def run_calibration(
     engine_url: str,
     stage: str,
@@ -332,8 +402,17 @@ def run_calibration(
     dry_run: bool = False,
     engine_id: str | None = None,
     audio_file: str | None = None,
+    throughput_sweep: bool = False,
+    safety_margin: float = 0.85,
 ) -> dict[str, Any]:
-    """Run the full calibration sweep and return the profile dict."""
+    """Run the full calibration sweep and return the profile dict.
+
+    When ``throughput_sweep`` is True, an additional ``throughput_optimal``
+    block is added to the returned profile under the ``solo`` key,
+    selecting the highest-RTF measurement that fits under
+    ``gpu_vram_mb * safety_margin``. Coloc-mode emission ships in
+    M89.2.2.
+    """
     eid, cal = _resolve_engine(stage, engine_id)
     endpoint = STAGE_ENDPOINTS.get(stage)
     if not endpoint:
@@ -399,7 +478,7 @@ def run_calibration(
         )
         coefficients, r_squared = _fit_model(measurements, eid)
 
-    profile = {
+    profile: dict[str, Any] = {
         "schema_version": "1.0",
         "engine_id": eid,
         "model_id": model_id or "",
@@ -417,6 +496,15 @@ def run_calibration(
             "safety_margin": 0.15,
         },
     }
+
+    if throughput_sweep:
+        optimal = _compute_throughput_optimal(
+            measurements, gpu_total_mb, safety_margin=safety_margin
+        )
+        # Always emit the block (even when None) so consumers can tell
+        # "ran a throughput sweep, no cell fit" apart from "didn't sweep".
+        profile["throughput_optimal"] = {"solo": optimal}
+
     return profile
 
 
@@ -1546,6 +1634,26 @@ def main() -> None:
         default=None,
         help="Path to a real audio file (overrides --audio-duration)",
     )
+    parser.add_argument(
+        "--throughput-sweep",
+        action="store_true",
+        help=(
+            "M89.2.1: pick the highest-RTF cell from the sweep that fits "
+            "under gpu_vram_mb * safety_margin and emit a "
+            "`throughput_optimal.solo` block in the profile JSON. Coloc "
+            "mode and recommended_budget_mb derivation arrive in M89.2.2."
+        ),
+    )
+    parser.add_argument(
+        "--safety-margin",
+        type=float,
+        default=0.85,
+        help=(
+            "Max peak VRAM, as a fraction of total GPU VRAM, that a cell "
+            "may use to count as 'fits'. Only used when --throughput-sweep "
+            "is set. Default: 0.85."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1583,6 +1691,8 @@ def main() -> None:
             dry_run=args.dry_run,
             engine_id=engine_id,
             audio_file=args.audio_file,
+            throughput_sweep=args.throughput_sweep,
+            safety_margin=args.safety_margin,
         )
 
         output_path = Path(args.output)
@@ -1591,6 +1701,20 @@ def main() -> None:
         print(f"\nProfile written to {output_path}")
         print(f"Coefficients: {json.dumps(profile['model']['coefficients'])}")
         print(f"R²: {profile['model']['r_squared']}")
+        if args.throughput_sweep:
+            optimal = (profile.get("throughput_optimal") or {}).get("solo")
+            if optimal:
+                print(
+                    f"Throughput-optimal (solo): {optimal['axis']}={optimal['value']} "
+                    f"RTF={optimal['rtf']}x peak={optimal['peak_vram_mb']}MB "
+                    f"(threshold {optimal['threshold_mb']}MB at "
+                    f"{optimal['safety_margin']:.0%})"
+                )
+            else:
+                print(
+                    f"Throughput-optimal (solo): no cell fits under "
+                    f"{args.safety_margin:.0%} of GPU VRAM."
+                )
 
 
 if __name__ == "__main__":
