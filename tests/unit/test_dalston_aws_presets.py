@@ -49,11 +49,11 @@ def daws():
 
 def test_t4_coloc_nemo_pyannote(daws) -> None:
     assert (
-        daws._resolve_vram_budget("nemo", "g4dn.xlarge", ["nemo", "pyannote"]) == 9000
+        daws._resolve_vram_budget("nemo", "g4dn.xlarge", ["nemo", "pyannote"]) == 10000
     )
     assert (
         daws._resolve_vram_budget("pyannote", "g4dn.xlarge", ["nemo", "pyannote"])
-        == 3000
+        == 2000
     )
 
 
@@ -108,7 +108,7 @@ def test_docker_block_t4_coloc(daws, monkeypatch) -> None:
     block = daws._generate_docker_run_block(
         "nemo", 9100, gpu_type="g4dn.xlarge", co_engines=["nemo", "pyannote"]
     )
-    assert _budget_in(block) == "9000"
+    assert _budget_in(block) == "10000"
 
 
 def test_docker_block_no_gpu_type_falls_back_to_preset(daws, monkeypatch) -> None:
@@ -134,5 +134,5 @@ def test_override_env_var_wins_over_per_gpu_budget(daws, monkeypatch) -> None:
     block = daws._generate_docker_run_block(
         "nemo", 9100, gpu_type="g4dn.xlarge", co_engines=["nemo", "pyannote"]
     )
-    # Override (7000) must beat the T4-coloc default (9000).
+    # Override (7000) must beat the T4-coloc default (10000).
     assert _budget_in(block) == "7000"
