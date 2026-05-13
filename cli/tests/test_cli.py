@@ -66,8 +66,10 @@ def test_jobs_list_since_invalid():
 
 
 def test_parse_since_relative_and_absolute():
-    """_parse_since handles relative offsets, today/yesterday, and ISO 8601."""
+    """_parse_since handles relative offsets, today/yesterday, ISO 8601, and HH:MM."""
     from datetime import UTC, datetime, timedelta
+
+    import typer
 
     from dalston_cli.commands.jobs import _parse_since
 
@@ -88,6 +90,24 @@ def test_parse_since_relative_and_absolute():
     )
     # Naive timestamps default to UTC
     assert _parse_since("2026-05-13").tzinfo is not None
+
+    # Bare HH:MM resolves to today at that UTC time (or yesterday if future)
+    tod = _parse_since("17:23")
+    assert tod.tzinfo is not None
+    assert tod.minute == 23 and tod.hour == 17
+    assert tod <= now
+
+    tod_with_seconds = _parse_since("17:23:45")
+    assert tod_with_seconds.second == 45
+
+    # Future HH:MM today rolls to yesterday
+    future_hh = (now + timedelta(hours=1)).strftime("%H:%M")
+    parsed = _parse_since(future_hh)
+    assert (now - parsed).total_seconds() > 23 * 3600
+
+    # Invalid time-of-day rejected
+    with pytest.raises(typer.BadParameter):
+        _parse_since("25:00")
 
 
 def test_export_help():
