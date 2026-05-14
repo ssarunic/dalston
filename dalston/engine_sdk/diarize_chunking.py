@@ -36,6 +36,7 @@ import numpy as np
 import structlog
 
 from dalston.common.pipeline_types import SpeakerTurn
+from dalston.engine_sdk.diarize_dtype import DTypeName, autocast_for_diarize
 
 logger = structlog.get_logger()
 
@@ -121,6 +122,16 @@ def compute_chunk_boundaries(
         start += step
 
     return boundaries
+
+
+def extract_annotation(result: Any) -> Any:
+    """Return the pyannote ``Annotation`` carried by a diarization result.
+
+    Pyannote 4.0 wraps the annotation in a ``DiarizationResponse`` exposed
+    via ``.speaker_diarization``; 3.x and chunked outputs return the
+    ``Annotation`` directly.
+    """
+    return getattr(result, "speaker_diarization", result)
 
 
 def get_audio_duration(audio_path: Path) -> float:
@@ -556,6 +567,7 @@ def run_chunked_diarization(
     exclusive: bool = False,
     max_chunk_s: float = DEFAULT_MAX_CHUNK_S,
     overlap_s: float = DEFAULT_OVERLAP_S,
+    dtype: DTypeName = "fp32",
     log: structlog.BoundLogger | None = None,
 ) -> tuple[list[str], list[SpeakerTurn]]:
     """Run diarization on long audio by chunking, diarizing, and merging.
@@ -574,6 +586,9 @@ def run_chunked_diarization(
             engine's existing ``_convert_annotation`` method.
         max_chunk_s: Maximum chunk duration in seconds.
         overlap_s: Overlap between adjacent chunks in seconds.
+        dtype: Precision for the per-chunk pyannote forward pass. ``"fp32"``
+            (default) preserves prior behaviour; ``"fp16"`` / ``"bf16"`` wraps
+            the inference call in ``torch.autocast``.
         log: Optional structured logger.
 
     Returns:
@@ -610,18 +625,15 @@ def run_chunked_diarization(
             spec = ChunkSpec(index=i, start=start, end=end, path=chunk_path)
 
             try:
-                # Run pyannote on chunk
-                raw_result = pipeline(str(chunk_path), **diarization_params)
+                # Run pyannote on chunk (autocast-wrapped for fp16/bf16)
+                with autocast_for_diarize(dtype):
+                    raw_result = pipeline(str(chunk_path), **diarization_params)
 
                 # Apply exclusive mode if requested (single speaker per segment)
                 if exclusive and hasattr(raw_result, "exclusive_speaker_diarization"):
                     raw_result = raw_result.exclusive_speaker_diarization
 
-                # Get the Annotation object (handles 4.0 DiarizationResponse)
-                if hasattr(raw_result, "speaker_diarization"):
-                    annotation = raw_result.speaker_diarization
-                else:
-                    annotation = raw_result
+                annotation = extract_annotation(raw_result)
 
                 # Convert to our types
                 speakers, turns = convert_annotation(raw_result)

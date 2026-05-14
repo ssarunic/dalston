@@ -1,6 +1,6 @@
 """Pydantic request schemas for Gateway API."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -52,6 +52,15 @@ class TranscriptionCreateParams(BaseModel):
         default=False,
         description="Exclusive diarization mode (pyannote 4.0+): one speaker per segment",
     )
+    diarize_dtype: Literal["fp32", "fp16", "bf16"] | None = Field(
+        default=None,
+        description=(
+            "Force a specific diarization precision for this job (M90). "
+            "Use 'fp32' as a bad-audio fallback if the engine's default "
+            "mixed precision misbehaves on this audio. Defaults to the "
+            "engine setting (DALSTON_DIARIZE_DTYPE)."
+        ),
+    )
 
     # Timestamps (M03)
     timestamps_granularity: str = Field(
@@ -97,6 +106,8 @@ class TranscriptionCreateParams(BaseModel):
             params["min_speakers"] = self.min_speakers
         if self.max_speakers is not None:
             params["max_speakers"] = self.max_speakers
+        if self.diarize_dtype is not None:
+            params["diarize_dtype"] = self.diarize_dtype
 
         # PII detection parameters (M26)
         if self.pii_detection:

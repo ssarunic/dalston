@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Schema version for pipeline types.  Bump this when you change any model in
 # this file.  Engines and orchestrator log it at startup, and engines include
 # it in their heartbeat so stale containers are caught immediately.
-PIPELINE_SCHEMA_VERSION = "2"
+PIPELINE_SCHEMA_VERSION = "3"
 
 # =============================================================================
 # Enums
@@ -532,6 +532,16 @@ class DiarizationRequest(StageInput):
             "Maximum diarization chunk duration in seconds. Primarily used by "
             "GPU calibration to sweep the pyannote throughput/VRAM tradeoff; "
             "runtime deployments normally set DALSTON_MAX_DIARIZE_CHUNK_S."
+        ),
+    )
+    dtype: Literal["fp32", "fp16", "bf16"] | None = Field(
+        default=None,
+        description=(
+            "Override engine default precision for this job. Used for the "
+            "bad-audio fallback (force fp32) or benchmarking. Engines that "
+            "do not support mixed precision ignore this field. Defaults to "
+            "the engine's resolved dtype (DALSTON_DIARIZE_DTYPE, which "
+            "itself defaults to fp32 until M90.5 validation is complete)."
         ),
     )
 
