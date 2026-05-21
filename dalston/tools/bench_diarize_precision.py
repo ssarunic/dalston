@@ -1,9 +1,14 @@
-"""Mixed-precision diarization benchmark (M90).
+"""Mixed-precision diarization benchmark (M90, retained post-rollback).
 
-Validates the autocast change before flipping the production default.
 Records wall-clock GPU inference time and peak VRAM per
 ``(dtype, audio_file)`` pair, and writes one RTTM per run so a separate
 comparison step can compute drift DER against the fp32 reference.
+
+The M90 production code (autocast wiring inside the pyannote engine) was
+rolled back after the g6/L4 run failed acceptance — see
+``docs/testing/M90-mixed-precision-results.md``. This harness is kept
+self-contained so a future precision experiment can re-run it without
+restoring the reverted engine plumbing.
 
 Run on a GPU instance (the benchmark requires CUDA — fp16/bf16 paths
 are no-ops on CPU)::
@@ -28,15 +33,36 @@ import argparse
 import json
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
+
+
+@contextmanager
+def _autocast(dtype_name: str) -> Iterator[None]:
+    """fp32 → nullcontext; fp16/bf16 → torch.autocast on CUDA."""
+    if dtype_name == "fp32":
+        with nullcontext():
+            yield
+        return
+
+    import torch
+
+    torch_dtype = torch.float16 if dtype_name == "fp16" else torch.bfloat16
+    with torch.autocast("cuda", dtype=torch_dtype):
+        yield
+
+
+def _extract_annotation(result: Any) -> Any:
+    """Pyannote 4.0 returns DiarizationResponse; older versions return Annotation."""
+    return getattr(result, "speaker_diarization", result)
 
 
 def _run_one(
     pipeline: Any,
     audio_path: Path,
     dtype_name: str,
-    autocast_ctx: Any,
 ) -> tuple[float, int, Any]:
     """Run a single diarization and return (elapsed_s, peak_mb, result)."""
     import torch
@@ -44,7 +70,7 @@ def _run_one(
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats()
     t0 = time.perf_counter()
-    with autocast_ctx(dtype_name):
+    with _autocast(dtype_name):
         result = pipeline(str(audio_path))
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
@@ -72,19 +98,7 @@ def main() -> None:
         default=2,
         help="Runs per (dtype, audio). The slowest pass (cold cache) is dropped.",
     )
-    parser.add_argument(
-        "--bypass-chunking",
-        action="store_true",
-        help=(
-            "Force single-pass diarization by setting "
-            "DALSTON_MAX_DIARIZE_CHUNK_S to infinity. Only safe on instances "
-            "with enough VRAM for the longest audio."
-        ),
-    )
     args = parser.parse_args()
-
-    if args.bypass_chunking:
-        os.environ["DALSTON_MAX_DIARIZE_CHUNK_S"] = "999999"
 
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
@@ -95,8 +109,17 @@ def main() -> None:
     import torch
     from pyannote.audio import Pipeline
 
-    from dalston.engine_sdk.diarize_chunking import extract_annotation
-    from dalston.engine_sdk.diarize_dtype import autocast_for_diarize
+    # Pyannote 4.0 calls .cpu().numpy() on segmentation outputs; under autocast
+    # those come back as bf16/fp16 and numpy lacks those dtypes. Upcast
+    # transparently so the autocast path is actually exercisable.
+    _orig_numpy = torch.Tensor.numpy
+
+    def _numpy_safe(self, *a, **kw):  # type: ignore[no-untyped-def]
+        if self.dtype in (torch.bfloat16, torch.float16):
+            self = self.float()
+        return _orig_numpy(self, *a, **kw)
+
+    torch.Tensor.numpy = _numpy_safe  # type: ignore[method-assign]
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is required for this benchmark.")
@@ -126,7 +149,7 @@ def main() -> None:
 
     # Warm-up — JIT, kernel autotune, lazy module init. Discard timing.
     print(f"[{args.instance_tag}] warm-up pass on {audios[0].name}")
-    _run_one(pipeline, audios[0], "fp32", autocast_for_diarize)
+    _run_one(pipeline, audios[0], "fp32")
 
     results: list[dict[str, Any]] = []
     for dtype_name in dtype_names:
@@ -135,9 +158,7 @@ def main() -> None:
             peak: int = 0
             result: Any = None
             for _ in range(args.passes):
-                elapsed, peak, result = _run_one(
-                    pipeline, audio, dtype_name, autocast_for_diarize
-                )
+                elapsed, peak, result = _run_one(pipeline, audio, dtype_name)
                 timings.append(elapsed)
 
             # Drop the slowest pass (typically the cold-cache run)
@@ -147,7 +168,7 @@ def main() -> None:
                 trimmed = timings
             chosen = sum(trimmed) / len(trimmed)
 
-            sd = extract_annotation(result)
+            sd = _extract_annotation(result)
             rttm_path = out_dir / f"{args.instance_tag}_{dtype_name}_{audio.stem}.rttm"
             with open(rttm_path, "w") as fh:
                 sd.write_rttm(fh)

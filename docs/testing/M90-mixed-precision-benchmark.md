@@ -1,5 +1,16 @@
 # M90 Mixed-Precision Diarization — Benchmark Runbook
 
+> **NOTE (2026-05-16):** The M90 production wiring was rolled back after
+> the g6 / L4 validation run — see
+> [M90-mixed-precision-results.md](M90-mixed-precision-results.md) for the
+> numbers and rationale. References below to `DALSTON_DIARIZE_DTYPE`,
+> `--bypass-chunking`, and `DiarizationRequest.dtype` no longer apply to
+> production code; the env var and per-job override do not exist on
+> `main`. The bench harness at `dalston/tools/bench_diarize_precision.py`
+> is kept and runs standalone (autocast is wrapped inside the bench
+> itself, not the engine). Use this runbook as a re-validation template
+> if a future attempt re-introduces engine-side autocast.
+
 Validates the precision change planned in [M90](../plan/milestones/M90-diarize-mixed-precision.md) on real GPU instances before flipping the production default.
 
 ## What we're measuring

@@ -1,12 +1,22 @@
 # M90: Mixed-Precision Diarization (fp16 / bf16)
 
+> **ROLLED BACK 2026-05-16.** Production wiring was reverted after the
+> g6 / L4 validation run failed three of five acceptance thresholds
+> (mean speedup 1.08× vs ≥ 1.6× target; mean drift DER 5.06 % vs < 1.0 %;
+> worst-file 12.67 % vs < 2.0 %). Root cause is structural: CPU-side
+> clustering (VBx / AHC / PLDA) dominates wall time, so autocasting the
+> GPU forward pass moves the needle ~8 %. Full numbers and rationale in
+> [docs/testing/M90-mixed-precision-results.md](../../testing/M90-mixed-precision-results.md).
+> The spec below is preserved for historical context and to seed any
+> future precision attempt (e.g. after clustering moves to GPU).
+
 |                    |                                                              |
 | ------------------ | ------------------------------------------------------------ |
 | **Goal**           | Run pyannote diarization in fp16 (T4) or bf16 (A10G / L4) to cut GPU wall time by 1.4–2× without changing diarization quality |
 | **Duration**       | 2–3 days                                                     |
 | **Dependencies**   | M84 (VRAM Budget Management & Diarization Chunking) — uses its chunked path; M89 (GPU-Aware VRAM Budgets) — uses its GPU-family detection |
 | **Deliverable**    | Autocast-gated diarization, runtime dtype auto-detect, env override, benchmark runbook, validation results checked in |
-| **Status**         | Not Started                                                  |
+| **Status**         | Rolled back — see banner above                               |
 
 ## User Story
 

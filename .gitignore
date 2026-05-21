@@ -50,6 +50,12 @@ node_modules/
 # Large test fixtures
 tests/audio/large/
 
+# Benchmark fixtures & raw output (M90 diarize precision and future runs)
+# Audio is large binary; RTTM/json results are summarized in docs/testing/*-results.md
+bench/audio/
+bench/results_*/
+infra/scripts/bench/results_*/
+
 # Temporary files
 tmp/
 
