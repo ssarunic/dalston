@@ -6,4 +6,4 @@ onnxruntime>=1.26.0
 
 # Audio processing
 soundfile>=0.13.1
-numpy>=2.4.4,<3.0.0
+numpy>=2.4.6,<3.0.0
