@@ -294,9 +294,6 @@ def _build_dag_with_engines(
     if parameters.get("exclusive"):
         diarize_config["exclusive"] = True
 
-    if parameters.get("diarize_dtype") is not None:
-        diarize_config["dtype"] = parameters["diarize_dtype"]
-
     # Build transcription config
     if "transcribe_config" in parameters:
         transcribe_config = {

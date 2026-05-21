@@ -21,14 +21,9 @@ from dalston.engine_sdk import (
 )
 from dalston.engine_sdk.diarize_chunking import (
     DEFAULT_MAX_CHUNK_S,
-    extract_annotation,
     get_audio_duration,
     overlap_stats_from_turns,
     run_chunked_diarization,
-)
-from dalston.engine_sdk.diarize_dtype import (
-    autocast_for_diarize,
-    resolve_diarize_dtype,
 )
 
 
@@ -56,11 +51,9 @@ class PyannoteEngine(Engine):
         self._max_chunk_s = float(
             os.environ.get("DALSTON_MAX_DIARIZE_CHUNK_S", DEFAULT_MAX_CHUNK_S)
         )
-        self._dtype = resolve_diarize_dtype()
         self.logger.info(
             "pyannote_4_0_engine_initialized",
             device=self._device,
-            dtype=self._dtype,
             max_chunk_s=self._max_chunk_s,
         )
 
@@ -154,25 +147,12 @@ class PyannoteEngine(Engine):
         max_speakers = params.max_speakers
         exclusive = params.exclusive
 
-        # Per-job dtype override falls back to the engine default
-        job_dtype = (
-            resolve_diarize_dtype(override=params.dtype)
-            if params.dtype
-            else self._dtype
-        )
-
         if min_speakers:
             self.logger.info("min_speakers_hint", min_speakers=min_speakers)
         if max_speakers:
             self.logger.info("max_speakers_hint", max_speakers=max_speakers)
         if exclusive:
             self.logger.info("exclusive_mode_enabled")
-        if job_dtype != self._dtype:
-            self.logger.info(
-                "diarize_dtype_override",
-                engine_dtype=self._dtype,
-                job_dtype=job_dtype,
-            )
 
         # Load pipeline (lazy)
         hf_token = self._get_hf_token(task_request.config)
@@ -201,9 +181,8 @@ class PyannoteEngine(Engine):
             if not use_chunked:
                 # Single-pass: try direct, fall back to chunked on OOM
                 try:
-                    self.logger.info("running_diarization", dtype=job_dtype)
-                    with autocast_for_diarize(job_dtype):
-                        diarization = pipeline(str(audio_path), **diarization_params)
+                    self.logger.info("running_diarization")
+                    diarization = pipeline(str(audio_path), **diarization_params)
 
                     if exclusive and hasattr(
                         diarization, "exclusive_speaker_diarization"
@@ -239,7 +218,6 @@ class PyannoteEngine(Engine):
                             convert_annotation=self._convert_annotation,
                             exclusive=bool(exclusive),
                             max_chunk_s=max_chunk_s,
-                            dtype=job_dtype,
                             log=self.logger,
                         )
                         break
@@ -292,7 +270,12 @@ class PyannoteEngine(Engine):
         speakers_set: set[str] = set()
         turns: list[SpeakerTurn] = []
 
-        annotation = extract_annotation(diarization)
+        # Pyannote 4.0 community pipeline returns DiarizationResponse with .speaker_diarization
+        # Fall back to the object itself if it's already an Annotation (3.x compatibility)
+        if hasattr(diarization, "speaker_diarization"):
+            annotation = diarization.speaker_diarization
+        else:
+            annotation = diarization
 
         for turn, _, speaker in annotation.itertracks(yield_label=True):
             speakers_set.add(speaker)
@@ -322,7 +305,11 @@ class PyannoteEngine(Engine):
             Tuple of (overlap_duration, overlap_ratio)
         """
         try:
-            annotation = extract_annotation(diarization)
+            # Extract annotation from DiarizationResponse if needed (4.0 format)
+            if hasattr(diarization, "speaker_diarization"):
+                annotation = diarization.speaker_diarization
+            else:
+                annotation = diarization
 
             # Use pyannote's native overlap detection
             # get_overlap() returns a Timeline of overlapping regions
@@ -353,7 +340,6 @@ class PyannoteEngine(Engine):
         return {
             "status": "healthy",
             "device": self._device,
-            "dtype": self._dtype,
             "pipeline_loaded": bool(self._pipelines),
             "loaded_models": sorted(self._pipelines.keys()),
             "active_model_id": self._active_model_id,

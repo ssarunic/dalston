@@ -54,16 +54,6 @@ class DiarizeHTTPServer(EngineHTTPServer):
                 float | None,
                 Form(description="Maximum diarization chunk duration in seconds"),
             ] = None,
-            dtype: Annotated[
-                str | None,
-                Form(
-                    description=(
-                        "Override engine precision for this request "
-                        "(fp32 | fp16 | bf16). Engines that ignore mixed "
-                        "precision drop this silently."
-                    )
-                ),
-            ] = None,
         ) -> dict:
             audio_path = await resolve_audio(file, audio_url)
 
@@ -78,8 +68,6 @@ class DiarizeHTTPServer(EngineHTTPServer):
                 config["max_speakers"] = max_speakers
             if max_chunk_s is not None:
                 config["max_chunk_s"] = max_chunk_s
-            if dtype is not None:
-                config["dtype"] = dtype
 
             task_id = str(uuid4())
             task_request = TaskRequest(
