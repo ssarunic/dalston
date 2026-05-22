@@ -13,6 +13,12 @@ dependencies = [
     "opentelemetry-api==1.41.1",
     "opentelemetry-sdk==1.41.1",
     "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
+    # Pin the exporter siblings explicitly. proto-grpc already requires these
+    # at ==1.41.1, but making them visible keeps a stale/dirty image build from
+    # shipping a mismatched proto-common (e.g. missing _exporter_metrics, which
+    # crashes every engine at configure_tracing()).
+    "opentelemetry-exporter-otlp-proto-common==1.41.1",
+    "opentelemetry-proto==1.41.1",
     # Prometheus metrics (M20)
     "prometheus-client==0.25.0",
 ]
