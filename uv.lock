@@ -481,7 +481,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-common" },
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-proto" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "pydantic" },
@@ -603,6 +605,7 @@ requires-dist = [
     { name = "nvidia-ml-py3", marker = "extra == 'tools'", specifier = ">=7.352.0" },
     { name = "openai", marker = "extra == 'dev'", specifier = "==2.36.0" },
     { name = "opentelemetry-api", specifier = "==1.41.1" },
+    { name = "opentelemetry-exporter-otlp-proto-common", specifier = "==1.41.1" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = "==1.41.1" },
     { name = "opentelemetry-instrumentation-boto3sqs", marker = "extra == 'engine-sdk'", specifier = "==0.62b1" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'gateway'", specifier = "==0.62b1" },
@@ -610,6 +613,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-redis", marker = "extra == 'engine-sdk'", specifier = "==0.62b1" },
     { name = "opentelemetry-instrumentation-redis", marker = "extra == 'gateway'", specifier = "==0.62b1" },
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'gateway'", specifier = "==0.62b1" },
+    { name = "opentelemetry-proto", specifier = "==1.41.1" },
     { name = "opentelemetry-sdk", specifier = "==1.41.1" },
     { name = "opentelemetry-test-utils", marker = "extra == 'dev'", specifier = "==0.62b1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
