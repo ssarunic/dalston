@@ -58,6 +58,14 @@ jobs:
             -f docker/Dockerfile.orchestrator \
             .
 
+          # Smoke test: verify the OTLP/telemetry stack imports in the built
+          # image before publishing. The gRPC exporter import is where an
+          # OpenTelemetry version skew crashes at runtime (see #256). CPU-only,
+          # no GPU required — runs fine on the ubuntu-latest runner.
+          echo "Smoke testing $REGISTRY/$IMAGE_NAME:latest (telemetry import) ..."
+          docker run --rm --entrypoint python "$REGISTRY/$IMAGE_NAME:latest" -c \
+            "import dalston.telemetry; from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter; print('telemetry import OK')"
+
           docker push --all-tags $REGISTRY/$IMAGE_NAME
 
           echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
