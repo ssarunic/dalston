@@ -13,11 +13,18 @@ dependencies = [
     "opentelemetry-api==1.41.1",
     "opentelemetry-sdk==1.41.1",
     "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
-    # Pin the exporter siblings explicitly. proto-grpc already requires these
-    # at ==1.41.1, but making them visible keeps a stale/dirty image build from
-    # shipping a mismatched proto-common (e.g. missing _exporter_metrics, which
-    # crashes every engine at configure_tracing()).
+    # Pin the ENTIRE OTLP exporter family — including the meta package and the
+    # http exporter — in lockstep. pyannote.audio depends on the meta
+    # `opentelemetry-exporter-otlp>=1.34.0`, so the base-pyannote image installs
+    # the latest family (1.42.x). The engine layer then installs dalston on top;
+    # if we only pin grpc/common/proto, pip leaves the meta + http at 1.42.x
+    # while forcing common to 1.41.1 — a skew where the 1.42.x exporter imports
+    # opentelemetry.exporter.otlp.proto.common._exporter_metrics (added in 1.42,
+    # absent in 1.41.1), raising ModuleNotFoundError on the engine's first span
+    # export. Naming the meta + http forces the whole family down to 1.41.1.
+    "opentelemetry-exporter-otlp==1.41.1",
     "opentelemetry-exporter-otlp-proto-common==1.41.1",
+    "opentelemetry-exporter-otlp-proto-http==1.41.1",
     "opentelemetry-proto==1.41.1",
     # Prometheus metrics (M20)
     "prometheus-client==0.25.0",
