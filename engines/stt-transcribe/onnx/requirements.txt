@@ -5,5 +5,5 @@ onnx-asr[hub]>=0.11.0
 onnxruntime>=1.26.0
 
 # Audio processing
-soundfile>=0.13.1
+soundfile>=0.14.0
 numpy>=2.4.6,<3.0.0
