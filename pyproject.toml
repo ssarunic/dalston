@@ -5,14 +5,14 @@ description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "pydantic==2.13.4",
-    "pydantic-settings==2.14.1",
+    "pydantic-settings==2.14.2",
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
     # Loose ranges cause pip resolver backtracking (20+ min in CI).
-    "opentelemetry-api==1.41.1",
-    "opentelemetry-sdk==1.41.1",
-    "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
+    "opentelemetry-api==1.43.0",
+    "opentelemetry-sdk==1.43.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.43.0",
     # Pin the ENTIRE OTLP exporter family — including the meta package and the
     # http exporter — in lockstep. pyannote.audio depends on the meta
     # `opentelemetry-exporter-otlp>=1.34.0`, so the base-pyannote image installs
@@ -22,10 +22,10 @@ dependencies = [
     # opentelemetry.exporter.otlp.proto.common._exporter_metrics (added in 1.42,
     # absent in 1.41.1), raising ModuleNotFoundError on the engine's first span
     # export. Naming the meta + http forces the whole family down to 1.41.1.
-    "opentelemetry-exporter-otlp==1.41.1",
-    "opentelemetry-exporter-otlp-proto-common==1.41.1",
-    "opentelemetry-exporter-otlp-proto-http==1.41.1",
-    "opentelemetry-proto==1.41.1",
+    "opentelemetry-exporter-otlp==1.43.0",
+    "opentelemetry-exporter-otlp-proto-common==1.43.0",
+    "opentelemetry-exporter-otlp-proto-http==1.43.0",
+    "opentelemetry-proto==1.43.0",
     # Prometheus metrics (M20)
     "prometheus-client==0.25.0",
 ]
@@ -48,10 +48,10 @@ gateway = [
     "tinytag>=2.2.1",  # Audio metadata extraction (CVE-2026-33671: SYLT loop DoS)
     "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
-    "opentelemetry-instrumentation-fastapi==0.62b1",
-    "opentelemetry-instrumentation-redis==0.62b1",
-    "opentelemetry-instrumentation-httpx==0.62b1",
-    "opentelemetry-instrumentation-sqlalchemy==0.62b1",
+    "opentelemetry-instrumentation-fastapi==0.64b0",
+    "opentelemetry-instrumentation-redis==0.64b0",
+    "opentelemetry-instrumentation-httpx==0.64b0",
+    "opentelemetry-instrumentation-sqlalchemy==0.64b0",
     "alembic>=1.13.0",
 ]
 orchestrator = [
@@ -74,8 +74,8 @@ engine-sdk = [
     "boto3>=1.35.0",  # Floor only — aioboto3 pins compatible botocore range
     "pyyaml>=6.0",  # For engine.yaml loading (M30)
     # OpenTelemetry instrumentation (M19)
-    "opentelemetry-instrumentation-redis==0.62b1",
-    "opentelemetry-instrumentation-boto3sqs==0.62b1",
+    "opentelemetry-instrumentation-redis==0.64b0",
+    "opentelemetry-instrumentation-boto3sqs==0.64b0",
     # HTTP server for engine interface contract (M79)
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
@@ -118,11 +118,11 @@ dev = [
     "soundfile>=0.12.0",  # For audio format tests (M81)
     "jsonschema>=4.0.0",  # For engine YAML validation (M30)
     # OpenTelemetry test utilities (M19)
-    "opentelemetry-test-utils==0.62b1",
+    "opentelemetry-test-utils==0.64b0",
     # Pinned OpenAI SDK for M61 contract suite
-    "openai==2.37.0",
+    "openai==2.44.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.47.0",
+    "elevenlabs==2.54.0",
 ]
 
 [build-system]
