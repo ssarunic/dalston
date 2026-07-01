@@ -1,6 +1,6 @@
 # Unified Riva Engine Dependencies (batch + realtime)
 
 # NVIDIA Riva client for gRPC communication with NIM sidecar
-nvidia-riva-client>=2.25.1
+nvidia-riva-client>=2.26.0
 grpcio>=1.81.0
 protobuf>=4.25.0,<7.0.0
