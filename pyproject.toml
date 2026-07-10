@@ -5,7 +5,7 @@ description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "pydantic==2.13.4",
-    "pydantic-settings==2.14.1",
+    "pydantic-settings==2.14.2",  # GHSA: NestedSecretsSettingsSource symlink traversal
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
@@ -34,7 +34,7 @@ dependencies = [
 gateway = [
     "fastapi>=0.135.0",
     "uvicorn>=0.41.0",
-    "python-multipart>=0.0.6",
+    "python-multipart>=0.0.31",  # GHSA: quadratic-time querystring DoS
     "redis>=7.0.0",
     "httpx>=0.26.0",
     "pyyaml>=6.0",  # For engine catalog (M31)
@@ -62,10 +62,10 @@ orchestrator = [
     "aioboto3>=15.5.0",
     "httpx>=0.26.0",
     "fastapi>=0.135.0",  # Required for importing gateway.services
-    "python-multipart>=0.0.6",  # Required by FastAPI for form data
+    "python-multipart>=0.0.31",  # GHSA: quadratic-time querystring DoS
     "websockets>=16.0",  # Required by gateway module
     "tinytag>=2.2.1",  # Required by gateway.services.audio_probe
-    "aiohttp>=3.13.4",  # For lightweight HTTP server (metrics endpoint)
+    "aiohttp>=3.14.1",  # For lightweight HTTP server (metrics endpoint); GHSA fixes
     "pyyaml>=6.0",  # For engine catalog YAML parsing (M29)
     "alembic>=1.13.0",
 ]
@@ -79,7 +79,7 @@ engine-sdk = [
     # HTTP server for engine interface contract (M79)
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
-    "python-multipart>=0.0.20",
+    "python-multipart>=0.0.31",  # GHSA: quadratic-time querystring DoS
 ]
 realtime-sdk = [
     "websockets>=16.0",
