@@ -714,6 +714,14 @@ class Transcript(BaseModel):
     language_confidence: float | None = Field(
         default=None, ge=0, le=1, description="Language detection confidence"
     )
+    language_source: Literal["requested", "detected"] | None = Field(
+        default=None,
+        description=(
+            "Provenance of the language field: 'detected' when the engine "
+            "detected or forced it during decoding, 'requested' when it "
+            "merely echoes the request (engine cannot force language)"
+        ),
+    )
     languages: list[LanguageInfo] | None = Field(
         default=None,
         description=(
@@ -843,6 +851,14 @@ class TranscriptMetadata(BaseModel):
     language: str = Field(..., description="Primary language code")
     language_confidence: float = Field(
         default=1.0, ge=0, le=1, description="Language detection confidence"
+    )
+    language_source: Literal["requested", "detected"] | None = Field(
+        default=None,
+        description=(
+            "Provenance of the language field: 'detected' when the engine "
+            "detected or forced it during decoding, 'requested' when it "
+            "merely echoes the request (engine cannot force language)"
+        ),
     )
     languages: list[LanguageInfo] | None = Field(
         default=None,

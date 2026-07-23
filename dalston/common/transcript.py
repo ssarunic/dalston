@@ -81,6 +81,7 @@ def assemble_transcript(
     text, language, language_confidence, languages = _extract_transcribe_data(
         transcribe_data
     )
+    language_source = transcribe_data.get("language_source")
 
     # Parse typed outputs — transcribe must be a valid Transcript
     if not transcribe_data:
@@ -145,6 +146,7 @@ def assemble_transcript(
         sample_rate=sample_rate,
         language=language,
         language_confidence=round(language_confidence, 3),
+        language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,
@@ -224,6 +226,7 @@ def assemble_per_channel_transcript(
     pipeline_warnings: list[str] = []
     language = "en"
     language_confidence = 1.0
+    language_source = None
     all_languages: dict[str, LanguageInfo] = {}  # keyed by code, merge across channels
 
     for channel in range(channel_count):
@@ -239,6 +242,7 @@ def assemble_per_channel_transcript(
             language = transcribe_data.get("language", "en")
             lc_raw = transcribe_data.get("language_confidence")
             language_confidence = lc_raw if lc_raw is not None else 1.0
+            language_source = transcribe_data.get("language_source")
 
         # Collect per-channel language lists for code-switching metadata
         if transcribe_data:
@@ -330,6 +334,7 @@ def assemble_per_channel_transcript(
         sample_rate=sample_rate,
         language=language,
         language_confidence=round(language_confidence, 3),
+        language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,

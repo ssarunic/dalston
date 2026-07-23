@@ -172,6 +172,14 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             char_count=len(core_result.text),
         )
 
+        warnings: list[str] = []
+        if params.language and params.language != "auto":
+            warnings.append(
+                f"Engine '{self.engine_id}' cannot force language "
+                f"'{params.language}'; the model auto-detects language per "
+                f"utterance"
+            )
+
         language = params.language or "en"
         return self.build_transcript(
             text=core_result.text,
@@ -179,8 +187,10 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             language=language if language != "auto" else "en",
             engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
+            language_source="requested",
             alignment_method=alignment_method,
             channel=channel,
+            warnings=warnings,
         )
 
     @staticmethod
@@ -220,6 +230,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             stages=["transcribe"],
             supports_word_timestamps=True,
             supports_native_streaming=False,
+            supports_language_forcing=False,
             model_variants=sorted(self.CURATED_MODELS),
             gpu_required=False,
             gpu_vram_mb=2000,

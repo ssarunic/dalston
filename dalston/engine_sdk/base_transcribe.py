@@ -19,7 +19,7 @@ import contextlib
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
@@ -521,6 +521,7 @@ class BaseBatchTranscribeEngine(Engine):
         language: str,
         engine_id: str,
         language_confidence: float | None = None,
+        language_source: Literal["requested", "detected"] | None = None,
         duration: float | None = None,
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
         channel: int | None = None,
@@ -538,6 +539,7 @@ class BaseBatchTranscribeEngine(Engine):
             segments=segments,
             language=language,
             language_confidence=language_confidence,
+            language_source=language_source,
             duration=duration,
             timestamp_granularity=granularity,
             alignment_method=alignment_method,

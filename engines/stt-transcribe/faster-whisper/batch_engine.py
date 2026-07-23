@@ -227,6 +227,7 @@ class FasterWhisperBatchEngine(BaseBatchTranscribeEngine):
                 language=result.language,
                 engine_id=self.engine_id,
                 language_confidence=round(result.language_probability, 3),
+                language_source="detected",
                 duration=result.duration,
                 alignment_method=AlignmentMethod.ATTENTION,
                 channel=channel,

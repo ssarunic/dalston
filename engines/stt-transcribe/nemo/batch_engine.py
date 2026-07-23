@@ -1,7 +1,11 @@
 """NVIDIA Parakeet transcription engine with engine_id model swapping.
 
 Uses NVIDIA NeMo Parakeet FastConformer models with CTC or TDT decoders
-for fast English-only speech-to-text transcription with GPU acceleration.
+for fast speech-to-text transcription with GPU acceleration. Language
+coverage is model-dependent: tdt-0.6b-v3 is multilingual (25 European
+languages, automatic per-utterance language detection); the ctc and
+1.1b variants are English-only. No variant supports forcing a decode
+language — a requested language is echoed with a warning.
 
 - CTC (Connectionist Temporal Classification): Fastest inference, good accuracy
 - TDT (Token-and-Duration Transducer): Best accuracy, 64% faster than RNNT
@@ -57,9 +61,10 @@ _DEFAULT_NEMO_MAX_CHUNK_S = 1500.0
 class NemoBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine with engine_id model swapping.
 
-    Uses FastConformer encoder with CTC or TDT decoder for efficient
-    English-only transcription. Automatically produces word-level
-    timestamps without requiring separate alignment.
+    Uses FastConformer encoder with CTC or TDT decoder. tdt-0.6b-v3 is
+    multilingual with automatic language detection; other variants are
+    English-only. Automatically produces word-level timestamps without
+    requiring separate alignment.
 
     Decoder types:
     - CTC: Fastest inference, greedy decoding, good for batch processing
@@ -86,8 +91,8 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         "nvidia/parakeet-tdt-1.1b",
     }
 
-    # Default model to load if none specified (multilingual + CPU-capable not applicable
-    # for Parakeet since it's English-only, so use the highest quality model)
+    # Default model to load if none specified (highest quality English variant;
+    # multilingual jobs should request parakeet-tdt-0.6b-v3 explicitly)
     DEFAULT_MODEL = "nvidia/parakeet-tdt-1.1b"
 
     def __init__(self, core: NemoInference | None = None) -> None:
@@ -441,6 +446,12 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             warnings.append(
                 f"Vocabulary boosting ({len(vocabulary)} terms) failed to configure - transcribed without boosting"
             )
+        if params.language and params.language != "auto":
+            warnings.append(
+                f"Engine '{self.engine_id}' cannot force language "
+                f"'{params.language}'; the model auto-detects language per "
+                f"utterance"
+            )
 
         language = params.language or "en"
         return self.build_transcript(
@@ -449,6 +460,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             language=language if language != "auto" else "en",
             engine_id=self.engine_id,
             language_confidence=1.0 if language != "auto" else 0.5,
+            language_source="requested",
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,
@@ -470,8 +482,9 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         a variant-specific ID. The engine can load any supported Parakeet
         model variant at engine_id.
 
-        Parakeet is an English-only transcription engine with native
-        word-level timestamps via CTC or TDT alignment.
+        Parakeet produces native word-level timestamps via CTC or TDT
+        alignment. Language coverage is model-dependent (v3 multilingual,
+        others English-only); no variant supports language forcing.
         """
         # VRAM requirements: report maximum for capability planning
         # Individual model requirements are in the model catalog
@@ -483,6 +496,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             stages=["transcribe"],
             supports_word_timestamps=True,
             supports_native_streaming=False,
+            supports_language_forcing=False,
             model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,
             gpu_vram_mb=vram_mb,
