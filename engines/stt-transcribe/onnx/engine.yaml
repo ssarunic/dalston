@@ -17,6 +17,7 @@ container:
 capabilities:
   native_streaming: true
   word_timestamps: true
+  language_forcing: false
   max_concurrency: 4
 
 input:

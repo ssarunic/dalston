@@ -159,6 +159,7 @@ class EngineCatalog:
             stages=stages,
             supports_word_timestamps=caps_data.get("supports_word_timestamps", False),
             supports_native_streaming=caps_data.get("supports_native_streaming", False),
+            supports_language_forcing=caps_data.get("supports_language_forcing", True),
             model_variants=None,
             gpu_required=hw_data.get("gpu_required", False),
             gpu_vram_mb=(

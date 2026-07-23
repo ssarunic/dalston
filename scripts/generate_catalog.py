@@ -115,6 +115,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
             "stages": stages,
             "supports_word_timestamps": caps.get("word_timestamps", False),
             "supports_native_streaming": caps.get("native_streaming", False),
+            "supports_language_forcing": caps.get("language_forcing", True),
             "max_audio_duration": caps.get("max_audio_duration"),
             "max_concurrency": caps.get("max_concurrency"),
         },
