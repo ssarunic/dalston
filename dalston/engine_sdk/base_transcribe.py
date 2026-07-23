@@ -526,13 +526,28 @@ class BaseBatchTranscribeEngine(Engine):
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
         channel: int | None = None,
         warnings: list[str] | None = None,
+        words_expected: bool = False,
         **extra: Any,
     ) -> Transcript:
-        """Build a ``Transcript`` from assembled parts."""
+        """Build a ``Transcript`` from assembled parts.
+
+        Args:
+            words_expected: Set by engines that always produce word
+                timestamps natively. When segments exist but carry no
+                words, the silent downgrade to segment granularity gets a
+                user-visible warning instead (M92.6).
+        """
         has_words = any(seg.words for seg in segments if seg.words is not None)
         granularity = (
             TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
         )
+
+        all_warnings = list(warnings or [])
+        if words_expected and segments and not has_words:
+            all_warnings.append(
+                "Word timestamps were expected but the model produced none; "
+                "timestamps degraded to segment granularity"
+            )
 
         return Transcript(
             text=text,
@@ -545,6 +560,6 @@ class BaseBatchTranscribeEngine(Engine):
             alignment_method=alignment_method,
             engine_id=engine_id,
             channel=channel,
-            warnings=warnings or [],
+            warnings=all_warnings,
             metadata=extra if extra else {},
         )

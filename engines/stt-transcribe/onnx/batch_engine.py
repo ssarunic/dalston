@@ -191,6 +191,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,
+            words_expected=True,
         )
 
     @staticmethod

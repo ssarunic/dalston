@@ -84,6 +84,8 @@ class TestEngineWarningPropagation:
     def test_successful_align_warnings_propagate(self):
         transcript = Transcript.model_validate(_transcribe_output())
         align = AlignmentResponse(
+            text="Hello world",
+            language="en",
             segments=[Segment(start=0.0, end=2.0, text="Hello world")],
             word_timestamps=True,
             engine_id="phoneme-align",
@@ -102,8 +104,6 @@ class TestEngineWarningPropagation:
 # ---------------------------------------------------------------------------
 # NeMo vocabulary boosting robustness (F8)
 # ---------------------------------------------------------------------------
-
-pytest.importorskip("torch")
 
 
 @pytest.fixture(scope="module")

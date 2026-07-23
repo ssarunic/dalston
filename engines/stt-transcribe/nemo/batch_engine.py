@@ -440,6 +440,14 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             word_count=len(all_words),
             char_count=len(core_result.text),
         )
+        if segments and not all_words:
+            self.logger.warning(
+                "nemo_word_timestamps_missing",
+                model_id=model_id,
+                segment_count=len(segments),
+                message="timestamps=True was requested but the hypothesis "
+                "carried no word timestamps",
+            )
 
         warnings: list[str] = []
         if vocabulary and not vocabulary_enabled:
@@ -464,6 +472,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,
+            words_expected=True,
         )
 
     def health_check(self) -> dict[str, Any]:

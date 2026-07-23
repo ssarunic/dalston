@@ -654,21 +654,40 @@ class NemoInference:
                 )
 
             if segment_timestamps:
-                for seg in segment_timestamps:
-                    seg_start = seg.get("start", 0.0)
-                    seg_end = seg.get("end", 0.0)
-                    seg_text = seg.get("segment", "")
-                    seg_words = [
-                        w
-                        for w in all_words
-                        if w.start >= seg_start - 0.01 and w.end <= seg_end + 0.01
-                    ]
+                # Assign each word to the segment containing its midpoint
+                # (ties to the earlier segment), falling back to the nearest
+                # segment. NeMo's segment spans can be sloppy — a strict
+                # containment filter silently drops every word when spans
+                # and word timings disagree (M92.6).
+                seg_bounds = [
+                    (seg.get("start", 0.0), seg.get("end", 0.0), seg.get("segment", ""))
+                    for seg in segment_timestamps
+                ]
+                assigned: list[list[NeMoWordResult]] = [[] for _ in seg_bounds]
+                for w in all_words:
+                    midpoint = (w.start + w.end) / 2.0
+                    target: int | None = None
+                    for i, (seg_start, seg_end, _) in enumerate(seg_bounds):
+                        if seg_start <= midpoint <= seg_end:
+                            target = i
+                            break
+                    if target is None:
+                        target = min(
+                            range(len(seg_bounds)),
+                            key=lambda i: min(
+                                abs(midpoint - seg_bounds[i][0]),
+                                abs(midpoint - seg_bounds[i][1]),
+                            ),
+                        )
+                    assigned[target].append(w)
+
+                for i, (seg_start, seg_end, seg_text) in enumerate(seg_bounds):
                     segments.append(
                         NeMoSegmentResult(
                             start=round(seg_start, 3),
                             end=round(seg_end, 3),
                             text=seg_text,
-                            words=seg_words if seg_words else [],
+                            words=assigned[i],
                         )
                     )
             elif all_words:
