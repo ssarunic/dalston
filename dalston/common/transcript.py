@@ -261,7 +261,7 @@ def assemble_per_channel_transcript(
         )
         if ch_word_ts:
             word_timestamps_available = True
-        pipeline_warnings.extend(ch_warnings)
+        pipeline_warnings.extend(f"ch{channel}: {w}" for w in ch_warnings)
 
         # Build annotated segment dicts with channel/speaker info
         for seg in segments_source:
@@ -519,12 +519,14 @@ def _select_segments(
     Returns:
         Tuple of (segments_source, word_timestamps_available, pipeline_warnings).
     """
-    pipeline_warnings: list = []
+    # Engine warnings must always surface, regardless of which segment
+    # source wins (vocabulary-boosting failures, language-forcing notes, ...).
+    pipeline_warnings: list = list(transcript.warnings)
 
     if align_response is not None:
+        pipeline_warnings.extend(align_response.warnings)
         if align_response.skipped:
             logger.warning("alignment_skipped", reason=align_response.skip_reason)
-            pipeline_warnings.extend(align_response.warnings)
             segments_source: list[Segment] | list[TranscriptSegment] = list(
                 transcript.segments
             )

@@ -27,6 +27,7 @@ Environment variables:
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
 """
 
+import copy
 import os
 import tempfile
 from pathlib import Path
@@ -100,6 +101,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         super().__init__()
         self._core = core if core is not None else NemoInference.from_env()
         self._local_attention_applied: set[str] = set()
+        self._boosting_support: dict[str, bool] = {}
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -164,6 +166,32 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             return loaded_model_id.split("/", 1)[1]
         return loaded_model_id
 
+    def _model_supports_boosting(self, model: Any, model_id: str) -> bool:
+        """Check (once per model) whether GPU-PB boosting_tree config exists.
+
+        Older NeMo builds lack ``decoding.greedy.boosting_tree``; without
+        this probe every vocabulary request would attempt configuration,
+        fail, and fall back — this makes the capability explicit in logs.
+        """
+        cached = self._boosting_support.get(model_id)
+        if cached is not None:
+            return cached
+
+        supported = False
+        try:
+            greedy = model.cfg.decoding.greedy
+            supported = "boosting_tree" in greedy
+        except Exception:
+            supported = False
+
+        self._boosting_support[model_id] = supported
+        self.logger.info(
+            "vocabulary_boosting_supported",
+            model_id=model_id,
+            supported=supported,
+        )
+        return supported
+
     def _configure_vocabulary_boosting(
         self, model: Any, vocabulary: list[str], boosting_alpha: float = 0.5
     ) -> Path | None:
@@ -189,6 +217,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         if not vocabulary or model is None:
             return None
 
+        vocab_path: Path | None = None
         try:
             # Generate case variants for each term
             # Parakeet-tdt-0.6b-v2/v3 was trained with capitalization
@@ -215,9 +244,10 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 expanded_terms=len(expanded_terms),
             )
 
-            # Configure decoding strategy with boosting tree
-            # The config path is the same for CTC and TDT models
-            decoding_cfg = model.cfg.decoding
+            # Build the boosting config on a copy so a failure part-way
+            # through leaves the model's live decoding config untouched.
+            # The config path is the same for CTC and TDT models.
+            decoding_cfg = copy.deepcopy(model.cfg.decoding)
             decoding_cfg.strategy = "greedy_batch"
             decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
             decoding_cfg.greedy.boosting_tree.context_score = 1.0
@@ -240,12 +270,13 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
 
             return vocab_path
 
-        except Exception as e:
-            self.logger.warning(
+        except Exception:
+            self.logger.exception(
                 "vocabulary_boosting_failed",
-                error=str(e),
                 message="Falling back to standard decoding without vocabulary boosting",
             )
+            if vocab_path is not None:
+                vocab_path.unlink(missing_ok=True)
             return None
 
     @staticmethod
@@ -346,7 +377,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         try:
             self._ensure_local_attention(model, model_id)
 
-            if vocabulary:
+            if vocabulary and self._model_supports_boosting(model, model_id):
                 vocab_file = self._configure_vocabulary_boosting(model, vocabulary)
                 vocabulary_enabled = vocab_file is not None
 
