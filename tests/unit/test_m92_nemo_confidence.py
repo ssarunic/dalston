@@ -61,6 +61,72 @@ class TestConfidenceParsing:
         assert all(w.confidence is None for w in words)
 
 
+class TestConfidenceThroughAssembly:
+    """R4: segment confidence must survive the assembly boundary."""
+
+    _PREPARE = {
+        "channel_files": [
+            {
+                "artifact_id": "a1",
+                "format": "wav",
+                "duration": 10.0,
+                "sample_rate": 16000,
+                "channels": 1,
+            }
+        ],
+        "engine_id": "audio-prepare",
+    }
+
+    def _transcribe(self) -> dict:
+        return {
+            "text": "hello",
+            "language": "hr",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "hello",
+                    "metadata": {"confidence": 0.83},
+                }
+            ],
+            "engine_id": "nemo",
+        }
+
+    def test_standard_assembly_carries_confidence(self):
+        from dalston.common.transcript import assemble_transcript
+
+        result = assemble_transcript(
+            job_id="j1",
+            stage_outputs={"prepare": self._PREPARE, "transcribe": self._transcribe()},
+        )
+        assert result.segments[0].confidence == 0.83
+
+    def test_per_channel_assembly_carries_confidence(self):
+        from dalston.common.transcript import assemble_per_channel_transcript
+
+        result = assemble_per_channel_transcript(
+            job_id="j2",
+            stage_outputs={
+                "prepare": self._PREPARE,
+                "transcribe_ch0": self._transcribe(),
+                "transcribe_ch1": self._transcribe(),
+            },
+            channel_count=2,
+        )
+        assert all(seg.confidence == 0.83 for seg in result.segments)
+
+    def test_absent_confidence_stays_none_through_assembly(self):
+        from dalston.common.transcript import assemble_transcript
+
+        transcribe = self._transcribe()
+        transcribe["segments"][0]["metadata"] = {}
+        result = assemble_transcript(
+            job_id="j3",
+            stage_outputs={"prepare": self._PREPARE, "transcribe": transcribe},
+        )
+        assert result.segments[0].confidence is None
+
+
 @pytest.fixture(scope="module")
 def nemo_engine_cls():
     engine_path = Path("engines/stt-transcribe/nemo/batch_engine.py")

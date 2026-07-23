@@ -351,6 +351,10 @@ class MergedSegment(BaseModel):
     temperature: float | None = Field(
         default=None, description="Decoding temperature for this segment"
     )
+    confidence: float | None = Field(
+        default=None,
+        description="Segment-level recognition confidence, None if unavailable",
+    )
     avg_logprob: float | None = Field(
         default=None, description="Average token log probability"
     )

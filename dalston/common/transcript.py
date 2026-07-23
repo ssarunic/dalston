@@ -301,6 +301,7 @@ def assemble_per_channel_transcript(
             if isinstance(seg_dict.get("tokens"), list)
             else None,
             temperature=seg_dict.get("temperature"),
+            confidence=seg_dict.get("confidence"),
             avg_logprob=seg_dict.get("avg_logprob"),
             compression_ratio=seg_dict.get("compression_ratio"),
             no_speech_prob=seg_dict.get("no_speech_prob"),
@@ -393,6 +394,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "language": seg.language,
             "tokens": seg.metadata.get("tokens"),
             "temperature": seg.metadata.get("temperature"),
+            "confidence": seg.metadata.get("confidence"),
             "avg_logprob": seg.metadata.get("avg_logprob"),
             "compression_ratio": seg.metadata.get("compression_ratio"),
             "no_speech_prob": seg.metadata.get("no_speech_prob"),
@@ -406,6 +408,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "language": seg.language,
             "tokens": seg.tokens,
             "temperature": seg.temperature,
+            "confidence": seg.confidence,
             "avg_logprob": seg.avg_logprob,
             "compression_ratio": seg.compression_ratio,
             "no_speech_prob": seg.no_speech_prob,
@@ -1272,6 +1275,7 @@ def _build_merged_segments(
             seg_words = seg.words
             seg_tokens = seg.metadata.get("tokens")
             seg_temperature = seg.metadata.get("temperature")
+            seg_confidence = seg.metadata.get("confidence")
             seg_avg_logprob = seg.metadata.get("avg_logprob")
             seg_compression_ratio = seg.metadata.get("compression_ratio")
             seg_no_speech_prob = seg.metadata.get("no_speech_prob")
@@ -1282,6 +1286,7 @@ def _build_merged_segments(
             seg_words = seg.words
             seg_tokens = seg.tokens
             seg_temperature = seg.temperature
+            seg_confidence = seg.confidence
             seg_avg_logprob = seg.avg_logprob
             seg_compression_ratio = seg.compression_ratio
             seg_no_speech_prob = seg.no_speech_prob
@@ -1331,6 +1336,7 @@ def _build_merged_segments(
                 words=output_words,
                 tokens=seg_tokens if isinstance(seg_tokens, list) else None,
                 temperature=seg_temperature,
+                confidence=seg_confidence,
                 avg_logprob=seg_avg_logprob,
                 compression_ratio=seg_compression_ratio,
                 no_speech_prob=seg_no_speech_prob,
