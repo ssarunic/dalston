@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-23T15:50:13.892885+00:00",
+  "generated_at": "2026-07-23T16:02:13.683078+00:00",
   "schema_version": "3.0",
-  "engine_count": 15,
+  "engine_count": 14,
   "engines": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -359,43 +359,6 @@
         "rtf_gpu": 0.1,
         "rtf_cpu": 1.0,
         "warm_start_latency_ms": 500
-      }
-    },
-    "hf-asr-align-pyannote": {
-      "id": "hf-asr-align-pyannote",
-      "name": "HF ASR + Phoneme Align + Pyannote 4.0",
-      "version": "1.0.0",
-      "stage": "transcribe",
-      "type": null,
-      "description": "Integrated combo engine that performs transcription (HuggingFace ASR),\nphoneme-level word alignment (torchaudio wav2vec2), and speaker\ndiarization (pyannote 4.0) in a single process.\n\nSupports any HuggingFace model with pipeline_tag=automatic-speech-recognition.\nProduces a multi-key envelope so the standard assemble_transcript() merging\nlogic handles word-level speaker splitting.\n\nIdeal for local Mac/MPS development where running separate containers is\nimpractical, or for single-GPU deployments where VRAM sharing is desired.",
-      "image": "dalston/stt-transcribe-hf-asr-align-pyannote:1.0.0",
-      "execution_profile": "container",
-      "capabilities": {
-        "stages": [
-          "transcribe"
-        ],
-        "supports_word_timestamps": true,
-        "supports_native_streaming": false,
-        "supports_language_forcing": true,
-        "max_audio_duration": null,
-        "max_concurrency": 1
-      },
-      "hardware": {
-        "gpu_required": false,
-        "gpu_optional": true,
-        "min_vram_gb": 10,
-        "recommended_gpu": [
-          "a10g",
-          "l4"
-        ],
-        "supports_cpu": true,
-        "min_ram_gb": 16,
-        "memory": "16G"
-      },
-      "performance": {
-        "rtf_gpu": 0.3,
-        "rtf_cpu": 3.0,
-        "warm_start_latency_ms": null
       }
     },
     "nemo": {
