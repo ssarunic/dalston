@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 from dalston.common.audio_defaults import (
     DEFAULT_MIN_SPEECH_MS,
     DEFAULT_SAMPLE_RATE,
-    DEFAULT_VAD_THRESHOLD,
+    get_vad_threshold,
 )
 from dalston.engine_sdk.audio import write_wav_file
 from dalston.engine_sdk.silero_vad import (
@@ -114,7 +114,7 @@ class VadChunker:
         max_chunk_duration_s: float = 1500.0,
         min_speech_duration_s: float = DEFAULT_MIN_SPEECH_MS / 1000,
         min_silence_duration_s: float = 0.3,
-        vad_threshold: float = DEFAULT_VAD_THRESHOLD,
+        vad_threshold: float | None = None,
     ) -> None:
         if max_chunk_duration_s <= 0:
             raise ValueError(
@@ -123,7 +123,10 @@ class VadChunker:
         self.max_chunk_duration_s = max_chunk_duration_s
         self.min_speech_duration_s = min_speech_duration_s
         self.min_silence_duration_s = min_silence_duration_s
-        self.vad_threshold = vad_threshold
+        # None -> DALSTON_VAD_THRESHOLD env override or the shared default
+        self.vad_threshold = (
+            vad_threshold if vad_threshold is not None else get_vad_threshold()
+        )
         self._model: Any | None = None
         self._get_speech_timestamps: Any | None = None
 

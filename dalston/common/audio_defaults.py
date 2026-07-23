@@ -21,6 +21,28 @@ DEFAULT_VAD_NEG_THRESHOLD = 0.25  # threshold to confirm silence (hysteresis)
 DEFAULT_MIN_SPEECH_MS = 250  # minimum speech duration to consider valid
 DEFAULT_MIN_SILENCE_MS = 400  # minimum silence to end an utterance
 
+
+def get_vad_threshold() -> float:
+    """Silero speech-probability threshold, tunable via DALSTON_VAD_THRESHOLD.
+
+    One knob for every Silero consumer (M92.7). The 0.5 default under-detects
+    on narrowband/low-passed telephony audio — 0.3 is a good starting point
+    there. Out-of-range or malformed values fall back to the default.
+    """
+    import os
+
+    raw = os.environ.get("DALSTON_VAD_THRESHOLD")
+    if raw is None:
+        return DEFAULT_VAD_THRESHOLD
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_VAD_THRESHOLD
+    if not 0.0 < value < 1.0:
+        return DEFAULT_VAD_THRESHOLD
+    return value
+
+
 # =============================================================================
 # Utterance Processing
 # =============================================================================

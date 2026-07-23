@@ -682,12 +682,18 @@ class NemoInference:
                     assigned[target].append(w)
 
                 for i, (seg_start, seg_end, seg_text) in enumerate(seg_bounds):
+                    seg_words = assigned[i]
+                    if seg_words:
+                        # Clamp the segment end to recognized content —
+                        # NeMo's hypothesis spans can extend far past the
+                        # last word over trailing noise (M92.7).
+                        seg_end = max(max(w.end for w in seg_words), seg_start)
                     segments.append(
                         NeMoSegmentResult(
                             start=round(seg_start, 3),
                             end=round(seg_end, 3),
                             text=seg_text,
-                            words=assigned[i],
+                            words=seg_words,
                         )
                     )
             elif all_words:

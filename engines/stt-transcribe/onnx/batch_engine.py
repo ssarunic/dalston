@@ -179,6 +179,12 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
                 f"'{params.language}'; the model auto-detects language per "
                 f"utterance"
             )
+        if not core_result.segments:
+            warnings.append(
+                "No speech detected by VAD; transcript is empty. If the "
+                "audio does contain speech, lower DALSTON_VAD_THRESHOLD "
+                "(narrowband/telephony audio often needs 0.3)."
+            )
 
         language = params.language or "en"
         return self.build_transcript(

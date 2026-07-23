@@ -318,11 +318,18 @@ class BaseBatchTranscribeEngine(Engine):
         concatenates text with a space separator.
         """
         if not chunk_results:
+            # M92.7: an empty result must say why — silence here previously
+            # made VAD-undetected speech indistinguishable from silent audio.
             return self.build_transcript(
                 text="",
                 segments=[],
                 language="en",
                 engine_id=getattr(self, "engine_id", "unknown"),
+                warnings=[
+                    "No speech detected by VAD; transcript is empty. If the "
+                    "audio does contain speech, lower DALSTON_VAD_THRESHOLD "
+                    "(narrowband/telephony audio often needs 0.3)."
+                ],
             )
 
         first_transcript = chunk_results[0][0]

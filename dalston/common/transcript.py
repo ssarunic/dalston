@@ -138,6 +138,9 @@ def assemble_transcript(
             speaker_detection=speaker_detection,
         )
 
+    # Warn when prepare-detected speech went untranscribed (M92.7)
+    _append_missed_speech_warning(prepare_data, segments, pipeline_warnings)
+
     # Build metadata
     now = datetime.now(UTC).isoformat()
     metadata = TranscriptMetadata(
@@ -327,6 +330,9 @@ def assemble_per_channel_transcript(
             all_languages.values(), key=lambda li: li.confidence, reverse=True
         )
 
+    # Warn when prepare-detected speech went untranscribed (M92.7)
+    _append_missed_speech_warning(prepare_data, segments, pipeline_warnings)
+
     # Build metadata
     now = datetime.now(UTC).isoformat()
     metadata = TranscriptMetadata(
@@ -441,6 +447,101 @@ def determine_terminal_stage(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+# Missed-speech coverage thresholds (M92.7). A warning fires only when the
+# untranscribed portion of VAD-detected speech is both long in absolute terms
+# and a meaningful fraction of all detected speech — ordinary pauses and
+# silence never trigger it because they are not detected speech to begin with.
+MISSED_SPEECH_TOLERANCE_S = 1.0  # slack around transcribed segment spans
+MISSED_SPEECH_MIN_REGION_S = 0.25  # ignore slivers below this
+MISSED_SPEECH_MIN_TOTAL_S = 3.0  # warn only above this much missed speech
+MISSED_SPEECH_MIN_FRACTION = 0.10  # ...and above this fraction of speech
+
+
+def _compute_missed_speech(
+    speech_regions: list[dict[str, Any]],
+    segments: list[MergedSegment],
+    tolerance_s: float = MISSED_SPEECH_TOLERANCE_S,
+) -> list[tuple[float, float]]:
+    """Spans of VAD-detected speech not covered by any transcribed segment."""
+    covered = sorted(
+        (max(0.0, seg.start - tolerance_s), seg.end + tolerance_s) for seg in segments
+    )
+    merged: list[list[float]] = []
+    for start, end in covered:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    missed: list[tuple[float, float]] = []
+    for region in speech_regions:
+        try:
+            region_start = float(region.get("start", 0.0))
+            region_end = float(region.get("end", 0.0))
+        except (TypeError, ValueError):
+            continue
+        cursor = region_start
+        for start, end in merged:
+            if end <= cursor:
+                continue
+            if start >= region_end:
+                break
+            if start > cursor and start - cursor >= MISSED_SPEECH_MIN_REGION_S:
+                missed.append((cursor, min(start, region_end)))
+            cursor = max(cursor, min(end, region_end))
+            if cursor >= region_end:
+                break
+        if region_end - cursor >= MISSED_SPEECH_MIN_REGION_S:
+            missed.append((cursor, region_end))
+    return missed
+
+
+def _append_missed_speech_warning(
+    prepare_data: dict[str, Any] | None,
+    segments: list[MergedSegment],
+    pipeline_warnings: list,
+) -> None:
+    """Warn when prepare-stage VAD speech went untranscribed (M92.7).
+
+    Activates only when prepare emitted ``speech_regions``
+    (detect_speech_regions=True); otherwise there is no ground truth to
+    compare against and the check is silent.
+    """
+    regions = (prepare_data or {}).get("speech_regions")
+    if not isinstance(regions, list) or not regions:
+        return
+    valid = [r for r in regions if isinstance(r, dict)]
+    total_speech = 0.0
+    for r in valid:
+        try:
+            total_speech += max(
+                0.0, float(r.get("end", 0.0)) - float(r.get("start", 0.0))
+            )
+        except (TypeError, ValueError):
+            continue
+    if total_speech <= 0.0:
+        return
+
+    missed = _compute_missed_speech(valid, segments)
+    missed_total = sum(end - start for start, end in missed)
+    if (
+        missed_total >= MISSED_SPEECH_MIN_TOTAL_S
+        and missed_total >= MISSED_SPEECH_MIN_FRACTION * total_speech
+    ):
+        spans = ", ".join(f"{start:.1f}-{end:.1f}s" for start, end in missed[:5])
+        suffix = "" if len(missed) <= 5 else f" (+{len(missed) - 5} more)"
+        pipeline_warnings.append(
+            f"{missed_total:.1f}s of detected speech was not transcribed "
+            f"(regions: {spans}{suffix})"
+        )
+        logger.warning(
+            "missed_speech_detected",
+            missed_s=round(missed_total, 1),
+            detected_speech_s=round(total_speech, 1),
+            region_count=len(missed),
+        )
 
 
 def _extract_audio_metadata(

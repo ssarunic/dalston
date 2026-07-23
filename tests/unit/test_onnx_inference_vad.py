@@ -119,7 +119,9 @@ class TestParseVadResult:
         assert result.text == "Hello world."
         assert len(result.segments) == 1
         assert result.segments[0].start == 0.0
-        assert result.segments[0].end == 5.0
+        # M92.7: segment end clamps to the last recognized word, not the
+        # VAD region boundary (5.0)
+        assert result.segments[0].end == 0.3
 
     def test_multiple_segments_with_offset_timestamps(self, inference):
         """Multiple VAD segments get correct absolute word timestamps."""
@@ -148,7 +150,8 @@ class TestParseVadResult:
         # First segment: words at absolute time 0.0+
         seg1 = result.segments[0]
         assert seg1.start == 0.0
-        assert seg1.end == 3.0
+        # M92.7: end clamps to the last recognized word (VAD boundary was 3.0)
+        assert seg1.end == 0.5
         assert len(seg1.words) == 2
         assert seg1.words[0].start == 0.0  # 0.0 + 0.0
         assert seg1.words[1].start == 0.5  # 0.0 + 0.5
@@ -156,7 +159,8 @@ class TestParseVadResult:
         # Second segment: words offset by segment start (10.0)
         seg2 = result.segments[1]
         assert seg2.start == 10.0
-        assert seg2.end == 14.0
+        # M92.7: end clamps to last word end (10.0 + 0.6)
+        assert seg2.end == 10.6
         assert len(seg2.words) == 2
         assert seg2.words[0].start == 10.0  # 10.0 + 0.0
         assert seg2.words[1].start == 10.6  # 10.0 + 0.6
