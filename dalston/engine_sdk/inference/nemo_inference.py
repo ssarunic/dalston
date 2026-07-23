@@ -710,9 +710,12 @@ class NemoInference:
                 for i, (seg_start, seg_end, seg_text) in enumerate(seg_bounds):
                     seg_words = assigned[i]
                     if seg_words:
-                        # Clamp the segment end to recognized content —
+                        # Bounds must cover every assigned word (a nearest-
+                        # segment fallback can attach a word outside the raw
+                        # span), and the end clamps to recognized content —
                         # NeMo's hypothesis spans can extend far past the
-                        # last word over trailing noise (M92.7).
+                        # last word over trailing noise (M92.7, review R5).
+                        seg_start = min(seg_start, min(w.start for w in seg_words))
                         seg_end = max(max(w.end for w in seg_words), seg_start)
                     segments.append(
                         NeMoSegmentResult(

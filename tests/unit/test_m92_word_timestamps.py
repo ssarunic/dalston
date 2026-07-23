@@ -59,6 +59,23 @@ class TestMidpointWordAssignment:
         assert [w.word for w in segments[0].words] == ["shared"]
         assert segments[1].words == []
 
+    def test_bounds_expand_to_cover_attached_words(self):
+        # R5: a word attached via nearest-segment fallback that precedes the
+        # segment must expand the start — no word may lie outside its
+        # parent segment's bounds, and no zero-duration inversion.
+        hyp = _hypothesis(
+            words=[{"word": "early", "start": 0.0, "end": 0.4}],
+            segments=[{"start": 2.0, "end": 5.0, "segment": "early"}],
+        )
+        segments, _ = NemoInference._parse_hypothesis(hyp, hyp.text)
+        seg = segments[0]
+        assert seg.words[0].word == "early"
+        assert seg.start <= seg.words[0].start
+        assert seg.end >= seg.words[0].end
+        assert seg.end >= seg.start
+        assert seg.start == 0.0
+        assert seg.end == 0.4  # clamped to recognized content
+
     def test_words_split_across_segments_by_midpoint(self):
         hyp = _hypothesis(
             words=[

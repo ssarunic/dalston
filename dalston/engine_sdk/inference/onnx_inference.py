@@ -474,9 +474,11 @@ class OnnxInference:
                         )
 
                 if seg_words:
-                    # Clamp the segment end to recognized content — the raw
-                    # end is the Silero VAD region boundary, which can hold
-                    # through long line-noise stretches (M92.7).
+                    # Bounds cover every word, and the end clamps to
+                    # recognized content — the raw end is the Silero VAD
+                    # region boundary, which can hold through long
+                    # line-noise stretches (M92.7, review R5).
+                    seg_start = min(seg_start, min(w.start for w in seg_words))
                     seg_end = max(max(w.end for w in seg_words), seg_start)
 
                 all_segments.append(
