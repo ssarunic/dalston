@@ -27,6 +27,14 @@ from dalston.engine_sdk.managers import NeMoModelManager
 logger = structlog.get_logger()
 
 
+def _mean_confidence(words: list[NeMoWordResult]) -> float | None:
+    """Mean word confidence, or None when no word carries one."""
+    values = [w.confidence for w in words if w.confidence is not None]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
+
 # ---------------------------------------------------------------------------
 # Result types — engine_id-neutral, no dependency on batch or RT SDK types
 # ---------------------------------------------------------------------------
@@ -50,6 +58,7 @@ class NeMoSegmentResult:
     end: float
     text: str
     words: list[NeMoWordResult] = field(default_factory=list)
+    confidence: float | None = None  # mean word confidence, when available
 
 
 @dataclass
@@ -644,12 +653,29 @@ class NemoInference:
             word_timestamps = ts_dict.get("word", [])
             segment_timestamps = ts_dict.get("segment", [])
 
-            for wt in word_timestamps:
+            # Word confidences appear on the hypothesis when the decoding
+            # config preserves them (M92.8, DALSTON_NEMO_CONFIDENCE).
+            raw_confidences = getattr(hypothesis, "word_confidence", None)
+            confidences: list[float] | None = None
+            if isinstance(raw_confidences, list | tuple) and len(
+                raw_confidences
+            ) == len(word_timestamps):
+                try:
+                    confidences = [float(c) for c in raw_confidences]
+                except (TypeError, ValueError):
+                    confidences = None
+
+            for i, wt in enumerate(word_timestamps):
                 all_words.append(
                     NeMoWordResult(
                         word=wt.get("word", ""),
                         start=round(wt.get("start", 0.0), 3),
                         end=round(wt.get("end", 0.0), 3),
+                        confidence=(
+                            round(confidences[i], 3)
+                            if confidences is not None
+                            else None
+                        ),
                     )
                 )
 
@@ -694,6 +720,7 @@ class NemoInference:
                             end=round(seg_end, 3),
                             text=seg_text,
                             words=seg_words,
+                            confidence=_mean_confidence(seg_words),
                         )
                     )
             elif all_words:
@@ -703,6 +730,7 @@ class NemoInference:
                         end=all_words[-1].end,
                         text=full_text.strip(),
                         words=all_words,
+                        confidence=_mean_confidence(all_words),
                     )
                 )
 

@@ -29,6 +29,8 @@ Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
     DALSTON_DEFAULT_MODEL: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
+    DALSTON_NEMO_CONFIDENCE: Set to 1/true to preserve word confidence during
+        decoding (M92.8). Off by default until GPU RTF overhead is measured.
 """
 
 import copy
@@ -107,6 +109,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         self._core = core if core is not None else NemoInference.from_env()
         self._local_attention_applied: set[str] = set()
         self._boosting_support: dict[str, bool] = {}
+        self._confidence_applied: set[str] = set()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -170,6 +173,41 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         if "/" in loaded_model_id:
             return loaded_model_id.split("/", 1)[1]
         return loaded_model_id
+
+    @staticmethod
+    def _confidence_emission_enabled() -> bool:
+        """Whether DALSTON_NEMO_CONFIDENCE opts into confidence estimation.
+
+        Default off until the decoding overhead is measured on GPU
+        (M92.8 gates enablement on <5% RTF impact).
+        """
+        raw = os.environ.get("DALSTON_NEMO_CONFIDENCE", "")
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _ensure_confidence(self, model: Any, model_id: str) -> None:
+        """Preserve word confidence in the decoding config (once per model).
+
+        Values land on ``hypothesis.word_confidence`` and are parsed into
+        word/segment confidence by the shared inference core.
+        """
+        if not self._confidence_emission_enabled():
+            return
+        if model_id in self._confidence_applied:
+            return
+        # Mark attempted either way — a failing config should not be
+        # retried (and re-logged) on every task.
+        self._confidence_applied.add(model_id)
+        try:
+            decoding_cfg = copy.deepcopy(model.cfg.decoding)
+            decoding_cfg.confidence_cfg.preserve_word_confidence = True
+            model.change_decoding_strategy(decoding_cfg)
+            self.logger.info("nemo_confidence_enabled", model_id=model_id)
+        except Exception:
+            self.logger.exception(
+                "nemo_confidence_config_failed",
+                model_id=model_id,
+                message="Continuing without confidence estimation",
+            )
 
     def _model_supports_boosting(self, model: Any, model_id: str) -> bool:
         """Check (once per model) whether GPU-PB boosting_tree config exists.
@@ -381,6 +419,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         model = self._core.manager.acquire(model_id)
         try:
             self._ensure_local_attention(model, model_id)
+            self._ensure_confidence(model, model_id)
 
             if vocabulary and self._model_supports_boosting(model, model_id):
                 vocab_file = self._configure_vocabulary_boosting(model, vocabulary)
@@ -425,12 +464,16 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 seg_words.append(word)
                 all_words.append(word)
 
+            seg_extra: dict[str, Any] = {}
+            if core_seg.confidence is not None:
+                seg_extra["confidence"] = core_seg.confidence
             segments.append(
                 self.build_segment(
                     start=core_seg.start,
                     end=core_seg.end,
                     text=core_seg.text,
                     words=seg_words if seg_words else None,
+                    **seg_extra,
                 )
             )
 
