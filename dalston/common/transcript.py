@@ -446,17 +446,36 @@ def determine_terminal_stage(
 def _extract_audio_metadata(
     prepare_data: dict[str, Any] | None,
 ) -> tuple[float, int, int]:
-    """Extract audio duration, channels, and sample rate from prepare output."""
+    """Extract audio duration, channels, and sample rate from prepare output.
+
+    Prefers the original uploaded file's properties (``source_media``,
+    M92.5) over the prepared channel files — the latter are resampled and
+    mono-split, so reporting them misrepresents the input (e.g. a stereo
+    8 kHz call showing up as 1 channel / 16 kHz).
+    """
     if not prepare_data:
         return 0.0, 1, 16000
 
-    # Try typed PreparationResponse format (channel_files array)
+    source_media = prepare_data.get("source_media")
+    if isinstance(source_media, dict):
+        return (
+            source_media.get("duration", 0.0),
+            source_media.get("channels", 1),
+            source_media.get("sample_rate", 16000),
+        )
+
+    # Legacy prepare output (no source_media): fall back to channel_files.
     channel_files = prepare_data.get("channel_files", [])
     if channel_files and isinstance(channel_files[0], dict):
         first = channel_files[0]
+        channels = first.get("channels", 1)
+        # Split-channel files are mono by construction; the channel count
+        # of the original is the number of split files.
+        if prepare_data.get("split_channels") and len(channel_files) > 1:
+            channels = len(channel_files)
         return (
             first.get("duration", 0.0),
-            first.get("channels", 1),
+            channels,
             first.get("sample_rate", 16000),
         )
 

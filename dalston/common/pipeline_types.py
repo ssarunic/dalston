@@ -592,6 +592,13 @@ class PreparationResponse(BaseModel):
         ..., description="Prepared audio files (1 for mono, N for per-channel)"
     )
 
+    # M92.5: original uploaded media (pre-conversion probe). Response
+    # metadata must report these, not the resampled/split channel files.
+    source_media: AudioMedia | None = Field(
+        default=None,
+        description="Original uploaded audio properties (before conversion)",
+    )
+
     split_channels: bool = Field(
         default=False, description="Whether per-channel processing is enabled"
     )

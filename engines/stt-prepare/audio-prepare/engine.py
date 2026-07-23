@@ -76,6 +76,32 @@ class AudioPrepareEngine(Engine):
         except Exception:
             return False
 
+    @staticmethod
+    def _build_source_media(
+        task_request: TaskRequest, original_metadata: dict
+    ) -> AudioMedia:
+        """Original-file media for truthful response metadata (M92.5).
+
+        Numeric properties come from our own ffprobe of the uploaded file
+        (authoritative); artifact_id and container format come from the
+        request payload's media object (built by the scheduler from the
+        gateway probe), since a probe cannot know the artifact reference.
+        """
+        request_media = task_request.media
+        artifact_id = "source:audio"
+        media_format = original_metadata.get("codec_name") or "unknown"
+        if isinstance(request_media, dict):
+            artifact_id = request_media.get("artifact_id") or artifact_id
+            media_format = request_media.get("format") or media_format
+        return AudioMedia(
+            artifact_id=artifact_id,
+            format=media_format,
+            duration=original_metadata["duration"],
+            sample_rate=original_metadata["sample_rate"],
+            channels=original_metadata["channels"],
+            bit_depth=original_metadata.get("bit_depth"),
+        )
+
     def process(
         self,
         task_request: TaskRequest,
@@ -101,6 +127,7 @@ class AudioPrepareEngine(Engine):
         # Step 1: Probe original audio metadata
         original_metadata = self._probe_audio(audio_path)
         self.logger.info("original_audio_metadata", metadata=original_metadata)
+        source_media = self._build_source_media(task_request, original_metadata)
 
         # Handle channel splitting for per_channel speaker detection
         if split_channels:
@@ -114,6 +141,7 @@ class AudioPrepareEngine(Engine):
             return self._process_split_channels(
                 audio_path=audio_path,
                 original_metadata=original_metadata,
+                source_media=source_media,
                 target_sample_rate=target_sample_rate,
                 task_id=task_request.task_id,
                 ctx=ctx,
@@ -165,6 +193,7 @@ class AudioPrepareEngine(Engine):
 
         output = PreparationResponse(
             channel_files=[prepared],
+            source_media=source_media,
             split_channels=False,
             engine_id="audio-prepare",
         )
@@ -176,6 +205,7 @@ class AudioPrepareEngine(Engine):
         *,
         audio_path: Path,
         original_metadata: dict,
+        source_media: AudioMedia,
         target_sample_rate: int,
         task_id: str,
         ctx: BatchTaskContext,
@@ -250,6 +280,7 @@ class AudioPrepareEngine(Engine):
         # Build typed output
         output = PreparationResponse(
             channel_files=channel_files,
+            source_media=source_media,
             split_channels=True,
             engine_id="audio-prepare",
         )
