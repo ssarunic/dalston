@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Schema version for pipeline types.  Bump this when you change any model in
 # this file.  Engines and orchestrator log it at startup, and engines include
 # it in their heartbeat so stale containers are caught immediately.
-PIPELINE_SCHEMA_VERSION = "2"
+PIPELINE_SCHEMA_VERSION = "3"
 
 # =============================================================================
 # Enums
@@ -351,6 +351,10 @@ class MergedSegment(BaseModel):
     temperature: float | None = Field(
         default=None, description="Decoding temperature for this segment"
     )
+    confidence: float | None = Field(
+        default=None,
+        description="Segment-level recognition confidence, None if unavailable",
+    )
     avg_logprob: float | None = Field(
         default=None, description="Average token log probability"
     )
@@ -592,6 +596,13 @@ class PreparationResponse(BaseModel):
         ..., description="Prepared audio files (1 for mono, N for per-channel)"
     )
 
+    # M92.5: original uploaded media (pre-conversion probe). Response
+    # metadata must report these, not the resampled/split channel files.
+    source_media: AudioMedia | None = Field(
+        default=None,
+        description="Original uploaded audio properties (before conversion)",
+    )
+
     split_channels: bool = Field(
         default=False, description="Whether per-channel processing is enabled"
     )
@@ -713,6 +724,14 @@ class Transcript(BaseModel):
     )
     language_confidence: float | None = Field(
         default=None, ge=0, le=1, description="Language detection confidence"
+    )
+    language_source: Literal["requested", "detected"] | None = Field(
+        default=None,
+        description=(
+            "Provenance of the language field: 'detected' when the engine "
+            "detected or forced it during decoding, 'requested' when it "
+            "merely echoes the request (engine cannot force language)"
+        ),
     )
     languages: list[LanguageInfo] | None = Field(
         default=None,
@@ -841,8 +860,22 @@ class TranscriptMetadata(BaseModel):
     audio_channels: int = Field(..., ge=1, description="Original audio channels")
     sample_rate: int = Field(..., gt=0, description="Audio sample rate")
     language: str = Field(..., description="Primary language code")
-    language_confidence: float = Field(
-        default=1.0, ge=0, le=1, description="Language detection confidence"
+    language_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Language detection confidence. None when the engine did not "
+            "compute one — never fabricated."
+        ),
+    )
+    language_source: Literal["requested", "detected"] | None = Field(
+        default=None,
+        description=(
+            "Provenance of the language field: 'detected' when the engine "
+            "detected or forced it during decoding, 'requested' when it "
+            "merely echoes the request (engine cannot force language)"
+        ),
     )
     languages: list[LanguageInfo] | None = Field(
         default=None,

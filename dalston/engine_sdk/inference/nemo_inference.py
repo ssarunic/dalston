@@ -27,6 +27,14 @@ from dalston.engine_sdk.managers import NeMoModelManager
 logger = structlog.get_logger()
 
 
+def _mean_confidence(words: list[NeMoWordResult]) -> float | None:
+    """Mean word confidence, or None when no word carries one."""
+    values = [w.confidence for w in words if w.confidence is not None]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
+
 # ---------------------------------------------------------------------------
 # Result types — engine_id-neutral, no dependency on batch or RT SDK types
 # ---------------------------------------------------------------------------
@@ -50,6 +58,7 @@ class NeMoSegmentResult:
     end: float
     text: str
     words: list[NeMoWordResult] = field(default_factory=list)
+    confidence: float | None = None  # mean word confidence, when available
 
 
 @dataclass
@@ -644,31 +653,77 @@ class NemoInference:
             word_timestamps = ts_dict.get("word", [])
             segment_timestamps = ts_dict.get("segment", [])
 
-            for wt in word_timestamps:
+            # Word confidences appear on the hypothesis when the decoding
+            # config preserves them (M92.8, DALSTON_NEMO_CONFIDENCE).
+            raw_confidences = getattr(hypothesis, "word_confidence", None)
+            confidences: list[float] | None = None
+            if isinstance(raw_confidences, list | tuple) and len(
+                raw_confidences
+            ) == len(word_timestamps):
+                try:
+                    confidences = [float(c) for c in raw_confidences]
+                except (TypeError, ValueError):
+                    confidences = None
+
+            for i, wt in enumerate(word_timestamps):
                 all_words.append(
                     NeMoWordResult(
                         word=wt.get("word", ""),
                         start=round(wt.get("start", 0.0), 3),
                         end=round(wt.get("end", 0.0), 3),
+                        confidence=(
+                            round(confidences[i], 3)
+                            if confidences is not None
+                            else None
+                        ),
                     )
                 )
 
             if segment_timestamps:
-                for seg in segment_timestamps:
-                    seg_start = seg.get("start", 0.0)
-                    seg_end = seg.get("end", 0.0)
-                    seg_text = seg.get("segment", "")
-                    seg_words = [
-                        w
-                        for w in all_words
-                        if w.start >= seg_start - 0.01 and w.end <= seg_end + 0.01
-                    ]
+                # Assign each word to the segment containing its midpoint
+                # (ties to the earlier segment), falling back to the nearest
+                # segment. NeMo's segment spans can be sloppy — a strict
+                # containment filter silently drops every word when spans
+                # and word timings disagree (M92.6).
+                seg_bounds = [
+                    (seg.get("start", 0.0), seg.get("end", 0.0), seg.get("segment", ""))
+                    for seg in segment_timestamps
+                ]
+                assigned: list[list[NeMoWordResult]] = [[] for _ in seg_bounds]
+                for w in all_words:
+                    midpoint = (w.start + w.end) / 2.0
+                    target: int | None = None
+                    for i, (seg_start, seg_end, _) in enumerate(seg_bounds):
+                        if seg_start <= midpoint <= seg_end:
+                            target = i
+                            break
+                    if target is None:
+                        target = min(
+                            range(len(seg_bounds)),
+                            key=lambda i: min(
+                                abs(midpoint - seg_bounds[i][0]),
+                                abs(midpoint - seg_bounds[i][1]),
+                            ),
+                        )
+                    assigned[target].append(w)
+
+                for i, (seg_start, seg_end, seg_text) in enumerate(seg_bounds):
+                    seg_words = assigned[i]
+                    if seg_words:
+                        # Bounds must cover every assigned word (a nearest-
+                        # segment fallback can attach a word outside the raw
+                        # span), and the end clamps to recognized content —
+                        # NeMo's hypothesis spans can extend far past the
+                        # last word over trailing noise (M92.7, review R5).
+                        seg_start = min(seg_start, min(w.start for w in seg_words))
+                        seg_end = max(max(w.end for w in seg_words), seg_start)
                     segments.append(
                         NeMoSegmentResult(
                             start=round(seg_start, 3),
                             end=round(seg_end, 3),
                             text=seg_text,
-                            words=seg_words if seg_words else [],
+                            words=seg_words,
+                            confidence=_mean_confidence(seg_words),
                         )
                     )
             elif all_words:
@@ -678,6 +733,7 @@ class NemoInference:
                         end=all_words[-1].end,
                         text=full_text.strip(),
                         words=all_words,
+                        confidence=_mean_confidence(all_words),
                     )
                 )
 

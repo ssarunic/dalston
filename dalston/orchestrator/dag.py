@@ -340,7 +340,9 @@ def _build_dag_with_engines(
     diarize_task = None
 
     # Prepare config
-    prepare_config: dict = {}
+    # Speech regions ground the assembler's missed-speech coverage check
+    # (M92.7/R1); detection degrades gracefully if the container lacks VAD.
+    prepare_config: dict = {"detect_speech_regions": True}
     if speaker_detection == "per_channel":
         prepare_config["split_channels"] = True
 

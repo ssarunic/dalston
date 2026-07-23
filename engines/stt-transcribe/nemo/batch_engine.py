@@ -1,7 +1,11 @@
 """NVIDIA Parakeet transcription engine with engine_id model swapping.
 
 Uses NVIDIA NeMo Parakeet FastConformer models with CTC or TDT decoders
-for fast English-only speech-to-text transcription with GPU acceleration.
+for fast speech-to-text transcription with GPU acceleration. Language
+coverage is model-dependent: tdt-0.6b-v3 is multilingual (25 European
+languages, automatic per-utterance language detection); the ctc and
+1.1b variants are English-only. No variant supports forcing a decode
+language — a requested language is echoed with a warning.
 
 - CTC (Connectionist Temporal Classification): Fastest inference, good accuracy
 - TDT (Token-and-Duration Transducer): Best accuracy, 64% faster than RNNT
@@ -25,8 +29,11 @@ Environment variables:
     DALSTON_ENGINE_ID: Runtime engine ID for registration (default: "nemo")
     DALSTON_DEFAULT_MODEL: Default NeMo model ID (default: "nvidia/parakeet-tdt-1.1b")
     DALSTON_DEVICE: Device to use for inference (cuda, cpu). Defaults to cuda if available.
+    DALSTON_NEMO_CONFIDENCE: Set to 1/true to preserve word confidence during
+        decoding (M92.8). Off by default until GPU RTF overhead is measured.
 """
 
+import copy
 import os
 import tempfile
 from pathlib import Path
@@ -56,9 +63,10 @@ _DEFAULT_NEMO_MAX_CHUNK_S = 1500.0
 class NemoBatchEngine(BaseBatchTranscribeEngine):
     """NVIDIA Parakeet transcription engine with engine_id model swapping.
 
-    Uses FastConformer encoder with CTC or TDT decoder for efficient
-    English-only transcription. Automatically produces word-level
-    timestamps without requiring separate alignment.
+    Uses FastConformer encoder with CTC or TDT decoder. tdt-0.6b-v3 is
+    multilingual with automatic language detection; other variants are
+    English-only. Automatically produces word-level timestamps without
+    requiring separate alignment.
 
     Decoder types:
     - CTC: Fastest inference, greedy decoding, good for batch processing
@@ -85,8 +93,8 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         "nvidia/parakeet-tdt-1.1b",
     }
 
-    # Default model to load if none specified (multilingual + CPU-capable not applicable
-    # for Parakeet since it's English-only, so use the highest quality model)
+    # Default model to load if none specified (highest quality English variant;
+    # multilingual jobs should request parakeet-tdt-0.6b-v3 explicitly)
     DEFAULT_MODEL = "nvidia/parakeet-tdt-1.1b"
 
     def __init__(self, core: NemoInference | None = None) -> None:
@@ -100,6 +108,8 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         super().__init__()
         self._core = core if core is not None else NemoInference.from_env()
         self._local_attention_applied: set[str] = set()
+        self._boosting_support: dict[str, bool] = {}
+        self._confidence_applied: set[str] = set()
 
         # Get default model from environment, with fallback to class default
         self._default_model_id = os.environ.get(
@@ -164,6 +174,67 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             return loaded_model_id.split("/", 1)[1]
         return loaded_model_id
 
+    @staticmethod
+    def _confidence_emission_enabled() -> bool:
+        """Whether DALSTON_NEMO_CONFIDENCE opts into confidence estimation.
+
+        Default off until the decoding overhead is measured on GPU
+        (M92.8 gates enablement on <5% RTF impact).
+        """
+        raw = os.environ.get("DALSTON_NEMO_CONFIDENCE", "")
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _ensure_confidence(self, model: Any, model_id: str) -> None:
+        """Preserve word confidence in the decoding config (once per model).
+
+        Values land on ``hypothesis.word_confidence`` and are parsed into
+        word/segment confidence by the shared inference core.
+        """
+        if not self._confidence_emission_enabled():
+            return
+        if model_id in self._confidence_applied:
+            return
+        # Mark attempted either way — a failing config should not be
+        # retried (and re-logged) on every task.
+        self._confidence_applied.add(model_id)
+        try:
+            decoding_cfg = copy.deepcopy(model.cfg.decoding)
+            decoding_cfg.confidence_cfg.preserve_word_confidence = True
+            model.change_decoding_strategy(decoding_cfg)
+            self.logger.info("nemo_confidence_enabled", model_id=model_id)
+        except Exception:
+            self.logger.exception(
+                "nemo_confidence_config_failed",
+                model_id=model_id,
+                message="Continuing without confidence estimation",
+            )
+
+    def _model_supports_boosting(self, model: Any, model_id: str) -> bool:
+        """Check (once per model) whether GPU-PB boosting_tree config exists.
+
+        Older NeMo builds lack ``decoding.greedy.boosting_tree``; without
+        this probe every vocabulary request would attempt configuration,
+        fail, and fall back — this makes the capability explicit in logs.
+        """
+        cached = self._boosting_support.get(model_id)
+        if cached is not None:
+            return cached
+
+        supported = False
+        try:
+            greedy = model.cfg.decoding.greedy
+            supported = "boosting_tree" in greedy
+        except Exception:
+            supported = False
+
+        self._boosting_support[model_id] = supported
+        self.logger.info(
+            "vocabulary_boosting_supported",
+            model_id=model_id,
+            supported=supported,
+        )
+        return supported
+
     def _configure_vocabulary_boosting(
         self, model: Any, vocabulary: list[str], boosting_alpha: float = 0.5
     ) -> Path | None:
@@ -189,6 +260,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         if not vocabulary or model is None:
             return None
 
+        vocab_path: Path | None = None
         try:
             # Generate case variants for each term
             # Parakeet-tdt-0.6b-v2/v3 was trained with capitalization
@@ -215,9 +287,10 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 expanded_terms=len(expanded_terms),
             )
 
-            # Configure decoding strategy with boosting tree
-            # The config path is the same for CTC and TDT models
-            decoding_cfg = model.cfg.decoding
+            # Build the boosting config on a copy so a failure part-way
+            # through leaves the model's live decoding config untouched.
+            # The config path is the same for CTC and TDT models.
+            decoding_cfg = copy.deepcopy(model.cfg.decoding)
             decoding_cfg.strategy = "greedy_batch"
             decoding_cfg.greedy.boosting_tree.key_phrases_file = str(vocab_path)
             decoding_cfg.greedy.boosting_tree.context_score = 1.0
@@ -240,12 +313,13 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
 
             return vocab_path
 
-        except Exception as e:
-            self.logger.warning(
+        except Exception:
+            self.logger.exception(
                 "vocabulary_boosting_failed",
-                error=str(e),
                 message="Falling back to standard decoding without vocabulary boosting",
             )
+            if vocab_path is not None:
+                vocab_path.unlink(missing_ok=True)
             return None
 
     @staticmethod
@@ -345,8 +419,9 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         model = self._core.manager.acquire(model_id)
         try:
             self._ensure_local_attention(model, model_id)
+            self._ensure_confidence(model, model_id)
 
-            if vocabulary:
+            if vocabulary and self._model_supports_boosting(model, model_id):
                 vocab_file = self._configure_vocabulary_boosting(model, vocabulary)
                 vocabulary_enabled = vocab_file is not None
 
@@ -389,12 +464,16 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
                 seg_words.append(word)
                 all_words.append(word)
 
+            seg_extra: dict[str, Any] = {}
+            if core_seg.confidence is not None:
+                seg_extra["confidence"] = core_seg.confidence
             segments.append(
                 self.build_segment(
                     start=core_seg.start,
                     end=core_seg.end,
                     text=core_seg.text,
                     words=seg_words if seg_words else None,
+                    **seg_extra,
                 )
             )
 
@@ -404,23 +483,42 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             word_count=len(all_words),
             char_count=len(core_result.text),
         )
+        if segments and not all_words:
+            self.logger.warning(
+                "nemo_word_timestamps_missing",
+                model_id=model_id,
+                segment_count=len(segments),
+                message="timestamps=True was requested but the hypothesis "
+                "carried no word timestamps",
+            )
 
         warnings: list[str] = []
         if vocabulary and not vocabulary_enabled:
             warnings.append(
                 f"Vocabulary boosting ({len(vocabulary)} terms) failed to configure - transcribed without boosting"
             )
+        explicit_language = bool(params.language) and params.language != "auto"
+        if explicit_language:
+            warnings.append(
+                f"Engine '{self.engine_id}' cannot force language "
+                f"'{params.language}'; the model auto-detects language per "
+                f"utterance"
+            )
 
-        language = params.language or "en"
+        # No explicit request -> 'und' (ISO 639 undetermined) with no
+        # provenance. The model exposes no detected-language label here,
+        # so any concrete code would be fabricated (M92 review R3).
         return self.build_transcript(
             text=core_result.text,
             segments=segments,
-            language=language if language != "auto" else "en",
+            language=params.language if explicit_language else "und",
             engine_id=self.engine_id,
-            language_confidence=1.0 if language != "auto" else 0.5,
+            language_confidence=None,
+            language_source="requested" if explicit_language else None,
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,
+            words_expected=True,
         )
 
     def health_check(self) -> dict[str, Any]:
@@ -439,8 +537,9 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
         a variant-specific ID. The engine can load any supported Parakeet
         model variant at engine_id.
 
-        Parakeet is an English-only transcription engine with native
-        word-level timestamps via CTC or TDT alignment.
+        Parakeet produces native word-level timestamps via CTC or TDT
+        alignment. Language coverage is model-dependent (v3 multilingual,
+        others English-only); no variant supports language forcing.
         """
         # VRAM requirements: report maximum for capability planning
         # Individual model requirements are in the model catalog
@@ -452,6 +551,7 @@ class NemoBatchEngine(BaseBatchTranscribeEngine):
             stages=["transcribe"],
             supports_word_timestamps=True,
             supports_native_streaming=False,
+            supports_language_forcing=False,
             model_variants=sorted(self.SUPPORTED_MODELS),
             gpu_required=True,
             gpu_vram_mb=vram_mb,

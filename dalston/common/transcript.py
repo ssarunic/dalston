@@ -81,6 +81,7 @@ def assemble_transcript(
     text, language, language_confidence, languages = _extract_transcribe_data(
         transcribe_data
     )
+    language_source = transcribe_data.get("language_source")
 
     # Parse typed outputs — transcribe must be a valid Transcript
     if not transcribe_data:
@@ -137,6 +138,9 @@ def assemble_transcript(
             speaker_detection=speaker_detection,
         )
 
+    # Warn when prepare-detected speech went untranscribed (M92.7)
+    _append_missed_speech_warning(prepare_data, segments, pipeline_warnings)
+
     # Build metadata
     now = datetime.now(UTC).isoformat()
     metadata = TranscriptMetadata(
@@ -144,7 +148,10 @@ def assemble_transcript(
         audio_channels=audio_channels,
         sample_rate=sample_rate,
         language=language,
-        language_confidence=round(language_confidence, 3),
+        language_confidence=(
+            round(language_confidence, 3) if language_confidence is not None else None
+        ),
+        language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,
@@ -222,8 +229,9 @@ def assemble_per_channel_transcript(
     all_channel_segments: list[dict[str, Any]] = []
     word_timestamps_available = False
     pipeline_warnings: list[str] = []
-    language = "en"
-    language_confidence = 1.0
+    language = "und"
+    language_confidence: float | None = None
+    language_source = None
     all_languages: dict[str, LanguageInfo] = {}  # keyed by code, merge across channels
 
     for channel in range(channel_count):
@@ -236,9 +244,9 @@ def assemble_per_channel_transcript(
 
         # Use first channel's language info as primary
         if channel == 0 and transcribe_data:
-            language = transcribe_data.get("language", "en")
-            lc_raw = transcribe_data.get("language_confidence")
-            language_confidence = lc_raw if lc_raw is not None else 1.0
+            language = transcribe_data.get("language", "und")
+            language_confidence = transcribe_data.get("language_confidence")
+            language_source = transcribe_data.get("language_source")
 
         # Collect per-channel language lists for code-switching metadata
         if transcribe_data:
@@ -261,7 +269,7 @@ def assemble_per_channel_transcript(
         )
         if ch_word_ts:
             word_timestamps_available = True
-        pipeline_warnings.extend(ch_warnings)
+        pipeline_warnings.extend(f"ch{channel}: {w}" for w in ch_warnings)
 
         # Build annotated segment dicts with channel/speaker info
         for seg in segments_source:
@@ -293,6 +301,7 @@ def assemble_per_channel_transcript(
             if isinstance(seg_dict.get("tokens"), list)
             else None,
             temperature=seg_dict.get("temperature"),
+            confidence=seg_dict.get("confidence"),
             avg_logprob=seg_dict.get("avg_logprob"),
             compression_ratio=seg_dict.get("compression_ratio"),
             no_speech_prob=seg_dict.get("no_speech_prob"),
@@ -322,6 +331,9 @@ def assemble_per_channel_transcript(
             all_languages.values(), key=lambda li: li.confidence, reverse=True
         )
 
+    # Warn when prepare-detected speech went untranscribed (M92.7)
+    _append_missed_speech_warning(prepare_data, segments, pipeline_warnings)
+
     # Build metadata
     now = datetime.now(UTC).isoformat()
     metadata = TranscriptMetadata(
@@ -329,7 +341,10 @@ def assemble_per_channel_transcript(
         audio_channels=audio_channels or channel_count,
         sample_rate=sample_rate,
         language=language,
-        language_confidence=round(language_confidence, 3),
+        language_confidence=(
+            round(language_confidence, 3) if language_confidence is not None else None
+        ),
+        language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
         word_timestamps_requested=word_timestamps_requested,
@@ -379,6 +394,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "language": seg.language,
             "tokens": seg.metadata.get("tokens"),
             "temperature": seg.metadata.get("temperature"),
+            "confidence": seg.metadata.get("confidence"),
             "avg_logprob": seg.metadata.get("avg_logprob"),
             "compression_ratio": seg.metadata.get("compression_ratio"),
             "no_speech_prob": seg.metadata.get("no_speech_prob"),
@@ -392,6 +408,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "language": seg.language,
             "tokens": seg.tokens,
             "temperature": seg.temperature,
+            "confidence": seg.confidence,
             "avg_logprob": seg.avg_logprob,
             "compression_ratio": seg.compression_ratio,
             "no_speech_prob": seg.no_speech_prob,
@@ -435,20 +452,134 @@ def determine_terminal_stage(
 # ---------------------------------------------------------------------------
 
 
+# Missed-speech coverage thresholds (M92.7). A warning fires only when the
+# untranscribed portion of VAD-detected speech is both long in absolute terms
+# and a meaningful fraction of all detected speech — ordinary pauses and
+# silence never trigger it because they are not detected speech to begin with.
+MISSED_SPEECH_TOLERANCE_S = 1.0  # slack around transcribed segment spans
+MISSED_SPEECH_MIN_REGION_S = 0.25  # ignore slivers below this
+MISSED_SPEECH_MIN_TOTAL_S = 3.0  # warn only above this much missed speech
+MISSED_SPEECH_MIN_FRACTION = 0.10  # ...and above this fraction of speech
+
+
+def _compute_missed_speech(
+    speech_regions: list[dict[str, Any]],
+    segments: list[MergedSegment],
+    tolerance_s: float = MISSED_SPEECH_TOLERANCE_S,
+) -> list[tuple[float, float]]:
+    """Spans of VAD-detected speech not covered by any transcribed segment."""
+    covered = sorted(
+        (max(0.0, seg.start - tolerance_s), seg.end + tolerance_s) for seg in segments
+    )
+    merged: list[list[float]] = []
+    for start, end in covered:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    missed: list[tuple[float, float]] = []
+    for region in speech_regions:
+        try:
+            region_start = float(region.get("start", 0.0))
+            region_end = float(region.get("end", 0.0))
+        except (TypeError, ValueError):
+            continue
+        cursor = region_start
+        for start, end in merged:
+            if end <= cursor:
+                continue
+            if start >= region_end:
+                break
+            if start > cursor and start - cursor >= MISSED_SPEECH_MIN_REGION_S:
+                missed.append((cursor, min(start, region_end)))
+            cursor = max(cursor, min(end, region_end))
+            if cursor >= region_end:
+                break
+        if region_end - cursor >= MISSED_SPEECH_MIN_REGION_S:
+            missed.append((cursor, region_end))
+    return missed
+
+
+def _append_missed_speech_warning(
+    prepare_data: dict[str, Any] | None,
+    segments: list[MergedSegment],
+    pipeline_warnings: list,
+) -> None:
+    """Warn when prepare-stage VAD speech went untranscribed (M92.7).
+
+    Activates only when prepare emitted ``speech_regions``
+    (detect_speech_regions=True); otherwise there is no ground truth to
+    compare against and the check is silent.
+    """
+    regions = (prepare_data or {}).get("speech_regions")
+    if not isinstance(regions, list) or not regions:
+        return
+    valid = [r for r in regions if isinstance(r, dict)]
+    total_speech = 0.0
+    for r in valid:
+        try:
+            total_speech += max(
+                0.0, float(r.get("end", 0.0)) - float(r.get("start", 0.0))
+            )
+        except (TypeError, ValueError):
+            continue
+    if total_speech <= 0.0:
+        return
+
+    missed = _compute_missed_speech(valid, segments)
+    missed_total = sum(end - start for start, end in missed)
+    if (
+        missed_total >= MISSED_SPEECH_MIN_TOTAL_S
+        and missed_total >= MISSED_SPEECH_MIN_FRACTION * total_speech
+    ):
+        spans = ", ".join(f"{start:.1f}-{end:.1f}s" for start, end in missed[:5])
+        suffix = "" if len(missed) <= 5 else f" (+{len(missed) - 5} more)"
+        pipeline_warnings.append(
+            f"{missed_total:.1f}s of detected speech was not transcribed "
+            f"(regions: {spans}{suffix})"
+        )
+        logger.warning(
+            "missed_speech_detected",
+            missed_s=round(missed_total, 1),
+            detected_speech_s=round(total_speech, 1),
+            region_count=len(missed),
+        )
+
+
 def _extract_audio_metadata(
     prepare_data: dict[str, Any] | None,
 ) -> tuple[float, int, int]:
-    """Extract audio duration, channels, and sample rate from prepare output."""
+    """Extract audio duration, channels, and sample rate from prepare output.
+
+    Prefers the original uploaded file's properties (``source_media``,
+    M92.5) over the prepared channel files — the latter are resampled and
+    mono-split, so reporting them misrepresents the input (e.g. a stereo
+    8 kHz call showing up as 1 channel / 16 kHz).
+    """
     if not prepare_data:
         return 0.0, 1, 16000
 
-    # Try typed PreparationResponse format (channel_files array)
+    source_media = prepare_data.get("source_media")
+    if isinstance(source_media, dict):
+        return (
+            source_media.get("duration", 0.0),
+            source_media.get("channels", 1),
+            source_media.get("sample_rate", 16000),
+        )
+
+    # Legacy prepare output (no source_media): fall back to channel_files.
     channel_files = prepare_data.get("channel_files", [])
     if channel_files and isinstance(channel_files[0], dict):
         first = channel_files[0]
+        channels = first.get("channels", 1)
+        # Split-channel files are mono by construction; the channel count
+        # of the original is the number of split files.
+        if prepare_data.get("split_channels") and len(channel_files) > 1:
+            channels = len(channel_files)
         return (
             first.get("duration", 0.0),
-            first.get("channels", 1),
+            channels,
             first.get("sample_rate", 16000),
         )
 
@@ -462,14 +593,11 @@ def _extract_audio_metadata(
 
 def _extract_transcribe_data(
     transcribe_data: dict[str, Any],
-) -> tuple[str, str, float, list[LanguageInfo] | None]:
+) -> tuple[str, str, float | None, list[LanguageInfo] | None]:
     """Extract text, language, confidence, and languages from transcribe output."""
     text = transcribe_data.get("text", "")
-    language = transcribe_data.get("language", "en")
-    language_confidence_raw = transcribe_data.get("language_confidence")
-    language_confidence = (
-        language_confidence_raw if language_confidence_raw is not None else 1.0
-    )
+    language = transcribe_data.get("language", "und")
+    language_confidence = transcribe_data.get("language_confidence")
     # Extract code-switching language list if present
     raw_languages = transcribe_data.get("languages")
     languages: list[LanguageInfo] | None = None
@@ -519,12 +647,14 @@ def _select_segments(
     Returns:
         Tuple of (segments_source, word_timestamps_available, pipeline_warnings).
     """
-    pipeline_warnings: list = []
+    # Engine warnings must always surface, regardless of which segment
+    # source wins (vocabulary-boosting failures, language-forcing notes, ...).
+    pipeline_warnings: list = list(transcript.warnings)
 
     if align_response is not None:
+        pipeline_warnings.extend(align_response.warnings)
         if align_response.skipped:
             logger.warning("alignment_skipped", reason=align_response.skip_reason)
-            pipeline_warnings.extend(align_response.warnings)
             segments_source: list[Segment] | list[TranscriptSegment] = list(
                 transcript.segments
             )
@@ -1145,6 +1275,7 @@ def _build_merged_segments(
             seg_words = seg.words
             seg_tokens = seg.metadata.get("tokens")
             seg_temperature = seg.metadata.get("temperature")
+            seg_confidence = seg.metadata.get("confidence")
             seg_avg_logprob = seg.metadata.get("avg_logprob")
             seg_compression_ratio = seg.metadata.get("compression_ratio")
             seg_no_speech_prob = seg.metadata.get("no_speech_prob")
@@ -1155,6 +1286,7 @@ def _build_merged_segments(
             seg_words = seg.words
             seg_tokens = seg.tokens
             seg_temperature = seg.temperature
+            seg_confidence = seg.confidence
             seg_avg_logprob = seg.avg_logprob
             seg_compression_ratio = seg.compression_ratio
             seg_no_speech_prob = seg.no_speech_prob
@@ -1204,6 +1336,7 @@ def _build_merged_segments(
                 words=output_words,
                 tokens=seg_tokens if isinstance(seg_tokens, list) else None,
                 temperature=seg_temperature,
+                confidence=seg_confidence,
                 avg_logprob=seg_avg_logprob,
                 compression_ratio=seg_compression_ratio,
                 no_speech_prob=seg_no_speech_prob,

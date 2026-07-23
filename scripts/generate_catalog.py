@@ -115,6 +115,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
             "stages": stages,
             "supports_word_timestamps": caps.get("word_timestamps", False),
             "supports_native_streaming": caps.get("native_streaming", False),
+            "supports_language_forcing": caps.get("language_forcing", True),
             "max_audio_duration": caps.get("max_audio_duration"),
             "max_concurrency": caps.get("max_concurrency"),
         },
@@ -151,6 +152,13 @@ def generate_catalog(engines_dir: Path) -> dict:
     for yaml_path in runtime_yamls:
         try:
             data = load_yaml(yaml_path)
+            # local_only engines (e.g. Mac/MPS combo engines) have no
+            # docker-compose service by design; the catalog<->compose
+            # contract check requires every catalog entry to map to one,
+            # so they are excluded from the generated catalog.
+            if data.get("local_only"):
+                print(f"Skipping local_only engine: {yaml_path}")
+                continue
             entry = transform_engine_id_to_entry(data, yaml_path)
             engine_id = entry["id"]
             # Build engine entry

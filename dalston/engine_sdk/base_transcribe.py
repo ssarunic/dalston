@@ -19,7 +19,7 @@ import contextlib
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
@@ -318,11 +318,18 @@ class BaseBatchTranscribeEngine(Engine):
         concatenates text with a space separator.
         """
         if not chunk_results:
+            # M92.7: an empty result must say why — silence here previously
+            # made VAD-undetected speech indistinguishable from silent audio.
             return self.build_transcript(
                 text="",
                 segments=[],
-                language="en",
+                language="und",
                 engine_id=getattr(self, "engine_id", "unknown"),
+                warnings=[
+                    "No speech detected by VAD; transcript is empty. If the "
+                    "audio does contain speech, lower DALSTON_VAD_THRESHOLD "
+                    "(narrowband/telephony audio often needs 0.3)."
+                ],
             )
 
         first_transcript = chunk_results[0][0]
@@ -521,28 +528,45 @@ class BaseBatchTranscribeEngine(Engine):
         language: str,
         engine_id: str,
         language_confidence: float | None = None,
+        language_source: Literal["requested", "detected"] | None = None,
         duration: float | None = None,
         alignment_method: AlignmentMethod = AlignmentMethod.UNKNOWN,
         channel: int | None = None,
         warnings: list[str] | None = None,
+        words_expected: bool = False,
         **extra: Any,
     ) -> Transcript:
-        """Build a ``Transcript`` from assembled parts."""
+        """Build a ``Transcript`` from assembled parts.
+
+        Args:
+            words_expected: Set by engines that always produce word
+                timestamps natively. When segments exist but carry no
+                words, the silent downgrade to segment granularity gets a
+                user-visible warning instead (M92.6).
+        """
         has_words = any(seg.words for seg in segments if seg.words is not None)
         granularity = (
             TimestampGranularity.WORD if has_words else TimestampGranularity.SEGMENT
         )
+
+        all_warnings = list(warnings or [])
+        if words_expected and segments and not has_words:
+            all_warnings.append(
+                "Word timestamps were expected but the model produced none; "
+                "timestamps degraded to segment granularity"
+            )
 
         return Transcript(
             text=text,
             segments=segments,
             language=language,
             language_confidence=language_confidence,
+            language_source=language_source,
             duration=duration,
             timestamp_granularity=granularity,
             alignment_method=alignment_method,
             engine_id=engine_id,
             channel=channel,
-            warnings=warnings or [],
+            warnings=all_warnings,
             metadata=extra if extra else {},
         )

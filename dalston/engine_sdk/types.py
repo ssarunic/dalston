@@ -55,6 +55,9 @@ class EngineCapabilities(BaseModel):
     includes_diarization: bool = False
     # Vocabulary boosting capability
     vocabulary_support: VocabularySupport | None = None
+    # M92: whether a requested `language` actually constrains decoding.
+    # False = the model auto-detects and the request is only echoed.
+    supports_language_forcing: bool = True
 
 
 @dataclass

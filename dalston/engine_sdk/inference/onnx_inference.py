@@ -259,6 +259,18 @@ class OnnxInference:
         model_id = self._current_model_id or ""
         original_batch_size = vad_batch_size
 
+        # Silero threshold override (M92.7): only passed when explicitly
+        # configured, so default behavior stays byte-identical with
+        # onnx-asr builds whose with_vad() may not accept the kwarg.
+        vad_kwargs: dict[str, Any] = {
+            "max_speech_duration_s": max_speech_s,
+            "min_silence_duration_ms": _DEFAULT_MIN_SILENCE_DURATION_MS,
+        }
+        if os.environ.get("DALSTON_VAD_THRESHOLD") is not None:
+            from dalston.common.audio_defaults import get_vad_threshold
+
+            vad_kwargs["threshold"] = get_vad_threshold()
+
         # OOM guard: try inference, halve batch_size on OOM, retry
         start = time.monotonic()
         with dalston.telemetry.create_span(
@@ -271,9 +283,8 @@ class OnnxInference:
             while True:
                 vad_ts_model = model.with_vad(
                     vad,
-                    max_speech_duration_s=max_speech_s,
-                    min_silence_duration_ms=_DEFAULT_MIN_SILENCE_DURATION_MS,
                     batch_size=vad_batch_size,
+                    **vad_kwargs,
                 ).with_timestamps()
 
                 try:
@@ -306,8 +317,11 @@ class OnnxInference:
         dalston.telemetry.set_span_attribute("dalston.segment_count", segment_count)
         dalston.metrics.observe_engine_vad_segment_count(engine_id, segment_count)
 
-        # Compute audio duration from segments for RTF
-        audio_duration_s = max((float(s.end) for s in vad_segments), default=0.0)
+        # File duration for RTF/telemetry — the max VAD-segment end hides
+        # trailing audio the VAD skipped (M92.7).
+        audio_duration_s = self._file_duration_s(audio_path)
+        if audio_duration_s <= 0.0:
+            audio_duration_s = max((float(s.end) for s in vad_segments), default=0.0)
         dalston.metrics.observe_engine_recognize(
             engine_id, model_id, self._device, recognize_time
         )
@@ -322,6 +336,17 @@ class OnnxInference:
             )
 
         return self._parse_vad_result(vad_segments)
+
+    @staticmethod
+    def _file_duration_s(audio_path: str) -> float:
+        """Duration of the audio file in seconds; 0.0 when unavailable."""
+        try:
+            import soundfile as sf
+
+            info = sf.info(audio_path)
+            return float(info.frames) / float(info.samplerate)
+        except Exception:
+            return 0.0
 
     def _get_or_load_vad(self) -> Any:
         """Lazy-load Silero VAD model."""
@@ -447,6 +472,14 @@ class OnnxInference:
                                 confidence=w.confidence,
                             )
                         )
+
+                if seg_words:
+                    # Bounds cover every word, and the end clamps to
+                    # recognized content — the raw end is the Silero VAD
+                    # region boundary, which can hold through long
+                    # line-noise stretches (M92.7, review R5).
+                    seg_start = min(seg_start, min(w.start for w in seg_words))
+                    seg_end = max(max(w.end for w in seg_words), seg_start)
 
                 all_segments.append(
                     OnnxSegmentResult(

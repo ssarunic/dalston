@@ -47,6 +47,7 @@ class EngineCapabilitiesResponse(BaseModel):
 
     supports_word_timestamps: bool = False
     supports_native_streaming: bool = False
+    supports_language_forcing: bool = True
     max_audio_duration_s: int | None = None
     max_concurrency: int | None = None
 
@@ -182,6 +183,7 @@ async def list_engines(
                 capabilities=EngineCapabilitiesResponse(
                     supports_word_timestamps=caps.supports_word_timestamps,
                     supports_native_streaming=caps.supports_native_streaming,
+                    supports_language_forcing=caps.supports_language_forcing,
                     max_audio_duration_s=None,  # Not in current schema
                     max_concurrency=caps.max_concurrency,
                 ),

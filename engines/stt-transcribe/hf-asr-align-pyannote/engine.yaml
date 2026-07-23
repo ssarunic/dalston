@@ -3,6 +3,10 @@ id: stt-hf-asr-align-pyannote
 engine_id: hf-asr-align-pyannote
 stage: transcribe
 mode: batch
+# No docker-compose service by design (local Mac/MPS combo engine);
+# excluded from the generated catalog so the catalog<->compose
+# contract check stays meaningful.
+local_only: true
 name: HF ASR + Phoneme Align + Pyannote 4.0
 version: 1.0.0
 description: |

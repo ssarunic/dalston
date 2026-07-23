@@ -172,15 +172,34 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             char_count=len(core_result.text),
         )
 
-        language = params.language or "en"
+        warnings: list[str] = []
+        explicit_language = bool(params.language) and params.language != "auto"
+        if explicit_language:
+            warnings.append(
+                f"Engine '{self.engine_id}' cannot force language "
+                f"'{params.language}'; the model auto-detects language per "
+                f"utterance"
+            )
+        if not core_result.segments:
+            warnings.append(
+                "No speech detected by VAD; transcript is empty. If the "
+                "audio does contain speech, lower DALSTON_VAD_THRESHOLD "
+                "(narrowband/telephony audio often needs 0.3)."
+            )
+
+        # No explicit request -> 'und' (ISO 639 undetermined) with no
+        # provenance; a concrete code would be fabricated (M92 review R3).
         return self.build_transcript(
             text=core_result.text,
             segments=segments,
-            language=language if language != "auto" else "en",
+            language=params.language if explicit_language else "und",
             engine_id=self.engine_id,
-            language_confidence=1.0 if language != "auto" else 0.5,
+            language_confidence=None,
+            language_source="requested" if explicit_language else None,
             alignment_method=alignment_method,
             channel=channel,
+            warnings=warnings,
+            words_expected=True,
         )
 
     @staticmethod
@@ -220,6 +239,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             stages=["transcribe"],
             supports_word_timestamps=True,
             supports_native_streaming=False,
+            supports_language_forcing=False,
             model_variants=sorted(self.CURATED_MODELS),
             gpu_required=False,
             gpu_vram_mb=2000,
