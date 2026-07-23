@@ -22,6 +22,17 @@ COPY dalston/ dalston/
 # Install the package with engine-sdk dependencies
 RUN pip install --no-cache-dir -e ".[engine-sdk]"
 
+# Silero VAD for prepare-stage speech-region detection (M92 R1).
+# CPU onnxruntime + audio decode deps; model pre-baked for offline use.
+# Prepared files are already 16 kHz WAV, so no resampler (librosa) needed.
+RUN pip install --no-cache-dir \
+    "onnxruntime>=1.18.0" \
+    "numpy>=1.26" \
+    "soundfile>=0.12"
+RUN mkdir -p /models/silero-vad \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
+
 # Set working directory for engine code
 WORKDIR /engine
 

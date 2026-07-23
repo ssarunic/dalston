@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from dalston.common.artifacts import build_task_artifact_id
+from dalston.common.pipeline_types import SpeechRegion
 from dalston.engine_sdk import (
     AudioMedia,
     BatchTaskContext,
@@ -18,6 +19,17 @@ from dalston.engine_sdk import (
     TaskRequest,
     TaskResponse,
 )
+
+
+def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Union possibly-overlapping (start, end) intervals across channels."""
+    merged: list[list[float]] = []
+    for start, end in sorted(i for i in intervals if i[1] > i[0]):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e) for s, e in merged]
 
 
 class AudioPrepareEngine(Engine):
@@ -75,6 +87,52 @@ class AudioPrepareEngine(Engine):
             )
         except Exception:
             return False
+
+    def _detect_speech_regions(
+        self, audio_paths: list[Path], total_duration: float
+    ) -> tuple[list[SpeechRegion] | None, float | None]:
+        """Run Silero VAD over prepared files; union regions across channels.
+
+        The regions ground the assembler's missed-speech coverage check
+        (M92.7/R1). Degrades gracefully to (None, None) when the VAD stack
+        (onnxruntime + pre-baked Silero model) is unavailable in this
+        container — detection is best-effort, never a job failure.
+        """
+        try:
+            from dalston.engine_sdk.vad import VadChunker
+
+            chunker = VadChunker()
+            intervals: list[tuple[float, float]] = []
+            for path in audio_paths:
+                for seg in chunker.detect_speech(path):
+                    intervals.append((float(seg.start), float(seg.end)))
+        except Exception:
+            self.logger.warning(
+                "speech_region_detection_unavailable",
+                exc_info=True,
+                message="Continuing without speech regions; the missed-speech "
+                "coverage check will be inactive for this job",
+            )
+            return None, None
+
+        merged = _merge_intervals(intervals)
+        regions = [
+            SpeechRegion(start=round(start, 3), end=round(end, 3))
+            for start, end in merged
+        ]
+        speech_total = sum(end - start for start, end in merged)
+        speech_ratio = (
+            min(1.0, round(speech_total / total_duration, 3))
+            if total_duration > 0
+            else None
+        )
+        self.logger.info(
+            "speech_regions_detected",
+            region_count=len(regions),
+            speech_s=round(speech_total, 1),
+            speech_ratio=speech_ratio,
+        )
+        return regions, speech_ratio
 
     @staticmethod
     def _build_source_media(
@@ -143,6 +201,7 @@ class AudioPrepareEngine(Engine):
                 original_metadata=original_metadata,
                 source_media=source_media,
                 target_sample_rate=target_sample_rate,
+                detect_speech_regions=params.detect_speech_regions,
                 task_id=task_request.task_id,
                 ctx=ctx,
             )
@@ -191,9 +250,18 @@ class AudioPrepareEngine(Engine):
             bit_depth=prepared_metadata["bit_depth"],
         )
 
+        speech_regions = None
+        speech_ratio = None
+        if params.detect_speech_regions:
+            speech_regions, speech_ratio = self._detect_speech_regions(
+                [prepared_path], prepared_metadata["duration"]
+            )
+
         output = PreparationResponse(
             channel_files=[prepared],
             source_media=source_media,
+            speech_regions=speech_regions,
+            speech_ratio=speech_ratio,
             split_channels=False,
             engine_id="audio-prepare",
         )
@@ -207,6 +275,7 @@ class AudioPrepareEngine(Engine):
         original_metadata: dict,
         source_media: AudioMedia,
         target_sample_rate: int,
+        detect_speech_regions: bool = False,
         task_id: str,
         ctx: BatchTaskContext,
     ) -> TaskResponse:
@@ -277,10 +346,23 @@ class AudioPrepareEngine(Engine):
                 )
             )
 
+        speech_regions = None
+        speech_ratio = None
+        if detect_speech_regions:
+            channel_paths = [
+                audio_path.parent / f"prepared_ch{i}.wav"
+                for i in range(len(channel_files))
+            ]
+            speech_regions, speech_ratio = self._detect_speech_regions(
+                channel_paths, source_media.duration
+            )
+
         # Build typed output
         output = PreparationResponse(
             channel_files=channel_files,
             source_media=source_media,
+            speech_regions=speech_regions,
+            speech_ratio=speech_ratio,
             split_channels=True,
             engine_id="audio-prepare",
         )
