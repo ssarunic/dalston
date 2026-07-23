@@ -97,6 +97,32 @@ class TestLanguageSourcePropagation:
         assert result.metadata.language_source == "requested"
 
 
+class TestUndeterminedLanguage:
+    """R3: no explicit language request -> 'und', no provenance."""
+
+    def test_assembler_defaults_to_und_when_engine_omits_language(self):
+        out = _transcribe_output()
+        del out["language"]
+        # Transcript requires language, so exercise the raw-dict default path
+        from dalston.common.transcript import _extract_transcribe_data
+
+        _, language, _, _ = _extract_transcribe_data(out)
+        assert language == "und"
+
+    def test_empty_chunk_merge_reports_und(self):
+        from types import SimpleNamespace
+
+        from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
+
+        fake_engine = SimpleNamespace(
+            build_transcript=BaseBatchTranscribeEngine.build_transcript,
+            engine_id="nemo",
+        )
+        transcript = BaseBatchTranscribeEngine._merge_chunk_transcripts(fake_engine, [])
+        assert transcript.language == "und"
+        assert transcript.language_source is None
+
+
 class TestEngineCapabilitiesLanguageForcing:
     def test_default_is_true(self):
         caps = EngineCapabilities(engine_id="x", version="1", stages=["transcribe"])

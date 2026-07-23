@@ -323,7 +323,7 @@ class BaseBatchTranscribeEngine(Engine):
             return self.build_transcript(
                 text="",
                 segments=[],
-                language="en",
+                language="und",
                 engine_id=getattr(self, "engine_id", "unknown"),
                 warnings=[
                     "No speech detected by VAD; transcript is empty. If the "

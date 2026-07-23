@@ -173,7 +173,8 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
         )
 
         warnings: list[str] = []
-        if params.language and params.language != "auto":
+        explicit_language = bool(params.language) and params.language != "auto"
+        if explicit_language:
             warnings.append(
                 f"Engine '{self.engine_id}' cannot force language "
                 f"'{params.language}'; the model auto-detects language per "
@@ -186,14 +187,15 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
                 "(narrowband/telephony audio often needs 0.3)."
             )
 
-        language = params.language or "en"
+        # No explicit request -> 'und' (ISO 639 undetermined) with no
+        # provenance; a concrete code would be fabricated (M92 review R3).
         return self.build_transcript(
             text=core_result.text,
             segments=segments,
-            language=language if language != "auto" else "en",
+            language=params.language if explicit_language else "und",
             engine_id=self.engine_id,
             language_confidence=None,
-            language_source="requested",
+            language_source="requested" if explicit_language else None,
             alignment_method=alignment_method,
             channel=channel,
             warnings=warnings,

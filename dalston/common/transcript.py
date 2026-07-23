@@ -229,7 +229,7 @@ def assemble_per_channel_transcript(
     all_channel_segments: list[dict[str, Any]] = []
     word_timestamps_available = False
     pipeline_warnings: list[str] = []
-    language = "en"
+    language = "und"
     language_confidence: float | None = None
     language_source = None
     all_languages: dict[str, LanguageInfo] = {}  # keyed by code, merge across channels
@@ -244,7 +244,7 @@ def assemble_per_channel_transcript(
 
         # Use first channel's language info as primary
         if channel == 0 and transcribe_data:
-            language = transcribe_data.get("language", "en")
+            language = transcribe_data.get("language", "und")
             language_confidence = transcribe_data.get("language_confidence")
             language_source = transcribe_data.get("language_source")
 
@@ -593,7 +593,7 @@ def _extract_transcribe_data(
 ) -> tuple[str, str, float | None, list[LanguageInfo] | None]:
     """Extract text, language, confidence, and languages from transcribe output."""
     text = transcribe_data.get("text", "")
-    language = transcribe_data.get("language", "en")
+    language = transcribe_data.get("language", "und")
     language_confidence = transcribe_data.get("language_confidence")
     # Extract code-switching language list if present
     raw_languages = transcribe_data.get("languages")
