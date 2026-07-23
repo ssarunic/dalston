@@ -145,7 +145,9 @@ def assemble_transcript(
         audio_channels=audio_channels,
         sample_rate=sample_rate,
         language=language,
-        language_confidence=round(language_confidence, 3),
+        language_confidence=(
+            round(language_confidence, 3) if language_confidence is not None else None
+        ),
         language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
@@ -225,7 +227,7 @@ def assemble_per_channel_transcript(
     word_timestamps_available = False
     pipeline_warnings: list[str] = []
     language = "en"
-    language_confidence = 1.0
+    language_confidence: float | None = None
     language_source = None
     all_languages: dict[str, LanguageInfo] = {}  # keyed by code, merge across channels
 
@@ -240,8 +242,7 @@ def assemble_per_channel_transcript(
         # Use first channel's language info as primary
         if channel == 0 and transcribe_data:
             language = transcribe_data.get("language", "en")
-            lc_raw = transcribe_data.get("language_confidence")
-            language_confidence = lc_raw if lc_raw is not None else 1.0
+            language_confidence = transcribe_data.get("language_confidence")
             language_source = transcribe_data.get("language_source")
 
         # Collect per-channel language lists for code-switching metadata
@@ -333,7 +334,9 @@ def assemble_per_channel_transcript(
         audio_channels=audio_channels or channel_count,
         sample_rate=sample_rate,
         language=language,
-        language_confidence=round(language_confidence, 3),
+        language_confidence=(
+            round(language_confidence, 3) if language_confidence is not None else None
+        ),
         language_source=language_source,
         languages=languages,
         word_timestamps=word_timestamps_available,
@@ -467,14 +470,11 @@ def _extract_audio_metadata(
 
 def _extract_transcribe_data(
     transcribe_data: dict[str, Any],
-) -> tuple[str, str, float, list[LanguageInfo] | None]:
+) -> tuple[str, str, float | None, list[LanguageInfo] | None]:
     """Extract text, language, confidence, and languages from transcribe output."""
     text = transcribe_data.get("text", "")
     language = transcribe_data.get("language", "en")
-    language_confidence_raw = transcribe_data.get("language_confidence")
-    language_confidence = (
-        language_confidence_raw if language_confidence_raw is not None else 1.0
-    )
+    language_confidence = transcribe_data.get("language_confidence")
     # Extract code-switching language list if present
     raw_languages = transcribe_data.get("languages")
     languages: list[LanguageInfo] | None = None

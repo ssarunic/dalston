@@ -111,7 +111,9 @@ class TestOnnxBatchOutputShape:
         data = output.data
         assert data.text == "hello world"
         assert data.language == "en"
-        assert data.language_confidence == 1.0
+        # M92.4: the engine does not compute LID confidence — never fabricated
+        assert data.language_confidence is None
+        assert data.language_source == "requested"
         assert len(data.segments) >= 1
         assert data.engine_id == "onnx"
 

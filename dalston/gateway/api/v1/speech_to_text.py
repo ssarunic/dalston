@@ -639,7 +639,14 @@ def _format_elevenlabs_response(
 
 
 def _resolve_language_fields(transcript: dict[str, Any]) -> tuple[str, float]:
-    """Resolve required language fields for ElevenLabs SDK compatibility."""
+    """Resolve required language fields for ElevenLabs SDK compatibility.
+
+    The ElevenLabs schema requires ``language_probability: float``, so a
+    missing/null confidence cannot be passed through. The ``0.0`` fallback
+    is a documented compat-contract concession meaning "no confidence
+    available" — the native API reports ``language_confidence: null``
+    instead and is the truthful surface (M92.4).
+    """
     metadata = transcript.get("metadata", {})
     if not isinstance(metadata, dict):
         metadata = {}

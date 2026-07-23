@@ -186,7 +186,7 @@ class OnnxBatchEngine(BaseBatchTranscribeEngine):
             segments=segments,
             language=language if language != "auto" else "en",
             engine_id=self.engine_id,
-            language_confidence=1.0 if language != "auto" else 0.5,
+            language_confidence=None,
             language_source="requested",
             alignment_method=alignment_method,
             channel=channel,
