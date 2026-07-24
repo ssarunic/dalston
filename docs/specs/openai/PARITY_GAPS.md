@@ -1,5 +1,9 @@
 # OpenAI STT API — Parity Gap Analysis
 
+> **Internal engineering analysis.** This file tracks gaps and proposed work;
+> it is not a current API reference or a promise of implemented behavior. See
+> [OpenAI-compatible API](./API.md) for the supported surface.
+
 **Date**: 2026-03-08
 **Scope**: `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`, `POST /v1/realtime/transcription_sessions`, `WS /v1/realtime`
 **Companion milestone**: [M61: OpenAI Speech-to-Text API Parity](../../plan/milestones/M61-openai-api-parity.md)

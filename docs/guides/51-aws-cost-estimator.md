@@ -1,5 +1,7 @@
 # AWS cost estimator
 
+<!-- performance-data: estimate; pricing-snapshot: 2025-11-01; region=eu-west-2 -->
+
 > Dalston is designed to make GPU compute disposable. Spin a GPU up for an
 > afternoon, transcribe a podcast back catalog, spin it down. The cheapest
 > 24/7 ElevenLabs/OpenAI-compatible API you can self-host costs about
@@ -8,8 +10,9 @@
 This page collects the verified cost numbers from the codebase
 ([`docs/guides/aws-deploy.md`](aws-deploy.md), the `infra/templates/*.yaml`
 files, and current AWS pricing pages) into one practical reference. Real
-prices vary by region and time — these are eu-west-2 (London) on-demand
-ranges as of late 2025.
+prices vary by region and time. This page is the repository's single pricing
+snapshot: **eu-west-2 (London), captured 2025-11-01**. It is illustrative and
+must be refreshed from AWS before a purchasing or capacity decision.
 
 ---
 

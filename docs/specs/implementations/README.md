@@ -1,6 +1,12 @@
-# Implementation Reference
+# Internal implementation references
 
-This folder contains reference implementations for non-obvious patterns used across Dalston. These are not exhaustive code listings, but focused examples of patterns that:
+> These documents explain engineering patterns and historical implementation
+> decisions. They are not public API contracts and may lag the running code.
+> For user-visible behavior, use the guides, generated OpenAPI document, CLI
+> `--help`, and current SDK types.
+
+This folder contains references for non-obvious patterns used across Dalston.
+They are not exhaustive code listings, but focused examples of patterns that:
 
 - Establish conventions used throughout the codebase
 - Have subtle requirements that aren't obvious from specs

@@ -13,7 +13,9 @@
 
 **Drop-in integration** — OpenAI and ElevenLabs compatible APIs mean you can point your existing code at Dalston and it just works. Need more power? The native Dalston API unlocks advanced functionality like multi-engine routing, pipeline customization, and detailed engine metadata.
 
-**Cheap to run** — `make dev` is free. A 1-hour podcast on a spot GPU costs cents. A 24/7 ElevenLabs/OpenAI-compatible API on AWS runs around $87/month all-in. See the [cost estimator](docs/guides/51-aws-cost-estimator.md).
+**Cost-aware** — run locally or use on-demand/spot cloud engines. Cloud prices
+change by region and date; use the dated inputs in the
+[cost estimator](docs/guides/51-aws-cost-estimator.md).
 
 ## What It Does
 
@@ -60,11 +62,12 @@ For zero-Docker single-process mode or AWS deployment, see the [guides](docs/gui
 
 - [Quickstart](docs/guides/01-quickstart.md) — first transcript in 5 minutes
 - [Pick your deployment](docs/guides/02-pick-your-deployment.md) — laptop / spot GPU / 24/7 AWS
+- [Configuration](docs/reference/configuration.md) — generated environment reference
 - [All guides →](docs/guides/) — engines, real-time, cost, principles
 
 **Engineering reference:**
 
-- [Architecture](docs/specs/ARCHITECTURE.md) · [REST API](docs/specs/batch/API.md) · [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
+- [Documentation hub](docs/README.md) · [Architecture](docs/specs/ARCHITECTURE.md) · [REST API](docs/specs/batch/API.md) · [WebSocket API](docs/specs/realtime/WEBSOCKET_API.md)
 
 ## License
 

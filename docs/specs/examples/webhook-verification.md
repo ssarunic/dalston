@@ -38,6 +38,8 @@ Supported event types are `transcription.completed`,
 
 Use the SDK helper instead of implementing the cryptography yourself:
 
+<!-- doc-test: webhook-handler -->
+
 ```python
 from dalston_sdk import (
     WebhookEventType,
@@ -47,14 +49,18 @@ from dalston_sdk import (
 )
 
 
-def handle_webhook(headers: dict[str, str], body: bytes) -> tuple[int, str]:
+def handle_webhook(
+    headers: dict[str, str],
+    body: bytes,
+    secret: str,
+) -> tuple[int, str]:
     try:
         valid = verify_webhook_signature(
             payload=body,
             signature=headers["webhook-signature"],
             msg_id=headers["webhook-id"],
             timestamp=headers["webhook-timestamp"],
-            secret="whsec_...",
+            secret=secret,
             max_age=300,
         )
     except (KeyError, WebhookVerificationError):

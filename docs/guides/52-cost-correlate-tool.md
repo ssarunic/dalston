@@ -36,15 +36,15 @@ For every day in the window, the script computes:
 
 Three concrete examples:
 
-1. **"Is split mode actually $87/mo?"**
+1. **"Is the split-mode headline estimate accurate for me?"**
    Run the tool over a month. Sum the `cost_usd` column. If it's notably higher,
    investigate `warmup_ratio` and `billed_instance_s` — you might be paying
    for instances that aren't doing work.
 
 2. **"Should I switch from faster-whisper to NeMo?"**
-   Compare `cost_per_audio_hour` before and after. NeMo's RTF 0.0006 means
-   the GPU is busy a lot less of the time — same instance hours, far more
-   audio per hour. The line item moves from $0.30/hr to $0.05/hr.
+   Compare `cost_per_audio_hour` before and after. A faster measured RTF means
+   audio completes sooner, so the GPU runs for fewer billed seconds per audio
+   hour.
 
 3. **"How much money am I leaking on idle GPU?"**
    Look at `warmup_ratio`. >50% means most of your spend is *not* useful

@@ -2,15 +2,16 @@
 
 ## Status
 
-- **Milestone:** M53
-- **State:** Implemented (2026-03-05)
-- **Scope:** Realtime worker session pipeline, gateway realtime translation, protocol close/error semantics
+Current behavior implemented by the realtime worker pipeline and gateway
+protocol adapters.
 
 ---
 
-## Problem (Pre-M53)
+## Problem
 
-The current realtime pipeline relies on implicit transport backpressure (`await send`) and has no explicit lag budget enforcement. Under CPU contention or slow inference, sessions can degrade into high latency without deterministic warning/termination behavior.
+Transport backpressure alone does not bound end-to-end audio lag. Under CPU
+contention or slow inference, sessions can otherwise degrade into high latency
+without deterministic warning or termination.
 
 ---
 
@@ -19,7 +20,6 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 1. Detect lag explicitly during active sessions.
 2. Warn client when lag crosses warning budget.
 3. Terminate session with explicit close code when hard lag budget is exceeded.
-4. Remove pre-M53 compatibility paths in realtime code after cutover.
 
 ---
 
@@ -33,7 +33,9 @@ The current realtime pipeline relies on implicit transport backpressure (`await 
 
 ### Rationale
 
-`transcript` duration is not a reliable lag signal because transcript timeline can exclude silence depending on model/VAD behavior. M53 uses audio ingestion vs processing cursors.
+`transcript` duration is not a reliable lag signal because transcript timeline
+can exclude silence depending on model/VAD behavior. Dalston uses audio
+ingestion vs processing cursors.
 
 ### Cursor measurement points
 
@@ -195,7 +197,7 @@ Invalid values fail closed at startup/connection parse.
 On lag termination:
 
 1. Session status is finalized as error/interrupted with `lag_exceeded` reason.
-2. Worker slot is released normally via existing session router flow.
+2. The embedded session coordinator releases the worker slot normally.
 3. Session logs include lag values and threshold config used.
 4. Session termination is non-recoverable:
    - `recoverable = false`
@@ -205,27 +207,14 @@ On lag termination:
 
 ## Monitoring Model
 
-M53 enforces lag budgets with two checks:
+Dalston enforces lag budgets with two checks:
 
 1. Inline checks at chunk/control boundaries.
 2. A periodic monitor task (target tick: 250ms) that evaluates lag/grace timers while long inference calls are in-flight.
 
 ---
 
-## Non-Goals (M53)
+## Non-goals
 
 1. Client-side adaptive pacing protocol.
 2. Dynamic model switching mid-session to recover lag.
-3. Backward compatibility with pre-M53 realtime worker protocol.
-
----
-
-## Legacy Cleanup Requirements
-
-After implementation, remove:
-
-1. Compatibility branches for old worker lag semantics.
-2. Obsolete comments/docs that claim implicit backpressure is the only control.
-3. Temporary migration toggles used only during M53 development.
-
-M53 is complete only when this cleanup is done.

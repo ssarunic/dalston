@@ -1,185 +1,85 @@
-# Data Retention
+# Data retention
 
-## Overview
+Batch jobs and persisted realtime sessions use one integer retention contract.
 
-Dalston uses a simple integer-based retention model for all audio and transcript artifacts. Retention is specified per-job (batch) or per-session (realtime) as a single integer parameter.
+| Value | Meaning |
+| --- | --- |
+| omitted | Use the server default |
+| `0` | Transient: do not retain artifacts after processing/session completion |
+| `-1` | Permanent: never purge automatically |
+| `1`–`3650` | Retain for that number of days |
 
-## Retention Values
+The default is 30 days in distributed mode. Lite mode changes the default to
+`0` unless `DALSTON_RETENTION_DEFAULT_DAYS` is explicitly set.
 
-| Value | Meaning | Behavior |
-|-------|---------|----------|
-| `0` | Transient | No storage - artifacts deleted immediately after processing |
-| `-1` | Permanent | Keep forever - never auto-delete |
-| `1-3650` | Days | Delete after N days from job completion / session end |
+## API use
 
-**Default:** 30 days
-
-## API Usage
-
-### Batch Jobs
+Batch:
 
 ```bash
-# 30-day retention (default)
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@meeting.mp3"
-
-# Transient - no storage
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@meeting.mp3" \
-  -F "retention=0"
-
-# Permanent - keep forever
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@meeting.mp3" \
-  -F "retention=-1"
-
-# 90-day retention
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -F "file=@meeting.mp3" \
-  -F "retention=90"
+  -H "Authorization: Bearer $DALSTON_API_KEY" \
+  -F file=@audio.wav \
+  -F retention=7
 ```
 
-### Realtime Sessions
+Native realtime:
 
-```
-# 30-day retention (default)
-ws://localhost:8000/v1/audio/transcriptions/stream
-
-# Transient - no storage
-ws://localhost:8000/v1/audio/transcriptions/stream?retention=0
-
-# 7-day retention
-ws://localhost:8000/v1/audio/transcriptions/stream?retention=7
+```text
+wss://HOST/v1/audio/transcriptions/stream?retention=7
 ```
 
-### SDK
+The Python SDK accepts the same values through its batch and realtime request
+parameters. The CLI exposes `--retention`.
 
-```python
-from dalston_sdk import DalstonClient
+API responses normalize retention to:
 
-client = DalstonClient(api_key="dk_xxx")
+- `mode`: `none`, `keep`, or `auto_delete`;
+- `hours` for time-limited retention;
+- `purge_after` once the deadline is known;
+- `purged_at` after cleanup.
 
-# Batch with 90-day retention
-job = client.transcribe("meeting.mp3", retention=90)
+## Stored data
 
-# Transient (no storage)
-job = client.transcribe("meeting.mp3", retention=0)
-```
+Retention applies to durable artifacts associated with a job/session, including
+source audio, transcript results, redacted outputs, PII metadata, and pipeline
+intermediates where present. A record can outlive its artifacts so clients can
+distinguish a purged result from a missing identifier.
 
-### CLI
+Transient mode avoids durable artifact retention. Processing may still require
+temporary working files or in-memory data. It is not a promise that bytes never
+touch local temporary storage.
 
-```bash
-# 90-day retention
-dalston transcribe meeting.mp3 --retention 90
+## Cleanup
 
-# Transient
-dalston transcribe meeting.mp3 --retention 0
+The retention cleanup worker periodically selects expired terminal records,
+deletes their stored artifacts, and records purge timestamps. Configure it
+with:
 
-# Permanent
-dalston transcribe meeting.mp3 --retention -1
-```
+- `DALSTON_RETENTION_CLEANUP_INTERVAL_SECONDS` (default `300`);
+- `DALSTON_RETENTION_CLEANUP_BATCH_SIZE` (default `100`);
+- `DALSTON_RETENTION_DEFAULT_DAYS`.
 
-## Data Model
+Permanent records have no purge deadline. Deleting a terminal job/session is an
+explicit user operation and is separate from scheduled retention cleanup.
 
-### Jobs Table
+## Runtime-mode differences
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `retention` | INTEGER | Retention days (0=transient, -1=permanent, N=days) |
-| `purge_after` | TIMESTAMPTZ | Computed: `completed_at + retention days` |
-| `purged_at` | TIMESTAMPTZ | When artifacts were deleted |
+Distributed mode uses PostgreSQL and object storage and defaults to 30 days.
+Lite mode uses SQLite/local artifacts and defaults to transient. Some
+historical artifact retrieval endpoints, especially realtime session
+transcript/audio retrieval, return `409` in Lite mode even if metadata exists.
 
-### Realtime Sessions Table
+Do not use removed storage flags or a hybrid realtime mode to describe
+retention. The integer request value, runtime default, and actual endpoint
+capabilities are authoritative.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `retention` | INTEGER | Retention days (0=transient, -1=permanent, N=days) |
-| `purge_after` | TIMESTAMPTZ | Computed: `ended_at + retention days` |
-| `purged_at` | TIMESTAMPTZ | When artifacts were deleted |
+## Security and operations
 
-## Cleanup Worker
+Purging is not a substitute for storage-provider lifecycle policies, encrypted
+backups, or audit-log retention. Operators must set compatible retention on
+backups and replicas. A presigned download URL may remain valid for its short
+expiry window after the underlying record changes.
 
-A background worker periodically purges expired jobs and sessions:
-
-```
-Every 5 minutes:
-  1. Query jobs/sessions where:
-     - purge_after IS NOT NULL
-     - purge_after <= NOW()
-     - purged_at IS NULL
-
-  2. For each expired item:
-     - Delete S3 artifacts (audio, transcript, intermediates)
-     - Set purged_at = NOW()
-     - Emit audit event
-```
-
-### Transient Mode
-
-For `retention=0`, artifacts are deleted inline when the job completes or session ends - no waiting for the cleanup worker.
-
-## API Response
-
-Job and session responses include retention information:
-
-```json
-{
-  "id": "job_abc123",
-  "status": "completed",
-  "retention": {
-    "mode": "auto_delete",
-    "hours": 720,
-    "purge_after": "2026-03-26T12:00:00Z",
-    "purged_at": null
-  }
-}
-```
-
-After purge:
-
-```json
-{
-  "retention": {
-    "mode": "auto_delete",
-    "hours": 720,
-    "purge_after": "2026-03-26T12:00:00Z",
-    "purged_at": "2026-03-26T12:05:00Z"
-  }
-}
-```
-
-## Web Console Display
-
-The retention card shows:
-
-- **Main text:** Original retention period (e.g., "30 days", "Permanent", "Transient")
-- **Subtitle:** Countdown until purge (e.g., "5d 3h until purge") or status ("Purged", "No storage")
-
-## Accessing Purged Artifacts
-
-Attempting to download audio or transcript for a purged job returns:
-
-```json
-{
-  "error": {
-    "code": "artifacts_purged",
-    "message": "Job artifacts were purged at 2026-03-26T12:05:00Z"
-  }
-}
-```
-
-HTTP status: `410 Gone`
-
-## Configuration
-
-| Environment Variable | Default | Description |
-| -------------------- | ------- | ----------- |
-| `RETENTION_DEFAULT_DAYS` | `30` | Default retention for new jobs/sessions |
-| `RETENTION_MAX_DAYS` | `3650` | Maximum allowed retention (10 years) |
-| `RETENTION_CLEANUP_INTERVAL_SECONDS` | `300` | Cleanup worker interval |
-| `RETENTION_CLEANUP_BATCH_SIZE` | `100` | Jobs processed per cleanup cycle |
-
-## Related Documentation
-
-- [Audit Log](AUDIT_LOG.md) - Retention events are logged
-- [Session Persistence](realtime/SESSION_PERSISTENCE.md) - Realtime storage
+Use audit events to record lifecycle actions; do not retain sensitive payloads
+inside audit details merely to compensate for purged artifacts.

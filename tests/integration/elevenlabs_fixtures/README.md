@@ -3,7 +3,7 @@
 These fixtures pin the ElevenLabs STT compatibility contract used by Dalston.
 
 - Contract date: `2026-03-08`
-- Primary SDK: `elevenlabs==2.38.1`
+- Primary SDK: `elevenlabs==2.47.0`
 - Scope:
   - `speech_to_text.convert(...)` sync and async
   - `speech_to_text.get(...)`

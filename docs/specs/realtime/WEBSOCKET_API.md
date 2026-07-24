@@ -1,1144 +1,157 @@
-# WebSocket API Reference
+# WebSocket API reference
 
-## Overview
-
-Dalston provides real-time streaming transcription via WebSocket with three endpoint variants:
-
-- **ElevenLabs Compatible** (`/v1/speech-to-text/realtime`) — Drop-in replacement for ElevenLabs WebSocket API
-- **OpenAI Compatible** (`/v1/realtime?intent=transcription`) — Drop-in replacement for OpenAI Realtime Transcription API
-- **Dalston Native** (`/v1/audio/transcriptions/stream`) — Dalston's own conventions with binary audio
-
-All three provide sub-500ms latency for real-time transcription.
-
-Lag budget behavior (explicit lag warning + lag-exceeded close semantics) is specified in [Latency Budget & Backpressure](./LATENCY_BUDGET_BACKPRESSURE.md).
-
----
-
-# ElevenLabs Compatible WebSocket
-
-## Endpoint
-
-```
-WS /v1/speech-to-text/realtime
-```
-
-This endpoint uses ElevenLabs message formats and parameter names by default.
-
----
+Dalston supports native, OpenAI-compatible, and ElevenLabs-compatible realtime
+transcription. All adapters share worker allocation and capacity, but their
+wire messages are intentionally different.
 
 ## Authentication
 
-WebSocket connections require an API key passed as a query parameter:
+Server-side clients should send:
 
-```
-wss://api.dalston.example.com/v1/speech-to-text/realtime?api_key=dk_your_key_here&...
-```
-
-The API key must have the `realtime` scope. If authentication fails, the connection is closed immediately with code `4001` (invalid key) or `4003` (missing scope).
-
----
-
-## Connection
-
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `api_key` | string | **required** | API key with `realtime` scope |
-| `model_id` | string | `"scribe_v1"` | Model: `"scribe_v1"` or `"scribe_v2"` |
-| `audio_format` | string | `"pcm_16000"` | Audio encoding (see table below) |
-| `language_code` | string | `"auto"` | ISO 639-1 code or `"auto"` |
-| `commit_strategy` | string | `"vad"` | `"vad"` (auto-commit) or `"manual"` |
-| `include_timestamps` | boolean | `false` | Include word-level timing |
-| `include_language_detection` | boolean | `false` | Include detected language in responses |
-| `vad_silence_threshold_secs` | float | `1.5` | Silence duration to trigger commit (VAD mode) |
-| `vad_threshold` | float | `0.4` | VAD sensitivity 0.0-1.0 (lower = more sensitive) |
-
-### Audio Format Values
-
-| Value | Description |
-|-------|-------------|
-| `pcm_16000` | 16-bit PCM, 16kHz, mono (recommended) |
-| `pcm_8000` | 16-bit PCM, 8kHz, mono |
-| `pcm_22050` | 16-bit PCM, 22.05kHz, mono |
-| `pcm_24000` | 16-bit PCM, 24kHz, mono |
-| `pcm_44100` | 16-bit PCM, 44.1kHz, mono |
-| `ulaw_8000` | μ-law, 8kHz, mono (telephony) |
-
-### Model ID Mapping
-
-| ElevenLabs Model | Dalston Backend |
-|------------------|-----------------|
-| `scribe_v1` | Parakeet 0.6B (native streaming) |
-| `scribe_v2` | Parakeet 1.1B (native streaming) |
-
-Note: Parakeet models provide native streaming support (not VAD-chunked like Whisper), enabling true partial results during speech.
-
-### Example Connection
-
-```javascript
-const ws = new WebSocket(
-  'wss://api.dalston.example.com/v1/speech-to-text/realtime?' +
-  'api_key=dk_your_key_here&model_id=scribe_v1&language_code=en&commit_strategy=vad&include_timestamps=true'
-);
+```http
+Authorization: Bearer <DALSTON_API_KEY>
 ```
 
----
+Browser clients that cannot set a WebSocket authorization header can use the
+supported protocol-specific single-use token flow. Do not put a long-lived API
+key in a browser URL.
 
-## Protocol Messages
+Authentication failures close with `4001`; a key without the required scope
+closes with `4003`.
 
-### Client → Server
+## Dalston-native protocol
 
-#### Audio Chunk
+Connect to:
 
-Send audio data as base64-encoded JSON:
-
-```json
-{
-  "message_type": "input_audio_chunk",
-  "audio_base_64": "UklGRiQAAABXQVZFZm10IBA...",
-  "commit": false,
-  "sample_rate": 16000
-}
+```text
+wss://HOST/v1/audio/transcriptions/stream
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `message_type` | string | Yes | Must be `"input_audio_chunk"` |
-| `audio_base_64` | string | Yes | Base64-encoded audio data |
-| `commit` | boolean | No | Force commit (manual mode), default `false` |
-| `sample_rate` | integer | No | Override sample rate if different from connection |
+Query parameters:
 
-**Chunk size recommendation**: 100-250ms of audio per message.
+| Name | Default | Notes |
+| --- | --- | --- |
+| `language` | `auto` | Language code or automatic detection |
+| `model` | empty | Registry model ID; empty enables automatic selection |
+| `encoding` | `pcm_s16le` | Raw audio encoding |
+| `sample_rate` | `16000` | Sample rate in Hz |
+| `enable_vad` | `true` | Emit VAD events |
+| `interim_results` | `true` | Emit provisional transcript events |
+| `word_timestamps` | `false` | Request word timing when supported |
+| `vocabulary` | omitted | JSON array, at most 100 terms of 50 characters |
+| `retention` | server default | `0`, `-1`, or 1–3650 days |
+| `resume_session_id` | omitted | Link the new session to a prior session |
+| `pii_detection` | `false` | Detect PII in a retained transcript |
+| `pii_entity_types` | omitted | Comma-separated entity types |
+| `redact_pii_audio` | `false` | Create retained redacted audio |
+| `pii_redaction_mode` | `silence` | `silence` or `beep` |
 
-#### Manual Commit
+Send audio as binary frames. JSON control messages include `end` to finish
+input. Server events use the internal public names:
 
-When using `commit_strategy=manual`, send a commit message to finalize a segment:
+- `session.begin`
+- `speech.start` / `speech.end`
+- `transcript.partial`
+- `transcript.final`
+- `warning`
+- `error`
+- `session.end`
 
-```json
-{
-  "message_type": "input_audio_chunk",
-  "audio_base_64": "",
-  "commit": true
-}
+Partial text is replaceable. Append only `transcript.final`. A normal client
+should send `end`, continue reading through `session.end`, then close.
+
+See [the native client guide](../../guides/43-realtime-dalston-native.md) and
+[client examples](../examples/websocket-clients.md).
+
+## ElevenLabs-compatible protocol
+
+Connect to:
+
+```text
+wss://HOST/v1/speech-to-text/realtime
 ```
 
-Or send an empty audio chunk with `commit: true`.
+Supported query parameters are `language_code`, `model_id`, `audio_format`,
+`commit_strategy`, `include_timestamps`, `include_language_detection`,
+`keyterms`, `previous_text`, `vad_threshold`, `min_speech_duration_ms`,
+`min_silence_duration_ms`, and `prefix_padding_ms`.
 
-#### End Session
+`commit_strategy` defaults to `manual`. Audio formats are validated through the
+ElevenLabs adapter, including PCM and µ-law variants supported by the current
+code. The compatibility model IDs are labels used by the adapter; actual
+routing resolves through Dalston's model registry and live workers.
 
-Close the session gracefully and receive final transcript:
+Clients send JSON `input_audio_chunk` messages containing `audio_base_64`.
+Manual mode uses the message's commit signal to finalize an utterance. Server
+messages include `session_started`, `partial_transcript`,
+`committed_transcript`, `committed_transcript_with_timestamps`,
+`input_error`, and session termination.
 
-```json
-{
-  "message_type": "close_connection"
-}
+Words in timestamped responses include `text`, `start`, `end`, and `type`.
+`logprob` and `characters` are included when the engine supplies them.
+
+See [the ElevenLabs guide](../../guides/41-realtime-elevenlabs-compatible.md).
+The compatibility suite is tested against `elevenlabs==2.47.0`.
+
+## OpenAI-compatible protocol
+
+Connect to:
+
+```text
+wss://HOST/v1/realtime?intent=transcription&model=gpt-4o-transcribe
 ```
 
----
+`intent` must be `transcription`. `OpenAI-Beta: realtime=v1` is accepted but
+optional.
 
-### Server → Client
+Dalston accepts both current transcription-session nesting and the older flat
+session-update shape, normalizing them internally. Relevant configuration
+includes input audio format, transcription model/language/prompt, server VAD,
+and input noise reduction.
 
-#### Partial Transcript
+Client events include:
 
-Interim results as speech is being recognized. Text may change as more audio arrives.
+- `transcription_session.update` or compatible `session.update`
+- `input_audio_buffer.append`
+- `input_audio_buffer.commit`
+- `input_audio_buffer.clear`
 
-```json
-{
-  "message_type": "partial_transcript",
-  "text": "hello how are"
-}
-```
+Server events include session created/updated events, speech started/stopped,
+transcription delta/completed, and `error`. Exact payload examples are in
+[the OpenAI realtime guide](../../guides/42-realtime-openai-compatible.md).
 
-#### Committed Transcript
+`POST /v1/realtime/transcription_sessions` creates an ephemeral
+OpenAI-compatible client secret and returns the normalized session
+configuration.
 
-Final transcript for a completed utterance (after VAD endpoint or manual commit).
-
-**Without timestamps** (`include_timestamps=false`):
-
-```json
-{
-  "message_type": "committed_transcript",
-  "text": "Hello, how are you?"
-}
-```
-
-**With timestamps** (`include_timestamps=true`):
-
-```json
-{
-  "message_type": "committed_transcript_with_timestamps",
-  "text": "Hello, how are you?",
-  "language_code": "en",
-  "words": [
-    {
-      "text": "Hello",
-      "start": 0.0,
-      "end": 0.4,
-      "type": "word",
-      "speaker_id": "speaker_1"
-    },
-    {
-      "text": ",",
-      "start": 0.4,
-      "end": 0.4,
-      "type": "spacing"
-    },
-    {
-      "text": "how",
-      "start": 0.5,
-      "end": 0.7,
-      "type": "word",
-      "speaker_id": "speaker_1"
-    },
-    {
-      "text": "are",
-      "start": 0.8,
-      "end": 1.0,
-      "type": "word",
-      "speaker_id": "speaker_1"
-    },
-    {
-      "text": "you",
-      "start": 1.1,
-      "end": 1.4,
-      "type": "word",
-      "speaker_id": "speaker_1"
-    }
-  ]
-}
-```
-
-#### Language Detection
-
-When `include_language_detection=true`, language info is included:
-
-```json
-{
-  "message_type": "language_detection",
-  "language_code": "en",
-  "language_confidence": 0.98
-}
-```
-
-#### Error
-
-```json
-{
-  "message_type": "error",
-  "code": "rate_limit",
-  "message": "Audio arriving too fast"
-}
-```
-
-| Code | Description |
-|------|-------------|
-| `rate_limit` | Audio arriving faster than real-time |
-| `invalid_audio` | Audio format doesn't match configuration |
-| `invalid_message` | Malformed JSON or unknown message type |
-| `language_unsupported` | Requested language not available |
-| `no_capacity` | No workers available |
-| `session_timeout` | Session exceeded maximum duration |
-| `lag_exceeded` | Realtime lag budget exceeded |
-
----
-
-## Client Examples
-
-For complete client implementations in JavaScript and Python, see [WebSocket Client Examples](../examples/websocket-clients.md).
-
----
-
-# OpenAI Compatible WebSocket
-
-## Endpoint
-
-```
-WS /v1/realtime?intent=transcription
-```
-
-This endpoint implements the OpenAI Realtime Transcription API protocol, allowing existing OpenAI SDK users to connect by changing only the base URL.
-
----
-
-## Authentication
-
-OpenAI uses header-based authentication during the WebSocket handshake:
-
-```
-Authorization: Bearer dk_your_api_key_here
-OpenAI-Beta: realtime=v1
-```
-
-Dalston accepts both `dk_` (Dalston native) and `sk-` (OpenAI-style) key prefixes, both treated as Dalston API keys.
-
-If authentication fails, the connection is closed immediately with an `error` event containing `type: "authentication_error"`.
-
----
-
-## Connection
-
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `intent` | string | **required** | Must be `"transcription"` |
-| `model` | string | `"gpt-4o-transcribe"` | Transcription model (see table below) |
-
-### Example Connection
-
-```javascript
-const ws = new WebSocket(
-  'wss://api.dalston.example.com/v1/realtime?intent=transcription',
-  {
-    headers: {
-      'Authorization': 'Bearer dk_your_key_here',
-      'OpenAI-Beta': 'realtime=v1'
-    }
-  }
-);
-```
-
----
-
-## Session Configuration
-
-After connecting, configure the transcription session. Dalston accepts both OpenAI request variants and normalizes them internally.
-
-### Variant A: Wrapped (`transcription_session.update`)
-
-```json
-{
-  "type": "transcription_session.update",
-  "session": {
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": {
-      "model": "gpt-4o-transcribe",
-      "language": "en",
-      "prompt": "Technical terms: Kubernetes, FastAPI"
-    },
-    "turn_detection": {
-      "type": "server_vad",
-      "threshold": 0.5,
-      "prefix_padding_ms": 300,
-      "silence_duration_ms": 500
-    },
-    "input_audio_noise_reduction": {
-      "type": "near_field"
-    }
-  }
-}
-```
-
-### Variant B: Flat (`session.update`)
-
-```json
-{
-  "type": "session.update",
-  "input_audio_format": "pcm16",
-  "input_audio_transcription": {
-    "model": "gpt-4o-transcribe",
-    "language": "en"
-  },
-  "turn_detection": {
-    "type": "server_vad",
-    "threshold": 0.5,
-    "prefix_padding_ms": 300,
-    "silence_duration_ms": 500
-  }
-}
-```
-
-Invalid nested payloads such as `{"session": {"session": {...}}}` are rejected with `invalid_request_error` (`code: "invalid_request"`).
-
-### Audio Format Values
-
-| Format | Description |
-|--------|-------------|
-| `pcm16` | 16-bit PCM, 24kHz, mono |
-| `g711_ulaw` | G.711 μ-law |
-| `g711_alaw` | G.711 A-law |
-
-### Turn Detection Options
-
-| Type | Description |
-|------|-------------|
-| `server_vad` | Server-side voice activity detection (default) |
-| `semantic_vad` | Semantic-aware turn detection |
-| `null` | Manual commit only (client controls when to commit) |
-
-### Model ID Mapping
-
-| OpenAI Model | Dalston Backend | Description |
-|--------------|-----------------|-------------|
-| `gpt-4o-transcribe` | Parakeet 1.1B | Best quality streaming |
-| `gpt-4o-mini-transcribe` | Parakeet 0.6B | Fast streaming |
-| `whisper-1` | Whisper streaming | VAD-chunked Whisper |
-
----
-
-## Protocol Messages
-
-### Client → Server
-
-#### Append Audio
-
-Send audio as base64-encoded data within a JSON event:
-
-```json
-{
-  "type": "input_audio_buffer.append",
-  "audio": "UklGRiQAAABXQVZFZm10IBA..."
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"input_audio_buffer.append"` |
-| `audio` | string | Yes | Base64-encoded audio data |
-
-**Chunk size limit**: Each chunk cannot exceed 15 MB.
-
-#### Commit Buffer
-
-Force processing of buffered audio (used with manual turn detection):
-
-```json
-{
-  "type": "input_audio_buffer.commit"
-}
-```
-
-#### Clear Buffer
-
-Discard buffered audio:
-
-```json
-{
-  "type": "input_audio_buffer.clear"
-}
-```
-
----
-
-### Server → Client
-
-All server events include an `event_id` field for correlation.
-
-#### Session Created
-
-Sent immediately on connection:
-
-```json
-{
-  "type": "transcription_session.created",
-  "event_id": "evt_abc123",
-  "session": {
-    "id": "sess_xyz789",
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": {
-      "model": "gpt-4o-transcribe",
-      "language": "en"
-    }
-  }
-}
-```
-
-#### Session Updated
-
-Confirmation of session configuration change:
-
-```json
-{
-  "type": "transcription_session.updated",
-  "event_id": "evt_abc124",
-  "session": {
-    "id": "sess_xyz789",
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": {
-      "model": "gpt-4o-transcribe",
-      "language": "en"
-    },
-    "turn_detection": {
-      "type": "server_vad",
-      "threshold": 0.5,
-      "prefix_padding_ms": 300,
-      "silence_duration_ms": 500
-    }
-  }
-}
-```
-
-#### Speech Started
-
-VAD detected speech in the audio buffer:
-
-```json
-{
-  "type": "input_audio_buffer.speech_started",
-  "event_id": "evt_abc125",
-  "audio_start_ms": 1500
-}
-```
-
-#### Speech Stopped
-
-VAD detected end of speech:
-
-```json
-{
-  "type": "input_audio_buffer.speech_stopped",
-  "event_id": "evt_abc126",
-  "audio_end_ms": 3200
-}
-```
-
-#### Buffer Committed
-
-Acknowledgment that the audio buffer was committed for processing:
-
-```json
-{
-  "type": "input_audio_buffer.committed",
-  "event_id": "evt_abc127",
-  "item_id": "item_xyz"
-}
-```
-
-#### Transcription Delta
-
-Incremental transcript as the model streams results:
-
-```json
-{
-  "type": "conversation.item.input_audio_transcription.delta",
-  "event_id": "evt_abc128",
-  "item_id": "item_xyz",
-  "content_index": 0,
-  "delta": "Hello, how"
-}
-```
-
-#### Transcription Completed
-
-Final transcript for an utterance:
-
-```json
-{
-  "type": "conversation.item.input_audio_transcription.completed",
-  "event_id": "evt_abc129",
-  "item_id": "item_xyz",
-  "content_index": 0,
-  "transcript": "Hello, how are you today?"
-}
-```
-
-With logprobs (if requested via `include` in session config):
-
-```json
-{
-  "type": "conversation.item.input_audio_transcription.completed",
-  "event_id": "evt_abc129",
-  "item_id": "item_xyz",
-  "content_index": 0,
-  "transcript": "Hello, how are you today?",
-  "logprobs": [
-    { "token": "Hello", "logprob": -0.12 },
-    { "token": ",", "logprob": -0.05 },
-    { "token": "how", "logprob": -0.08 }
-  ]
-}
-```
-
-#### Error
-
-```json
-{
-  "type": "error",
-  "event_id": "evt_abc130",
-  "error": {
-    "type": "invalid_request_error",
-    "code": "invalid_audio_format",
-    "message": "Audio format does not match session configuration"
-  }
-}
-```
-
-| Error Type | Description |
-|------------|-------------|
-| `invalid_request_error` | Malformed request, bad parameters, or unsupported format |
-| `authentication_error` | Invalid or missing API key |
-| `rate_limit_error` | Rate limit exceeded |
-| `server_error` | Internal processing error |
-
----
-
-## REST Session Creation
-
-Dalston also supports creating transcription sessions via REST before connecting:
-
-`POST /v1/realtime/transcription_sessions`
-
-The endpoint accepts either flat session fields at the top level, or a wrapped payload under `session`. See [OpenAI API Reference](../openai/API.md#rest-session-creation) for details.
-
----
-
-## Client Examples
-
-For complete OpenAI-compatible client implementations, see [WebSocket Client Examples](../examples/websocket-clients.md#openai-compatible-client-javascript).
-
----
-
-# Dalston Native WebSocket
-
-## Endpoint
-
-```
-WS /v1/audio/transcriptions/stream
-```
-
-This endpoint uses Dalston's native message format with efficient binary audio frames.
-
----
-
-## Connection
-
-Authentication is required via the `api_key` query parameter. See the [Authentication section](#authentication) above.
-
-### Query Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `api_key` | string | **required** | API key with `realtime` scope |
-| `language` | string | `"auto"` | Language code (ISO 639-1) or `"auto"` |
-| `model` | string | `"fast"` | Model variant: `"fast"` or `"accurate"` |
-| `encoding` | string | `"pcm_s16le"` | Audio encoding |
-| `sample_rate` | integer | `16000` | Audio sample rate in Hz |
-| `channels` | integer | `1` | Number of audio channels |
-| `enable_vad` | boolean | `true` | Enable voice activity detection |
-| `interim_results` | boolean | `true` | Return partial transcripts |
-| `word_timestamps` | boolean | `false` | Include word-level timing |
-| `enhance_on_end` | boolean | `false` | Trigger batch enhancement on session end |
-| `max_utterance_duration` | float | `60.0` | Max seconds before forcing utterance end (0=unlimited) |
-| `vad_threshold` | float | `0.5` | Speech detection threshold (0.0-1.0, lower=more sensitive) |
-| `min_speech_duration_ms` | integer | `250` | Min speech duration before valid utterance (50-2000) |
-| `min_silence_duration_ms` | integer | `500` | Silence duration to trigger endpoint (50-2000) |
-
-### Supported Encodings
-
-| Encoding | Description |
-|----------|-------------|
-| `pcm_s16le` | 16-bit signed PCM, little-endian (recommended) |
-| `pcm_f32le` | 32-bit float PCM, little-endian |
-| `mulaw` | μ-law encoded (8-bit) |
-| `alaw` | A-law encoded (8-bit) |
-
-### Example Connection
-
-```javascript
-const ws = new WebSocket(
-  'ws://localhost:8000/v1/audio/transcriptions/stream?' +
-  'api_key=dk_your_key_here&language=en&model=fast&interim_results=true&word_timestamps=true'
-);
-```
-
----
-
-## Protocol Messages
-
-### Client → Server
-
-#### Binary: Audio Data
-
-Send raw audio bytes as binary WebSocket frames. More efficient than base64 encoding.
-
-```javascript
-// Send raw PCM bytes directly
-ws.send(audioBuffer);
-```
-
-#### JSON: Configuration Update
-
-```json
-{
-  "type": "config",
-  "language": "es"
-}
-```
-
-#### JSON: Flush
-
-Force processing of buffered audio:
-
-```json
-{
-  "type": "flush"
-}
-```
-
-#### JSON: End Session
-
-```json
-{
-  "type": "end"
-}
-```
-
----
-
-### Server → Client
-
-#### Session Begin
-
-```json
-{
-  "type": "session.begin",
-  "session_id": "sess_abc123def456",
-  "config": {
-    "sample_rate": 16000,
-    "encoding": "pcm_s16le",
-    "channels": 1,
-    "language": "en",
-    "model": "fast"
-  }
-}
-```
-
-#### Partial Transcript
-
-```json
-{
-  "type": "transcript.partial",
-  "text": "hello how are",
-  "start": 0.0,
-  "end": 1.2
-}
-```
-
-#### Final Transcript
-
-```json
-{
-  "type": "transcript.final",
-  "text": "Hello, how are you?",
-  "start": 0.0,
-  "end": 1.8,
-  "confidence": 0.95,
-  "words": [
-    { "word": "Hello", "start": 0.0, "end": 0.4, "confidence": 0.98 },
-    { "word": "how", "start": 0.5, "end": 0.7, "confidence": 0.96 },
-    { "word": "are", "start": 0.8, "end": 1.0, "confidence": 0.94 },
-    { "word": "you", "start": 1.1, "end": 1.4, "confidence": 0.97 }
-  ]
-}
-```
-
-#### VAD Events
-
-```json
-{
-  "type": "vad.speech_start",
-  "timestamp": 2.5
-}
-```
-
-```json
-{
-  "type": "vad.speech_end",
-  "timestamp": 4.2
-}
-```
-
-#### Session End
-
-```json
-{
-  "type": "session.end",
-  "session_id": "sess_abc123def456",
-  "total_duration": 45.6,
-  "total_speech_duration": 32.1,
-  "transcript": "Full transcript of entire session...",
-  "segments": [
-    { "start": 0.0, "end": 1.8, "text": "Hello, how are you?" },
-    { "start": 2.5, "end": 5.2, "text": "I'm doing great, thanks for asking." }
-  ]
-}
-```
-
-#### Error
-
-```json
-{
-  "type": "error",
-  "code": "rate_limit",
-  "message": "Audio arriving too fast",
-  "recoverable": true
-}
-```
-
----
-
-# Management Endpoints
-
-## GET /v1/realtime/status
-
-System capacity for realtime transcription.
-
-```json
-{
-  "status": "ready",
-  "total_capacity": 16,
-  "active_sessions": 7,
-  "available_capacity": 9,
-  "workers": [
-    {
-      "id": "stt-rt-transcribe-whisper-1",
-      "status": "ready",
-      "capacity": 4,
-      "active_sessions": 2
-    }
-  ]
-}
-```
-
-## GET /v1/realtime/sessions
-
-List active sessions (admin).
-
-```json
-{
-  "sessions": [
-    {
-      "session_id": "sess_abc123",
-      "worker_id": "stt-rt-transcribe-whisper-1",
-      "started_at": "2025-01-28T12:00:00Z",
-      "duration": 45.6,
-      "language": "en",
-      "model": "fast"
-    }
-  ],
-  "total": 7
-}
-```
-
-## DELETE /v1/realtime/sessions/{session_id}
-
-Force-terminate a session (admin).
-
----
-
-# Error Handling
-
-## Connection Refused (No Capacity)
-
-```json
-{
-  "message_type": "error",
-  "code": "no_capacity",
-  "message": "No realtime workers available. Try again later.",
-  "retry_after": 5
-}
-```
-
-## Graceful Degradation
-
-If preferred model unavailable:
-
-```json
-{
-  "type": "session.begin",
-  "session_id": "sess_abc123",
-  "config": {
-    "model": "fast"
-  },
-  "warnings": [
-    {
-      "code": "model_fallback",
-      "message": "Requested model 'accurate' unavailable, using 'fast'"
-    }
-  ]
-}
-```
-
----
-
-# Limits
-
-| Limit | Value | Configurable |
-|-------|-------|--------------|
-| Maximum session duration | 4 hours | Yes |
-| Maximum audio rate | 1.5x real-time | Yes |
-| Minimum chunk size | 50ms | No |
-| Maximum chunk size | 1000ms | Yes |
-| Idle timeout | 30 seconds | Yes |
-
----
-
-# Protocol Comparison
-
-| Aspect | ElevenLabs (`/v1/speech-to-text/realtime`) | OpenAI (`/v1/realtime?intent=transcription`) | Dalston (`/v1/audio/transcriptions/stream`) |
-|--------|-------------------------------------------|----------------------------------------------|---------------------------------------------|
-| Auth | `api_key` query param | `Authorization` header + `OpenAI-Beta` header | `api_key` query param |
-| Audio input | JSON with `audio_base_64` | JSON with `audio` (base64) | Binary frames (raw bytes) |
-| Message type field | `message_type` | `type` | `type` |
-| Partial message | `partial_transcript` | `conversation.item.input_audio_transcription.delta` | `transcript.partial` |
-| Final message | `committed_transcript_with_timestamps` | `conversation.item.input_audio_transcription.completed` | `transcript.final` |
-| Commit control | `commit: true` in audio message | `input_audio_buffer.commit` | `{ "type": "flush" }` |
-| Session begin | *(not sent)* | `transcription_session.created` | `session.begin` |
-| Session config | *(query params only)* | `transcription_session.update` / `session.update` | `{ "type": "config" }` |
-| VAD events | *(not sent)* | `input_audio_buffer.speech_started/stopped` | `vad.speech_start`, `vad.speech_end` |
-| Session end | *(connection closes)* | *(connection closes)* | `session.end` with summary |
-| Model param | `model_id` = `scribe_v1`/`scribe_v2` | `model` = `gpt-4o-transcribe`/`gpt-4o-mini-transcribe`/`whisper-1` | `model` = `fast`/`accurate` |
-| Language param | `language_code` | `input_audio_transcription.language` | `language` |
-| VAD param | `commit_strategy` = `vad`/`manual` | `turn_detection.type` = `server_vad`/`null` | `enable_vad` = `true`/`false` |
-| Timestamps param | `include_timestamps` | *(always included via delta events)* | `word_timestamps` |
-| Error format | `{ "message_type": "error", "code": ... }` | `{ "type": "error", "error": { "type": ..., "code": ... } }` | `{ "type": "error", "code": ... }` |
-| Event correlation | *(none)* | `event_id` on all server events | *(none)* |
-
----
-
-# Migration Guide
-
-## From ElevenLabs to Dalston
-
-If using the ElevenLabs endpoint (`/v1/speech-to-text/realtime`), no changes needed — it's fully compatible.
-
-If migrating to Dalston native for efficiency:
-
-| Change | Before (ElevenLabs) | After (Dalston) |
-|--------|---------------------|-----------------|
-| Endpoint | `/v1/speech-to-text/realtime` | `/v1/audio/transcriptions/stream` |
-| Audio | Base64 JSON | Raw binary frames |
-| Params | `model_id`, `language_code`, `commit_strategy` | `model`, `language`, `enable_vad` |
-| Message field | `message_type` | `type` |
-| Partials | `partial_transcript` | `transcript.partial` |
-| Finals | `committed_transcript_with_timestamps` | `transcript.final` |
-
-**Benefits of Dalston native:**
-
-- ~33% bandwidth reduction (no base64 overhead)
-- Session metadata (`session.begin`, `session.end`)
-- VAD events for UI feedback
-- Enhanced transcript option on session end
-
-## From OpenAI to Dalston
-
-If using the OpenAI-compatible endpoint (`/v1/realtime?intent=transcription`), no changes needed — point the OpenAI SDK at Dalston's base URL:
-
-```python
-import asyncio
-import websockets
-import json
-
-# Before (OpenAI)
-uri = "wss://api.openai.com/v1/realtime?intent=transcription"
-headers = {"Authorization": "Bearer sk-xxx", "OpenAI-Beta": "realtime=v1"}
-
-# After (Dalston) — only change the host and key
-uri = "wss://api.dalston.example.com/v1/realtime?intent=transcription"
-headers = {"Authorization": "Bearer dk_your_key", "OpenAI-Beta": "realtime=v1"}
-```
-
-If migrating to Dalston native for efficiency:
-
-| Change | Before (OpenAI) | After (Dalston) |
-|--------|-----------------|-----------------|
-| Endpoint | `/v1/realtime?intent=transcription` | `/v1/audio/transcriptions/stream` |
-| Auth | `Authorization` header | `api_key` query param |
-| Audio | Base64 JSON (`input_audio_buffer.append`) | Raw binary frames |
-| Session config | `transcription_session.update` event | Query params at connection |
-| Partials | `conversation.item.input_audio_transcription.delta` | `transcript.partial` |
-| Finals | `conversation.item.input_audio_transcription.completed` | `transcript.final` |
-| VAD events | `input_audio_buffer.speech_started/stopped` | `vad.speech_start/end` |
-| Model | `gpt-4o-transcribe` | `accurate` |
-
-**Benefits of Dalston native:**
-
-- ~33% bandwidth reduction (no base64 overhead)
-- Session summary on end (`session.end`)
-- Enhanced transcript option on session end
-- Simpler message format (shorter event type names)
-
----
-
-# Error Recovery & Reconnection
-
-## Unclean Session Termination
-
-When a session ends unexpectedly (worker crash, network issue, resource exhaustion), the server sends a `session.terminated` message before closing:
-
-```json
-{
-  "type": "session.terminated",
-  "session_id": "sess_abc123",
-  "reason": "worker_crash",
-  "last_transcript_offset_ms": 45600,
-  "recoverable": true,
-  "recovery_hint": {
-    "action": "reconnect_with_replay",
-    "buffer_window_ms": 10000,
-    "retry_after_ms": 500
-  }
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `reason` | string | `worker_crash`, `worker_maintenance`, `resource_exhaustion`, `session_timeout`, `lag_exceeded` |
-| `last_transcript_offset_ms` | integer | Last confirmed transcript position in milliseconds |
-| `recoverable` | boolean | Whether recovery is possible |
-| `recovery_hint.action` | string | `reconnect_with_replay` or `start_fresh` |
-| `recovery_hint.buffer_window_ms` | integer | How much audio the client should replay |
-| `recovery_hint.retry_after_ms` | integer | Suggested wait before reconnecting |
-
-For `reason="lag_exceeded"`, `recoverable=false` and no `recovery_hint` is sent.
-
-## Reconnection Protocol
-
-When `recoverable=true`, clients can reconnect with session recovery:
-
-```
-ws://host/v1/audio/transcriptions/stream?api_key=dk_xxx&recovery_session=old_session_id&language=en
-```
-
-### Recovery Query Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `recovery_session` | string | Previous session ID to recover |
-
-### Recovery Flow
-
-1. **Client receives `session.terminated`** (or detects WebSocket close)
-2. **If `recoverable=true`:**
-   - Wait `retry_after_ms` milliseconds
-   - Reconnect with `recovery_session={old_session_id}` query param
-   - If client buffered audio since `last_transcript_offset_ms`, send as first chunks
-   - Gateway allocates new worker, returns `session.recovered`
-3. **If `recoverable=false`:**
-   - Start fresh session
-   - Audio since last `transcript.final` is lost
-
-### Recovery Response
-
-On successful recovery:
-
-```json
-{
-  "type": "session.recovered",
-  "session_id": "sess_def456",
-  "previous_session_id": "sess_abc123",
-  "recovered_offset_ms": 45600,
-  "message": "Session recovered. Resume sending audio."
-}
-```
-
-On failed recovery (session expired or unavailable):
-
-```json
-{
-  "type": "session.begin",
-  "session_id": "sess_def456",
-  "warnings": [
-    {
-      "code": "recovery_failed",
-      "message": "Previous session not found. Starting fresh session."
-    }
-  ]
-}
-```
-
-## Client Implementation Guidance
-
-Clients SHOULD:
-
-- Buffer the last 5-10 seconds of audio locally
-- Track the `offset_ms` from each `transcript.final`
-- Implement exponential backoff for reconnection attempts (500ms, 1s, 2s, 4s)
-- Set a maximum reconnection attempts limit (recommended: 3)
-- Clear buffer after successful `transcript.final` acknowledgment
-
-For a complete reconnection-capable client implementation, see [WebSocket Client Examples](../examples/websocket-clients.md#robust-client-with-reconnection-javascript).
-
----
-
-# Rate Limits
-
-## Connection Limits
-
-| Limit | Default | Configurable | Description |
-|-------|---------|--------------|-------------|
-| Max concurrent sessions per API key | 3 | Yes | Simultaneous active sessions |
-| Max concurrent sessions per tenant | 10 | Yes | Total sessions across all keys |
-| Connection attempts per minute | 10 | Yes | Rate of new connection attempts |
-| Session creation rate | 5/minute | Yes | Successful session creations |
-
-## In-Session Limits
-
-| Limit | Default | Description |
-|-------|---------|-------------|
-| Audio data rate (sustained) | 1.5x real-time | Average rate over 10-second window |
-| Audio data rate (burst) | 10 seconds | Burst allowance for catch-up/replay |
-| Message rate (non-audio) | 30/second | Control messages (config, flush, etc.) |
-| Maximum audio chunk size | 1MB | Single message size limit |
-
-### Audio Rate Limiting (Token Bucket)
-
-Audio rate limiting uses a token bucket algorithm that allows bursts while maintaining a sustainable average rate:
-
-```
-Bucket capacity: 10 seconds of audio
-Refill rate: 1.5x real-time
-```
-
-This allows clients to:
-
-- Send up to 10 seconds of buffered audio immediately (reconnection scenario)
-- Sustain 1.5x real-time transmission (faster-than-realtime uploads)
-- Recover from temporary delays without data loss
-
-When the bucket is empty, excess audio is queued briefly, then dropped with a warning.
-
-## Rate Limit Errors
-
-When a rate limit is exceeded:
-
-```json
-{
-  "type": "error",
-  "code": "rate_limit",
-  "message": "Concurrent session limit reached",
-  "limit_type": "concurrent_sessions",
-  "current": 3,
-  "limit": 3,
-  "retry_after": null
-}
-```
-
-| `limit_type` | Meaning | Recovery |
-|--------------|---------|----------|
-| `concurrent_sessions` | Too many active sessions | Wait for one to end |
-| `connection_rate` | Too many connect attempts | Wait `retry_after` seconds |
-| `audio_rate` | Sending audio too fast | Slow down; data being dropped |
-| `message_rate` | Too many control messages | Reduce message frequency |
-
-### Rate Limit Response Behavior
-
-| Limit Type | Connection Phase | Behavior |
-|------------|------------------|----------|
-| `concurrent_sessions` | Before accept | Connection rejected with 4029 |
-| `connection_rate` | Before accept | Connection rejected with 4029 |
-| `audio_rate` | During session | Warning message, audio queued/dropped |
-| `message_rate` | During session | Warning, then disconnect |
-
-## WebSocket Close Codes
+## Limits and close codes
 
 | Code | Meaning |
-|------|---------|
-| `4001` | Invalid API key |
-| `4003` | Missing required scope |
-| `4029` | Rate limit exceeded |
-| `4008` | Session timeout |
-| `4010` | Realtime lag budget exceeded |
-| `4500` | Internal server error |
-| `4503` | Service unavailable (no workers) |
+| --- | --- |
+| `1000` | Normal completion |
+| `4001` | Missing, invalid, or expired credentials |
+| `4003` | Required scope missing |
+| `4010` | Audio lag budget exceeded |
+| `4029` | API-key request-rate limit |
+| `4400` | Invalid realtime parameters or unsupported intent |
+| `4429` | Concurrent-session limit |
+| `4503` | No compatible worker capacity / service unavailable |
+
+The default concurrent limit is 5 sessions per tenant
+(`DALSTON_RATE_LIMIT_CONCURRENT_SESSIONS`). Message size, audio rate, queue lag,
+and utterance duration are also bounded by gateway/worker implementation.
+
+Clients should retry `4429` and `4503` with jittered backoff. Do not retry
+authentication or parameter failures unchanged. A `4010` disconnect requires
+slower sending, lower load, or more capacity.
+
+## Persistence and reconnection
+
+Retention is opt-in/configurable and does not change the live transcript
+protocol. `resume_session_id` creates lineage only; a reconnect is a new
+session with fresh decoder state. There is no sequence-number replay protocol
+and no automatic batch enhancement.
+
+Use `/v1/realtime/sessions` to discover persisted sessions and the transcript,
+audio, and export endpoints to retrieve retained artifacts. See
+[Session persistence](./SESSION_PERSISTENCE.md).

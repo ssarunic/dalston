@@ -28,16 +28,17 @@ job = client.wait_for_completion(job.id)
 print(job.transcript.text)
 ```
 
-`transcribe()` returns immediately with a pending `Job`; `wait_for_completion()`
-polls until done (or raises if the job fails). All the knobs:
+In distributed mode, `transcribe()` normally returns a pending `Job`;
+`wait_for_completion()` polls until done (or raises if the job fails). A
+transient Lite request can complete inline. All the knobs:
 
 ```python
 job = client.transcribe(
     file="meeting.mp3",                    # or audio_url="https://..."
-    model="auto",                          # engine_id or "auto"
+    model="auto",                          # model registry ID or "auto"
     language="auto",
     vocabulary=["PostgreSQL", "Kubernetes"],
-    speaker_detection="diarize",           # "none", "diarize", "per-channel"
+    speaker_detection="diarize",           # "none", "diarize", "per_channel"
     num_speakers=2,                        # exact (overrides min/max)
     min_speakers=2,
     max_speakers=4,
@@ -60,6 +61,21 @@ for segment in job.transcript.segments:
     for word in segment.words or []:
         print(f"  {word.text}  {word.start:.2f}s")
 ```
+
+### Optional output semantics
+
+Treat language, timestamps, and confidence as capability-dependent:
+
+- `job.transcript.language_code` can be `None` or `und`.
+- `word.confidence` can be `None`.
+- `segments`, `words`, and `speakers` can be absent.
+- Requesting word timestamps does not guarantee them if the selected engine
+  lacks the capability.
+
+The native HTTP response also carries warnings and original-audio metadata that
+the current typed SDK does not expose on every dataclass. Use the REST response
+directly if those fields are required for policy decisions, and test the
+selected engine rather than assuming a field exists.
 
 ---
 
@@ -137,13 +153,12 @@ but blocking `connect()` / `send_audio()`. Use it from non-async code.
 
 ---
 
-## Job management
+## Batch and control-plane methods
 
 ```python
 client.list_jobs(status="completed", limit=50)
 job = client.get_job(job_id)
 client.cancel(job_id)
-client.get_job_artifacts(job_id)  # S3 references for raw outputs
 client.list_engines()
 client.list_models()
 client.get_model(model_id)
@@ -151,9 +166,27 @@ client.get_realtime_status()
 client.create_session_token()
 client.list_realtime_sessions()
 client.get_realtime_session(session_id)
-client.get_session_artifacts(session_id)
 client.delete_realtime_session(session_id)
 ```
+
+The sync and async clients expose matching methods:
+
+| Area | Methods |
+| --- | --- |
+| Jobs | `transcribe`, `get_job`, `list_jobs`, `cancel`, `wait_for_completion`, `export` |
+| Models | `list_models`, `get_model` |
+| Engines | `list_engines` |
+| Realtime control plane | `get_realtime_status`, `create_session_token`, `list_realtime_sessions`, `get_realtime_session`, `delete_realtime_session` |
+| Service | `health`, `close` |
+
+The package still defines `get_job_artifacts` and `get_session_artifacts`, but
+they target legacy `/v2` routes that the current gateway does not mount. Do not
+use them as supported control-plane operations until the routes or SDK are
+reconciled. Use the native job task-artifact endpoints instead.
+
+Model pull/remove/sync, webhook endpoint administration, audit queries, job
+rename/deletion, retained audio download, and task artifacts remain
+REST/console operations in the current SDK.
 
 Full job deletion is available through the REST API
 (`DELETE /v1/audio/transcriptions/{job_id}`) and the web console.

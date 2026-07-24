@@ -1,9 +1,8 @@
 # Dalston user guides
 
 > **Self-host an ElevenLabs- and OpenAI-compatible speech-to-text API.**
-> Run it on your laptop for free. Spin up a GPU on AWS for an afternoon and
-> pay cents. Or stand up a 24/7 ElevenLabs alternative for around $87/month.
-> You own the models, the cache, and the bill.
+> Run it on your laptop or private cloud. Use spot/on-demand engines when they
+> fit your workload. You own the models, the cache, and the bill.
 
 This is the user-facing guide section. For engineering deep-dives (DAG
 internals, schema specs, etc.), see [`docs/specs/`](../specs/).
@@ -32,6 +31,13 @@ internals, schema specs, etc.), see [`docs/specs/`](../specs/).
 - **[23-using-the-cli.md](23-using-the-cli.md)** — `dalston transcribe`, `listen`, `jobs`, …
 - **[24-using-the-python-sdk.md](24-using-the-python-sdk.md)** — sync, async, real-time, webhooks
 
+## Deployment references
+
+- **[self-hosted-deployment-tutorial.md](self-hosted-deployment-tutorial.md)** — current local/private deployment
+- **[aws-deploy.md](aws-deploy.md)** — current AWS script and templates
+- **[gcp-deploy-experimental.md](gcp-deploy-experimental.md)** — experimental GCP script, with explicit gaps
+- **[configuration reference](../reference/configuration.md)** — generated gateway/orchestrator environment settings
+
 ## Principles — how it works under the hood
 
 - **[30-how-models-are-fetched.md](30-how-models-are-fetched.md)** — S3-first, HF fallback, on-disk cache
@@ -53,27 +59,28 @@ internals, schema specs, etc.), see [`docs/specs/`](../specs/).
 
 ---
 
-## Legacy engineering references
+## Additional engineering references
 
-These predate the numbered guide path. Use them for deeper context, not as the
-first copy-paste path.
+Use these for deeper or scenario-specific context.
 
 - [aws-deploy.md](aws-deploy.md) — comprehensive AWS deployment reference
 - [aws-deployment-scenarios.md](aws-deployment-scenarios.md) — scenario-by-scenario tradeoffs
 - [aws-engine-deployment-tutorial.md](aws-engine-deployment-tutorial.md) — engineering walkthrough
 - [aws-cost-correlation.md](aws-cost-correlation.md) — cost-correlate tool reference
-- [self-hosted-deployment-tutorial.md](self-hosted-deployment-tutorial.md) — original local-deploy tutorial
 - [new-transcription-engine-tutorial.md](new-transcription-engine-tutorial.md) — adding a new engine
 - [TYPED_ENGINE_CONTRACTS.md](TYPED_ENGINE_CONTRACTS.md) — engine SDK contracts
 
 ---
 
-## The pitch in numbers
+## At a glance
 
-- **$0** — `make dev` on your laptop
-- **~$0.20/hr** — spot g4dn.xlarge for batch transcription
-- **~$87/mo** — full split-mode 24/7 ElevenLabs/OpenAI-compatible API
-- **RTF 0.0006** — NeMo Parakeet on a g4dn.xlarge: 1-hour audio in ~2s of compute
-- **3 protocols** — Dalston native, ElevenLabs, OpenAI; pick what your client speaks
-- **6 engine presets** — onnx, faster-whisper, nemo, hf-asr, vllm-asr, pyannote
-- **0 vendor lock-in** — your model cache, your S3 bucket, your tailnet
+- Three public realtime protocols: Dalston native, ElevenLabs, and OpenAI.
+- Batch stages for preparation, transcription, alignment, diarization, PII
+  detection, and audio redaction.
+- Local, AWS, and experimental GCP deployment tooling.
+- Pluggable authored engines and a shared model registry/cache.
+
+Performance and cloud cost depend on dated hardware/price inputs. Use
+[50-performance-and-rtf.md](50-performance-and-rtf.md) and
+[51-aws-cost-estimator.md](51-aws-cost-estimator.md) rather than copying a
+headline number from the navigation page.

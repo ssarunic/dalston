@@ -349,6 +349,41 @@ client = Dalston(
 
 ---
 
+## Control-plane coverage
+
+`Dalston` and `AsyncDalston` expose matching sync/async methods:
+
+| Area | Methods |
+| --- | --- |
+| Jobs | `transcribe`, `get_job`, `list_jobs`, `cancel`, `wait_for_completion`, `export` |
+| Models/engines | `list_models`, `get_model`, `list_engines` |
+| Realtime management | `get_realtime_status`, `create_session_token`, `list_realtime_sessions`, `get_realtime_session`, `delete_realtime_session` |
+| Service | `health`, `close` |
+
+The package still defines `get_job_artifacts` and `get_session_artifacts`, but
+they target legacy `/v2` routes that the current gateway does not mount. Do not
+treat them as supported operations until the gateway/SDK contract is
+reconciled. Job task artifacts are available from the native REST API.
+
+Job deletion/rename, model mutation, webhook administration, audit queries,
+retained audio download, and task artifacts currently use the REST API or
+console.
+
+## Result semantics
+
+Optional output follows the selected engine's capabilities:
+
+- language may be absent or `und`;
+- word confidence may be `None`;
+- segments, words, speakers, and word timestamps may be absent;
+- a word-timestamp request can fall back when an engine lacks that capability.
+
+The native HTTP payload also includes warnings and original-audio metadata that
+are not represented on every current SDK dataclass. Use the HTTP API directly
+when an application must make decisions from those fields.
+
+---
+
 ## Error Handling
 
 The SDK provides typed exceptions for different error scenarios:

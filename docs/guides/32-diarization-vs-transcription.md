@@ -1,5 +1,7 @@
 # Picking the right transcription + diarization combo
 
+<!-- performance-data: estimate; source=engine.yaml planning metadata -->
+
 > Three decisions, two patterns. Walking through them once will save you
 > hours of "why is my speaker labeling weird" later.
 
@@ -58,7 +60,7 @@ Use cases:
 - Single-GPU production where you want one container managing one VRAM budget
 - Demos where you don't want to coordinate three services
 
-Cost on AWS: a g6.xlarge spot ≈ $0.34/hr for the whole pipeline (transcribe + align + diarize).
+Check the dated cost estimator for the current instance-price assumptions.
 
 ### Multiple GPUs → run **separate engines**
 
@@ -70,7 +72,7 @@ phoneme-align (g4dn.xlarge spot)   ─┼─► assembled by orchestrator
 pyannote-4.0 (g4dn.xlarge spot)    ─┘
 ```
 
-Three boxes, each at ~$0.20/hr spot, doing different stages in parallel.
+Three boxes doing different stages in parallel.
 Higher throughput, more flexibility, easier to scale a hot stage.
 
 Or: **one box, multiple engines co-located** on a g6.xlarge (24 GB L4),
@@ -129,21 +131,22 @@ diarization you have two options:
 
 ---
 
-## Common combos with cost & throughput
+## Common combos and throughput
 
-Real numbers from each `engine.yaml` `performance:` block:
+The `engine.yaml` performance fields are planning estimates, not reproducible
+benchmarks. Use them to shortlist a topology, then measure with your audio:
 
-| Combo | Hardware | Cost (spot) | RTF effective | 1-hour podcast |
-|---|---|---|---|---|
-| `nemo` only | g4dn.xlarge | $0.20/hr | 0.0006 | finishes in ~2s + I/O ≈ $0.001 |
-| `nemo` + `pyannote` co-located | g6.xlarge | $0.34/hr | 0.15 (diarize-bound) | ~9 min ≈ $0.05 |
-| `faster-whisper` + `phoneme-align` + `pyannote` | 3× g4dn.xlarge | $0.60/hr | parallel — slowest of 0.03/0.05/0.15 | ~9 min ≈ $0.09 |
-| `hf-asr-align-pyannote` (combo) | g6.xlarge | $0.34/hr | ~0.3 (sequential in one process) | ~18 min ≈ $0.10 |
-| `whisper-align-pyannote` composite | 3× g4dn.xlarge | $0.60/hr | parallel transcribe+diarize, then align | similar to triple-engine but scheduling overhead |
+| Combo | Hardware pattern | Scheduling behavior |
+| --- | --- | --- |
+| `nemo` only | One compatible GPU | Transcription only |
+| `nemo` + `pyannote` co-located | One GPU with shared VRAM budget | Transcription and diarization can overlap |
+| `faster-whisper` + `phoneme-align` + `pyannote` | Separate compatible workers | Parallel branches, then orchestrator assembly |
+| `hf-asr-align-pyannote` | One larger GPU | Sequential composite process |
+| `whisper-align-pyannote` composite | Three child engines | Parallel transcription/diarization, then alignment |
 
-> **The headline:** for English at scale, **NeMo + pyannote co-located on a
-> single g6.xlarge spot** is the sweet spot. ~$0.34/hr active, killer RTF,
-> shared VRAM budget.
+For an actual benchmark, record hardware, model revisions, engine commit,
+audio corpus, concurrency, and date. For prices, use
+[51-aws-cost-estimator.md](51-aws-cost-estimator.md).
 
 ---
 
@@ -191,7 +194,8 @@ Max 100 terms, 50 chars each. The engines that support it: `faster-whisper`,
 
 - **Using `faster-whisper` and complaining about word timestamps.** It doesn't
   produce them. Add an `align` stage or pick a different engine.
-- **Running pyannote on CPU and complaining it's slow.** RTF 1.2 on CPU.
+- **Running pyannote on CPU and expecting GPU-class throughput.** Benchmark the
+  chosen model and corpus before sizing a production worker.
   Use a GPU.
 - **`HF_TOKEN` not set** — pyannote will refuse to load. See
   [30-how-models-are-fetched.md](30-how-models-are-fetched.md).

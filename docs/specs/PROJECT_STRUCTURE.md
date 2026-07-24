@@ -1,456 +1,149 @@
-# Dalston Project Structure
+# Project structure
 
-## Directory Layout
+This is an orientation map, not a generated file inventory. Use `rg --files`
+and the package manifests when exact contents matter.
 
-```
+```text
 dalston/
-│
-├── pyproject.toml                      # Project metadata and dependencies
-├── docker-compose.yml                  # Container orchestration
-├── .env.example                        # Environment variables template
-├── README.md                           # Project overview
-│
-├── dalston/                            # Main Python package
-│   ├── __init__.py
-│   ├── config.py                       # Configuration management
-│   │
-│   ├── gateway/                        # API Gateway
-│   │   ├── __init__.py
-│   │   ├── main.py                     # FastAPI application entry point
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   ├── v1/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── router.py           # API router aggregation
-│   │   │   │   ├── transcription.py    # Batch: POST/GET /v1/audio/transcriptions
-│   │   │   │   ├── realtime.py         # Realtime: WS /v1/audio/transcriptions/stream
-│   │   │   │   ├── realtime_status.py  # Realtime: GET /v1/realtime/*
-│   │   │   │   ├── engines.py          # GET /v1/engines
-│   │   │   │   └── system.py           # GET /v1/system/status
-│   │   │   └── console.py              # Management API for web console
-│   │   ├── services/
-│   │   │   ├── __init__.py
-│   │   │   ├── jobs.py                 # Batch job management
-│   │   │   ├── results.py              # Result retrieval
-│   │   │   ├── engines.py              # Engine registry
-│   │   │   └── session_router.py       # Realtime session router client
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   ├── requests.py             # Pydantic request schemas
-│   │   │   └── responses.py            # Pydantic response schemas
-│   │   └── middleware/
-│   │       ├── __init__.py
-│   │       └── error_handler.py        # Global error handling
-│   │
-│   ├── orchestrator/                   # Batch Job Orchestrator
-│   │   ├── __init__.py
-│   │   ├── main.py                     # Orchestrator entry point
-│   │   ├── dag.py                      # DAG builder from job parameters
-│   │   ├── scheduler.py                # Task scheduling
-│   │   ├── handlers.py                 # Event handlers
-│   │   ├── engine_selector.py          # Engine selection logic
-│   │   └── audio_analyzer.py           # Audio property analysis
-│   │
-│   ├── session_router/                 # Realtime Session Router
-│   │   ├── __init__.py
-│   │   ├── main.py                     # Entry point (if standalone)
-│   │   ├── router.py                   # Main router class
-│   │   ├── registry.py                 # Worker registry management
-│   │   ├── allocator.py                # Session allocation logic
-│   │   └── health.py                   # Worker health monitoring
-│   │
-│   ├── engine_sdk/                     # SDK for batch engines
-│   │   ├── __init__.py
-│   │   ├── base.py                     # Base Engine class
-│   │   ├── runner.py                   # Queue polling loop
-│   │   ├── io.py                       # File I/O helpers
-│   │   ├── redis_client.py             # Redis wrapper
-│   │   └── types.py                    # TaskInput, TaskOutput
-│   │
-│   ├── realtime_sdk/                   # SDK for realtime engines
-│   │   ├── __init__.py
-│   │   ├── engine.py                   # Base RealtimeEngine class
-│   │   ├── session.py                  # Session handler base
-│   │   ├── vad.py                      # Voice activity detection
-│   │   ├── asr.py                      # Streaming ASR wrapper
-│   │   ├── assembler.py                # Transcript assembly
-│   │   ├── registry.py                 # Registry client
-│   │   └── protocol.py                 # WebSocket message types
-│   │
-│   └── common/                         # Shared utilities
-│       ├── __init__.py
-│       ├── redis.py                    # Redis client factory
-│       ├── models.py                   # Shared data models
-│       └── utils.py                    # Common utilities
-│
-├── engines/                            # Engine implementations
-│   │
-│   ├── prepare/                        # Audio preparation
-│   │   └── audio-prepare/
-│   │       ├── Dockerfile
-│   │       ├── requirements.txt
-│   │       ├── engine.yaml
-│   │       └── engine.py
-│   │
-│   ├── transcribe/                     # Batch transcription
-│   │   ├── faster-whisper/
-│   │   │   └── ...
-│   │   ├── parakeet/
-│   │   │   └── ...
-│   │   └── whisper-openai/
-│   │       └── ...
-│   │
-│   ├── align/                          # Word alignment
-│   │   └── phoneme-align/              # Standalone CTC forced alignment
-│   │       └── ...
-│   │
-│   ├── diarize/                        # Speaker diarization
-│   │   └── pyannote-4.0/
-│   │       └── ...
-│   │
-│   ├── detect/                         # Audio analysis
-│   │   ├── emotion2vec/
-│   │   │   └── ...
-│   │   └── panns-events/
-│   │       └── ...
-│   │
-│   ├── refine/                         # LLM refinement
-│   │   └── llm-cleanup/
-│   │       └── ...
-│   │
-│   ├── merge/                          # Output merging
-│   │   └── final-merger/
-│   │       └── ...
-│   │
-│   ├── multi/                          # Multi-stage batch engines
-│   │   └── whisperx-full/
-│   │       └── ...
-│   │
-│   └── realtime/                       # Realtime streaming engines
-│       └── whisper-streaming/
-│           ├── Dockerfile
-│           ├── requirements.txt
-│           ├── engine.yaml
-│           └── engine.py
-│
-├── web/                                # React Management Console
-│   ├── package.json
-│   ├── package-lock.json
-│   ├── vite.config.ts
-│   ├── tsconfig.json
-│   ├── index.html
-│   └── src/
-│       ├── main.tsx
-│       ├── App.tsx
-│       ├── api/
-│       │   ├── client.ts
-│       │   └── types.ts
-│       ├── pages/
-│       │   ├── Dashboard.tsx           # Unified batch + realtime overview
-│       │   ├── BatchJobs.tsx           # Batch job list
-│       │   ├── BatchJobDetail.tsx      # Batch job with DAG
-│       │   ├── RealtimeSessions.tsx    # Active realtime sessions
-│       │   ├── Engines.tsx             # All engines (batch + realtime)
-│       │   └── Settings.tsx            # System configuration
-│       ├── components/
-│       │   ├── Layout.tsx
-│       │   ├── Sidebar.tsx
-│       │   ├── DAGViewer.tsx           # Batch task DAG
-│       │   ├── TranscriptViewer.tsx
-│       │   ├── AudioPlayer.tsx
-│       │   ├── RealtimeMonitor.tsx     # Live session stats
-│       │   ├── CapacityGauge.tsx       # Realtime capacity
-│       │   ├── ProgressBar.tsx
-│       │   └── StatusBadge.tsx
-│       └── hooks/
-│           ├── useJobs.ts
-│           ├── useSessions.ts
-│           └── useWebSocket.ts
-│
-├── docker/                             # Dockerfiles
-│   ├── Dockerfile.gateway
-│   ├── Dockerfile.orchestrator
-│   ├── Dockerfile.session-router       # If standalone
-│   └── Dockerfile.base                 # Base for batch engines
-│
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── unit/
-│   │   ├── test_dag.py
-│   │   ├── test_engine_selector.py
-│   │   ├── test_vad.py
-│   │   ├── test_session_router.py
-│   │   └── test_assembler.py
-│   ├── integration/
-│   │   ├── test_batch_api.py
-│   │   ├── test_realtime_api.py
-│   │   ├── test_job_flow.py
-│   │   └── test_session_flow.py
-│   └── fixtures/
-│       └── audio/
-│           ├── short_mono.wav
-│           ├── short_stereo.wav
-│           └── long_interview.wav
-│
-├── scripts/
-│   ├── setup.sh
-│   ├── download_models.sh
-│   └── benchmark.py
-│
-└── docs/
-    ├── ARCHITECTURE.md                 # Unified architecture overview
-    ├── PROJECT_STRUCTURE.md            # This file
-    │
-    ├── batch/                          # Batch transcription docs
-    │   ├── API.md
-    │   ├── ORCHESTRATOR.md
-    │   ├── DATA_MODEL.md
-    │   ├── ENGINES.md
-    │   └── DOCKER.md
-    │
-    └── realtime/                       # Realtime transcription docs
-        ├── REALTIME.md
-        ├── WEBSOCKET_API.md
-        ├── SESSION_ROUTER.md
-        └── REALTIME_ENGINES.md
+├── dalston/                 Python control plane and shared runtimes
+│   ├── common/              Shared models, streams, Redis/S3, registry helpers
+│   ├── db/                  SQLAlchemy models and database sessions
+│   ├── engine_sdk/          Batch engine runtime, managers, local runner
+│   ├── gateway/             FastAPI HTTP/WebSocket API and services
+│   ├── orchestrator/        DAG scheduling, events, Lite runtime, RT coordinator
+│   ├── realtime_sdk/        Realtime worker/session runtime
+│   ├── schemas/             Typed engine input/output schemas
+│   └── tools/               Profiling and operational utilities
+├── engines/                 Authored pluggable engines and metadata
+├── cli/                     `dalston` command-line package and tests
+├── sdk/                     `dalston-sdk` Python package and tests
+├── web/                     React/TypeScript operator console
+├── tests/                   Unit, integration, e2e, web, and benchmark tests
+├── docker/                  Control-plane and engine base Dockerfiles
+├── infra/                   Cloud templates and deployment scripts
+├── alembic/                 Distributed PostgreSQL migrations
+├── docs/                    Guides, current references, ADRs, and history
+├── scripts/                 Validation, compatibility, and operations scripts
+├── docker-compose.yml       Local distributed composition
+├── pyproject.toml           Root Python package/tool configuration
+└── Makefile                 Supported development workflows
 ```
 
----
+## Control plane
 
-## Package Details
+### `dalston/gateway`
 
-### dalston/gateway/
+`main.py` creates the FastAPI application. `api/v1` contains public native and
+compatibility routes; `api/console.py` contains console aggregation routes.
+Handlers authenticate/validate and delegate to `services/`. Middleware owns
+auth, correlation IDs, metrics, and error translation.
 
-The API Gateway serving both batch and realtime endpoints.
+The gateway also embeds the realtime `SessionCoordinator` from
+`dalston/orchestrator/session_coordinator.py`. There is no standalone
+session-router source package or container in the current architecture.
 
-| File | Purpose |
-|------|---------|
-| `main.py` | FastAPI app, middleware, router mounting |
-| `api/v1/transcription.py` | Batch transcription endpoints |
-| `api/v1/realtime.py` | WebSocket endpoint, proxy to workers |
-| `api/v1/realtime_status.py` | Realtime capacity and session management |
-| `services/jobs.py` | Batch job lifecycle |
-| `services/session_router.py` | Client for Session Router |
+### `dalston/orchestrator`
 
-### dalston/orchestrator/
+The distributed orchestrator builds task DAGs, consumes durable events,
+schedules stage tasks, handles cancellation/retries, assembles final results,
+and runs cleanup/reconciliation loops. `lite_main.py` provides the
+single-process Lite execution path.
 
-Batch job orchestration (unchanged from batch-only design).
+Final transcript assembly is orchestrator logic, not a queue-backed `merge`
+service.
 
-| File | Purpose |
-|------|---------|
-| `main.py` | Entry point, event loop |
-| `dag.py` | Build task DAG from parameters |
-| `scheduler.py` | Task queue management |
-| `handlers.py` | Event handlers |
-| `engine_selector.py` | Select optimal engines |
+### `dalston/common`, `db`, and `schemas`
 
-### dalston/session_router/
+These packages define cross-component contracts. Changes to stream names,
+statuses, retention semantics, engine schemas, or persistence models usually
+require synchronized updates in gateway, orchestrator, SDK/tests, and docs.
 
-Realtime worker pool management.
+## Engine runtimes
 
-| File | Purpose |
-|------|---------|
-| `main.py` | Entry point (if standalone) |
-| `router.py` | Main SessionRouter class |
-| `registry.py` | Worker registration and tracking |
-| `allocator.py` | Session-to-worker allocation |
-| `health.py` | Heartbeat monitoring |
+`dalston/engine_sdk` provides batch execution, artifact materialization, model
+management, inference helpers, cache management, and the local engine runner.
+`dalston/realtime_sdk` provides realtime registration, capacity, VAD/session
+handling, lag enforcement, and the internal worker WebSocket protocol.
 
-### dalston/engine_sdk/
+Authored engines are grouped by stage:
 
-SDK for batch engines (queue-based).
-
-| File | Purpose |
-|------|---------|
-| `base.py` | Abstract `Engine` class |
-| `runner.py` | Queue polling loop |
-| `io.py` | Task input/output |
-| `types.py` | `TaskInput`, `TaskOutput` |
-
-### dalston/realtime_sdk/
-
-SDK for realtime engines (WebSocket-based).
-
-| File | Purpose |
-|------|---------|
-| `engine.py` | Base `RealtimeEngine` class |
-| `session.py` | Session handler base |
-| `vad.py` | Silero VAD wrapper |
-| `asr.py` | Streaming ASR interface |
-| `assembler.py` | Transcript assembly |
-| `registry.py` | Registry client |
-| `protocol.py` | Message types |
-
----
-
-## Engine Directory Structure
-
-### Batch Engine
-
-```
-engines/{stage}/{engine-id}/
-├── Dockerfile
-├── requirements.txt
-├── engine.yaml          # Metadata: stages, GPU, config schema
-└── engine.py            # Implements Engine.process()
+```text
+engines/
+├── stt-prepare/
+├── stt-transcribe/
+├── stt-align/
+├── stt-diarize/
+├── stt-detect/
+├── stt-redact/
+└── stt-combo/
 ```
 
-### Realtime Engine
+Each active engine directory normally owns `engine.yaml`, implementation code,
+dependencies, tests where appropriate, and a `Dockerfile`. Some historical
+engine directories can remain in the tree without being present in the current
+Compose service set; `docker compose config --services` is authoritative for
+local deployment.
 
-```
-engines/realtime/{engine-id}/
-├── Dockerfile
-├── requirements.txt
-├── engine.yaml          # Metadata: models, capacity, capabilities
-└── engine.py            # WebSocket server, session handling
-```
+## Clients and console
 
----
+- `cli/dalston_cli` implements the Typer CLI, output formatting, configuration,
+  and Lite bootstrap.
+- `sdk/dalston_sdk` implements typed sync/async HTTP clients, realtime clients,
+  and webhook verification.
+- `web/src` contains the console pages, shared components, API client/types,
+  hooks, and styling. Vite builds `web/dist`, which the gateway serves.
 
-## Docker Compose Services
+These packages have their own manifests and focused test directories.
 
-### Core Services
+## Tests
 
-| Service | Purpose |
-|---------|---------|
-| `gateway` | API server (REST + WebSocket) |
-| `orchestrator` | Batch job scheduling |
-| `session-router` | Realtime worker management (optional if embedded) |
-| `redis` | State, queues, pub/sub |
+| Directory | Purpose |
+| --- | --- |
+| `tests/unit` | Fast isolated backend/runtime behavior |
+| `tests/integration` | Component boundaries, protocol contracts, persistence |
+| `tests/e2e` | Live-stack/API compatibility flows |
+| `tests/web` | Browser/UI behavior |
+| `tests/benchmarks` | Load/performance experiments |
+| `cli/tests` | CLI package behavior |
+| `sdk/tests` | SDK package behavior |
 
-### Batch Engines
+The default `pytest` configuration excludes tests marked `e2e`. Use
+`pytest -m e2e` only with the required live stack.
 
-| Service | Stage |
-|---------|-------|
-| `stt-prepare` | prepare |
-| `stt-transcribe-whisper-cpu` | transcribe |
-| `stt-transcribe-parakeet` | transcribe |
-| `stt-align-phoneme-cpu` | align |
-| `stt-diarize-pyannote-v40-cpu` | diarize |
-| `stt-pii-detect-presidio` | pii_detect |
-| `stt-audio-redact-audio` | audio_redact |
-| `stt-merge` | merge |
+## Development workflows
 
-### Realtime Engines
-
-| Service | Purpose |
-|---------|---------|
-| `stt-rt-transcribe-whisper-1` | Streaming transcription worker |
-| `stt-rt-transcribe-whisper-2` | Streaming transcription worker |
-| `stt-rt-transcribe-whisper-N` | Additional workers as needed |
-
----
-
-## Configuration Files
-
-### pyproject.toml
-
-```toml
-[project]
-name = "dalston"
-version = "0.1.0"
-description = "Modular audio transcription server"
-requires-python = ">=3.11"
-
-[project.optional-dependencies]
-gateway = [
-    "fastapi>=0.109.0",
-    "uvicorn>=0.27.0",
-    "python-multipart>=0.0.6",
-    "redis>=5.0.0",
-    "websockets>=12.0",
-]
-orchestrator = [
-    "redis>=5.0.0",
-]
-session-router = [
-    "redis>=5.0.0",
-]
-engine-sdk = [
-    "redis>=5.0.0",
-]
-realtime-sdk = [
-    "redis>=5.0.0",
-    "websockets>=12.0",
-    "numpy>=1.24.0",
-]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "httpx>=0.26.0",
-]
-```
-
-### .env.example
+Prefer Make targets:
 
 ```bash
-# Required
-HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
-
-# Optional (for LLM cleanup)
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
-
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# Realtime
-REALTIME_MAX_SESSIONS_PER_WORKER=4
+make help
+make dev
+make dev-minimal
+make validate
+make health
+make stop
 ```
 
----
+For local Python development, install
+`.[gateway,orchestrator,dev]`. Do not run Docker and local Python copies of the
+same gateway/orchestrator simultaneously.
 
-## Development Workflow
-
-### Running Locally
-
-```bash
-# Install all components
-pip install -e ".[gateway,orchestrator,session-router,dev]"
-
-# Start Redis
-docker run -d -p 6379:6379 redis:7-alpine
-
-# Terminal 1: Gateway
-uvicorn dalston.gateway.main:app --reload
-
-# Terminal 2: Orchestrator (for batch)
-python -m dalston.orchestrator.main
-
-# Terminal 3: Realtime engine (for realtime)
-cd engines/realtime/whisper-streaming
-pip install -r requirements.txt
-WORKER_ID=dev-worker REDIS_URL=redis://localhost:6379 python engine.py
-```
-
-### Testing
+Quality commands:
 
 ```bash
-# All tests
 pytest
-
-# Batch tests
-pytest tests/unit/test_dag.py tests/integration/test_batch_api.py
-
-# Realtime tests
-pytest tests/unit/test_vad.py tests/integration/test_realtime_api.py
-
-# With coverage
-pytest --cov=dalston --cov-report=html
+ruff check .
+ruff format --check .
+pre-commit run --all-files
+npm run build --prefix web
+npm run lint --prefix web
 ```
 
-### Building Containers
+## Documentation classes
 
-```bash
-# Build all
-docker compose build
-
-# Build specific
-docker compose build gateway stt-transcribe-whisper-cpu stt-rt-transcribe-whisper-1
-
-# Start batch + realtime
-docker compose up -d gateway orchestrator redis \
-  stt-transcribe-whisper-cpu stt-merge \
-  stt-rt-transcribe-whisper-1 stt-rt-transcribe-whisper-2
-```
+- `docs/guides`: task-oriented user/operator documentation.
+- `docs/specs`: current public and architecture references.
+- `docs/specs/implementations`: internal engineering patterns, not public API
+  guarantees.
+- `docs/decisions`: architecture decision records.
+- `docs/plan`, `docs/reports`, and milestone/test-plan material: historical or
+  delivery context, not current user documentation.
