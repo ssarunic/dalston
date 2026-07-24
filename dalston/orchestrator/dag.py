@@ -21,6 +21,7 @@ pipeline shapes. No merge engine is used.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -44,6 +45,17 @@ VALID_TIMESTAMPS_GRANULARITIES = {"word", "segment", "none"}
 
 # Valid values for speaker_detection API parameter
 VALID_SPEAKER_DETECTION_MODES = {"none", "diarize", "per_channel"}
+
+
+def _speech_regions_enabled() -> bool:
+    """Whether prepare-stage Silero speech-region detection is enabled.
+
+    Opt-in via DALSTON_PREPARE_SPEECH_REGIONS (off by default): the CPU
+    VAD pass is worth it for telephony/per-channel diagnosis but adds
+    ~30s per hour of audio ahead of transcription.
+    """
+    raw = os.environ.get("DALSTON_PREPARE_SPEECH_REGIONS", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _audio_input_binding(
@@ -340,9 +352,15 @@ def _build_dag_with_engines(
     diarize_task = None
 
     # Prepare config
-    # Speech regions ground the assembler's missed-speech coverage check
-    # (M92.7/R1); detection degrades gracefully if the container lacks VAD.
-    prepare_config: dict = {"detect_speech_regions": True}
+    # Speech-region detection (grounds the assembler's missed-speech
+    # coverage check, M92.7/R1) is opt-in: the Silero pass costs ~30s per
+    # hour of audio on CPU, which is poor value on long high-speech-ratio
+    # files. Set DALSTON_PREPARE_SPEECH_REGIONS=1 to enable it (debug /
+    # telephony diagnosis); the engine and coverage check stay dormant
+    # otherwise.
+    prepare_config: dict = {}
+    if _speech_regions_enabled():
+        prepare_config["detect_speech_regions"] = True
     if speaker_detection == "per_channel":
         prepare_config["split_channels"] = True
 
