@@ -92,6 +92,82 @@ class TestMidpointWordAssignment:
         assert [w.word for w in segments[1].words] == ["two"]
 
 
+class TestPerChannelWordsSurviveAssembly:
+    """Production regression: per-channel assembly silently dropped every
+    TranscriptWord because _normalize_words() only accepts Word/dict.
+
+    This — not the engine — was the incident's empty-words root cause:
+    NeMo emitted words, the assembler discarded them.
+    """
+
+    _PREPARE = {
+        "channel_files": [
+            {
+                "artifact_id": "a1",
+                "format": "wav",
+                "duration": 10.0,
+                "sample_rate": 16000,
+                "channels": 1,
+            }
+        ],
+        "engine_id": "audio-prepare",
+    }
+
+    def _transcribe(self, text: str, start: float) -> dict:
+        # TranscriptWord shape ("text" key) exactly as engines emit it;
+        # Transcript.model_validate turns these into TranscriptWord objects.
+        words = [
+            {
+                "text": tok,
+                "start": start + i * 0.5,
+                "end": start + i * 0.5 + 0.4,
+                "alignment_method": "tdt",
+            }
+            for i, tok in enumerate(text.split())
+        ]
+        return {
+            "text": text,
+            "language": "hr",
+            "segments": [
+                {
+                    "start": start,
+                    "end": start + len(words) * 0.5,
+                    "text": text,
+                    "words": words,
+                }
+            ],
+            "engine_id": "nemo",
+        }
+
+    def test_words_reach_final_per_channel_segments(self):
+        from dalston.common.transcript import assemble_per_channel_transcript
+
+        result = assemble_per_channel_transcript(
+            job_id="j1",
+            stage_outputs={
+                "prepare": self._PREPARE,
+                "transcribe_ch0": self._transcribe("dobar dan poštovanje", 0.0),
+                "transcribe_ch1": self._transcribe("halo molim", 3.0),
+            },
+            channel_count=2,
+        )
+        assert result.metadata.word_timestamps is True
+        by_speaker = {s.speaker: s for s in result.segments}
+        ch0_words = by_speaker["SPEAKER_00"].words
+        ch1_words = by_speaker["SPEAKER_01"].words
+        assert ch0_words is not None and [w.text for w in ch0_words] == [
+            "dobar",
+            "dan",
+            "poštovanje",
+        ]
+        assert ch1_words is not None and [w.text for w in ch1_words] == [
+            "halo",
+            "molim",
+        ]
+        # Word objects, absolute times preserved
+        assert ch1_words[0].start == 3.0
+
+
 class TestGranularityDowngradeWarning:
     def _segments(self, with_words: bool):
         seg_words = None
