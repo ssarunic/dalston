@@ -1,8 +1,8 @@
 # Deploying the control plane on AWS
 
-> Twenty minutes from `aws sts get-caller-identity` to a working,
-> ElevenLabs/OpenAI-compatible STT API at `https://dalston-control-plane.<your-tailnet>.ts.net`.
-> No public ports. Real Let's Encrypt cert. Total cost: ~$87/month split mode.
+Deploy an ElevenLabs/OpenAI-compatible STT API at
+`https://dalston-control-plane.<your-tailnet>.ts.net`, reachable only through
+your tailnet. Instance availability, bootstrap time, and cost vary by region.
 
 This is the production-grade path. If you only want a one-shot GPU for the
 afternoon, use [11-single-engine-tailscale-mode.md](11-single-engine-tailscale-mode.md)
@@ -54,22 +54,34 @@ Pre-flight: enable MagicDNS HTTPS in your tailnet at
 <https://login.tailscale.com/admin/dns> (toggle MagicDNS on, toggle HTTPS
 Certificates on). One-time, tailnet-wide.
 
----
+Store a reusable Tailscale auth key where instance bootstrap expects it:
 
-## The 4 commands
+```bash
+aws ssm put-parameter \
+  --name /dalston/tailscale-auth-key \
+  --type SecureString \
+  --overwrite \
+  --value tskey-auth-...
+```
+
+## Launch
 
 ```bash
 # 1. Provision (S3 bucket, IAM role, security group, keypair).
 #    Idempotent: re-running doesn't re-create anything.
 dalston-aws setup -t split
 
-# 2. Boot both instances (control plane + GPU worker).
-dalston-aws launch
+# 2. Boot the control plane.
+dalston-aws launch control-plane
 
-# 3. Wait until ready (~3-5 min for first launch with model downloads).
+# 3. Boot a worker with an explicit engine set.
+export HF_TOKEN=hf_...  # required only when selecting pyannote
+dalston-aws launch gpu --engines nemo,pyannote --spot
+
+# 4. Inspect EC2 and worker state while bootstrap completes.
 dalston-aws status
 
-# 4. Use the stable MagicDNS name configured by the deployment.
+# 5. Use the stable MagicDNS name configured by the deployment.
 export DALSTON_SERVER=https://dalston-control-plane.<your-tailnet>.ts.net
 ```
 
@@ -135,7 +147,7 @@ print(job.transcript.text)
 dalston-aws status        # instance state, addresses, and workers
 dalston-aws ssh           # SSH to control plane via Tailscale
 dalston-aws ssh gpu       # SSH to GPU worker
-dalston-aws down          # stop control plane (EBS preserved, ~$4/mo)
+dalston-aws down          # stop retained instances; spot workers may terminate
 dalston-aws up            # bring it back
 dalston-aws up --pull     # pull latest GHCR images on boot, redeploy
 ```
@@ -161,18 +173,13 @@ docker compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
 
 ---
 
-## Cost on this setup
+## Cost
 
-| State | Hourly | Monthly |
-|---|---|---|
-| Both running | ~$0.12/hr | ~$87 |
-| Control plane only (GPU torn down) | ~$0.08/hr | ~$60 |
-| Both stopped (`dalston-aws down`) | ~$0.005/hr (EBS only) | ~$8 |
-
-Cut your bill by half: `dalston-aws down` overnight. Bring back up with
-`dalston-aws up` in the morning. The control-plane database and artifacts
-survive on EBS/S3; GPU workers are replaceable and reload models from S3 or
-HuggingFace.
+Instance, spot, EBS, S3, transfer, and observability prices vary by region and
+time. Use the current template with the AWS Pricing Calculator, and use
+`dalston-cost-correlate` for measured cost. The control-plane database and
+artifacts survive on EBS/S3; GPU workers are replaceable and reload models
+from S3 or Hugging Face.
 
 Full breakdown: [51-aws-cost-estimator.md](51-aws-cost-estimator.md).
 

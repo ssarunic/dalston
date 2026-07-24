@@ -35,7 +35,7 @@ internals, schema specs, etc.), see [`docs/specs/`](../specs/).
 ## Principles — how it works under the hood
 
 - **[30-how-models-are-fetched.md](30-how-models-are-fetched.md)** — S3-first, HF fallback, on-disk cache
-- **[31-pipeline-stages-explained.md](31-pipeline-stages-explained.md)** — PREPARE → TRANSCRIBE → ALIGN → DIARIZE → MERGE
+- **[31-pipeline-stages-explained.md](31-pipeline-stages-explained.md)** — prepare/transcribe/align/diarize, transcript assembly, then optional PII detection/audio redaction
 - **[32-diarization-vs-transcription.md](32-diarization-vs-transcription.md)** — picking the right combo
 
 ## Real-time streaming

@@ -7,7 +7,8 @@
 The `dalston-aws engine up <preset>` command (and the GPU worker section of
 `launch`) takes one of six preset names. Each preset bundles an engine image,
 default model, and recommended environment overrides. The source of truth is
-`GPU_ENGINE_PRESETS` in [`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws#L81-L161).
+`GPU_ENGINE_PRESETS` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws).
 
 ---
 

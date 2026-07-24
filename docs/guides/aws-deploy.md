@@ -1,555 +1,267 @@
 # Deploying Dalston on AWS
 
-A step-by-step guide to running Dalston on AWS using the `dalston-aws` script.
-No Terraform required — just the AWS CLI.
+`infra/scripts/dalston-aws` provisions and operates the AWS deployment used by
+this repository. It is a Python 3.11+ tool backed by boto3 and YAML templates;
+it does not use Terraform.
 
-> **Legacy reference:** this is the older, comprehensive engineering reference.
-> For the current user-facing path, start with
-> [21-control-plane-aws-deploy.md](21-control-plane-aws-deploy.md). New commands
-> use `dalston-aws setup -t <template>` followed by `dalston-aws launch`.
+Run it from the repository virtual environment when the system Python is
+older:
+
+```bash
+.venv/bin/python infra/scripts/dalston-aws --help
+```
+
+The examples below assume `dalston-aws` resolves to that command.
 
 ## Prerequisites
 
-1. **AWS CLI** configured with credentials:
+1. Configure AWS credentials and verify them:
 
    ```bash
    aws sts get-caller-identity
-   # Should print your account ID. If not: aws configure
    ```
 
-2. **The script** lives at `infra/scripts/dalston-aws`. Make it easy to run:
+2. Install the project’s Python dependencies, including boto3 and PyYAML.
+
+3. Join the operator machine to Tailscale and enable MagicDNS.
+
+4. Store a reusable Tailscale auth key in the deployment region:
 
    ```bash
-   # Option A: symlink to your PATH
-   ln -s $(pwd)/infra/scripts/dalston-aws /usr/local/bin/dalston-aws
-
-   # Option B: just use the full path
-   ./infra/scripts/dalston-aws help
+   aws ssm put-parameter \
+     --name /dalston/tailscale-auth-key \
+     --type SecureString \
+     --overwrite \
+     --value tskey-auth-...
    ```
 
-## What it creates
+   `/dalston/tailscale-api-key` is optional. When present, bootstrap can remove
+   an offline node with the same hostname before joining.
 
-The script provisions exactly 5 AWS resources:
+5. For tailnet HTTPS, enable HTTPS certificates in the Tailscale DNS settings.
 
-| Resource | What | Monthly cost (approx) |
-|---|---|---|
-| **S3 bucket** | Stores uploaded audio, job outputs, temp files | ~$1 (usage-based) |
-| **IAM role** | Lets the EC2 instance access S3 without API keys | Free |
-| **Security group** | Firewall: only SSH from Tailscale (100.64.0.0/10) | Free |
-| **EC2 instance** | The server running everything | $50–$150 (see scenarios) |
-| **EBS volume** | 50 GB persistent data (Postgres, Redis, models) | ~$4 |
+6. Export `HF_TOKEN` before `launch` when a selected worker includes
+   `pyannote`.
 
-Everything is tagged with `Project=dalston` so you can find it in the AWS console.
+Do not `source .env.example` before running this tool: its MinIO credentials
+would override real AWS credentials in boto3.
 
----
+## Two separate phases
 
-## Scenario 1: Single GPU instance (recommended start)
-
-Best for: getting started, small-to-medium workloads, one person.
-
-```
-┌─────────────────────────────────────────────┐
-│  g5.xlarge ($1.006/hr ≈ $150/mo on-demand) │
-│                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ Gateway  │  │  Redis   │  │ Postgres │  │
-│  │ :8000    │  │  :6379   │  │  :5432   │  │
-│  └──────────┘  └──────────┘  └──────────┘  │
-│  ┌──────────────┐  ┌──────────────────────┐ │
-│  │ Orchestrator │  │ GPU Engines          │ │
-│  │              │  │  transcribe (NeMo)   │ │
-│  │              │  │  align (phoneme)     │ │
-│  │              │  │  diarize (pyannote)  │ │
-│  │              │  │  RT: NeMo, Whisper   │ │
-│  └──────────────┘  └──────────────────────┘ │
-│                    ┌──────────────────────┐  │
-│                    │ 50 GB EBS (/data)   │  │
-│                    │  postgres/  redis/   │  │
-│                    │  models/             │  │
-│                    └──────────────────────┘  │
-└─────────────────────────────────────────────┘
-         ↕ S3 (audio uploads + outputs)
-```
-
-### Steps
+`setup` provisions shared infrastructure only. `launch` creates instances.
+This distinction is intentional.
 
 ```bash
-# 1. Create everything
-dalston-aws setup
-```
-
-Output:
-
-```
-[dalston-aws] Setting up Dalston on AWS
-[dalston-aws]   Region:   eu-west-2
-[dalston-aws]   Scenario: gpu
-[dalston-aws]   Spot:     false
-[dalston-aws]   Account:  123456789012
-[dalston-aws] Creating S3 bucket: dalston-artifacts-123456789012
-[dalston-aws] S3 bucket created with encryption + lifecycle rules
-[dalston-aws] Creating IAM role: dalston-ec2-role
-[dalston-aws] IAM role + instance profile ready
-[dalston-aws] Creating key pair: dalston-key
-[dalston-aws] Private key saved to ~/.dalston/dalston-key.pem
-[dalston-aws] Creating security group: dalston-sg
-[dalston-aws] Security group sg-0abc123 created (SSH from Tailscale)
-[dalston-aws] Launching GPU instance (g5.xlarge)...
-[dalston-aws] Waiting for i-0def456 to be running...
-[dalston-aws] Waiting for volume vol-0ghi789 to be available...
-==========================================
-[dalston-aws] Setup complete!
-==========================================
-[dalston-aws] Instance: i-0def456 (3.10.45.67)
-
-Next steps:
-  1. SSH to the instance:
-     ssh -i ~/.dalston/dalston-key.pem ec2-user@3.10.45.67
-  2. Set up Tailscale:
-     sudo tailscale up
-  3. Clone your repo to /data/dalston and start:
-     sudo systemctl start dalston
-```
-
-```bash
-# 2. SSH in and set up Tailscale
-dalston-aws ssh
-# On the instance:
-sudo tailscale up
-# Follow the URL to authenticate — note the Tailscale IP (e.g., 100.100.1.5)
-
-# 3. Clone your repo and start
-cd /data/dalston
-git clone https://github.com/you/dalston.git .
-sudo systemctl start dalston
-
-# 4. Access the API via Tailscale
-curl http://100.100.1.5:8000/health
-```
-
-### With spot pricing (~65% cheaper)
-
-```bash
-dalston-aws setup -t gpu
-dalston-aws launch --spot
-# Same GPU shape at spot pricing instead of on-demand.
-# AWS may reclaim the instance with 2 min warning; one-time spot terminates.
-```
-
----
-
-## Scenario 2: CPU-only instance
-
-Best for: testing the pipeline without GPU costs, or if your workload is small
-enough that CPU transcription speed is acceptable.
-
-```
-┌─────────────────────────────────────────────┐
-│  t3.xlarge ($0.166/hr ≈ $25/mo on-demand)  │
-│                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ Gateway  │  │  Redis   │  │ Postgres │  │
-│  └──────────┘  └──────────┘  └──────────┘  │
-│  ┌──────────────┐  ┌──────────────────────┐ │
-│  │ Orchestrator │  │ CPU Engines          │ │
-│  │              │  │  faster-whisper      │ │
-│  │              │  │  align (CPU)         │ │
-│  │              │  │  diarize (CPU, slow) │ │
-│  │              │  │  pii-detect, merge   │ │
-│  │              │  │  RT: Whisper, NeMo   │ │
-│  └──────────────┘  └──────────────────────┘ │
-└─────────────────────────────────────────────┘
-```
-
-```bash
-dalston-aws setup -t cpu
-dalston-aws launch
-```
-
-CPU engines are ~5-10x slower than GPU for transcription and diarization, but
-the pipeline works identically. Good enough for a few files per day.
-
----
-
-## Scenario 3: Start small, add GPU later
-
-This is the recommended path if you're not sure about costs yet. Start CPU-only,
-then add a GPU worker when you need more throughput.
-
-```bash
-# Start with split infrastructure but launch only the control plane.
 dalston-aws setup -t split
 dalston-aws launch control-plane
-
-# ... use it for a while, transcription is slow ...
-
-# Add a GPU worker (spot = cheap)
-dalston-aws launch gpu --engines nemo,pyannote --spot
+dalston-aws launch gpu --engines nemo,pyannote
 ```
 
-This creates a second instance:
+`setup` requires `-t/--template`; flags such as `--cpu`, `--gpu`,
+`--instance-type`, and `--spot` are not setup options.
 
-```
-┌─────────────────────────┐     ┌──────────────────────────┐
-│  t3.xlarge (control)    │     │  g5.xlarge (GPU worker)  │
-│                         │     │                          │
-│  Gateway    Orchestrator│     │  GPU Engines             │
-│  Redis      Postgres    │◄────│   transcribe (NeMo)     │
-│                         │     │   align (phoneme)        │
-│  CPU engines (prepare,  │     │   diarize (NeMo MSDD)    │
-│   merge, pii-detect)    │     │   RT: NeMo, Whisper      │
-└─────────────────────────┘     └──────────────────────────┘
-     ↕ S3                             ↕ S3
-```
+## Templates
 
-The GPU worker connects to the control plane's Redis and Postgres over the
-private VPC network. The security group is configured automatically to allow
-ports 6379 (Redis) and 5432 (Postgres) between the two instances.
+The source of truth is `infra/templates/`.
+
+| Template | Current shape |
+| --- | --- |
+| `cpu` | One `t3.xlarge` control-plane host, no GPU worker definition |
+| `gpu` | One `g4dn.xlarge` host using the local-infra and GPU profiles |
+| `split` | `t3.large` control plane plus a `g6.xlarge` spot GPU worker |
+
+Instance types, regions, profiles, and spot defaults can be changed in a
+custom template:
 
 ```bash
-dalston-aws status
-# Done — GPU engines join Tailscale and start polling Redis queues automatically.
+dalston-aws setup -t path/to/template.yaml
 ```
 
-### Removing the GPU worker
+The repository does not contain a Terraform, ECS, or autoscaling deployment.
+Those require separate infrastructure work; they are not modes of
+`dalston-aws`.
+
+## Recommended split deployment
+
+Launch the control plane first, then choose only the GPU engines you intend to
+co-locate:
 
 ```bash
-dalston-aws terminate gpu --name nemo-pyannote
-# Terminates the selected GPU worker. The control plane keeps running.
+dalston-aws setup -t split
+dalston-aws launch control-plane --observability
+
+export HF_TOKEN=hf_...  # only when pyannote is selected
+dalston-aws launch gpu \
+  --engines nemo,pyannote \
+  --spot
 ```
 
----
+`launch gpu` supports:
 
-## Accessing the control plane over HTTPS
+- `--engines` with comma-separated preset keys;
+- `--gpu-type` to override the template instance type;
+- `--spot` or `--on-demand`;
+- `--region` for a worker in another region.
 
-The control-plane bootstrap automatically runs `tailscale serve` to expose the
-gateway at `https://<node>.<tailnet>.ts.net/` with a real Let's Encrypt
-certificate. Traffic stays on the Tailscale overlay interface (`tailscale0`),
-so there are **no security group changes** and **no public port 443
-exposure** — the Dalston SG is unchanged from the default "SSH from Tailscale
-only" setup.
+Available preset keys are `onnx`, `faster-whisper`, `nemo`, `pyannote`,
+`vllm-asr`, and `hf-asr`. The script checks declared compute-capability
+requirements, but the operator still owns aggregate VRAM sizing when
+co-locating engines.
 
-### One-time tailnet setup
+Omitting `--engines` selects every preset known to the script. That is useful
+for automation but is not a promise that all models fit simultaneously on the
+template GPU.
 
-Before the control plane can produce a working HTTPS URL, enable MagicDNS
-HTTPS certificates **once** in your tailnet admin console. This is a
-tailnet-wide toggle and cannot be set from code.
+## What gets provisioned
 
-1. Go to <https://login.tailscale.com/admin/dns>.
-2. Enable **MagicDNS**.
-3. Enable **HTTPS Certificates**.
+Shared setup creates or records:
 
-If the toggle is already on, skip this step.
+- an S3 artifact bucket;
+- an IAM role and instance profile;
+- an EC2 key pair, saving a newly created private key under `~/.dalston/`;
+- control-plane and, for split mode, GPU security groups; and
+- local deployment state.
 
-### Finding your HTTPS URL
+The control plane uses a persistent EBS data volume for PostgreSQL, Redis,
+models, and operational data. Replacement control-plane instances reattach
+that volume in its availability zone. GPU workers use replaceable local model
+storage and shared S3 artifacts.
 
-After the control plane finishes bootstrapping, SSH in and print the FQDN:
+Local state is YAML:
+
+```text
+~/.dalston/aws-state.yaml
+~/.dalston/engine-state.yaml
+~/.dalston/audit.log
+```
+
+Deleting a state file does not delete AWS resources; it only removes the
+tool’s record of them.
+
+## Access and first request
+
+The control plane joins as `dalston-control-plane`. Bootstrap configures
+Tailscale Serve from HTTPS port 443 to the gateway on localhost port 8000.
+Use the full tailnet DNS name in browsers:
+
+```text
+https://dalston-control-plane.<tailnet>.ts.net/
+```
+
+`setup` generates an admin API key in `aws-state.yaml`; `launch` seeds it into
+the gateway:
 
 ```bash
-dalston-aws ssh
-tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'])"
-# → dalston-control-plane.<your-tailnet>.ts.net.
+API_KEY=$(awk -F': ' '/^api_key:/ {print $2}' ~/.dalston/aws-state.yaml)
+URL=https://dalston-control-plane.<tailnet>.ts.net
+
+curl -X POST "$URL/v1/audio/transcriptions" \
+  -H "Authorization: Bearer $API_KEY" \
+  -F file=@meeting.wav
 ```
 
-The short MagicDNS name `dalston-control-plane` **won't work** for HTTPS —
-browsers need the full `.ts.net` FQDN because that's what the Let's Encrypt
-cert is issued for. From any device on your tailnet:
-
-```
-https://dalston-control-plane.<your-tailnet>.ts.net/console
-wss://dalston-control-plane.<your-tailnet>.ts.net/v1/audio/transcriptions/stream
-```
-
-The cert is real Let's Encrypt — no browser warnings, and `getUserMedia`
-works in the secure context for in-browser mic capture.
-
-### Enabling HTTPS certs after the instance is already running
-
-The bootstrap runs `tailscale serve` once on first boot. If MagicDNS HTTPS
-certs were disabled at that time, the `dalston-tailscale-serve` unit logged
-a warning to `/var/log/user-data.log` and exited 0 (so the boot succeeded).
-To apply the config without rebooting, toggle the admin console setting, then:
+If HTTPS was enabled after launch:
 
 ```bash
 dalston-aws ssh
 sudo systemctl restart dalston-tailscale-serve
-sudo systemctl status dalston-tailscale-serve
 tailscale serve status
 ```
-
-### Cert lifecycle
-
-The control plane runs on-demand, so the routine `dalston-aws down`/`up`
-cycle is `stop_instances` / `start_instances` — the instance (including
-the ephemeral root volume holding `/var/lib/tailscale/`) is preserved,
-and the Let's Encrypt cert survives trivially. tailscaled auto-renews
-it every ~60 days in place.
-
-Instance replacement only happens in uncommon situations: AMI upgrades,
-force-termination by AWS, or accidental console termination. When
-that happens, the next launch boots a fresh root volume, tailscaled
-starts with empty state, and a new Let's Encrypt cert is issued — one
-additional entry in the Certificate Transparency log, no rate-limit
-impact at this frequency. The `/data` EBS volume (postgres, models,
-job artifacts) is separately preserved across instance replacement
-because `dalston-aws` re-attaches the existing volume rather than
-creating a new one; see [Day-to-day operations](#day-to-day-operations)
-for the `launch`/`up`/`terminate` semantics.
-
-GPU workers don't run `tailscale serve`, don't get HTTPS, and don't
-have a persistent `/data` volume — their tailnet identity is ephemeral
-by design, which is the right choice for workers rotated on spot.
-
-### Other notes
-
-- **Gateway port is unchanged.** Port 8000 is still the backend. HTTPS on 443
-  is a Tailscale-terminated reverse proxy; the gateway itself speaks plain
-  HTTP on localhost.
-- **WebSocket upgrades work transparently.** `tailscale serve` forwards
-  `Upgrade: websocket` headers without extra config — good for the realtime
-  streaming endpoints.
-- **Public 443 stays closed.** Don't add a public 443 ingress rule to the
-  Dalston security group. `tailscale serve` binds to `tailscale0`, not the
-  public ENI; a public 443 rule would expose nothing useful and just widen
-  your attack surface.
-- **If you later front this with an ALB** (for non-tailnet access), bump the
-  idle timeout from the default 60s — long-lived WebSocket sessions will
-  otherwise be killed mid-stream.
-
-### Summary: choosing the right access method
-
-The Tailscale+HTTPS setup above is the right default when your control plane
-is long-lived and you access it from any device on your tailnet. If your
-usage looks different, here is a quick decision guide:
-
-- **Trying Dalston locally on your own laptop** → open
-  `http://localhost:8000`. Browsers grant `localhost` the secure-context
-  exemption, so in-browser microphone capture works with no cert at all.
-  See [self-hosted-deployment-tutorial.md](self-hosted-deployment-tutorial.md#7-access-services).
-- **Running Dalston on a remote box, browsing from a different machine**
-  → SSH-tunnel the gateway port back to your laptop
-  (`ssh -L 8000:localhost:8000 you@remote-box`) and open
-  `http://localhost:8000`. Same loopback exemption, no certs, no Tailscale.
-  This is the recommended path for trial users who run `make dev` on a
-  homelab box or cloud VM.
-- **Deploying to AWS via `dalston-aws`** → the default setup in this
-  section is the right path. The only operator action is the one-time
-  tailnet admin toggle. See [Cert lifecycle](#cert-lifecycle) for what
-  happens on the rare occasions the instance is rebuilt.
-- **Zero Certificate Transparency exposure required** → run a private CA
-  (e.g. `step-ca`), issue your own cert, and install its root on every
-  device that connects. Significantly more setup and every new device
-  needs the trust anchor; only worth it if CT leakage is a specific
-  concern in your threat model.
-
-### What Certificate Transparency publishes
-
-Every Let's Encrypt cert obtained by `tailscale serve` is submitted to
-public, append-only [Certificate Transparency logs](https://certificate.transparency.dev/)
-and becomes permanently searchable (e.g. via [crt.sh](https://crt.sh/)).
-This leaks:
-
-- Your tailnet suffix (the randomized `tailXXXXXX` string Tailscale uses
-  to obfuscate your organization).
-- Your machine naming scheme and which hosts have enabled HTTPS.
-- A historical record of cert issuance — one CT entry per issuance.
-
-It does **not** leak any IPs, ports, or content, and it does **not** make
-the control plane publicly reachable — `tailscale serve` still binds to
-`tailscale0` only. The risk is metadata/recon, not network exposure. For
-generic names like `dalston-control-plane` the exposure is minimal; avoid
-putting tenant, customer, or environment-identifying strings in machine
-names.
-
----
 
 ## Day-to-day operations
 
-### Check what's running
-
 ```bash
 dalston-aws status
+dalston-aws ssh
+dalston-aws ssh gpu
+dalston-aws ssh gpu --name nemo-pyannote
+dalston-aws reconcile
+dalston-aws patch
 ```
 
-```
-[dalston-aws] Dalston AWS Deployment
-[dalston-aws]   Scenario: split
-[dalston-aws]   Region:   eu-west-2
-[dalston-aws]   S3:       dalston-artifacts-123456789012
+Multiple GPU workers with the same engine label are distinguished by their
+resolved Tailscale hostnames. Use `--name` to choose one.
 
-[dalston-aws]   Control plane: i-0def456  state=running  ip=3.10.45.67
-[dalston-aws]   GPU worker:    i-0abc789  state=running  ip=3.10.45.89
-```
+Lifecycle commands have different consequences:
 
-### Stop to save money (keep data)
+| Command | Effect |
+| --- | --- |
+| `down` | Stops stoppable instances; one-time spot instances may be terminated |
+| `up` | Starts retained instances; terminated workers must be launched again |
+| `terminate gpu --name NAME` | Terminates selected GPU worker replicas |
+| `terminate control-plane` | Terminates the host and deletes its recorded data volume |
+| `teardown` | Removes tracked deployment resources; preserves the S3 bucket |
+
+After a spot worker is reclaimed or terminated:
 
 ```bash
-dalston-aws down
-# Stops instance(s) — EBS volume preserved, no compute charges
-# ~$4/month for the 50 GB EBS volume while stopped
+dalston-aws launch gpu --engines nemo,pyannote --spot
 ```
 
-### Start back up
+Do not assume `up` can restart a terminated one-time spot worker.
+
+## Logs and updates
+
+Control-plane bootstrap and service logs:
 
 ```bash
-dalston-aws up
-# Boots instance(s) — same EBS data, new public IP
-# Dalston auto-starts via systemd
+dalston-aws ssh
+sudo tail -f /var/log/user-data.log
+sudo systemctl status dalston
+cd /data/dalston
+sudo /data/dalston/deploy.sh
 ```
 
-### SSH access
+The generated deploy script pulls the repository and GHCR images using the
+Compose file list stored in `.env.aws`. From the operator machine,
+`dalston-aws up --pull` starts retained instances and runs that deployment
+script after SSH becomes reachable.
+
+GPU worker diagnostics:
 
 ```bash
-dalston-aws ssh          # Main instance
-dalston-aws ssh gpu      # GPU worker (split mode only)
+dalston-aws ssh gpu --name nemo-pyannote
+sudo systemctl status dalston-gpu
+sudo journalctl -u dalston-gpu -n 100
+docker ps
+nvidia-smi
 ```
-
-### Delete everything
-
-```bash
-dalston-aws teardown
-```
-
-This terminates instances, deletes EBS volumes, security groups, and IAM role.
-The S3 bucket is **not** deleted (it may contain your transcription data).
-You'll get a command to delete it manually if you want to.
-
----
-
-## Re-running setup is safe
-
-The script is idempotent. Running `dalston-aws setup` twice will:
-
-1. Detect the existing instance is alive
-2. Verify infrastructure (S3, IAM, SG) still exists — re-create if missing
-3. Show current status
-4. **Not** create a duplicate instance
-
-```bash
-dalston-aws setup
-# [dalston-aws] Existing deployment found: i-0def456 (state=running)
-# [dalston-aws] Infrastructure resources (S3, IAM, SG) will be verified.
-# [dalston-aws] Instance will NOT be re-created. Use 'dalston-aws teardown' first to start fresh.
-```
-
----
-
-## Cost cheat sheet
-
-| Scenario | On-demand | With `--spot` | Stopped |
-|---|---|---|---|
-| CPU only (t3.xlarge) | ~$120/mo | ~$40/mo | ~$4/mo |
-| Single GPU (g5.xlarge) | ~$725/mo | ~$250/mo | ~$4/mo |
-| Split: CPU + GPU spot | ~$120 + ~$250/mo | ~$40 + ~$250/mo | ~$8/mo |
-
-Tip: use `dalston-aws down` nights and weekends to cut costs in half.
-
----
 
 ## Troubleshooting
 
-### Where is the state stored?
+### Tailscale hostname does not resolve
+
+Confirm the SSM auth-key parameter exists in the same region, inspect
+`dalston-tailscale.service`, then run:
 
 ```bash
-cat ~/.dalston/aws-state.env
+dalston-aws reconcile
 ```
 
-Contains instance IDs, volume IDs, bucket name, etc. If you delete this file,
-the script loses track of your resources (but they still exist in AWS).
+### Gateway returns 502 through Tailscale Serve
 
-### User-data log (bootstrap issues)
+Tailscale Serve can be ready before the gateway. On the control plane:
 
 ```bash
-dalston-aws ssh
-sudo cat /var/log/user-data.log
+curl http://127.0.0.1:8000/health
+sudo systemctl status dalston
+docker ps
 ```
 
-### Docker Compose logs
+### GPU worker is running but no engine registers
 
-```bash
-dalston-aws ssh
-cd /data/dalston
-docker-compose -f docker-compose.yml -f infra/docker/docker-compose.aws.yml \
-  --env-file .env.aws logs -f gateway
-```
+Check `dalston-gpu.service`, the engine container logs, Redis reachability to
+`dalston-control-plane:6379`, `HF_TOKEN`, and the selected GPU’s compatibility.
 
-### Instance won't start
+### Need current prices
 
-Check if your region has the instance type available:
-
-```bash
-aws ec2 describe-instance-type-offerings \
-  --filters Name=instance-type,Values=g5.xlarge \
-  --location-type availability-zone \
-  --region eu-west-2
-```
-
-### Spot instance was reclaimed
-
-AWS stops spot instances (doesn't terminate) when it needs capacity back.
-Just start it again:
-
-```bash
-dalston-aws up
-```
-
-Your data on EBS is preserved. The instance gets a new public IP but Tailscale
-reconnects automatically.
-
-### HTTPS URL returns a cert error or hangs
-
-Check the serve unit on the instance:
-
-```bash
-dalston-aws ssh
-sudo systemctl status dalston-tailscale-serve
-sudo journalctl -u dalston-tailscale-serve -n 50
-tailscale serve status
-```
-
-Common causes:
-
-- **MagicDNS HTTPS certs not enabled in the tailnet admin console.** The
-  unit logs a warning on first boot and exits 0. Enable the toggle (see
-  [Accessing the control plane over HTTPS](#accessing-the-control-plane-over-https)),
-  then `sudo systemctl restart dalston-tailscale-serve`.
-- **You used the short name** (`dalston-control-plane`) instead of the full
-  `.ts.net` FQDN. The cert is only valid for the full name.
-- **Let's Encrypt rate limit** after heavy spot rotation. See the
-  persistence limitation section above.
-- **Gateway isn't healthy yet.** `tailscale serve` happily accepts the
-  reverse-proxy config before the backend exists, so early requests can
-  return 502. Check `docker compose ... ps gateway` and
-  `curl -s http://127.0.0.1:8000/health` on the instance.
-
----
-
-## Quick reference
-
-```bash
-dalston-aws setup -t gpu             # Single GPU template
-dalston-aws setup -t cpu             # CPU-only template
-dalston-aws setup -t split           # CPU control plane + GPU worker
-dalston-aws launch                   # Launch the template's instances
-dalston-aws launch --spot            # Force spot where supported
-dalston-aws launch --gpu-type p3.2xlarge  # Different GPU type
-
-dalston-aws launch gpu               # Add GPU worker to split setup
-dalston-aws launch gpu --spot        # Add GPU worker with spot pricing
-dalston-aws terminate gpu --name onnx  # Remove GPU worker
-
-dalston-aws status                   # Show instance state
-dalston-aws up                       # Start instance(s)
-dalston-aws down                     # Stop instance(s)
-dalston-aws ssh                      # SSH to main instance
-dalston-aws ssh gpu                  # SSH to GPU worker
-
-dalston-aws teardown                 # Delete everything (except S3 data)
-```
-
----
+Instance, EBS, S3, and spot prices vary by region and time. Use the AWS Pricing
+Calculator and current EC2 spot history rather than the historical dollar
+figures that used to appear in this guide.
 
 ## See also
 
-- [Correlating AWS Cost with Transcription Activity](aws-cost-correlation.md) — daily cost-per-episode and warmup-overhead reports via `dalston-cost-correlate`
-- [AWS Deployment Scenarios](aws-deployment-scenarios.md) — instance type and spot pricing tradeoffs
+- [AWS deployment scenarios](aws-deployment-scenarios.md)
+- [Single-engine Tailscale mode](11-single-engine-tailscale-mode.md)
+- [Control-plane walkthrough](21-control-plane-aws-deploy.md)
+- [Cost correlation](aws-cost-correlation.md)

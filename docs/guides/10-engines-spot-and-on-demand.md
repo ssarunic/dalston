@@ -22,8 +22,8 @@ take them back with **2 minutes' notice** when paying customers need that
 capacity. In Dalston's setup, spot instances cannot be stopped — only
 terminated. You restart by launching a new one. (Source:
 [`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws), the spot
-handling in `_stop_instance` raises `UnsupportedOperation` and falls through
-to terminate.)
+handling in `_stop_instance` catches AWS’s `UnsupportedOperation` response
+and terminates the one-time spot instance instead.)
 
 ---
 
@@ -45,7 +45,8 @@ default for `engine up`; on-demand is the default for the control plane in
 
 ## What `--spot` actually does
 
-When you launch with `--spot`, the script ([`infra/scripts/dalston-aws:1851`](../../infra/scripts/dalston-aws)):
+When you launch with `--spot`, `launch_instance()` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws):
 
 1. Sorts the AZs in your region by **cheapest current spot price** and picks
    the cheapest one

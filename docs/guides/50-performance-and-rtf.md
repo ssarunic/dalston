@@ -169,8 +169,9 @@ GPUs have fixed VRAM. The presets are tuned to fit common GPUs:
 | A100 (p4d) | 40–80 GB | multi-engine, lots of headroom |
 
 The `nemo` and `pyannote` presets explicitly declare `DALSTON_VRAM_BUDGET_MB`
-to enforce these splits at runtime — see
-[`infra/scripts/dalston-aws:107`](../../infra/scripts/dalston-aws#L107) and `:124`.
+to enforce these splits at runtime. See their entries in
+`GPU_ENGINE_PRESETS` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws).
 
 `max_concurrency` is the per-engine concurrent-session ceiling (declared in
 each `engine.yaml`). Beyond that, the gateway queues or rejects (depending

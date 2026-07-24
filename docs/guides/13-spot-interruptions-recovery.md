@@ -10,12 +10,13 @@
 
 When AWS needs spot capacity back, it sends a **2-minute warning** and then
 takes the instance. In Dalston's setup, that means **terminate, not stop**.
-The script forces this on purpose:
+The script forces this in `launch_instance()`:
+`InstanceMarketOptions.SpotOptions.InstanceInterruptionBehavior` is
+`"terminate"`.
 
-> [`infra/scripts/dalston-aws:1896`](../../infra/scripts/dalston-aws):
-> `InstanceMarketOptions.SpotOptions.InstanceInterruptionBehavior: "terminate"`
-
-And in the stop path ([`infra/scripts/dalston-aws:2934`](../../infra/scripts/dalston-aws)):
+The `_stop_instance()` path in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws) applies the
+same lifecycle:
 
 ```python
 if "UnsupportedOperation" in err_str and "Spot" in err_str:

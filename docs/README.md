@@ -124,7 +124,7 @@ docs/
 | **Job** | Batch request to transcribe one audio file |
 | **Task** | Atomic unit of work in the batch pipeline |
 | **DAG** | Directed Acyclic Graph of task dependencies |
-| **Engine** | Containerized processor (batch or realtime) |
+| **Engine** | Processor that can advertise batch, realtime, or both modes |
 | **Session** | Real-time transcription connection |
 | **Worker** | Real-time engine instance handling sessions |
 

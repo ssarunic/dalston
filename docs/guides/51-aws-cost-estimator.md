@@ -80,11 +80,11 @@ GPU up, run the job, spin it down. Practical examples:
 
 | Workload | Setup | Time on the clock | Cost |
 |---|---|---|---|
-| One 1-hour podcast, faster-whisper | `engine up faster-whisper --spot` (g4dn.xlarge) | 30 min wall (5-min boot + 25-min RTF 0.4) | ~$0.10 |
-| Same, on NeMo (English only) | `engine up nemo --spot` | 6 min wall (5-min boot + 1-min RTF 0.0006 + safety) | ~$0.02 |
-| Voxtral Q&A on a 30-min recording | `engine up vllm-asr --spot` (g6.xlarge) | 15 min wall | ~$0.10 |
-| Diarize 100 hours of archive overnight | `engine up pyannote --spot` | ~15 hours of clock time at RTF 0.15 | ~$3 |
-| Batch transcribe 1,000 hours of catalog | `engine up nemo --spot` | ~1 hour wall on a g4dn.xlarge spot | ~$0.20 |
+| One 1-hour podcast, faster-whisper | `dalston-aws engine up faster-whisper --spot` (g4dn.xlarge) | 30 min wall (5-min boot + 25-min RTF 0.4) | ~$0.10 |
+| Same, on NeMo (English only) | `dalston-aws engine up nemo --spot` | 6 min wall (5-min boot + 1-min RTF 0.0006 + safety) | ~$0.02 |
+| Voxtral Q&A on a 30-min recording | `dalston-aws engine up vllm-asr --spot` (g6.xlarge) | 15 min wall | ~$0.10 |
+| Diarize 100 hours of archive overnight | `dalston-aws engine up pyannote --spot` | ~15 hours of clock time at RTF 0.15 | ~$3 |
+| Batch transcribe 1,000 hours of catalog | `dalston-aws engine up nemo --spot` | ~1 hour wall on a g4dn.xlarge spot | ~$0.20 |
 
 > **The killer feature:** these costs assume you actually `engine down` when
 > done. Set a calendar reminder. AWS happily bills your spot instance forever.
