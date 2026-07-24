@@ -285,9 +285,11 @@ def assemble_per_channel_transcript(
     # Build MergedSegment list
     segments: list[MergedSegment] = []
     for idx, seg_dict in enumerate(all_channel_segments):
+        # Words were already normalized to pipeline Word objects by
+        # _extract_segment_fields (type-aware).
         words: list[Word] | None = None
         if seg_dict["_word_ts"] and seg_dict.get("words"):
-            words = _normalize_words(seg_dict["words"])
+            words = seg_dict["words"]
 
         segment = MergedSegment(
             id=f"seg_{idx:03d}",
@@ -390,7 +392,13 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "start": seg.start,
             "end": seg.end,
             "text": seg.text,
-            "words": seg.words,
+            # TranscriptSegment carries TranscriptWord objects — normalize
+            # with the type-aware helper. _normalize_words() only accepts
+            # Word/dict and silently discarded every TranscriptWord, which
+            # is how per-channel responses lost all word timestamps while
+            # the engines were emitting them (the original incident's
+            # empty-words symptom).
+            "words": _normalize_transcript_words(seg.words) if seg.words else None,
             "language": seg.language,
             "tokens": seg.metadata.get("tokens"),
             "temperature": seg.metadata.get("temperature"),
@@ -404,7 +412,7 @@ def _extract_segment_fields(seg: Segment | TranscriptSegment) -> dict[str, Any]:
             "start": seg.start,
             "end": seg.end,
             "text": seg.text,
-            "words": seg.words,
+            "words": _normalize_words(seg.words) if seg.words else None,
             "language": seg.language,
             "tokens": seg.tokens,
             "temperature": seg.temperature,
