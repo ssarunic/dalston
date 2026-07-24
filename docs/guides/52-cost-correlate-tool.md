@@ -21,10 +21,12 @@ For every day in the window, the script computes:
 |---|---|
 | `jobs_completed` | Episodes finished that day |
 | `audio_hours` | Audio duration transcribed |
+| `transcribe_s`, `diarize_s` | Wall time attributed to those GPU stages |
 | `useful_work_s` | Sum of GPU-stage task wall times (the work you wanted to pay for) |
 | `billed_instance_s` | Sum of EC2 instance lifetimes (what AWS actually charged you for) |
 | `warmup_overhead_s` | `billed - useful` — idle, boot, model-load time |
 | `warmup_ratio` | `warmup / billed` — fraction of paid time that wasn't useful |
+| `cost_usd` | Unblended cost attributed to the day |
 | `cost_per_episode` | Total daily cost / jobs_completed |
 | `cost_per_audio_hour` | Total daily cost / audio_hours |
 
@@ -35,7 +37,7 @@ For every day in the window, the script computes:
 Three concrete examples:
 
 1. **"Is split mode actually $87/mo?"**
-   Run the tool over a month. Sum the `cost` column. If it's notably higher,
+   Run the tool over a month. Sum the `cost_usd` column. If it's notably higher,
    investigate `warmup_ratio` and `billed_instance_s` — you might be paying
    for instances that aren't doing work.
 
@@ -90,12 +92,12 @@ CSV to stdout, human summary to stderr:
 ```
 --- summary ---
   days:                 14
+  billed instance time: 27.6 h
+  total cost:           $52.18
   jobs completed:       312
   audio transcribed:    142.4 h
   useful GPU work:      18.3 h
-  billed instance time: 27.6 h
   warmup overhead:      9.3 h (33.7%)
-  total cost:           $52.18
   $/episode (avg):      $0.167
   $/audio-hour (avg):   $0.366
 ```
@@ -122,6 +124,18 @@ Whole-account spend instead of just Dalston:
 .venv/bin/python ./infra/scripts/dalston-cost-correlate --days 30 --no-tag-filter
 ```
 
+### AWS-only or filtered reports
+
+```bash
+# Skip Postgres and emit date, billed_instance_s, cost_usd
+.venv/bin/python ./infra/scripts/dalston-cost-correlate --days 30 --no-db
+
+# Inspect or exclude Cost Explorer service names
+.venv/bin/python ./infra/scripts/dalston-cost-correlate --show-services
+.venv/bin/python ./infra/scripts/dalston-cost-correlate \
+  --exclude-services "Amazon Simple Storage Service"
+```
+
 ---
 
 ## Reading the output
@@ -129,8 +143,8 @@ Whole-account spend instead of just Dalston:
 A typical row:
 
 ```csv
-day,jobs_completed,audio_hours,useful_work_s,billed_instance_s,warmup_overhead_s,warmup_ratio,total_cost_usd,cost_per_episode,cost_per_audio_hour
-2026-04-15,28,12.4,1280,2160,880,0.41,3.71,0.132,0.299
+date,jobs_completed,audio_hours,transcribe_s,diarize_s,useful_work_s,billed_instance_s,warmup_overhead_s,warmup_ratio,cost_usd,cost_per_episode,cost_per_audio_hour
+2026-04-15,28,12.4,840,440,1280,2160,880,0.41,3.71,0.132,0.299
 ```
 
 What this says:
@@ -151,7 +165,7 @@ work tighter together.
 ```bash
 # Daily 6am report — append to a CSV
 0 6 * * * cd /home/dalston && .venv/bin/python infra/scripts/dalston-cost-correlate \
-    --days 1 --output - >> /var/log/dalston-cost.csv 2>/dev/null
+    --days 1 >> /var/log/dalston-cost.csv 2>/dev/null
 ```
 
 Or pipe into a Slack webhook for a daily standup-friendly dashboard.

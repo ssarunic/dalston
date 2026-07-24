@@ -316,7 +316,7 @@ s3://{bucket}/
 │       │       ├── request.json         # Task input specification
 │       │       └── response.json        # Task output result
 │       │
-│       └── transcript.json            # Final merged result
+│       └── transcript.json            # Final orchestrator-assembled result
 │
 ├── sessions/
 │   └── {session_id}/
@@ -456,7 +456,7 @@ Workers download models to local cache on startup:
     "created_at": "2025-01-28T12:00:00Z",
     "completed_at": "2025-01-28T12:02:30Z",
     "processing_time_seconds": 150,
-    "pipeline_stages": ["prepare", "transcribe", "align", "diarize", "llm-cleanup", "merge"],
+    "pipeline_stages": ["prepare", "transcribe", "align", "diarize"],
     "pipeline_warnings": []
   },
 

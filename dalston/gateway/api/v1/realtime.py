@@ -214,8 +214,8 @@ async def realtime_transcription(
     - redact_pii_audio: Generate redacted audio file (requires retention != 0)
     - pii_redaction_mode: Audio redaction mode (silence, beep)
     """
-    # Get session router via dependency (note: WebSocket endpoints can't use Depends
-    # in the same way as REST endpoints, so we import directly)
+    # Get the session allocation facade. WebSocket endpoints cannot use Depends
+    # in the same way as REST endpoints, so import the provider directly.
     try:
         session_router = get_session_router()
     except Exception:
@@ -462,7 +462,7 @@ async def elevenlabs_realtime_transcription(
     - Server sends: {"message_type": "committed_transcript", "text": "..."}
 
     Query Parameters (ElevenLabs naming):
-    - model_id: "scribe_v1" or "scribe_v2" (maps to parakeet-0.6b/1.1b)
+    - model_id: "scribe_v1" or "scribe_v2" compatibility label; routing is automatic
     - language_code: ISO 639-1 code or "auto"
     - audio_format: "pcm_16000", "pcm_8000", etc.
     - commit_strategy: "vad" (auto) or "manual"
@@ -500,7 +500,7 @@ async def elevenlabs_realtime_transcription(
         return
     sample_rate = format_spec.sample_rate
 
-    # Get session router
+    # Get the session allocation facade.
     try:
         session_router = get_session_router()
     except Exception:

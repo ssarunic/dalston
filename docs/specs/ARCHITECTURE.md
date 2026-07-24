@@ -1,414 +1,164 @@
-# Dalston Architecture
+# Dalston architecture
 
-## Executive Summary
+Dalston is a self-hosted batch and realtime speech-to-text platform with
+Dalston-native, ElevenLabs-compatible, and OpenAI-compatible APIs.
 
-**Dalston** is a modular, self-hosted audio transcription server that provides an ElevenLabs and OpenAI-compatible API for both batch and real-time transcription. It deconstructs monolithic transcription pipelines into isolated, containerized engines that communicate via Redis queues and S3 storage.
+## Runtime modes
 
-### Core Value Proposition
+| Mode | Persistence and scheduling | Typical use |
+| --- | --- | --- |
+| `distributed` | PostgreSQL, Redis Streams, S3/MinIO, container workers | Multi-node and production deployments |
+| `lite` | SQLite, in-memory scheduling, local artifacts, in-process/venv engines | Local and zero-config workflows |
 
-- **Dual Mode**: Both batch (file upload) and real-time (streaming) transcription
-- **Runtime Isolation Profiles**: Batch engines declare `execution_profile` (`container`, `venv`, `inproc`) so incompatible stacks can coexist without scattered engine-specific dispatch logic
-- **Pluggable Pipeline**: Swap transcription, diarization, or alignment engines without changing the system
-- **Two-Level Queue**: Jobs contain task DAGs enabling parallel processing and granular failure handling
-- **Simple API, Complex Internals**: ElevenLabs and OpenAI-compatible API abstracts internal complexity
+`DALSTON_MODE` is selected at startup. The application does not silently fall
+back between modes.
 
----
+## Components
 
-## Batch vs Real-Time: When to Use
+```text
+                       HTTP / WebSocket
+                              │
+                       ┌──────▼──────┐
+                       │   Gateway   │
+                       │ API + SPA   │
+                       └───┬─────┬───┘
+                           │     │ realtime proxy
+                 job event │     │
+                    ┌──────▼─────▼──────────┐
+                    │     Orchestrator       │
+                    │ DAG + session          │
+                    │ coordination + assembly│
+                    └───┬───────────────┬────┘
+                        │               │
+               task streams       worker registry
+                        │               │
+                 ┌──────▼───────────────▼─────┐
+                 │ Unified engine instances   │
+                 │ batch and/or realtime      │
+                 └────────────────────────────┘
 
-| Aspect | Batch | Real-Time |
-|--------|-------|-----------|
-| **Use Case** | Recorded audio, podcasts, meetings | Live calls, voice assistants, live captioning |
-| **Latency** | Seconds to minutes | < 500ms target |
-| **Features** | Full pipeline (diarize, emotions, LLM cleanup) | Transcription only (+ VAD) |
-| **Input** | Complete audio file | Streaming audio chunks |
-| **Scaling** | Queue-based, async | Direct connection, capacity-limited |
-| **Quality** | Highest (multiple passes) | Good (single pass, optimized for speed) |
-
-**Hybrid Mode**: Start with real-time for immediate feedback, then run batch enhancement for speaker identification, error correction, and analysis.
-
----
-
-## System Architecture
-
-### Unified Overview
-
+    PostgreSQL/SQLite       Redis/in-memory       S3/local filesystem
+    durable metadata       queues + registry     audio + artifacts
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                                   DALSTON                                        │
-│                                                                                  │
-│  ┌────────────────────────────────────────────────────────────────────────────┐ │
-│  │                              GATEWAY                                        │ │
-│  │                          FastAPI + React                                    │ │
-│  │                                                                             │ │
-│  │   REST API (/v1/audio/transcriptions)         ─── BATCH PATH               │ │
-│  │   WebSocket (/v1/audio/transcriptions/stream) ─── REALTIME PATH            │ │
-│  │   Management Console (/console)                                             │ │
-│  │                                                                             │ │
-│  └──────────────────────┬─────────────────────────┬────────────────────────────┘ │
-│                         │                         │                              │
-│            BATCH        │                         │   REALTIME                  │
-│                         ▼                         ▼                              │
-│  ┌──────────────────────────────┐   ┌──────────────────────────────────────────┐│
-│  │        ORCHESTRATOR          │   │         SESSION ROUTER                    ││
-│  │                              │   │                                           ││
-│  │   • DAG expansion            │   │   • Worker pool management               ││
-│  │   • Task scheduling          │   │   • Session allocation                   ││
-│  │   • Dependency management    │   │   • Load balancing                       ││
-│  └──────────────┬───────────────┘   └─────────────────┬────────────────────────┘│
-│                 │                                     │                          │
-│                 ▼                                     │                          │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐│
-│  │                              REDIS                                           ││
-│  │                                                                              ││
-│  │   Batch: Job/Task state, engine work queues, events                         ││
-│  │   Realtime: Worker registry, session state, metrics                         ││
-│  │                                                                              ││
-│  └──────────────┬───────────────────────────────────┬───────────────────────────┘│
-│                 │                                   │                            │
-│    ┌────────────┴────────────┐                     │                            │
-│    │                         │                     │                            │
-│    ▼                         ▼                     ▼                            │
-│  ┌──────────────────┐      ┌──────────────────────────────────────────────────┐ │
-│  │  BATCH ENGINE    │      │              REALTIME WORKER POOL                │ │
-│  │  CONTAINERS      │      │                                                  │ │
-│  │                  │      │   ┌─────────────────┐  ┌─────────────────┐       │ │
-│  │  faster-whisper  │      │   │ realtime-       │  │ realtime-       │       │ │
-│  │  pyannote        │      │   │ whisper-1       │  │ whisper-2       │       │ │
-│  │  phoneme-align   │      │   │                 │  │                 │       │ │
-│  │  llm-cleanup     │      │   │ • WebSocket srv │  │ • WebSocket srv │       │ │
-│  │  merger          │      │   │ • Streaming ASR │  │ • Streaming ASR │       │ │
-│  │  whisperx-full   │      │   │ • VAD           │  │ • VAD           │       │ │
-│  │                  │      │   │                 │  │                 │       │ │
-│  │  [Poll Redis]    │      │   │ [Direct WS]     │  │ [Direct WS]     │       │ │
-│  └──────────────────┘      │   └─────────────────┘  └─────────────────┘       │ │
-│                            └──────────────────────────────────────────────────┘ │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
-│  │                           STORAGE LAYER                                      │ │
-│  │                                                                              │ │
-│  │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────┐ │ │
-│  │   │   PostgreSQL    │  │      S3         │  │      Local Temp             │ │ │
-│  │   │                 │  │                 │  │                             │ │ │
-│  │   │  • Jobs         │  │  • Audio files  │  │  • In-flight processing    │ │ │
-│  │   │  • Tasks        │  │  • Transcripts  │  │  • Audio buffering         │ │ │
-│  │   │  • API Keys     │  │  • Exports      │  │  • Model cache             │ │ │
-│  │   │  • Tenants      │  │  • Models       │  │                             │ │ │
-│  │   │                 │  │                 │  │                             │ │ │
-│  │   └─────────────────┘  └─────────────────┘  └─────────────────────────────┘ │ │
-│  └─────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Core Components
 
 ### Gateway
 
-**Purpose**: Public API, web console, request routing
+The FastAPI gateway handles authentication, request validation, uploads,
+REST/WebSocket compatibility translation, rate limits, the console API, and
+serving the React application.
 
-**Technology**: FastAPI (Python) + React (TypeScript)
+Primary surfaces:
 
-**Endpoints**:
+- native batch: `/v1/audio/transcriptions`
+- native realtime: `/v1/audio/transcriptions/stream`
+- ElevenLabs: `/v1/speech-to-text`
+- ElevenLabs realtime: `/v1/speech-to-text/realtime`
+- OpenAI audio: `/v1/audio/transcriptions`, `/v1/audio/translations`
+- OpenAI realtime: `/v1/realtime?intent=transcription`
 
-- `POST /v1/audio/transcriptions` — Submit file for batch transcription
-- `GET /v1/audio/transcriptions/{id}` — Get batch job status/results
-- `WS /v1/audio/transcriptions/stream` — Real-time streaming transcription
-- `GET /v1/realtime/status` — Real-time capacity and status
-- `GET /console/*` — Management UI
+The native and OpenAI batch routes share a path and are distinguished by the
+request contract/model handling.
 
-**Documentation**: [Batch API](./batch/API.md) | [WebSocket API](./realtime/WEBSOCKET_API.md)
+### Orchestrator
 
----
+The orchestrator:
 
-### Orchestrator (Batch)
+- consumes durable job events;
+- selects engines by capability and readiness;
+- constructs and schedules task DAGs;
+- retries/reconciles stale work;
+- assembles the final transcript;
+- coordinates realtime worker allocation and capacity;
+- delivers webhooks and applies retention cleanup; and
+- runs optional PII/audio-redaction post-processing.
 
-**Purpose**: Job expansion, task scheduling, dependency management
+Realtime coordination is implemented by the orchestrator’s session
+coordinator/allocator. The former standalone “Session Router” architecture is
+legacy.
 
-**Responsibilities**:
+### Engines
 
-- Expand jobs into task DAGs based on parameters
-- Select optimal engines (single-stage or multi-stage)
-- Push ready tasks to engine queues
-- Handle failures and retries
-- Trigger webhooks on completion
+An engine advertises stages, models, timing/speaker/language capabilities,
+hardware requirements, and whether it supports batch and/or native streaming.
+Unified runners can share a loaded model between batch and realtime adapters.
 
-**Documentation**: [Orchestrator Details](./batch/ORCHESTRATOR.md)
+Execution profiles are:
 
----
+- `container`: distributed Redis-stream worker;
+- `venv`: isolated lite subprocess; and
+- `inproc`: lite execution in the application process.
 
-### Session Router (Real-Time)
+## Batch data flow
 
-**Purpose**: Real-time worker pool management and session allocation
-
-**Responsibilities**:
-
-- Track available real-time workers
-- Allocate sessions to workers with capacity
-- Monitor worker health via heartbeat
-- Handle failover and reconnection
-
-**Documentation**: [Session Router](./realtime/SESSION_ROUTER.md)
-
----
-
-### Storage Architecture
-
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **PostgreSQL** | Primary database | Persistent business data (jobs, tasks, API keys, tenants) |
-| **Redis** | In-memory store | Ephemeral data (streams, session state, rate limits, pub/sub) |
-| **S3** | Object storage | All artifacts (audio files, transcripts, exports, models) |
-| **Local** | Temp filesystem | In-flight processing files only |
-
-### Redis (Ephemeral)
-
-**Purpose**: Streams, pub/sub, rate limiting, session state
-
-**Batch Structures**:
-
-- `dalston:stream:{engine_id}` — Engine work streams
-- `dalston:ratelimit:{key_id}` — Rate limit counters
-- `dalston:events` — Event pub/sub
-
-**Real-Time Structures**:
-
-- `dalston:realtime:workers` — Worker registry
-- `dalston:realtime:worker:{id}` — Worker state
-- `dalston:realtime:session:{id}` — Session state (TTL-based)
-
-**Documentation**: [Data Model](./batch/DATA_MODEL.md)
-
----
-
-### Batch Engine Runtimes
-
-**Purpose**: Execute processing tasks in the isolation boundary declared by each engine_id
-
-**Execution Profiles**:
-
-- `container` (default): existing Redis-stream + long-running engine worker path
-- `venv`: lite-mode subprocess execution in an engine-specific virtualenv
-- `inproc`: lite-mode direct execution in the orchestrator process
-
-**Execution Model**:
-
-- Distributed mode keeps polling Redis streams with long-running engine workers
-- Lite mode dispatches `inproc` and `venv` engine IDs through the same task contract used by containerized engines
-- There is no silent fallback from `venv` or `inproc` back to another profile on execution failure
-
-**Engine Categories**:
-
-| Category | Engines |
-|----------|---------|
-| TRANSCRIBE | faster-whisper, parakeet, whisper-openai |
-| ALIGN | phoneme-align |
-| DIARIZE | pyannote-4.0 |
-| DETECT | emotion2vec, panns-events, pii-presidio |
-| REDACT | audio-redactor |
-| REFINE | llm-cleanup |
-| MERGE | final-merger |
-| MULTI-STAGE | whisperx-full |
-
-**Documentation**: [Engines Reference](./batch/ENGINES.md)
-
----
-
-### Real-Time Worker Pool
-
-**Purpose**: Handle streaming transcription with low latency
-
-**Execution Model**: WebSocket server accepting direct connections
-
-**Capabilities**:
-
-- Voice Activity Detection (VAD)
-- Streaming ASR with partial results
-- Multiple concurrent sessions per worker
-- Model variants (fast/accurate)
-
-**Documentation**: [Real-Time Engines](./realtime/REALTIME_ENGINES.md)
-
----
-
-## Batch Pipeline
-
-```
-Ingest → Prepare → Transcribe → Align → Diarize → Enrich → Refine (LLM) → Merge → Output
+```text
+submit
+  │
+  ▼
+prepare ──► transcribe ──► optional align
+  │
+  └─────────────────────► optional diarize
+                              │
+                 all required tasks terminal
+                              │
+                              ▼
+                 orchestrator transcript assembly
+                              │
+                              ▼
+                  optional pii_detect/audio_redact
 ```
 
-### Speaker Detection Modes
+Diarization depends on prepared audio and runs in parallel with the
+transcription/alignment branch. Capability flags can remove align or diarize
+when an upstream engine already supplies that output.
 
-| Mode | Description | Pipeline |
-|------|-------------|----------|
-| `none` | No speaker identification | transcribe → merge |
-| `diarize` | AI-based detection | transcribe → align → diarize → merge |
-| `per_channel` | Channel = speaker | split → [transcribe×N] → merge |
+There is no distributed merge task. Mono and per-channel transcripts are
+assembled by orchestrator code. Legacy merge types and lite-profile logic are
+retained only where compatibility requires them.
 
-### Single-Stage vs Multi-Stage
+## Realtime data flow
 
-**Modular** (maximum flexibility):
+1. Gateway authenticates the WebSocket and checks tenant limits.
+2. The session coordinator chooses a compatible ready worker.
+3. Gateway proxies native or translated protocol messages to that worker.
+4. Worker emits VAD, interim, final, warning, and session lifecycle messages.
+5. Coordinator releases capacity and the gateway persists native session data
+   when retention permits.
 
-```
-faster-whisper → phoneme-align → pyannote → merger
-```
+Compatibility model names are validated but do not imply a fixed model-to-
+engine mapping. Native `resume_session_id` records lineage without restoring
+transcript or decoder context.
 
-**Integrated** (optimized pipeline):
+Realtime completion does not automatically launch batch enhancement.
 
-```
-whisperx-full [transcribe + align + diarize] → merger
-```
+## Storage
 
----
+| Data | Distributed | Lite |
+| --- | --- | --- |
+| Jobs, tasks, keys, sessions, webhooks, audit | PostgreSQL | SQLite |
+| Events, queues, registry, rate limits | Redis | In-memory services |
+| Audio, task outputs, transcripts, exports | S3/MinIO | Local filesystem |
+| Model cache | Shared/worker volume or configured model storage | Local cache |
 
-## Real-Time Pipeline
+Engine business logic receives materialized local files and returns typed
+responses/artifact descriptors. Runners own storage I/O.
 
-```
-Audio Stream → VAD → Streaming ASR → Transcript Assembly → WebSocket Output
-```
+## Reliability and observability
 
-### Features
+- Redis consumer groups provide durable distributed delivery.
+- Heartbeats and stale-task scanners recover abandoned work.
+- PostgreSQL/SQLite remain the durable lifecycle source.
+- OpenTelemetry propagates request/job/task trace context.
+- Structured logs and Prometheus metrics expose queue, worker, engine, and
+  latency state.
+- Webhooks use Standard Webhooks signatures and retry delivery.
 
-- **Partial Results**: See text as it's being spoken
-- **Final Results**: Confirmed transcript on utterance end
-- **VAD Events**: Speech start/end notifications
-- **Word Timestamps**: Optional word-level timing
+## Further reference
 
-### Model Variants
-
-| Variant | Model | Latency | Quality |
-|---------|-------|---------|---------|
-| `fast` | Parakeet 0.6B | ~200ms | Good |
-| `accurate` | Parakeet 1.1B | ~300ms | Excellent |
-
-Parakeet models provide native streaming with true partial results during speech. Non-streaming models (Whisper) use VAD-chunked transcription.
-
----
-
-## Hybrid Mode
-
-Get immediate results with real-time, then enhance with batch processing:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                  │
-│   REALTIME SESSION                        BATCH ENHANCEMENT                     │
-│                                                                                  │
-│   Audio ───▶ Realtime ───▶ Immediate     Session ───▶ Batch ───▶ Enhanced      │
-│   stream     Worker       transcript     recording   Pipeline   result          │
-│                                │                                   │            │
-│                                ▼                                   ▼            │
-│                           User sees                           User gets         │
-│                           text NOW                            + diarization     │
-│                           (< 500ms)                           + speaker names   │
-│                                                               + LLM cleanup     │
-│                                                               + emotions        │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Usage**:
-
-```
-WS /v1/audio/transcriptions/stream?enhance_on_end=true
-```
-
-On session end, returns `enhancement_job_id` to poll for enhanced transcript.
-
----
-
-## Key Technical Decisions
-
-| Decision | Choice | Details |
-|----------|--------|---------|
-| Storage architecture | PostgreSQL + Redis + S3 | [ADR-001](../decisions/ADR-001-storage-architecture.md) |
-| Engine isolation | Docker containers | [ADR-002](../decisions/ADR-002-engine-isolation.md) |
-| Job/task model | Two-level queues (Jobs → Tasks) | [ADR-003](../decisions/ADR-003-two-level-queues.md) |
-| Realtime communication | Direct WebSocket | Low latency, bidirectional |
-| API compatibility | ElevenLabs | Easy migration for users |
-| Realtime scaling | Worker pool + router | Capacity management, load balancing |
-
-For detailed rationale on architectural decisions, see [Architecture Decision Records](../decisions/README.md).
-
----
-
-## Implementation Phases
-
-### Phase 1: Batch MVP
-
-- Gateway (REST API)
-- Orchestrator
-- Core engines: faster-whisper, merger
-
-### Phase 2: Batch Speaker Detection
-
-- Diarization and per-channel modes
-- Engines: phoneme-align, pyannote
-
-### Phase 3: Batch Enrichment
-
-- Emotion, events, LLM cleanup
-
-### Phase 4: Real-Time MVP
-
-- Session Router
-- Realtime workers
-- WebSocket API
-
-### Phase 5: Hybrid Mode
-
-- Session recording
-- Batch enhancement from realtime
-
-### Phase 6: Management Console
-
-- React web application
-- Unified batch + realtime monitoring
-
----
-
-## Documentation Index
-
-### Batch Transcription
-
-- [API Reference](./batch/API.md) — REST endpoints, parameters, responses
-- [Orchestrator](./batch/ORCHESTRATOR.md) — DAG building, task scheduling
-- [Data Model](./batch/DATA_MODEL.md) — Redis structures, transcript format
-- [Engines](./batch/ENGINES.md) — Engine reference, SDK, creating engines
-- [Docker](./batch/DOCKER.md) — Container composition, operations
-
-### Real-Time Transcription
-
-- [Real-Time Overview](./realtime/REALTIME.md) — Architecture and concepts
-- [WebSocket API](./realtime/WEBSOCKET_API.md) — Protocol reference
-- [Session Router](./realtime/SESSION_ROUTER.md) — Worker pool management
-- [Real-Time Engines](./realtime/REALTIME_ENGINES.md) — Streaming worker implementation
-
-### General
-
-- [Project Structure](./PROJECT_STRUCTURE.md) — Directory layout, packages
-- [Glossary](../GLOSSARY.md) — Terminology definitions
-
-### Architecture Decisions
-
-- [ADR Index](../decisions/README.md) — Why we made key technical choices
-
-### Examples
-
-- [WebSocket Clients](./examples/websocket-clients.md) — JS/Python client implementations
-- [Webhook Verification](./examples/webhook-verification.md) — Signature verification code
-
-### Implementation Reference
-
-- [Auth Patterns](./implementations/auth-patterns.md) — API key auth, middleware, scopes, rate limiting
-- [DAG Builder](./implementations/dag-builder.md) — Task DAG construction with optional/parallel tasks
-- [Enrichment Engines](./implementations/enrichment-engines.md) — Emotion, events, LLM cleanup patterns
-- [Console API](./implementations/console-api.md) — Dashboard aggregation, React Query integration
-
-### Runtime Modes
-
-- `distributed` (default): Postgres + Redis + S3/MinIO.
-- `lite`: SQLite + in-memory queue + local filesystem artifacts.
-- Mode is selected once at startup via `DALSTON_MODE` and does not fallback at runtime.
+- [Batch API](batch/API.md)
+- [Orchestrator](batch/ORCHESTRATOR.md)
+- [Engine contracts](PIPELINE_INTERFACES.md)
+- [Realtime guide](realtime/REALTIME.md)
+- [WebSocket API](realtime/WEBSOCKET_API.md)
+- [Data retention](DATA_RETENTION.md)
+- [Observability](OBSERVABILITY.md)
+- [Glossary](../GLOSSARY.md)

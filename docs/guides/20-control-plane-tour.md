@@ -33,7 +33,7 @@
                     │          ENGINE WORKERS (ephemeral)             │
                     │                                                 │
                     │   stt-prepare   stt-transcribe   stt-diarize    │
-                    │   stt-align     stt-redact       stt-merge      │
+                    │   stt-align     stt-pii-detect   stt-redact     │
                     │                                                 │
                     │   (CPU on control plane + GPU spot workers)     │
                     └─────────────────────────────────────────────────┘
@@ -69,9 +69,12 @@ What it speaks:
 ### Orchestrator
 
 The DAG scheduler. Watches a durable Redis stream
-(`dalston:events:stream`) for `job.created`, builds a per-job task graph
-(`prepare → transcribe → align → diarize → merge`), and dispatches tasks to
-matching engines. Re-queues stale tasks when workers die. Source:
+(`dalston:events:stream`) for `job.created`, builds a capability-driven task
+graph, and dispatches tasks to matching engines. Alignment is conditional;
+diarization runs from prepared audio in parallel with transcription/alignment.
+The orchestrator assembles the final transcript after the required tasks
+finish—there is no distributed merge worker. It also re-queues stale tasks
+when workers die. Source:
 [`dalston/orchestrator/`](../../dalston/orchestrator/).
 
 Background workers it runs:
@@ -88,7 +91,7 @@ realtime session ledger.
 
 ### Redis
 
-Three roles:
+Four roles:
 
 1. **Engine registry** — `dalston:engine:instance:{id}` hash with 60s TTL.
    Engines heartbeat in; the gateway reads this for `/v1/engines`.
@@ -124,16 +127,17 @@ Submitting a podcast for transcription:
 2. Gateway publishes `job.created` to `dalston:events:stream`. Returns the
    `Job` (HTTP 201, status=pending).
 3. **Orchestrator** consumes `job.created`. Calls `dag.build_task_dag()` to
-   construct `prepare → transcribe → [align] → [diarize] → merge` based on
-   the request flags (`speaker_detection`, `timestamps_granularity`).
+   construct `prepare → transcribe → [align]`, with an optional diarize task
+   depending on `prepare`, based on request flags and engine capabilities.
 4. The orchestrator looks up engines that match each stage in the Redis
    registry, then `XADD`s a task to the chosen engine's input stream.
 5. **Engine** picks up the task via `XREADGROUP`, downloads the audio
    artifact from S3, runs the model, writes the output JSON to S3 at
    `tasks/{task_id}/output.json`, and emits `task.completed`.
-6. Orchestrator unblocks downstream tasks. Final stage is `merge`, which
-   assembles `transcript.json` at `jobs/{job_id}/transcript.json` and emits
-   `job.completed`.
+6. Orchestrator unblocks downstream tasks, assembles `transcript.json` at
+   `jobs/{job_id}/transcript.json` after all required tasks finish, and emits
+   `job.completed`. Requested PII detection/audio redaction continues as
+   asynchronous post-processing.
 7. **Webhook delivery worker** posts to any subscribed endpoints with a
    signed payload.
 8. You poll `GET /v1/audio/transcriptions/{job_id}` (or wait for a webhook).

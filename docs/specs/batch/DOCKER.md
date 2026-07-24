@@ -288,26 +288,6 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # ============================================================
-  # MERGE ENGINES
-  # ============================================================
-
-  stt-merge:
-    build:
-      context: ./engines/merge/final-merger
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - ENGINE_ID=final-merger
-      - DALSTON_S3_BUCKET=${DALSTON_S3_BUCKET}
-      - DALSTON_S3_REGION=${DALSTON_S3_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    tmpfs:
-      - /tmp/dalston:size=1G
-    depends_on:
-      - redis
-    restart: unless-stopped
-
 volumes:
   postgres-data:
     driver: local
@@ -334,9 +314,6 @@ AWS_SECRET_ACCESS_KEY=...
 # HuggingFace token (required for pyannote)
 HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
 
-# LLM providers (optional, for llm-cleanup engine)
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
 ```
 
 ### Required Environment Variables
@@ -460,15 +437,15 @@ CMD ["python", "/app/engine.py"]
 docker compose up -d
 
 # Start core only (minimal)
-docker compose up -d postgres redis gateway orchestrator stt-prepare stt-transcribe-whisper-cpu stt-merge
+docker compose up -d postgres redis gateway orchestrator \
+  stt-prepare stt-transcribe-faster-whisper
 
 # Start with specific engines
 docker compose up -d postgres redis gateway orchestrator \
   stt-prepare \
-  stt-transcribe-whisper-cpu \
-  stt-align-whisperx-cpu \
-  stt-diarize-pyannote-v40-cpu \
-  stt-merge
+  stt-transcribe-faster-whisper \
+  stt-align-phoneme \
+  stt-diarize-pyannote-4.0
 ```
 
 ### Scaling Engines

@@ -22,7 +22,7 @@ Control plane (always-on, on-demand t3.large)
   • Postgres      (jobs, API keys, audit log)
   • Redis         (engine registry, event stream, task queues)
   • Web console   (React SPA, served by gateway)
-  • CPU engines   (prepare, redact, merge, llm-cleanup)
+  • CPU engines   (prepare, align where configured, PII detection/redaction)
 
 GPU worker (ephemeral, spot g6.xlarge by default)
   • Whatever transcribe/diarize engines you launch
@@ -69,9 +69,8 @@ dalston-aws launch
 # 3. Wait until ready (~3-5 min for first launch with model downloads).
 dalston-aws status
 
-# 4. Find your URL.
-dalston-aws ssh -- 'tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)[\"Self\"][\"DNSName\"])"'
-# → dalston-control-plane.<your-tailnet>.ts.net
+# 4. Use the stable MagicDNS name configured by the deployment.
+export DALSTON_SERVER=https://dalston-control-plane.<your-tailnet>.ts.net
 ```
 
 That's it. Open the URL in any browser on your tailnet:
@@ -133,7 +132,7 @@ print(job.transcript.text)
 ## Day-to-day commands
 
 ```bash
-dalston-aws status        # what's running, how much it's costing
+dalston-aws status        # instance state, addresses, and workers
 dalston-aws ssh           # SSH to control plane via Tailscale
 dalston-aws ssh gpu       # SSH to GPU worker
 dalston-aws down          # stop control plane (EBS preserved, ~$4/mo)
@@ -221,7 +220,7 @@ Then open the web console at `$URL/` and confirm:
 
 - Dashboard shows green
 - Engines page lists your transcribe + diarize workers
-- Settings → API keys page lets you mint additional keys
+- API Keys (`/keys`) lets you mint additional keys
 
 ---
 

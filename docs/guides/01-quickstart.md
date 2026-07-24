@@ -70,16 +70,16 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F file=@meeting.mp3 \
   -F model=auto \
   -F language=auto
-# → { "id": "job_abc123", "status": "pending", ... }
+# → { "id": "550e8400-e29b-41d4-a716-446655440000", "status": "pending", ... }
 ```
 
 Poll until done (a 5-minute audio file takes **~2 minutes** of CPU model time
 at RTF 0.4 — a 1-hour file takes **~24 minutes**):
 
 ```bash
-curl http://localhost:8000/v1/audio/transcriptions/job_abc123 \
+curl http://localhost:8000/v1/audio/transcriptions/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer $DALSTON_API_KEY"
-# → { "status": "completed", "transcript": { "text": "..." } }
+# → { "status": "completed", "text": "...", "segments": [...], ... }
 ```
 
 That's it. Same shape as ElevenLabs / OpenAI; drop-in friendly.
@@ -135,15 +135,20 @@ dalston transcribe meeting.mp3
 Common knobs:
 
 ```bash
-dalston transcribe meeting.mp3 --speakers diarize --format srt -o out.srt
+JOB_ID=$(dalston transcribe meeting.mp3 --speakers diarize --no-wait --json | jq -r '.id')
+dalston jobs wait "$JOB_ID"
+dalston export "$JOB_ID" --format srt -o out.srt
 dalston transcribe meeting.mp3 --model faster-whisper --language en --show-words
 dalston listen   # real-time microphone capture
 dalston status   # health check
 dalston jobs list
 ```
 
-The CLI reads `DALSTON_SERVER` and `DALSTON_API_KEY` from the env, or
-`~/.dalston/config.yaml`. See [23-using-the-cli.md](23-using-the-cli.md).
+The CLI reads `DALSTON_SERVER` and `DALSTON_API_KEY` from the environment or
+`~/.dalston/config.yaml`. Installing `dalston-cli` gives you the client; its
+automatic localhost bootstrap additionally needs the Dalston backend
+dependencies. In this quickstart, `make dev` already provides the server. See
+[23-using-the-cli.md](23-using-the-cli.md).
 
 ---
 

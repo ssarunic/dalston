@@ -14,7 +14,7 @@ Today, the job status API returns a flat view: `status`, `progress`, `current_st
 - How long did each stage take? Where is the bottleneck?
 - What did the transcriber produce before alignment adjusted it?
 - Did diarization run, or was it skipped? Why?
-- What input did the merge stage receive?
+- What inputs did orchestrator assembly select?
 
 The data to answer all of these questions already exists — tasks are tracked in PostgreSQL with status and timing, and every task's input/output is persisted in S3. The gap is an API to surface this information.
 
@@ -105,17 +105,6 @@ The `stages` field appears on any job that has reached `RUNNING` status (i.e., t
       "duration_ms": 3100,
       "retries": 2,
       "error": "Too many speakers detected (>20)"
-    },
-    {
-      "stage": "merge",
-      "task_id": "550e8400-e29b-41d4-a716-446655440005",
-      "engine_id": "final-merger",
-      "status": "completed",
-      "required": true,
-      "started_at": "2025-01-28T12:00:13Z",
-      "completed_at": "2025-01-28T12:00:14Z",
-      "duration_ms": 800,
-      "error": null
     }
   ],
 
@@ -128,7 +117,7 @@ The `stages` field appears on any job that has reached `RUNNING` status (i.e., t
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stage` | string | Pipeline stage name (`prepare`, `transcribe`, `align`, `diarize`, `merge`, etc.) |
+| `stage` | string | Task stage (`prepare`, `transcribe`, `align`, `diarize`, `pii_detect`, `audio_redact`, or a channel-suffixed variant) |
 | `task_id` | string | UUID of the underlying task (used for artifact inspection) |
 | `engine_id` | string | Engine that executed (or will execute) this task |
 | `status` | string | `pending`, `ready`, `running`, `completed`, `failed`, `skipped` |
@@ -152,8 +141,7 @@ For `per_channel` speaker detection, channel-specific tasks appear with a suffix
     {"stage": "transcribe_ch0", "status": "completed", "duration_ms": 4200},
     {"stage": "transcribe_ch1", "status": "completed", "duration_ms": 3800},
     {"stage": "align_ch0", "status": "completed", "duration_ms": 2100},
-    {"stage": "align_ch1", "status": "completed", "duration_ms": 1900},
-    {"stage": "merge", "status": "completed", "duration_ms": 600}
+    {"stage": "align_ch1", "status": "completed", "duration_ms": 1900}
   ]
 }
 ```
@@ -342,8 +330,10 @@ When viewing a completed or failed job, the DAG viewer shows:
 **Timing breakdown** (top-level summary):
 
 - **Wall**: Total time from job creation to completion (what the user waited)
-- **Processing**: Sum of all tasks' `duration_ms` (actual engine work)
-- **Wait**: Sum of all tasks' `wait_ms` (time queued before engine pickup)
+- **Processing**: Union of task processing intervals, so parallel work is not
+  double-counted
+- **Wait**: Union of task ready-to-start intervals, so parallel queue waits are
+  not double-counted
 - **Speed ratio**: `audio_duration / processing_time` (uses processing time, not wall time)
 
 **Per-task nodes** show processing duration and queue wait (if > 500ms).
@@ -352,10 +342,11 @@ When viewing a completed or failed job, the DAG viewer shows:
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Wall: 14.5s | Processing: 13.5s (6.7x) | Wait: 1.0s              │
 │                                                                     │
-│  ┌──────────┐  ┌──────────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ prepare  │─▶│  transcribe  │─▶│ diarize  │─▶│  merge   │       │
-│  │  1.2s ✓  │  │   8.4s ✓     │  │ 3.1s ✗   │  │  0.8s ✓  │       │
-│  └──────────┘  └──────────────┘  └──────────┘  └──────────┘       │
+│  ┌──────────┐  ┌──────────────┐                                  │
+│  │ prepare  │─▶│  transcribe  │                                  │
+│  │  1.2s ✓  │  │   8.4s ✓     │                                  │
+│  └────┬─────┘  └──────────────┘                                  │
+│       └────────▶ diarize 3.1s ✗ (optional, parallel)              │
 │                                                                     │
 │  Click any stage to inspect its input and output artifacts.        │
 └─────────────────────────────────────────────────────────────────────┘

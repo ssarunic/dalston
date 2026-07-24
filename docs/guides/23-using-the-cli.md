@@ -44,10 +44,10 @@ dalston listen     [OPTIONS]           # real-time microphone capture
 dalston export     JOB_ID  [OPTIONS]   # download a transcript in another format
 dalston status                         # health check
 dalston engines                        # list registered engines
-dalston jobs       (list|get|wait|cancel|delete)
-dalston sessions   (list|get|...)      # real-time sessions
-dalston models     (list|...)
-dalston server     (start|stop|...)    # local lite mode helpers
+dalston jobs       (list|get|wait|cancel)
+dalston sessions   (list|get|delete)   # real-time sessions
+dalston models     (list|pull)
+dalston server     (status|stop)       # local ghost-server helpers
 ```
 
 ---
@@ -69,8 +69,10 @@ dalston transcribe meeting.mp3 --speakers diarize --timestamps word
 # Hint speaker count
 dalston transcribe interview.mp3 --speakers diarize --num-speakers 2
 
-# SRT subtitles
-dalston transcribe lecture.mp4 --format srt -o lecture.srt
+# SRT subtitles use the export endpoint after submission
+JOB_ID=$(dalston transcribe lecture.mp4 --no-wait --json | jq -r '.id')
+dalston jobs wait "$JOB_ID"
+dalston export "$JOB_ID" --format srt -o lecture.srt
 
 # Show word timestamps in the printed output
 dalston transcribe meeting.mp3 --show-words
@@ -85,7 +87,7 @@ dalston transcribe *.mp3 -o ./transcripts/
 dalston transcribe --url https://example.com/audio.mp3
 
 # JSON output for scripting
-dalston transcribe meeting.mp3 --json | jq '.transcript.text'
+dalston transcribe meeting.mp3 --json | jq -r '.text'
 
 # Don't wait, just submit and exit
 dalston transcribe meeting.mp3 --no-wait
@@ -100,13 +102,19 @@ Common flags:
 | `-l`, `--language` | Language code or `auto` (default) |
 | `-v`, `--vocab` | Term to boost (repeatable) |
 | `-o`, `--output` | Output file (or directory for multi-file) |
-| `-f`, `--format` | `txt`, `json`, `srt`, `vtt` |
+| `-f`, `--format` | `txt` or `json`; use `dalston export` for `srt`/`vtt` |
 | `--speakers` | `none` (default), `diarize`, `per-channel` |
 | `--num-speakers`, `--min-speakers`, `--max-speakers` | Speaker count hints |
 | `--timestamps` | `none`, `segment`, `word` (default) |
 | `--show-words` | Print word-level timing in `txt` output |
 | `--wait` / `--no-wait` | Block until done (default) or just submit |
 | `--json` | Machine-readable output |
+| `--pii` | Detect PII in the transcript |
+| `--pii-entities` | Comma-separated entity types to detect |
+| `--redact-audio` | Generate redacted audio (requires `--pii`) |
+| `--redaction-mode` | `silence` or `beep` |
+| `-r`, `--retention` | `0` transient, `-1` permanent, or `1`–`3650` days |
+| `--profile` | Lite pipeline: `core`, `speaker`, or `compliance` |
 
 ---
 
@@ -124,16 +132,21 @@ dalston listen --list-devices
 # Pick a specific device
 dalston listen --device "MacBook Pro Microphone"
 
-# English only, save the captured audio + transcript
-dalston listen --language en --store-audio --store-transcript
+# English only
+dalston listen --language en
 
 # Replay a file as if it were a live stream (for testing)
-dalston listen --input-file recorded.wav
+dalston listen --file recorded.wav
+# Short form: dalston listen -i recorded.wav
 ```
 
 Outputs partial transcripts as you speak (interim results), then "commits"
 final transcripts on silence (VAD events drive this — see
 [40-realtime-overview.md](40-realtime-overview.md)).
+
+The CLI still exposes legacy `--store-audio` and `--store-transcript` switches,
+but the current native gateway derives persistence from its session retention
+setting; those switches do not override it.
 
 ---
 
@@ -153,7 +166,13 @@ dalston jobs list --since 2026-05-13T17:23:00Z
 dalston jobs get JOB_ID                 # full detail
 dalston jobs wait JOB_ID                # block until completed/failed
 dalston jobs cancel JOB_ID
-dalston jobs delete JOB_ID              # also removes S3 artifacts
+```
+
+Job deletion is available through the REST API and web console, not the CLI:
+
+```bash
+curl -X DELETE "$DALSTON_SERVER/v1/audio/transcriptions/$JOB_ID" \
+  -H "Authorization: Bearer $DALSTON_API_KEY"
 ```
 
 The table has columns:
@@ -187,6 +206,7 @@ A job's transcript is stored once; export converts on read.
 dalston export JOB_ID -f srt -o subtitles.srt
 dalston export JOB_ID -f vtt
 dalston export JOB_ID -f json   # full JSON with words and speakers
+dalston export JOB_ID -f srt --max-line-length 42 --max-lines 2
 ```
 
 ---
@@ -224,6 +244,7 @@ If something is wrong, this is your first stop.
 ```bash
 dalston sessions list                  # active + recent sessions
 dalston sessions get SESSION_ID
+dalston sessions delete SESSION_ID
 ```
 
 ---
@@ -232,7 +253,8 @@ dalston sessions get SESSION_ID
 
 ```bash
 dalston models list
-dalston models list --stage transcribe
+dalston models list --engine_id nemo
+dalston models pull MODEL_ID
 ```
 
 ---
@@ -241,9 +263,15 @@ dalston models list --stage transcribe
 
 Source: [`cli/dalston_cli/commands/server.py`](../../cli/dalston_cli/commands/server.py).
 
-For lite-mode setups (single-process, no Docker), this manages the local
-server lifecycle. Most users don't need it — they use `make dev` or
-`dalston-aws launch` instead.
+`dalston transcribe` can automatically start a local ghost server when the
+target is the default localhost URL and the gateway dependencies are installed.
+Use `dalston server status` to inspect that process and `dalston server stop` to
+stop it. There is no explicit `server start` command.
+
+The published `dalston-cli` package is only the client. Automatic local startup
+also requires the Dalston backend and Uvicorn, as provided by a source
+development install. Otherwise start the server with `make dev` or point
+`DALSTON_SERVER` at an existing deployment.
 
 ---
 

@@ -18,11 +18,10 @@ For the protocol comparison, see [40-realtime-overview.md](40-realtime-overview.
 ```
 wss://<your-dalston>/v1/speech-to-text/realtime
     ?api_key=dk_...
-    &model_id=scribe_v1                # scribe_v1 → parakeet-0.6b
-                                       # scribe_v2 → parakeet-1.1b
+    &model_id=scribe_v1                # compatibility label; routing is automatic
     &language_code=en                  # ISO 639-1 or "auto"
     &audio_format=pcm_16000            # pcm_16000, pcm_8000, ulaw_8000, ...
-    &commit_strategy=vad               # "vad" (auto-commit on silence) or "manual"
+    &commit_strategy=manual            # default; use "vad" for auto-commit on silence
     &include_timestamps=true
     &keyterms=["PostgreSQL","Tailscale"]    # JSON array, max 100 / 50 chars
 ```
@@ -53,18 +52,25 @@ To force a commit (manual mode):
 To close gracefully:
 
 ```json
-{ "message_type": "close_connection" }
+{ "message_type": "close_stream" }
 ```
 
 **Server → client** (also JSON):
 
 | `message_type` | Content |
 |---|---|
+| `session_started` | Session and accepted connection settings |
 | `partial_transcript` | `text` (interim, may change) |
 | `committed_transcript` | `text` (final) |
-| `committed_transcript_with_timestamps` | `text` + `words: [{text, start, end}, ...]` |
-| `language_detection` | `language_code`, `language_confidence` |
-| `error` | `code`, `message` |
+| `committed_transcript_with_timestamps` | `text` + words with `text`, `start`, `end`, `type`, and optional `logprob`/`characters` |
+| `speech_started`, `speech_ended` | VAD boundary events in `vad` mode |
+| `warning` | Recoverable server warning |
+| `session_ended` | Final session summary |
+| `error` | Nested `error: {type, code, message}` |
+
+When language detection is requested, language metadata is attached to
+committed transcript messages; there is no separate `language_detection`
+message.
 
 The full schema lives in [`docs/specs/realtime/WEBSOCKET_API.md`](../specs/realtime/WEBSOCKET_API.md).
 
@@ -115,7 +121,7 @@ ws.onmessage = (event) => {
                m.message_type === 'committed_transcript_with_timestamps') {
         console.log('final:', m.text, m.words);
     } else if (m.message_type === 'error') {
-        console.error(m.code, m.message);
+        console.error(m.error?.code, m.error?.message);
     }
 };
 ```
@@ -153,7 +159,7 @@ async def transcribe(audio_chunks):
                     "audio_base_64": base64.b64encode(chunk).decode(),
                     "commit": False,
                 }))
-            await ws.send(json.dumps({"message_type": "close_connection"}))
+            await ws.send(json.dumps({"message_type": "close_stream"}))
 
         async def recv():
             async for raw in ws:
@@ -164,7 +170,8 @@ async def transcribe(audio_chunks):
                 elif t in ("committed_transcript", "committed_transcript_with_timestamps"):
                     print(f"\n[final] {m['text']}")
                 elif t == "error":
-                    print(f"\nerror: {m.get('code')} {m.get('message')}")
+                    error = m.get("error", {})
+                    print(f"\nerror: {error.get('code')} {error.get('message')}")
                     break
 
         await asyncio.gather(send(), recv())
@@ -191,15 +198,15 @@ ffmpeg -i input.mp3 -f s16le -ac 1 -ar 16000 audio.pcm
 
 ## Auto-commit (VAD) vs manual commit
 
-`commit_strategy=vad` is the default and what most clients want. The
-server detects speech start, accumulates audio while you're speaking, and
-emits a `committed_transcript` when it detects silence. You don't manage
-boundaries.
+`commit_strategy=manual` is the compatibility default. In manual mode, send
+`commit: true` whenever you want a final transcript for the buffered audio.
 
-`commit_strategy=manual` puts you in charge: send `commit: true` whenever
-you want a final transcript for the audio so far. Use this when you have
-better speech-boundary signals from your application — e.g. push-to-talk
-UIs.
+Set `commit_strategy=vad` when you want the server to detect speech start,
+accumulate audio while you speak, and emit a `committed_transcript` when it
+detects silence. You do not manage boundaries.
+
+Manual mode is useful when your application has better speech-boundary
+signals, such as a push-to-talk UI.
 
 VAD knobs (only relevant in `vad` mode):
 
@@ -214,9 +221,11 @@ VAD knobs (only relevant in `vad` mode):
 
 ## Common errors
 
-- **`4001 Invalid API key`** — your key is wrong, doesn't have `realtime`
-  scope, or hit rate limit. Mint a new key with the right scope in the
-  console.
+- **Close code `4001`** — the API key is missing or invalid.
+- **Close code `4003`** — the key lacks realtime scope.
+- **Close code `4029`** — the API key exceeded its request-rate limit.
+- **Close code `4429`** — the key reached its concurrent-session limit.
+- **Close code `4503`** — no compatible realtime worker has capacity.
 - **`Invalid commit_strategy`** — must be `manual` or `vad`. Anything else
   closes the connection.
 - **`Invalid audio_format`** — see the supported list:

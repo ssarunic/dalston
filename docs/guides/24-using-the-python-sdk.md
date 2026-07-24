@@ -1,8 +1,8 @@
 # Using the Python SDK
 
-> Three classes do everything: `Dalston` for sync batch, `AsyncDalston` for
-> async batch, `AsyncRealtimeSession` for streaming. Plus webhook signature
-> helpers. That's the whole API surface.
+> Use `Dalston` or `AsyncDalston` for batch and control-plane operations.
+> Use `RealtimeSession` or `AsyncRealtimeSession` for streaming. Webhook
+> helpers verify and parse Standard Webhooks deliveries.
 
 ```bash
 pip install -e ./sdk
@@ -39,8 +39,15 @@ job = client.transcribe(
     vocabulary=["PostgreSQL", "Kubernetes"],
     speaker_detection="diarize",           # "none", "diarize", "per-channel"
     num_speakers=2,                        # exact (overrides min/max)
+    min_speakers=2,
+    max_speakers=4,
     timestamps_granularity="word",         # "none", "segment", "word"
+    pii_detection=True,
+    pii_entity_types=["ssn", "credit_card_number"],
+    redact_pii_audio=True,
+    pii_redaction_mode="beep",
     retention=30,                          # days; 0 = transient, -1 = permanent
+    lite_profile="compliance",              # ignored by distributed mode
 )
 ```
 
@@ -137,10 +144,19 @@ client.list_jobs(status="completed", limit=50)
 job = client.get_job(job_id)
 client.cancel(job_id)
 client.get_job_artifacts(job_id)  # S3 references for raw outputs
+client.list_engines()
+client.list_models()
+client.get_model(model_id)
+client.get_realtime_status()
+client.create_session_token()
+client.list_realtime_sessions()
+client.get_realtime_session(session_id)
+client.get_session_artifacts(session_id)
+client.delete_realtime_session(session_id)
 ```
 
-Full job deletion is available through the CLI (`dalston jobs delete JOB_ID`) or
-the REST API (`DELETE /v1/audio/transcriptions/{job_id}`).
+Full job deletion is available through the REST API
+(`DELETE /v1/audio/transcriptions/{job_id}`) and the web console.
 
 ---
 
@@ -154,22 +170,29 @@ from dalston_sdk import (
     verify_webhook_signature,
     parse_webhook_payload,
     WebhookEventType,
+    WebhookVerificationError,
 )
 
 # In your HTTP handler:
 def webhook_handler(headers, body):
-    if not verify_webhook_signature(
-        body=body,
-        signature=headers["X-Dalston-Signature"],
-        secret="whsec_...",                     # from the console
-        timestamp=headers["X-Dalston-Timestamp"],
-        max_age=300,                            # reject replays > 5 min old
-    ):
+    try:
+        valid = verify_webhook_signature(
+            payload=body,
+            signature=headers["webhook-signature"],
+            msg_id=headers["webhook-id"],
+            timestamp=headers["webhook-timestamp"],
+            secret="whsec_...",                 # from the console
+            max_age=300,                        # reject replays > 5 min old
+        )
+    except WebhookVerificationError:
+        return 401, "invalid signature"
+    if not valid:
         return 401, "invalid signature"
 
     payload = parse_webhook_payload(body)
-    if payload.event == WebhookEventType.JOB_COMPLETED:
-        print(f"Job {payload.job_id} done — text: {payload.data.transcript.text}")
+    if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
+        print(f"Transcription {payload.transcription_id} completed")
+        print(payload.data)
     return 200, "ok"
 ```
 
@@ -185,7 +208,7 @@ app = FastAPI()
 
 @app.post("/webhooks/dalston")
 async def handle(payload: WebhookPayload = Depends(verify)):
-    print(payload.event, payload.job_id)
+    print(payload.type, payload.transcription_id)
 ```
 
 ---
@@ -198,7 +221,7 @@ async def handle(payload: WebhookPayload = Depends(verify)):
 job = client.transcribe("long.mp3")
 try:
     job = client.wait_for_completion(job.id, timeout=600)  # seconds
-except TimeoutError:
+except TimeoutException:
     client.cancel(job.id)
 ```
 
@@ -254,10 +277,11 @@ final = client.wait_for_completion("<the id you saved>")
 | `ServerError` | 5xx from the gateway |
 | `ConnectError` | Network failure |
 | `TimeoutException` | Request took too long |
-| `RealtimeError` | The server emitted an `error` frame on a streaming session |
+| `RealtimeException` | The server emitted an `error` frame on a streaming session |
 | `WebhookVerificationError` | Signature didn't verify |
 
-All inherit from `DalstonError`.
+The exception types above inherit from `DalstonError`. `RealtimeError` is the
+typed payload carried by a realtime error message, not an exception class.
 
 ---
 

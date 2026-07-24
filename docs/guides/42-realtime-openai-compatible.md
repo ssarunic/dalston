@@ -34,15 +34,13 @@ Source: [`dalston/gateway/api/v1/openai_realtime.py:612`](../../dalston/gateway/
 
 ---
 
-## Model mapping
+## Model routing
 
-OpenAI model IDs resolve to Dalston engines:
-
-| OpenAI ID | Dalston engine |
-|---|---|
-| `gpt-4o-transcribe` | largest available Parakeet (typically 1.1B) |
-| `gpt-4o-mini-transcribe` | smaller Parakeet (0.6B) |
-| `whisper-1` | Whisper streaming (faster-whisper) |
+Dalston accepts `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and
+`whisper-1` as compatibility model names. They currently use automatic
+ready-worker routing rather than selecting fixed Parakeet or Whisper weights.
+Inspect the session/engine metadata when your application needs to know the
+concrete runtime.
 
 ---
 
@@ -142,23 +140,11 @@ function sendPCM(int16Buffer) {
 
 ---
 
-## Python — using the OpenAI SDK directly
+## Python
 
-You can use OpenAI's official Python client by overriding the base URL and
-key:
-
-```python
-# Approach 1: their AsyncOpenAI realtime client (when stable)
-from openai import AsyncOpenAI
-
-client = AsyncOpenAI(
-    base_url="https://dalston.example.com/v1",
-    api_key="dk_...",
-)
-# client.beta.realtime.transcription.connect(...)
-```
-
-Or just speak the protocol with `websockets`:
+The raw `websockets` example below is the validated integration path. OpenAI
+SDK realtime helper APIs change across SDK releases, so do not rely on an
+unexecuted placeholder call:
 
 ```python
 import asyncio
@@ -229,8 +215,8 @@ async def main(audio_chunks):
 **Different:**
 
 - Different host. `wss://<your-dalston>/v1/realtime` instead of OpenAI.
-- Models behind the scenes are NeMo Parakeet / faster-whisper, not GPT-4o.
-  Audio quality is excellent but the underlying weights are different.
+- Compatibility names route to a ready Dalston engine; they do not imply
+  OpenAI-hosted weights or a fixed Dalston model mapping.
 - No conversation / response generation — this is **transcription only**.
   `intent` must be `"transcription"`.
 - API keys are Dalston keys (`dk_...`), not OpenAI keys.

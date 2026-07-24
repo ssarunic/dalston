@@ -28,8 +28,10 @@ timestamps**.
 | Multilingual + reasoning over audio | `vllm-asr` (Voxtral) | Audio LLM, longer context, multilingual |
 | English + lightweight | `onnx` | Smallest container, CPU-OK |
 
-For **diarization**, `pyannote-4.0` is the right answer in nearly every
-case. It's language-agnostic — it operates on speech embeddings, not words.
+For **diarization**, `pyannote-4.0` is the default. `nemo-msdd` and
+`nemo-sortformer` are also registered options when their NeMo models and
+hardware profile suit the deployment. Diarization is language-independent: it
+operates on speech characteristics, not transcript words.
 
 ---
 
@@ -64,7 +66,7 @@ This is the production shape: one engine per stage, scaled independently.
 
 ```
 faster-whisper (g4dn.xlarge spot)  ─┐
-phoneme-align (g4dn.xlarge spot)   ─┼─► merged by orchestrator
+phoneme-align (g4dn.xlarge spot)   ─┼─► assembled by orchestrator
 pyannote-4.0 (g4dn.xlarge spot)    ─┘
 ```
 
@@ -75,12 +77,13 @@ Or: **one box, multiple engines co-located** on a g6.xlarge (24 GB L4),
 which the `dalston-aws` GPU presets are tuned for:
 
 ```
-nemo (20 GB VRAM budget) + pyannote (4 GB VRAM budget) → one g6.xlarge spot ≈ $0.34/hr
+nemo + pyannote → one g6.xlarge spot
 ```
 
-The presets are pre-configured for this — `nemo` declares
-`DALSTON_VRAM_BUDGET_MB=20000` and `pyannote` declares `4000`. Total 24 GB,
-fits an L4 with no surprises.
+The presets calculate per-engine budgets from the selected GPU family. For
+example, an L4 worker can allocate a larger NeMo and pyannote budget than a T4
+worker. Treat the calculated values as caps for that deployment, not universal
+20 GB/4 GB requirements.
 
 ```bash
 dalston-aws launch gpu --engines nemo,pyannote --spot
@@ -115,10 +118,10 @@ Real-time WebSocket sessions only work with engines that declare
 `pyannote` does not stream (`native_streaming: false`). For real-time
 diarization you have two options:
 
-1. **Streaming-then-batch enrich:** transcribe live for immediate captions,
-   then run a diarize pass on the recorded audio for the final speaker
-   labels. The gateway wires this up with `store_audio: true` →
-   post-session diarization job.
+1. **Record and submit separately:** transcribe live for immediate captions,
+   retain the recording, then submit it as a batch job with
+   `speaker_detection=diarize`. Realtime completion does not automatically
+   create a diarization job.
 2. **Per-channel split:** if your audio source already has one speaker per
    channel (call centers, multi-mic recording), use
    `speaker_detection=per-channel` — no diarization model needed, the
