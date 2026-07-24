@@ -77,8 +77,8 @@ function DeployBadge({ node }: { node: NodeView }) {
 function interfaceLabel(interfaces: string[]): string {
   const hasBatch = interfaces.includes('batch')
   const hasRealtime = interfaces.includes('realtime')
-  if (hasBatch && hasRealtime) return 'batch + rt'
-  if (hasRealtime) return 'realtime'
+  if (hasBatch && hasRealtime) return 'b+rt'
+  if (hasRealtime) return 'rt'
   return 'batch'
 }
 
@@ -90,19 +90,23 @@ function EngineRow({ engine }: { engine: NodeEngine }) {
   const active = engine.active_batch + engine.active_realtime
 
   return (
-    <div className="flex items-center justify-between py-2 px-1">
-      <div className="flex items-center gap-2 min-w-0">
-        <Badge className={cn('text-xs font-normal border-0', stagePillClass(engine.stage))}>
+    <div className="flex items-center justify-between gap-3 py-2 px-1">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <Badge className={cn('text-xs font-normal border-0 shrink-0', stagePillClass(engine.stage))}>
           {engine.stage}
         </Badge>
-        <span className="text-sm font-medium truncate">{engine.engine_id}</span>
-        <span className="text-xs text-muted-foreground">{iface}</span>
+        <span className="text-sm font-medium truncate" title={engine.engine_id}>
+          {engine.engine_id}
+        </span>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2.5 shrink-0">
+        <span className="rounded bg-muted px-1 py-0.5 text-[10px] leading-none text-muted-foreground">
+          {iface}
+        </span>
+        <span className="flex items-center gap-1.5" title={label}>
           <StatusDot status={dot} />
-          <span className="text-xs text-muted-foreground">{label}</span>
-        </div>
+          {!engine.is_healthy && <span className="text-xs text-red-400">{label}</span>}
+        </span>
         <span className="text-xs text-muted-foreground tabular-nums text-right">
           {active} / {engine.capacity}
         </span>
@@ -156,7 +160,7 @@ function NodeCard({ node }: { node: NodeView }) {
 // Loading skeleton
 function LoadingSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
       {[1, 2, 3].map((i) => (
         <Card key={i}>
           <CardHeader className="pb-2">
@@ -212,7 +216,7 @@ export function Infrastructure() {
       {data && data.nodes.length === 0 && <EmptyState />}
 
       {data && data.nodes.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
           {[...data.nodes]
             .sort((a, b) => {
               // AWS first, then by earliest pipeline stage, then hostname
