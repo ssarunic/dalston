@@ -4,4 +4,4 @@ gliner>=0.2.27
 spacy>=3.8.14
 phonenumbers>=9.0.31
 pydantic>=2.13.4
-structlog>=25.5.0
+structlog>=26.1.0
