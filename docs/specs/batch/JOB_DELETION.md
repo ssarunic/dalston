@@ -30,7 +30,8 @@ terminal.
 
 The gateway authorizes the tenant-scoped job, deletes associated object/local
 artifacts through the storage service, and removes the database record.
-Database cascades remove task rows. Storage cleanup covers source audio,
+Task rows are deleted explicitly in application code (this codebase does not
+use database cascade deletes). Storage cleanup covers source audio,
 intermediate task artifacts, final transcript/output, and redacted outputs
 that belong to the job.
 

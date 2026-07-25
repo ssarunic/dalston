@@ -99,8 +99,11 @@ Model capabilities differ, so optional result fields are not universal:
 - Audio metadata describes the original upload even when the prepare stage
   creates normalized mono/16 kHz working audio.
 
-Check `warnings` and test the selected model before making word timing or
-confidence mandatory in an application.
+Pipeline warnings live in the transcript metadata, which is returned by the
+JSON export (`GET /v1/audio/transcriptions/{id}/export/json` or
+`dalston export <id> -f json`) — the polled job response does not carry a
+`warnings` field. Check them and test the selected model before making word
+timing or confidence mandatory in an application.
 
 ---
 

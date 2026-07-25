@@ -66,17 +66,20 @@ stop. Deletion is accepted only after the job reaches a terminal state.
 
 ## Results and exports
 
-The job response includes input audio metadata, stages, retention information,
-and either a result or an error. Result fields are capability-dependent:
+The job response includes audio duration, stages, retention information, and
+either a result or an error. Result fields are capability-dependent:
 
 - Language may be `und` when it cannot be determined.
 - Language, segment, and word confidence values can be `null`.
 - Requesting word timestamps does not guarantee them; engines that cannot
   produce them return segment-level data and a warning.
-- Warnings can describe unavailable capabilities or low speech coverage.
-- Original channel count, sample rate, codec, duration, and other preserved
-  input metadata describe the uploaded audio, even when preparation creates a
-  normalized working artifact.
+- Pipeline warnings (unavailable capabilities, low speech coverage) are stored
+  in the transcript metadata and returned by the JSON export; the job response
+  itself has no `warnings` field.
+- Original channel count, sample rate, and duration are preserved in the
+  transcript metadata (JSON export), even when preparation creates a
+  normalized working artifact. The job response exposes
+  `audio_duration_seconds`.
 
 Exports are available as `txt`, `json`, `srt`, and `vtt`. Subtitle exports
 require timestamps in the result.

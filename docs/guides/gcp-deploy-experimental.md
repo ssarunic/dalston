@@ -20,7 +20,9 @@ shared `~/.dalston/audit.log`.
 - Python 3.11+ and PyYAML.
 - `gcloud` installed and authenticated.
 - An active GCP project with billing.
-- Compute Engine, Cloud Storage, and Secret Manager APIs.
+- Compute Engine, Cloud Storage, Secret Manager, and IAM APIs (`doctor`
+  and `setup` fail preflight unless all four are enabled; use
+  `doctor --fix` or `setup --auto-enable-apis` to enable them).
 - A Tailscale auth key stored as
   `dalston-tailscale-auth-key` in Google Secret Manager.
 

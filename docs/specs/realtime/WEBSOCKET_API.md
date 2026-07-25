@@ -50,7 +50,7 @@ Send audio as binary frames. JSON control messages include `end` to finish
 input. Server events use the internal public names:
 
 - `session.begin`
-- `speech.start` / `speech.end`
+- `vad.speech_start` / `vad.speech_end`
 - `transcript.partial`
 - `transcript.final`
 - `warning`

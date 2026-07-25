@@ -140,8 +140,6 @@ All requests use `multipart/form-data` to `POST /v1/audio/transcriptions`.
 | PII detection | Toggle | No | off | Boolean | `pii_detection` |
 | PII preset/entity types | Preset plus checkboxes | No | default entities | Valid entity IDs | `pii_entity_types` (JSON array string) |
 | Redact PII audio | Toggle plus `silence`/`beep` mode | No | off | Requires PII detection | `redact_pii_audio`, `pii_redaction_mode` |
-| Redact PII audio | Toggle | No | off | Boolean | `redact_pii_audio` |
-| Redaction mode | Select (`silence`,`beep`) | Yes when redact audio on | `silence` | Allowed enum | `pii_redaction_mode` |
 
 ### 7.1 Conditional Display Rules
 

@@ -31,10 +31,12 @@ The audit service provides events for:
 | Realtime | `session.started`, `session.ended` |
 | API keys/auth | `api_key.created`, `api_key.revoked`, `auth.failed`, `permission.denied` |
 | Models | `model.downloaded`, `model.download_failed`, `model.removed`, `model.deleted_from_registry` |
+| Settings | `settings.updated`, `settings.reset` |
 
 An action existing in `AuditService` means the event shape is supported; the
-gateway call sites determine which current API flows emit it. Add/update an
-event and its call-site tests together.
+gateway call sites determine which current API flows emit it. The settings
+actions are emitted directly from the console API rather than through an
+`AuditService` helper. Add/update an event and its call-site tests together.
 
 Details must contain operational metadata, not full transcripts, raw
 credentials, webhook secrets, or detected PII values.
