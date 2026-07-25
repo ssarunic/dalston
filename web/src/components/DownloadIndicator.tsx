@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router'
 import { Loader2, CheckCircle, XCircle, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'

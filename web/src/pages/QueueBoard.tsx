@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import { Activity, AlertTriangle, Gauge, Timer } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useQueueBoard } from '@/hooks/useQueueBoard'

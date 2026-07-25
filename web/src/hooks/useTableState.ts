@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router'
 
 export interface TableStateOptions<T> {
   /** Default filter values when none are in URL */

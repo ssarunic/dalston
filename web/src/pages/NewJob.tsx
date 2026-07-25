@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { S } from '@/lib/strings'
 import { Upload, Link, AlertCircle, ChevronDown, ChevronUp, X, Info } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'

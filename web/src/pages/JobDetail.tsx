@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { S } from '@/lib/strings'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import {
   Globe,
   Users,

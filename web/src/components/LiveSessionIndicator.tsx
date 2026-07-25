@@ -1,4 +1,4 @@
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router'
 import { Mic, Loader2 } from 'lucide-react'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { cn } from '@/lib/utils'
