@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 
 const SCROLL_POSITIONS_KEY = 'dalston:scroll-positions'
 const MAX_ENTRIES = 50

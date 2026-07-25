@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { S } from '@/lib/strings'
 import { Trash2, X, Plus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'

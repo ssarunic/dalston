@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Radio, Trash2, Mic } from 'lucide-react'
 import { S } from '@/lib/strings'
 import { apiClient } from '@/api/client'
