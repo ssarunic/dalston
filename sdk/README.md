@@ -1,6 +1,7 @@
 # Dalston SDK
 
-Official Python SDK for [Dalston](https://github.com/your-org/dalston) - a self-hosted audio transcription server with real-time streaming support.
+Official Python SDK for [Dalston](https://github.com/ssarunic/dalston), a
+self-hosted audio transcription server with real-time streaming support.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -139,7 +140,7 @@ async def stream_microphone():
     session = AsyncRealtimeSession(
         base_url="ws://localhost:8000",
         language="en",
-        model="fast",        # Low latency
+        # model omitted: route to any compatible ready worker
         sample_rate=16000,   # 16kHz audio
     )
 
@@ -184,7 +185,12 @@ async with AsyncRealtimeSession(base_url="ws://localhost:8000") as session:
 For simpler integration with synchronous code, use decorator-based callbacks:
 
 ```python
-from dalston_sdk import RealtimeSession, TranscriptFinal, VADEvent
+from dalston_sdk import (
+    RealtimeSession,
+    TranscriptFinal,
+    TranscriptPartial,
+    VADEvent,
+)
 
 session = RealtimeSession(
     base_url="ws://localhost:8000",
@@ -248,26 +254,31 @@ via the admin console.
 Always verify webhook signatures to ensure requests are authentic:
 
 ```python
-from dalston_sdk import verify_webhook_signature, parse_webhook_payload
+from dalston_sdk import (
+    WebhookEventType,
+    WebhookVerificationError,
+    parse_webhook_payload,
+    verify_webhook_signature,
+)
 
 def handle_webhook(request):
-    # Verify the signature
-    is_valid = verify_webhook_signature(
-        payload=request.body,
-        signature=request.headers["X-Dalston-Signature"],
-        timestamp=request.headers["X-Dalston-Timestamp"],
-        secret="your-webhook-secret",
-    )
-
-    if not is_valid:
+    try:
+        valid = verify_webhook_signature(
+            payload=request.body,
+            signature=request.headers["webhook-signature"],
+            msg_id=request.headers["webhook-id"],
+            timestamp=request.headers["webhook-timestamp"],
+            secret="whsec_...",
+        )
+    except WebhookVerificationError:
+        return Response(status=401)
+    if not valid:
         return Response(status=401)
 
-    # Parse and handle the payload
     payload = parse_webhook_payload(request.body)
-
-    if payload.event == WebhookEventType.JOB_COMPLETED:
-        print(f"Job {payload.job_id} completed!")
-        print(f"Metadata: {payload.metadata}")  # Your custom data
+    if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
+        print(f"Transcription {payload.transcription_id} completed")
+        print(payload.data)
 ```
 
 ### FastAPI Integration
@@ -279,13 +290,12 @@ from fastapi import FastAPI, Depends
 from dalston_sdk import fastapi_webhook_dependency, WebhookPayload, WebhookEventType
 
 app = FastAPI()
-verify_webhook = fastapi_webhook_dependency("your-secret")
+verify_webhook = fastapi_webhook_dependency("whsec_...")
 
 @app.post("/webhooks/dalston")
 async def handle_webhook(payload: WebhookPayload = Depends(verify_webhook)):
-    if payload.event == WebhookEventType.JOB_COMPLETED:
-        # Process the completed transcription
-        job_id = payload.job_id
+    if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
+        transcription_id = payload.transcription_id
 ```
 
 ---
@@ -309,10 +319,20 @@ client = Dalston(
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `file` | str/Path/BinaryIO | - | Audio file path or file object |
+| `audio_url` | str | - | Remote audio URL instead of `file` |
+| `model` | str | `"auto"` | Engine/model ID or automatic selection |
 | `language` | str | `"auto"` | Language code (e.g., `"en"`, `"es"`) or `"auto"` |
+| `vocabulary` | list[str] | None | Recognition hints |
 | `speaker_detection` | str | `"none"` | `"none"`, `"diarize"`, or `"per_channel"` |
 | `num_speakers` | int | None | Expected number of speakers (hint for diarization) |
+| `min_speakers`, `max_speakers` | int | None | Diarization bounds |
 | `timestamps_granularity` | str | `"word"` | `"none"`, `"segment"`, or `"word"` |
+| `pii_detection` | bool | `False` | Detect PII |
+| `pii_entity_types` | list[str] | None | Restrict PII entity types |
+| `redact_pii_audio` | bool | `False` | Produce redacted audio |
+| `pii_redaction_mode` | str | None | `silence` or `beep` |
+| `retention` | int | server default | `0`, `-1`, or days |
+| `lite_profile` | str | `"core"` | `core`, `speaker`, or `compliance` in lite mode |
 
 ### Real-time Session Parameters
 
@@ -320,12 +340,47 @@ client = Dalston(
 | --------- | ---- | ------- | ----------- |
 | `base_url` | str | - | WebSocket URL (`ws://` or `wss://`) |
 | `language` | str | `"auto"` | Language code or `"auto"` |
-| `model` | str | `"fast"` | `"fast"` (lower latency) or `"accurate"` |
+| `model` | str | None | Registered model/engine preference; omit for automatic routing |
 | `encoding` | str | `"pcm_s16le"` | Audio encoding format |
 | `sample_rate` | int | `16000` | Audio sample rate in Hz |
 | `enable_vad` | bool | `True` | Emit VAD events |
 | `interim_results` | bool | `True` | Send partial transcripts |
 | `word_timestamps` | bool | `False` | Include word-level timing |
+
+---
+
+## Control-plane coverage
+
+`Dalston` and `AsyncDalston` expose matching sync/async methods:
+
+| Area | Methods |
+| --- | --- |
+| Jobs | `transcribe`, `get_job`, `list_jobs`, `cancel`, `wait_for_completion`, `export` |
+| Models/engines | `list_models`, `get_model`, `list_engines` |
+| Realtime management | `get_realtime_status`, `create_session_token`, `list_realtime_sessions`, `get_realtime_session`, `delete_realtime_session` |
+| Service | `health`, `close` |
+
+The package still defines `get_job_artifacts` and `get_session_artifacts`, but
+they target legacy `/v2` routes that the current gateway does not mount. Do not
+treat them as supported operations until the gateway/SDK contract is
+reconciled. Job task artifacts are available from the native REST API.
+
+Job deletion/rename, model mutation, webhook administration, audit queries,
+retained audio download, and task artifacts currently use the REST API or
+console.
+
+## Result semantics
+
+Optional output follows the selected engine's capabilities:
+
+- language may be absent or `und`;
+- word confidence may be `None`;
+- segments, words, speakers, and word timestamps may be absent;
+- a word-timestamp request can fall back when an engine lacks that capability.
+
+The native HTTP payload also includes warnings and original-audio metadata that
+are not represented on every current SDK dataclass. Use the HTTP API directly
+when an application must make decisions from those fields.
 
 ---
 
@@ -342,8 +397,8 @@ from dalston_sdk import (
     RateLimitError,      # Too many requests (429)
     ValidationError,     # Invalid parameters (400/422)
     ServerError,         # Server error (5xx)
-    TimeoutError,        # Request timeout
-    ConnectionError,     # Network error
+    TimeoutException,    # Request timeout
+    ConnectError,        # Network error
 )
 
 try:
@@ -383,7 +438,7 @@ The SDK exports typed dataclasses for all API responses:
 
 ### Enums
 
-- `JobStatus` - pending, running, completed, failed, cancelled
+- `JobStatus` - pending, running, completed, failed, cancelling, cancelled
 - `SpeakerDetection` - none, diarize, per_channel
 - `ExportFormat` - srt, vtt, txt, json
 

@@ -1,625 +1,221 @@
-# Self-Hosted Deployment Tutorial
+# Self-hosting Dalston with Docker Compose
 
-Step-by-step guide to deploy Dalston on your own server using Docker Compose.
+This guide runs the current Dalston control plane and engines from this
+repository. It uses local PostgreSQL, Redis, and MinIO containers and does not
+provision cloud infrastructure.
 
 ## Prerequisites
 
-- Linux server (Ubuntu 22.04+ recommended)
-- Docker and Docker Compose installed
-- At least 8GB RAM (16GB+ recommended for full pipeline)
-- (Optional) NVIDIA GPU with CUDA for accelerated transcription
-- (Optional) HuggingFace account for speaker diarization
+- Docker Engine or Docker Desktop with Compose v2 (`docker compose version`);
+- Git;
+- enough disk for container images and model caches; and
+- Python 3.11+ only if you also want to run repository tests or local tools.
 
-## Zero-Config Local CLI (M57)
-
-For local-first usage without manual server startup, install CLI + SDK and run:
+For NVIDIA acceleration, install a working NVIDIA driver and NVIDIA Container
+Toolkit. Configure Docker with the toolkit’s current runtime command:
 
 ```bash
-pip install -e ".[gateway,orchestrator,dev]"
-pip install -e ./sdk -e ./cli
-DALSTON_SECURITY_MODE=none dalston transcribe tests/audio/test_merged.wav --format json
-```
-
-Bootstrap controls:
-
-- `DALSTON_BOOTSTRAP=true|false` (default `true`)
-- `DALSTON_DEFAULT_MODEL=distil-small`
-- `DALSTON_LOCAL_SERVER_URL=http://127.0.0.1:8000`
-- `DALSTON_SERVER_START_TIMEOUT_SECONDS=30`
-- `DALSTON_MODEL_ENSURE_TIMEOUT_SECONDS=900`
-- `DALSTON_GHOST_IDLE_TIMEOUT_SECONDS=900`
-
-Ghost server artifacts:
-
-- PID metadata: `~/.dalston/run/ghost-server.pid`
-- Bootstrap lock: `~/.dalston/run/bootstrap.lock`
-- Logs: `~/.dalston/logs/ghost-server.log`
-
-## 1. Server Setup
-
-### Install Docker
-
-```bash
-# Ubuntu/Debian
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-
-# Log out and back in for group changes to take effect
-```
-
-### Install Docker Compose
-
-```bash
-# Docker Compose is included with Docker Desktop
-# For Linux servers, install the plugin:
-sudo apt-get update
-sudo apt-get install docker-compose-plugin
-
-# Verify installation
-docker compose version
-```
-
-### (Optional) Install NVIDIA Container Toolkit
-
-Required only if using GPU acceleration:
-
-```bash
-# Add NVIDIA repository
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
-  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-
-# Install toolkit
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
-
-# Configure Docker engine_id
-sudo nvidia-ctk engine_id configure --engine_id=docker
+sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
-
-# Verify GPU access
-docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
+nvidia-smi
+docker info | grep -i runtimes
 ```
 
-## 2. Clone Repository
+The command is `nvidia-ctk runtime configure`; `engine_id` is not a valid
+subcommand or option.
 
-```bash
-git clone https://github.com/ssarunic/dalston.git
-cd dalston
-```
+## Configure
 
-## 3. Configure Environment
+From the repository root:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your settings:
+The checked-in defaults use local MinIO credentials and are for local
+self-hosting only. Do not reuse them for an internet-facing deployment.
+
+Set `HF_TOKEN` in `.env` when running gated pyannote models. You must also have
+accepted the applicable model terms on Hugging Face.
+
+To seed a stable local admin key on first boot, set:
+
+```dotenv
+DALSTON_API_KEY=dk_local_dev_change_me
+```
+
+If it is omitted, the gateway generates an admin key once and prints it in its
+startup log.
+
+## Start the stack
+
+The Make targets are the supported shortcuts:
 
 ```bash
-# Required: Database password
-POSTGRES_PASSWORD=your-secure-password-here
-
-# Required for diarization: HuggingFace token
-# Get one at https://huggingface.co/settings/tokens
-HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
-
-# MinIO credentials (for local S3-compatible storage)
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=change-this-password
-
-# S3 configuration (uses MinIO)
-DALSTON_S3_BUCKET=dalston-artifacts
-DALSTON_S3_REGION=eu-west-2
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=change-this-password
-DALSTON_S3_ENDPOINT_URL=http://minio:9000
-
-# Optional: LLM API keys for cleanup engine
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxx
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
+make dev-minimal
 ```
 
-## 4. Choose Deployment Configuration
-
-### Option A: Minimal Setup (Transcription Only)
-
-Best for: Testing, development, or when you only need basic transcription without word timestamps.
+`dev-minimal` starts local infrastructure, the gateway, orchestrator, audio
+preparation, faster-whisper transcription, and phoneme alignment. Use the full
+CPU-oriented stack when you need the other default engines:
 
 ```bash
-docker compose --profile local-infra --profile local-object-storage up -d \
-  gateway orchestrator \
-  stt-prepare stt-transcribe-faster-whisper-base stt-merge
+make dev
 ```
 
-Submit jobs with `timestamps_granularity=segment` to skip alignment.
-
-### Option B: Standard Setup (With Word Timestamps)
-
-Best for: Production use requiring word-level timestamps.
+For NVIDIA engines, use the GPU override and profiles:
 
 ```bash
-docker compose --profile local-infra --profile local-object-storage up -d \
-  gateway orchestrator \
-  stt-prepare stt-transcribe-faster-whisper-base stt-align-whisperx-cpu stt-merge
+make dev-gpu
 ```
 
-### Option C: Full Pipeline (With Speaker Diarization)
+Do not run local Python gateway/orchestrator processes at the same time as
+their Docker containers. The Make targets call `make clean-local` before
+starting the stack.
 
-Best for: Meeting transcription, interviews, multi-speaker content.
+## Verify
 
 ```bash
-docker compose --profile local-infra --profile local-object-storage up -d
+make ps
+make health
+curl http://127.0.0.1:8000/health
 ```
 
-This starts the default CPU-safe stack, including `stt-diarize-pyannote-4.0-cpu` for speaker identification.
-
-### Option D: GPU-Accelerated
-
-Best for: High-throughput production deployments.
+If the gateway generated an API key, retrieve it from its startup output:
 
 ```bash
-docker compose --profile local-infra --profile local-object-storage --profile gpu up -d
+docker compose logs gateway
 ```
 
-This uses GPU variants of transcription, alignment, and diarization engines.
-
-### Option E: Real-Time Streaming Only
-
-Best for: Live transcription without batch processing.
+Then submit a file:
 
 ```bash
-docker compose --profile local-infra --profile local-object-storage up -d \
-  gateway orchestrator \
-  stt-rt-transcribe-parakeet-rnnt-0.6b-cpu
+export DALSTON_API_KEY=dk_...
+
+curl -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $DALSTON_API_KEY" \
+  -F file=@meeting.wav
 ```
 
-## 5. Verify Deployment
+Open <http://127.0.0.1:8000/> for the web console.
 
-### Check service health
+## Choose services accurately
+
+Current Compose service names include:
+
+| Purpose | Service |
+| --- | --- |
+| Gateway | `gateway` |
+| Orchestrator | `orchestrator` |
+| Preparation | `stt-prepare` |
+| Faster Whisper | `stt-transcribe-faster-whisper` |
+| ONNX | `stt-transcribe-onnx` |
+| NeMo | `stt-transcribe-nemo` |
+| Alignment | `stt-align-phoneme` |
+| Pyannote | `stt-diarize-pyannote-4.0` |
+| PII detection | `stt-pii-detect-presidio` |
+| Audio redaction | `stt-audio-redact-audio` |
+
+Inspect the authoritative list rather than copying old service names:
 
 ```bash
-# All services running
-docker compose ps
-
-# Gateway health
-curl http://localhost:8000/health
-# Expected: {"status":"healthy"}
-
-# System status
-curl http://localhost:8000/v1/system/status
+docker compose config --services
+docker compose config --profiles
 ```
 
-### Check individual components
+For example, rebuild one current engine with:
 
 ```bash
-# Redis connectivity
-docker compose exec redis redis-cli ping
-# Expected: PONG
-
-# PostgreSQL connectivity
-docker compose exec postgres pg_isready -U dalston
-# Expected: accepting connections
-
-# View logs
-docker compose logs -f gateway
-docker compose logs -f orchestrator
+make rebuild ENGINE=stt-transcribe-faster-whisper
 ```
 
-## 6. Create Admin API Key
+There is no `stt-transcribe-whisper-cpu`,
+`stt-diarize-pyannote-v40-cpu`, or `whisperx-align` service.
+
+## Observability
+
+Start the optional local observability profile:
 
 ```bash
-docker compose exec -T gateway python -c "
-import asyncio
-from dalston.common.redis import get_redis
-from dalston.gateway.services.auth import AuthService, Scope
-from dalston.db.session import DEFAULT_TENANT_ID
-
-async def create_key():
-    redis = await get_redis()
-    auth = AuthService(redis)
-    key, _ = await auth.create_api_key('Admin', DEFAULT_TENANT_ID, [Scope.ADMIN])
-    print('API Key:', key)
-
-asyncio.run(create_key())
-"
+make dev-observability
 ```
 
-**Save this key** (starts with `dk_`) - it cannot be retrieved later.
+It adds Jaeger, Prometheus, Grafana, Loki, and the metrics exporter. Default
+local ports are defined in `docker-compose.yml`; notable UIs are:
 
-## 7. Access Services
+- Grafana: <http://127.0.0.1:3001/>
+- Prometheus: <http://127.0.0.1:9090/>
+- Jaeger: <http://127.0.0.1:16686/>
 
-| Service | URL | Description |
-| ------- | --- | ----------- |
-| API | <http://localhost:8000> | REST API |
-| API Docs | <http://localhost:8000/docs> | OpenAPI documentation |
-| Web Console | <http://localhost:8000> | Management UI (login with API key) |
-| MinIO Console | <http://localhost:9001> | Object storage admin |
-
-### Browser microphone access (in-browser recording)
-
-The web console can record audio directly from your microphone, but browsers
-only grant microphone access in a "secure context" — i.e. over HTTPS, or
-over plain HTTP when the origin is `localhost` / `127.0.0.1`. Depending on
-where you are running Dalston, one of these paths applies:
-
-- **Running `make dev` on your own laptop** → open `http://localhost:8000`.
-  Loopback is always a secure context, so microphone capture works with no
-  certificate and no extra setup. This is the simplest path and covers
-  most trial usage.
-- **Running Dalston on a remote machine (homelab, cloud VM, dev server)
-  and browsing from a different device** → SSH-tunnel the gateway port
-  back to your local machine:
-
-  ```bash
-  ssh -L 8000:localhost:8000 you@remote-host
-  ```
-
-  Then open `http://localhost:8000` in your **local** browser. Because the
-  browser sees `localhost`, the loopback secure-context exemption applies
-  and microphone capture works — no certificates, no browser warnings,
-  no new tooling.
-- **Deploying to AWS via `dalston-aws`** → the control plane serves the web
-  console over real HTTPS via Tailscale automatically. See
-  [aws-deploy.md → Accessing the control plane over HTTPS](aws-deploy.md#accessing-the-control-plane-over-https).
-- **Deploying to your own server with a public domain** → terminate TLS
-  with a reverse proxy (Caddy's automatic HTTPS is the easiest option).
-  See [section 10 below](#10-setup-reverse-proxy-production).
-
-API and CLI clients (the Dalston CLI, the Python SDK, `curl`) do not care
-about secure context — they work fine over plain HTTP regardless of
-origin. The microphone restriction only applies to the in-browser console.
-
-## 8. Test Transcription
-
-### Submit a test job
+## Operations
 
 ```bash
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer dk_YOUR_API_KEY" \
-  -F "file=@/path/to/audio.mp3" \
-  -F "language=en"
+make logs
+make logs-all
+make stop
+make validate
 ```
 
-### Check job status
+Container logs are capped by the Compose logging configuration. PostgreSQL,
+Redis, MinIO, and model data live in named Docker volumes.
+
+Back up PostgreSQL without stopping the stack:
 
 ```bash
-curl http://localhost:8000/v1/audio/transcriptions/JOB_ID \
-  -H "Authorization: Bearer dk_YOUR_API_KEY"
+docker compose exec -T postgres \
+  pg_dump -U dalston dalston > dalston-backup.sql
 ```
 
-### 8.1 Bootstrap Troubleshooting (`dalston transcribe`)
-
-- `Bootstrap failed: Local port is occupied by a non-Dalston process`
-  - free port `8000` or use `--server` with a different endpoint.
-- `Bootstrap failed: Local Dalston server exited during startup`
-  - inspect `~/.dalston/logs/ghost-server.log` and retry.
-- `Bootstrap failed` with model readiness/download error
-  - run `dalston models pull <model>` manually, then retry.
-- `DALSTON_BOOTSTRAP=false` fails immediately
-  - expected behavior; manually start server and pre-pull model before running `dalston transcribe`.
-- Stop ghost server explicitly:
-  - `dalston server stop`
-
-## 9. Scaling for Production
-
-### Scale compute-intensive engines
+Restore into a compatible empty database:
 
 ```bash
-# Scale transcription engines
-docker compose up -d --scale stt-transcribe-whisper-cpu=2
-
-# Scale multiple engines
-docker compose up -d \
-  --scale stt-transcribe-whisper-cpu=2 \
-  --scale stt-align-whisperx-cpu=2 \
-  --scale stt-diarize-pyannote-v40-cpu=2
+docker compose exec -T postgres \
+  psql -U dalston dalston < dalston-backup.sql
 ```
 
-### Resource limits
-
-Add to `docker-compose.override.yml`:
-
-```yaml
-services:
-  stt-transcribe-whisper-cpu:
-    deploy:
-      resources:
-        limits:
-          memory: 16G
-        reservations:
-          memory: 8G
-```
-
-### Multi-GPU assignment
-
-```yaml
-services:
-  stt-transcribe-whisper-cpu:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['0']
-              capabilities: [gpu]
-
-  stt-diarize-pyannote-v40-cpu:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['1']
-              capabilities: [gpu]
-```
-
-## 10. Setup Reverse Proxy (Production)
-
-For production, use a reverse proxy with SSL. Example with Caddy:
-
-### Install Caddy
-
-```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install caddy
-```
-
-### Configure Caddy
-
-Create `/etc/caddy/Caddyfile`:
-
-```
-transcribe.yourdomain.com {
-    reverse_proxy localhost:8000
-}
-```
-
-### Start Caddy
-
-```bash
-sudo systemctl enable caddy
-sudo systemctl start caddy
-```
-
-Caddy automatically provisions SSL certificates via Let's Encrypt.
-
-## 11. Setup Systemd Service
-
-Create `/etc/systemd/system/dalston.service`:
-
-```ini
-[Unit]
-Description=Dalston Transcription Server
-Requires=docker.service
-After=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/path/to/dalston
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-TimeoutStartSec=0
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable dalston
-sudo systemctl start dalston
-```
-
-## Daily Operations
-
-### Start services
-
-```bash
-docker compose up -d
-# Or with systemd:
-sudo systemctl start dalston
-```
-
-### Stop services
-
-```bash
-docker compose down
-# Or with systemd:
-sudo systemctl stop dalston
-```
-
-### View logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f gateway
-docker compose logs -f stt-transcribe-whisper-cpu
-```
-
-### Update deployment
-
-```bash
-git pull
-docker compose build
-docker compose up -d
-```
-
-### Check stream backlogs
-
-```bash
-docker compose exec redis redis-cli XINFO GROUPS dalston:stream:faster-whisper
-docker compose exec redis redis-cli XINFO GROUPS dalston:stream:whisperx-align
-```
-
-## Backup Strategy
-
-### PostgreSQL backup
-
-```bash
-# Backup
-docker compose exec postgres pg_dump -U dalston dalston > backup.sql
-
-# Restore
-cat backup.sql | docker compose exec -T postgres psql -U dalston dalston
-```
-
-### MinIO backup
-
-```bash
-# Using MinIO client
-docker run --rm -v minio-data:/data alpine tar czf - /data > minio-backup.tar.gz
-```
-
-### Volume locations
-
-| Volume | Contents |
-| ------ | -------- |
-| `postgres-data` | Jobs, tasks, API keys, tenants |
-| `minio-data` | Audio files, transcripts, models |
-| `faster-whisper-cache` | Whisper model cache |
-| `whisperx-cache` | WhisperX model cache |
-| `pyannote-cache` | PyAnnote model cache |
+`make clean-all` removes containers, images, and volumes, including the
+database. It is intentionally destructive; ordinary shutdown should use
+`make stop`.
 
 ## Troubleshooting
 
-### Services won't start
+### A service never becomes healthy
 
 ```bash
-# Check for port conflicts
-sudo lsof -i :8000
-sudo lsof -i :5432
-sudo lsof -i :6379
-
-# Check Docker logs
-docker compose logs
-```
-
-### GPU not detected
-
-```bash
-# Verify NVIDIA driver
-nvidia-smi
-
-# Verify Docker GPU access
-docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
-
-# Check Docker engine_id configuration
-docker info | grep -i engine_id
-```
-
-### Out of memory errors
-
-```bash
-# Check memory usage
-docker stats
-
-# Reduce concurrent processing by scaling down
-docker compose up -d --scale stt-transcribe-whisper-cpu=1
-```
-
-### Jobs stuck in pending
-
-```bash
-# Check orchestrator logs
-docker compose logs orchestrator
-
-# Check stream keys/backlogs
-docker compose exec redis redis-cli KEYS "dalston:stream:*"
-docker compose exec redis redis-cli XINFO GROUPS dalston:stream:faster-whisper
-
-# Verify engines are running
-docker compose ps | grep engine
-```
-
-### Connection refused errors
-
-```bash
-# Ensure services are healthy
 docker compose ps
-
-# Check if gateway can reach Redis
-docker compose exec gateway python -c "import redis; r=redis.from_url('redis://redis:6379'); print(r.ping())"
-
-# Check if gateway can reach PostgreSQL
-docker compose exec gateway python -c "import psycopg2; c=psycopg2.connect('postgresql://dalston:password@postgres/dalston'); print('Connected')"
+docker compose logs gateway orchestrator
+docker compose logs stt-prepare stt-transcribe-faster-whisper
 ```
 
-### Model download failures
+### GPU containers cannot see CUDA
 
-Models are downloaded on first use. If downloads fail:
+Verify `nvidia-smi` on the host, rerun the toolkit configuration command from
+the prerequisites, and validate the CUDA test container before restarting
+Dalston.
+
+### A job remains queued
+
+Check registered engines and their streams:
 
 ```bash
-# Check internet connectivity from container
-docker compose exec stt-transcribe-whisper-cpu curl -I https://huggingface.co
-
-# Manually download models
-docker compose exec stt-transcribe-whisper-cpu python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
+curl -H "Authorization: Bearer $DALSTON_API_KEY" \
+  http://127.0.0.1:8000/v1/engines
+docker compose exec -T redis redis-cli KEYS "dalston:stream:*"
 ```
 
-### HuggingFace token issues
+Engine streams use the selected engine ID, for example
+`dalston:stream:faster-whisper`.
 
-For diarization engines:
+### Model download fails
 
-```bash
-# Verify token is set
-docker compose exec stt-diarize-pyannote-v40-cpu printenv HF_TOKEN
+Check the engine log, outbound HTTPS access, `DALSTON_MODEL_SOURCE`, and
+`HF_TOKEN` where required. Local mode defaults to `auto`, which can fall back
+to Hugging Face when MinIO has no cached model.
 
-# Test token validity
-docker compose exec stt-diarize-pyannote-v40-cpu python -c "
-from huggingface_hub import HfApi
-api = HfApi()
-print(api.whoami())
-"
-```
+## Production boundary
 
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Your Server                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌─────────────┐    ┌──────────────────────┐   │
-│  │  Caddy   │───▶│   Gateway   │───▶│     Orchestrator     │   │
-│  │ (proxy)  │    │  (FastAPI)  │    │   (Job Scheduler)    │   │
-│  └──────────┘    └─────────────┘    └──────────────────────┘   │
-│                         │                      │                 │
-│                         ▼                      ▼                 │
-│                  ┌──────────┐          ┌──────────────┐         │
-│                  │  Redis   │◀────────▶│   Engines    │         │
-│                  │ (queues) │          │ (containers) │         │
-│                  └──────────┘          └──────────────┘         │
-│                         │                      │                 │
-│           ┌─────────────┴─────────────┐       │                 │
-│           ▼                           ▼       ▼                 │
-│    ┌────────────┐              ┌──────────────────┐             │
-│    │ PostgreSQL │              │      MinIO       │             │
-│    │  (state)   │              │ (file storage)   │             │
-│    └────────────┘              └──────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Comparison: Self-Hosted vs AWS
-
-| Aspect | Self-Hosted | AWS |
-| ------ | ----------- | --- |
-| Storage | MinIO (local) | S3 |
-| Cost | Hardware + electricity | Pay-per-use |
-| Scaling | Manual | Easier with ASG |
-| Maintenance | You manage updates | Managed services available |
-| Network | Direct or VPN | Tailscale VPN |
-| GPU | Your hardware | EC2 GPU instances |
-| Backup | Manual setup | S3 versioning + snapshots |
+This Compose workflow is suitable for a private server or development
+environment. Before exposing it beyond a trusted network, provide TLS, durable
+backups, secret management, restricted ingress, monitoring, and an upgrade
+process. For the repository’s AWS/Tailscale automation, see
+[Deploying Dalston on AWS](aws-deploy.md).

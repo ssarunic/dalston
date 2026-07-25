@@ -1,164 +1,116 @@
-# Real-time transcription — three protocols, one backend
+# Realtime transcription: three protocols, one worker pool
 
-> Stream audio in over a WebSocket, get transcripts back as you speak.
-> Dalston speaks **three** WebSocket protocols, all hitting the same engine
-> pool: its native binary protocol, the ElevenLabs JSON protocol, and the
-> OpenAI Realtime protocol. Pick whichever your existing client speaks.
+Dalston exposes three WebSocket protocols in front of the registered realtime
+workers:
 
----
+| Protocol | Endpoint | Audio framing |
+| --- | --- | --- |
+| Dalston native | `/v1/audio/transcriptions/stream` | Binary PCM |
+| ElevenLabs compatible | `/v1/speech-to-text/realtime` | Base64 in JSON |
+| OpenAI compatible | `/v1/realtime?intent=transcription` | Base64 in JSON |
 
-## The three endpoints
-
-| Protocol | URL | Audio framing | Picked because |
-|---|---|---|---|
-| **Dalston native** | `ws://host/v1/audio/transcriptions/stream` | binary PCM | Lowest overhead. Building from scratch. |
-| **ElevenLabs** | `ws://host/v1/speech-to-text/realtime` | base64 in JSON | You already have ElevenLabs SDK code |
-| **OpenAI Realtime** | `ws://host/v1/realtime?intent=transcription` | base64 in JSON | You already have OpenAI Realtime client |
-
-All three sit in front of the same real-time engines (NeMo, ONNX,
-faster-whisper, vllm-asr, riva, hf-asr). The gateway translates the
-incoming JSON / binary protocol into the engines' internal format. From
-your audio model's perspective, it doesn't matter which front door you
-came through.
-
-Source files:
-
-- Dalston native: [`dalston/gateway/api/v1/realtime.py:145`](../../dalston/gateway/api/v1/realtime.py#L145)
-- ElevenLabs: [`dalston/gateway/api/v1/realtime.py:409`](../../dalston/gateway/api/v1/realtime.py#L409)
-- OpenAI: [`dalston/gateway/api/v1/openai_realtime.py:612`](../../dalston/gateway/api/v1/openai_realtime.py#L612)
-
----
+Use the compatibility endpoint that matches an existing integration. For a new
+client, the native endpoint avoids base64 expansion and has the smallest wire
+format.
 
 ## Authentication
 
-| Protocol | Where the key goes |
-|---|---|
-| Dalston native | `?api_key=dk_...` query param **or** `Authorization: Bearer dk_...` header |
-| ElevenLabs | `?api_key=dk_...` query param **or** `Authorization: Bearer dk_...` |
-| OpenAI | `Authorization: Bearer dk_...` header (+ `OpenAI-Beta: realtime=v1` header) |
+Dalston native and ElevenLabs clients can send a Dalston API key through
+`?api_key=dk_...` or `Authorization: Bearer dk_...`. OpenAI-compatible
+server-side clients normally use the Authorization header; browser clients can
+use the query parameter because the browser `WebSocket` API cannot set arbitrary
+headers.
 
-The query param approach is the right choice for browser-based clients
-(Web `WebSocket` API doesn't reliably support custom headers). For
-server-side, the header is cleaner.
+The key needs realtime scope. Common connection close codes are:
 
-The API key needs the `realtime` scope. Auth happens **before** WebSocket
-upgrade — failed auth gets a `4001` close code, not an HTTP 401 (the
-upgrade never happens).
+| Code | Meaning |
+| --- | --- |
+| `4400` | Invalid request parameters |
+| `4001` | Missing or invalid authentication |
+| `4003` | Missing required scope |
+| `4029` | API-key request-rate limit |
+| `4429` | Concurrent-session limit |
+| `4503` | No compatible worker capacity |
+| `4010` | Client audio lag exceeded the recoverable threshold |
 
----
+## Routing
 
-## Models and latency
+The orchestrator’s session coordinator selects a ready worker by capability,
+language/model preference, and available capacity.
 
-The model parameter resolves to a real-time engine via the `engine_selector`
-([dalston/orchestrator/engine_selector.py](../../dalston/orchestrator/)):
+- Native `model` is a routing preference for a registered model or engine.
+- ElevenLabs `scribe_v1` and `scribe_v2` are accepted compatibility labels;
+  they currently use automatic ready-worker routing.
+- OpenAI `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1` are
+  accepted compatibility labels; they also route automatically.
 
-| Endpoint | Model param | Maps to |
-|---|---|---|
-| Dalston native | `model=faster-whisper-large-v3` (or `parakeet-rnnt-0.6b`, …) | direct engine ID |
-| ElevenLabs | `model_id=scribe_v1` | `parakeet-0.6b` |
-| ElevenLabs | `model_id=scribe_v2` | `parakeet-1.1b` |
-| OpenAI | `model=gpt-4o-transcribe` | largest available Parakeet |
-| OpenAI | `model=gpt-4o-mini-transcribe` | smaller Parakeet |
-| OpenAI | `model=whisper-1` | Whisper streaming |
+Do not infer the concrete model weights from a compatibility name. Inspect
+session metadata or the engine registry when the exact runtime matters.
 
-End-to-end latency budgets (verified from each engine's `engine.yaml`
-`performance.warm_start_latency_ms`, plus typical chunk-to-result delay):
+Latency depends on the selected worker, loaded model, VAD/commit settings,
+network, and audio chunk size. Values in `engine.yaml` are benchmark metadata,
+not an end-to-end latency guarantee.
 
-| Engine | Warm start | Per-chunk delivery | Best for |
-|---|---|---|---|
-| `nemo` | 100 ms | ~100 ms | live captions, dictation |
-| `onnx` | 50 ms | ~150 ms | low-VRAM live |
-| `faster-whisper` | 30 ms | ~300 ms (VAD-chunked) | multilingual live |
-| `vllm-asr` | 5000 ms | ~500 ms | audio LLM apps |
+## Common lifecycle
 
-For sub-200ms experiences, **NeMo on a warm GPU** is the answer.
+1. The client opens a WebSocket with authentication and configuration.
+2. The gateway validates the request and asks the session coordinator for a
+   compatible worker.
+3. The gateway accepts the connection and sends the protocol’s session-start
+   event.
+4. The client streams binary or base64 audio.
+5. The worker emits interim transcript and optional VAD events.
+6. Silence, a commit message, or a flush produces a final segment.
+7. The client sends the protocol’s graceful-end message.
+8. The worker returns a session summary and the coordinator releases capacity.
 
----
+The wire lifecycle is similar, but persistence is not identical:
 
-## A request, end to end
+- Native sessions are recorded in the realtime session ledger.
+- Native audio/transcript persistence is derived from `retention`: zero is
+  transient; a non-zero value permits storage.
+- ElevenLabs-compatible sessions currently do not create the same persisted
+  realtime session record.
+- Realtime completion does not automatically create a batch enhancement job.
 
-Whichever endpoint you pick, the lifecycle looks the same:
+To add speaker diarization after a live session, retain the recording and
+submit it separately to the batch API with `speaker_detection=diarize`.
 
-1. **Client opens WebSocket** with auth + config in URL/headers.
-2. **Gateway authenticates** before upgrading. On failure: 4001/4003/4029
-   close codes.
-3. **Gateway accepts** and picks a worker via the session router (least-loaded
-   policy + capability filter).
-4. **Gateway sends a session-start frame** specific to the protocol
-   (`session.begin`, `transcription_session.created`, etc.).
-5. **Client streams audio** as binary frames (Dalston native) or base64 in
-   JSON (ElevenLabs/OpenAI).
-6. **Server emits partial transcripts** as they become available. With
-   `enable_vad=true` (Dalston/ElevenLabs) or auto-VAD (OpenAI), the server
-   also emits speech-start/speech-end events.
-7. **On commit / silence / explicit end**, server emits **final** transcript
-   for the committed segment.
-8. **Client closes** with a JSON close message or just disconnects.
-9. **Server emits `session.end`** with summary stats and total transcript.
-10. If `store_transcript=true`, the gateway persists the transcript to S3
-    and creates a Job record (queryable via the batch API afterwards).
+## Resume linkage
 
----
-
-## Two big "soft" features
-
-### Hybrid mode (real-time + batch enrichment)
-
-Real-time engines optimize for latency, not necessarily diarization.
-Common pattern: stream live captions for immediate UX, **then** kick off a
-batch diarize job on the recorded audio after the session ends.
-
-Enable with `store_audio=true` and `store_transcript=true` on the
-WebSocket query params. The session ends with a Job record in the standard
-batch surface; you can post-process for speaker labels.
-
-### Resume / continuation
-
-The Dalston native protocol accepts `resume_session_id` to link a new
-session to a previous one — useful for clients that drop and reconnect.
-The transcript context is preserved across reconnect.
-
-ElevenLabs and OpenAI compat layers do not implement resume — they expect
-clients to manage session state themselves.
-
----
-
-## Picking the right protocol
-
-| You're … | Pick |
-|---|---|
-| Migrating an ElevenLabs Scribe integration | [41-realtime-elevenlabs-compatible.md](41-realtime-elevenlabs-compatible.md) |
-| Migrating an OpenAI Realtime integration | [42-realtime-openai-compatible.md](42-realtime-openai-compatible.md) |
-| Building a new app from scratch | [43-realtime-dalston-native.md](43-realtime-dalston-native.md) |
-| Building a browser mic widget | Dalston native (binary frames are smaller) |
-| Building a server-side bridge | Whichever your upstream library prefers |
-
-Each protocol page has copy-pasteable code in JS/Python.
-
----
+The native endpoint accepts `resume_session_id`. This records the prior session
+as lineage for the new session. It does not currently replay transcript state
+or restore decoding context. ElevenLabs and OpenAI compatibility endpoints do
+not expose this linkage.
 
 ## Limits
 
-The gateway enforces:
+Defaults are configurable, but the current application defaults include:
 
-- Per-API-key WebSocket session count limits (configurable, default 10
-  concurrent)
-- Per-key rate limits per second (configurable)
-- Vocabulary: max 100 terms, 50 chars each
-- Audio sample rate: must match `sample_rate` query param (16 kHz is the
-  default and the most common engine input)
+- five concurrent realtime sessions per tenant;
+- 600 API requests per minute per tenant;
+- vocabulary limited to 100 terms of at most 50 characters; and
+- a 16 kHz default sample rate.
 
-Violations produce `error` frames with codes (`rate_limit`,
-`session_limit`, etc.) and a typed `recoverable` flag so the client can
-decide whether to retry.
+The realtime worker also monitors audio lag. Recoverable lag produces warning
+messages; sustained excessive lag terminates the session so clients do not
+receive indefinitely delayed transcripts.
 
----
+## Choose a protocol
 
-## See also
+| Situation | Guide |
+| --- | --- |
+| Existing ElevenLabs Scribe integration | [ElevenLabs-compatible](41-realtime-elevenlabs-compatible.md) |
+| Existing OpenAI Realtime integration | [OpenAI-compatible](42-realtime-openai-compatible.md) |
+| New application or browser microphone UI | [Dalston native](43-realtime-dalston-native.md) |
 
-- [41-realtime-elevenlabs-compatible.md](41-realtime-elevenlabs-compatible.md) — ElevenLabs JSON protocol
-- [42-realtime-openai-compatible.md](42-realtime-openai-compatible.md) — OpenAI Realtime protocol
-- [43-realtime-dalston-native.md](43-realtime-dalston-native.md) — Dalston binary protocol
-- [`docs/specs/realtime/REALTIME.md`](../specs/realtime/REALTIME.md) — engineering reference
-- [`docs/specs/realtime/WEBSOCKET_API.md`](../specs/realtime/WEBSOCKET_API.md) — full wire protocol
-- [`docs/specs/examples/websocket-clients.md`](../specs/examples/websocket-clients.md) — more client samples
+## Sources
+
+- Native and ElevenLabs gateway:
+  [`dalston/gateway/api/v1/realtime.py`](../../dalston/gateway/api/v1/realtime.py)
+- OpenAI gateway:
+  [`dalston/gateway/api/v1/openai_realtime.py`](../../dalston/gateway/api/v1/openai_realtime.py)
+- Session coordination:
+  [`dalston/orchestrator/session_coordinator.py`](../../dalston/orchestrator/session_coordinator.py)
+- Wire reference:
+  [WEBSOCKET_API.md](../specs/realtime/WEBSOCKET_API.md)

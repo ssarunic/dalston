@@ -82,12 +82,12 @@ The CSV goes to stdout; a human-readable summary goes to stderr at the end:
 ```
 --- summary ---
   days:                 14
+  billed instance time: 27.6 h
+  total cost:           $52.18
   jobs completed:       312
   audio transcribed:    142.4 h
   useful GPU work:      18.3 h
-  billed instance time: 27.6 h
   warmup overhead:      9.3 h (33.7%)
-  total cost:           $52.18
   $/episode (avg):      $0.167
   $/audio-hour (avg):   $0.366
 ```

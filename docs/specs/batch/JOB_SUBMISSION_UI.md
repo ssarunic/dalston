@@ -136,18 +136,17 @@ All requests use `multipart/form-data` to `POST /v1/audio/transcriptions`.
 | Timestamps | Select (`none`,`segment`,`word`) | Yes | `word` | Allowed enum only | `timestamps_granularity` |
 | Model | Select (`auto` + available transcribe engines) | Yes | `auto` | Allowed string | `model` |
 | Vocabulary | Tag/chips input or multiline text | No | empty | max 100 terms | `vocabulary` (JSON array string) |
-| Retention policy | Select from API | No | empty (server default) | Existing policy name | `retention_policy` |
+| Retention | Server default / transient / permanent / days | No | server default | `0`, `-1`, or 1-3650 days | `retention` |
 | PII detection | Toggle | No | off | Boolean | `pii_detection` |
-| PII tier | Select (`fast`,`standard`,`thorough`) | Yes when PII on | `standard` | Allowed enum | `pii_detection_tier` |
-| PII entity types | Tag/chips input | No | empty (= server defaults) | valid tokens | `pii_entity_types` (JSON array string) |
-| Redact PII audio | Toggle | No | off | Boolean | `redact_pii_audio` |
-| Redaction mode | Select (`silence`,`beep`) | Yes when redact audio on | `silence` | Allowed enum | `pii_redaction_mode` |
+| PII preset/entity types | Preset plus checkboxes | No | default entities | Valid entity IDs | `pii_entity_types` (JSON array string) |
+| Redact PII audio | Toggle plus `silence`/`beep` mode | No | off | Requires PII detection | `redact_pii_audio`, `pii_redaction_mode` |
 
 ### 7.1 Conditional Display Rules
 
 1. `Audio file` is visible only in file mode.
 2. `Audio URL` is visible only in URL mode.
-3. `PII tier`, `PII entity types`, and `Redact PII audio` appear only when `PII detection` is enabled.
+3. PII presets/entity types and `Redact PII audio` appear only when
+   `PII detection` is enabled.
 4. `Redaction mode` appears only when `Redact PII audio` is enabled.
 5. `Num/Min/Max speakers` are shown only when speaker mode is `diarize` or `per_channel`.
 
@@ -182,7 +181,7 @@ Map known backend responses to user-facing text:
 | URL too large | `File too large...` | `The URL file exceeds server size limits.` |
 | Invalid audio | `Unable to read audio file...` | Show backend detail under Source card |
 | per_channel mono file | `per_channel ... requires stereo audio` | `Per-channel requires stereo audio. Use diarize for mono.` |
-| Invalid retention policy | detail object with `param=retention_policy` | `Retention policy not found.` |
+| Invalid retention | validation error for `retention` | `Choose transient, permanent, or 1-3650 days.` |
 
 ### 8.3 Error Presentation
 

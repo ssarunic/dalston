@@ -3,7 +3,7 @@
 These fixtures pin the OpenAI STT compatibility contract used by Dalston.
 
 - Contract date: `2026-03-08`
-- Primary SDK: `openai==1.93.2`
+- Primary SDK: `openai==2.37.0`
 - Scope:
   - `audio.transcriptions.create(...)`
   - `audio.translations.create(...)`

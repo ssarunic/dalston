@@ -1,195 +1,148 @@
 # Pipeline stages explained
 
-> Five stages, each one focused on a single job. Together they turn raw
-> audio into a speaker-attributed, word-timed transcript. Mix and match
-> engines per stage for the best price-performance fit.
+Dalston builds a task graph for each request. The normal distributed batch
+pipeline has four inference stages, two of them optional:
 
+```text
+prepare ──► transcribe ──► optional align
+   │
+   └─────────────────────► optional diarize
 ```
-┌─────────┐   ┌─────────────┐   ┌────────┐   ┌─────────┐   ┌────────┐
-│ PREPARE │──►│ TRANSCRIBE  │──►│ ALIGN  │──►│ DIARIZE │──►│ MERGE  │
-└─────────┘   └─────────────┘   └────────┘   └─────────┘   └────────┘
+
+Diarization depends only on prepared audio, so it runs in parallel with
+transcription and alignment. When all required tasks finish, the orchestrator
+assembles the canonical transcript. There is no distributed merge task.
+
+PII work is asynchronous post-processing after the transcript is assembled:
+
+```text
+assembled transcript ──► optional pii_detect ──► optional audio_redact
 ```
 
-The orchestrator builds a per-job DAG over these stages based on what you
-asked for. If you didn't ask for word timestamps, ALIGN is skipped. If you
-didn't ask for diarization, DIARIZE is skipped. MERGE is always last and
-always assembles the canonical `transcript.json`.
-
----
-
-## PREPARE — `audio-prepare`
-
-> Make any audio look the same to every downstream stage.
+## Prepare — `audio-prepare`
 
 Source: [`engines/stt-prepare/audio-prepare/`](../../engines/stt-prepare/audio-prepare/).
 
-**In:** any audio format ffmpeg can read — mp3, wav, m4a, flac, ogg, webm,
-mp4, mkv, avi, aac, wma. Any sample rate, any channel count, up to 4 hours.
+Prepare probes the original media, records its duration/sample rate/channels
+and codec, then normalizes audio for downstream engines. It can also split
+channels for `speaker_detection=per_channel`.
 
-**Out:** 16 kHz mono WAV, 16-bit PCM. Plus metadata: original duration,
-sample rate, channels, codec.
+Input may be any format supported by ffmpeg. The standard speech artifact is
+16 kHz, mono, 16-bit PCM WAV. This CPU stage is always present.
 
-**How:** wraps ffprobe (for metadata) and ffmpeg (for resampling/downmixing)
-with a 30-minute timeout per file. CPU only — no GPU needed.
+## Transcribe — choose an ASR engine
 
-**Cost:** sub-cent per hour of audio. This stage runs on the control plane's
-CPU engines; you don't need to think about it.
+Transcription converts prepared audio into the canonical `Transcript` type:
+text, timed segments, language information, confidence where the engine
+provides it, warnings, and sometimes word timestamps.
 
-**Why this stage exists:** every transcription model expects a specific
-input shape. Standardizing once means every engine downstream works the
-same way regardless of source.
+Common engine families:
 
----
+| Engine | Typical use |
+| --- | --- |
+| `onnx` | Lightweight Parakeet models, including CPU execution |
+| `faster-whisper` | Broad multilingual Whisper support |
+| `nemo` | High-throughput NeMo/Parakeet models |
+| `hf-asr` | Custom Hugging Face ASR models |
+| `vllm-asr` | Audio language models served through vLLM |
 
-## TRANSCRIBE — choose your engine
+See [12-engine-presets-catalog.md](12-engine-presets-catalog.md) for deployment
+presets. Performance values in the engine catalog are benchmark metadata, not
+a guarantee for every model, file, or machine.
 
-> Audio → text + segment boundaries + (sometimes) word timestamps.
+Batch transcription engines can opt into SDK-managed VAD chunking by declaring
+a maximum audio duration. Audio above that limit is split on speech boundaries,
+each chunk is transcribed, and timestamp offsets are recombined. Engines with no
+declared limit keep the direct whole-file path; chunk limits may also vary by
+the selected model.
 
-The variants and their tradeoffs are catalogued in
-[12-engine-presets-catalog.md](12-engine-presets-catalog.md). Quick recap:
-
-| Preset | Best for |
-|---|---|
-| `onnx` | Lightweight, English, CPU-OK |
-| `faster-whisper` | 99 languages, good baseline |
-| `nemo` | Fastest English, real-time native |
-| `hf-asr` | Custom HuggingFace models |
-| `vllm-asr` | Audio LLMs (Voxtral) |
-
-**In:** 16 kHz mono WAV.
-**Out:** `Transcript` object with language, segments (start/end/text), and
-optional words (depending on the engine's `word_timestamps` capability).
-
-**Cost driver:** RTF × audio duration × hourly GPU cost. NeMo on a g4dn.xlarge
-spot ≈ $0.0001 per hour of audio. faster-whisper ≈ $0.05/hr of audio.
-
----
-
-## ALIGN — `phoneme-align`
-
-> Refine segment-level timestamps into word-level timestamps.
+## Align — `phoneme-align`
 
 Source: [`engines/stt-align/phoneme-align/`](../../engines/stt-align/phoneme-align/).
 
-**In:** the transcript from TRANSCRIBE plus the original audio.
-**Out:** the same transcript with `Word` objects on each segment, each with
-exact `start` and `end` times.
+Alignment refines segment timing to word timing using the prepared audio and
+the transcription response. It is added only when word timestamps were
+requested and the selected transcription engine does not provide them
+natively.
 
-**How:** CTC forced alignment with wav2vec2 — a standalone reimplementation
-of the algorithm from the WhisperX paper. Supports the major European
-languages via torchaudio pipelines plus 35+ more via HuggingFace wav2vec2
-models.
+NeMo and ONNX model variants commonly provide native word timing.
+`faster-whisper` is currently advertised without reliable native word timing,
+so capability-based selection normally adds `phoneme-align` for word-level
+requests.
 
-**Cost:** GPU optional but recommended. RTF is fast; this stage is rarely
-the bottleneck.
+## Diarize — choose a speaker engine
 
-**Skipped when:** the upstream transcribe engine already produces word
-timestamps (`nemo`, `onnx`, Whisper-via-`hf-asr`) **or** you didn't request
-`timestamps_granularity=word`.
+Source: [`engines/stt-diarize/`](../../engines/stt-diarize/).
 
-> **faster-whisper specifically does not** produce reliable word timestamps
-> on its own (verified in its `engine.yaml` — `word_timestamps: false`).
-> Pair it with ALIGN if you need word-level timing. NeMo doesn't need it;
-> ONNX doesn't need it.
+Diarization produces speaker turns such as
+`{start, end, speaker}` from prepared audio. Available implementations include:
 
----
+| Engine | Notes |
+| --- | --- |
+| `pyannote-4.0` | Default pyannote community pipeline |
+| `nemo-msdd` | NeMo MSDD diarization |
+| `nemo-sortformer` | NeMo Sortformer diarization |
 
-## DIARIZE — `pyannote-4.0` (or `nemo-msdd`)
+The task is present only for `speaker_detection=diarize` and only when the
+selected transcription engine does not already include speaker labels.
+`num_speakers`, `min_speakers`, and `max_speakers` constrain compatible
+engines.
 
-> Audio → speaker timeline. Who spoke when.
+Pyannote requires `HF_TOKEN` for gated models. Long input is chunked according
+to `DALSTON_MAX_DIARIZE_CHUNK_S`; the engine can reduce its chunk size after a
+CUDA out-of-memory error.
 
-Source: [`engines/stt-diarize/pyannote-4.0/`](../../engines/stt-diarize/pyannote-4.0/).
+## Transcript assembly
 
-**In:** 16 kHz mono WAV.
-**Out:** `DiarizationResponse` with `speakers` (list of detected speaker
-IDs like `SPEAKER_00`) and `turns` (list of `{start, end, speaker}`).
+Assembly is orchestrator business logic, not a queue-backed engine stage. It
+combines the latest transcription/alignment result with diarization turns,
+assigns speakers by time overlap, preserves confidence and warnings, and writes
+the final transcript artifact.
 
-**How:** pyannote-audio 4.0 with the `pyannote/speaker-diarization-community-1`
-pipeline. New in 4.0: VBx clustering for better speaker counting,
-**exclusive mode** that emits one speaker per segment (cleaner Whisper
-alignment), modern numpy 2.0 / PyTorch compatibility.
+For per-channel audio, the orchestrator assembles the independently
+transcribed channels into one chronological transcript. No `final-merger`
+worker is required.
 
-Long audio gets chunked: configurable via `DALSTON_MAX_DIARIZE_CHUNK_S`
-(default 900s in the upstream config; the AWS preset bumps it to 3600s).
-The engine has an OOM fallback that halves the chunk size and retries.
+The repository retains legacy merge contracts and a lite-profile merge
+implementation for compatibility. Do not deploy or diagram `final-merger` as
+part of the distributed DAG.
 
-**Cost:** GPU recommended (RTF 0.15 vs 1.2 on CPU — worth ~10× the throughput).
+## PII detection and audio redaction
 
-**Skipped when:** you didn't request `speaker_detection=diarize`. (The
-`per-channel` mode does speaker assignment differently — see below.)
+When requested, post-processing runs after successful transcript assembly:
 
-**Required:** `HF_TOKEN` — the model is gated. See [30-how-models-are-fetched.md](30-how-models-are-fetched.md).
+1. `pii_detect` identifies configured entity types and produces redacted text.
+2. `audio_redact` uses timed entities to generate silenced or beeped audio.
 
----
+These stages do not delay the core transcription result. Their state and
+artifacts appear as post-processing becomes available.
 
-## MERGE — `final-merger`
+## Capability-driven shortcuts
 
-> Assemble the canonical `transcript.json`.
+An engine can advertise native word timestamps, included diarization, native
+streaming, and language-forcing support. The orchestrator uses those
+capabilities to omit redundant tasks; it does not infer support from an engine
+name.
 
-Source: [`engines/stt-merge/final-merger/`](../../engines/stt-merge/final-merger/).
+Examples:
 
-**In:** outputs from every upstream stage (`prepare`, `transcribe`, `align`,
-`diarize`).
-**Out:** `transcript.json` with:
+| Request and selected capability | Distributed DAG |
+| --- | --- |
+| Segment timestamps, no speakers | `prepare → transcribe` |
+| Word timestamps, no native word support | `prepare → transcribe → align` |
+| Diarization | `prepare → transcribe`, plus `prepare → diarize` |
+| Word timestamps and diarization | `transcribe → align` in parallel with `diarize` |
+| Native word timestamps | `prepare → transcribe` |
+| Included diarization | Omit the separate diarize task |
+| Per-channel | `prepare → transcribe_chN → optional align_chN` for each channel |
 
-- `metadata` — source, duration, language, model used, processing time
-- `text` — full concatenated text
-- `segments` — speaker-attributed, word-timed segments
-- `speakers` — list of speaker IDs with statistics
-
-**How:** combines stage outputs by walking segment boundaries and assigning
-the speaker whose turn has maximum overlap. CPU only, runs on the control
-plane.
-
-For **per-channel** mode (stereo audio with one speaker per channel), MERGE
-also assembles redacted mono WAVs back into a stereo file via ffmpeg.
-
----
-
-## When engines combine stages
-
-Some engines do multiple stages in one container. The `composite` /
-`includes_diarization` flag tells the orchestrator to skip the merged-in
-stages.
-
-| Engine | Does | Skips |
-|---|---|---|
-| `hf-asr-align-pyannote` | transcribe + align + diarize | individual ALIGN, DIARIZE stages |
-| `whisper-align-pyannote` | transcribe + align + diarize (composite over HTTP) | individual stages |
-
-These exist for two reasons:
-
-1. **Single-GPU deployments** — one container holding three models means one
-   warm-start cost, one memory budget, simpler ops.
-2. **Mac MPS / dev boxes** — running three Docker services with bind-mounted
-   models doesn't always work nicely on macOS.
-
-Decision tree in [32-diarization-vs-transcription.md](32-diarization-vs-transcription.md).
-
----
-
-## Orchestrator DAG construction
-
-The orchestrator looks at your request and builds the DAG dynamically:
-
-| Request | DAG |
-|---|---|
-| Default (no flags) | `prepare → transcribe` |
-| `timestamps_granularity=word` | `prepare → transcribe → align` (skipped if engine has word ts) |
-| `speaker_detection=diarize` | `prepare → transcribe → diarize` (parallel to align) |
-| Both word + diarize | `prepare → (transcribe + diarize parallel) → align → merge` |
-| `speaker_detection=per-channel` | `prepare (split channels) → transcribe (each channel)` |
-
-The DAG always ends in `merge`. Tasks run in parallel where the graph
-permits; the orchestrator decides which engines handle which tasks based on
-capabilities reported in the Redis registry.
-
----
+After all terminal tasks complete, the orchestrator assembles the result and
+emits job completion.
 
 ## See also
 
-- [12-engine-presets-catalog.md](12-engine-presets-catalog.md) — picking transcribe engines
-- [32-diarization-vs-transcription.md](32-diarization-vs-transcription.md) — picking the best combo
-- [30-how-models-are-fetched.md](30-how-models-are-fetched.md) — HF tokens, S3 caching
-- [`docs/specs/PIPELINE_INTERFACES.md`](../specs/PIPELINE_INTERFACES.md) — wire-format reference
-- [`docs/specs/batch/ORCHESTRATOR.md`](../specs/batch/ORCHESTRATOR.md) — DAG internals
+- [12-engine-presets-catalog.md](12-engine-presets-catalog.md)
+- [32-diarization-vs-transcription.md](32-diarization-vs-transcription.md)
+- [30-how-models-are-fetched.md](30-how-models-are-fetched.md)
+- [PIPELINE_INTERFACES.md](../specs/PIPELINE_INTERFACES.md)
+- [ORCHESTRATOR.md](../specs/batch/ORCHESTRATOR.md)

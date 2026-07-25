@@ -1,5 +1,7 @@
 # Performance and RTF — sizing your deployment
 
+<!-- performance-data: estimate; tutorial examples, not benchmark results -->
+
 > **RTF = processing-time / audio-duration.** Lower is faster.
 > RTF 0.03 means a 1-hour file finishes in 108 seconds. RTF 0.0006 means
 > a 1-hour file finishes in 2 seconds of pure model compute. RTF 1.0
@@ -90,24 +92,21 @@ Combine RTF with hourly GPU cost.
 cost_per_audio_hour = RTF × hourly_gpu_cost
 ```
 
-For `faster-whisper` on a g4dn.xlarge spot (~$0.20/hr):
+For a hypothetical engine at RTF `0.03` on compute priced at `P` per hour:
 
 ```
-0.03 × $0.20 = $0.006 / audio hour
+0.03 × P = 0.03P per audio hour
 ```
 
-For `nemo` on the same hardware:
+For a hypothetical engine at RTF `0.0006`:
 
 ```
-0.0006 × $0.20 = $0.00012 / audio hour
+0.0006 × P = 0.0006P per audio hour
 ```
 
-Compare to ElevenLabs Scribe (~$0.40/hr of audio) or OpenAI Whisper API
-(~$0.36/hr). At even modest scale, self-hosted is dramatically cheaper.
-
-But! The numbers above assume the GPU is doing nothing else — bill rounds
-to the hour. If you only transcribe 5 minutes a day, the API price wins.
-**Self-hosted economics kick in around 30+ audio-hours/month.**
+The formula excludes boot, idle, storage, network, and control-plane cost.
+Compare it with current provider pricing and your measured utilization; there
+is no universal break-even point.
 
 Full breakdown with EBS / S3 / control-plane overhead:
 [51-aws-cost-estimator.md](51-aws-cost-estimator.md).
@@ -169,8 +168,9 @@ GPUs have fixed VRAM. The presets are tuned to fit common GPUs:
 | A100 (p4d) | 40–80 GB | multi-engine, lots of headroom |
 
 The `nemo` and `pyannote` presets explicitly declare `DALSTON_VRAM_BUDGET_MB`
-to enforce these splits at runtime — see
-[`infra/scripts/dalston-aws:107`](../../infra/scripts/dalston-aws#L107) and `:124`.
+to enforce these splits at runtime. See their entries in
+`GPU_ENGINE_PRESETS` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws).
 
 `max_concurrency` is the per-engine concurrent-session ceiling (declared in
 each `engine.yaml`). Beyond that, the gateway queues or rejects (depending

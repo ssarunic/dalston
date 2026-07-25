@@ -1,61 +1,45 @@
-# Tutorial: Add a New Transcription Engine (Beginner-Friendly)
+# Tutorial: add a transcription engine
 
-This guide shows the simplest path to add a new batch transcription engine after M51.
+This guide builds a batch transcription engine using the current typed engine
+contract. A complete engine:
 
-## 0. What "Done" Looks Like
+1. receives a local audio path in `TaskRequest`;
+2. returns a canonical `Transcript` inside `TaskResponse`;
+3. performs no Redis, S3, or other storage I/O in inference code;
+4. declares capabilities that agree with its output; and
+5. passes the engine contract tests.
 
-A new engine is considered integrated when:
+## 1. Scaffold the files
 
-1. It implements `process(input, ctx)` with the M51 contract.
-2. It returns typed `TranscribeOutput`.
-3. It does not do storage I/O in engine business logic.
-4. It passes unit/integration + M51 guardrail tests.
-
-## 1. Scaffold The Engine
-
-Generate a starter engine:
+The scaffold command is a dry run unless you pass `--no-dry-run`:
 
 ```bash
-python -m dalston.tools.scaffold_engine my-asr --stage transcribe
+python -m dalston.tools.scaffold_engine my-asr \
+  --stage transcribe \
+  --no-dry-run
 ```
 
-This creates files under:
+This creates `engine.py`, `engine.yaml`, `requirements.txt`, `Dockerfile`, and
+`README.md` under `engines/stt-transcribe/my-asr/`.
 
-`engines/stt-transcribe/my-asr/`
-
-Main files:
-
-1. `engine.py`
-2. `engine.yaml`
-3. `requirements.txt`
-4. `Dockerfile`
-
-Tip: list valid stages with:
+List accepted stages with:
 
 ```bash
 python -m dalston.tools.scaffold_engine --list-stages
 ```
 
-## 2. Configure `engine.yaml`
+The generated `engine.py` is a generic starting point. For transcription,
+replace it with a `BaseBatchTranscribeEngine` adapter as shown below.
 
-Set realistic capabilities so routing can choose your engine correctly.
+## 2. Declare capabilities
 
-At minimum verify:
-
-1. `stage: transcribe`
-2. `engine_id`/`id` naming consistency
-3. `capabilities.languages`
-4. `capabilities.word_timestamps`
-5. `container.gpu` and hardware section
-
-Example skeleton:
+Review the generated `engine.yaml`. The important fields are:
 
 ```yaml
 schema_version: "1.1"
 id: my-asr
-engine_id: my-asr
 stage: transcribe
-name: My ASR Runtime
+name: My ASR
 version: 1.0.0
 
 container:
@@ -67,147 +51,146 @@ capabilities:
   languages:
     - all
   max_audio_duration: 7200
-  streaming: false
+  native_streaming: false
   word_timestamps: true
   includes_diarization: false
+  language_forcing: true
 ```
 
-## 3. Implement `process(input, ctx)`
+Do not advertise word timestamps, native streaming, language forcing, or
+speaker labels unless the engine really produces them. Capability-driven
+routing uses these values to construct the DAG.
 
-The core rule after M51:
+## 3. Implement inference
 
-1. Use local files (`input.audio_path`), not URIs.
-2. Do not call S3/Redis helpers in `process`.
-3. Return typed output.
-
-Minimal transcription engine shape:
+`BaseBatchTranscribeEngine` owns the `process()` envelope and optional
+long-audio chunking. Implement `transcribe_audio()` and return a `Transcript`:
 
 ```python
 from dalston.engine_sdk import (
     AlignmentMethod,
+    BaseBatchTranscribeEngine,
     BatchTaskContext,
-    Engine,
-    EngineRequest,
-    EngineResponse,
-    Segment,
-    TimestampGranularity,
-    TranscribeOutput,
-    Word,
+    TaskRequest,
+    Transcript,
 )
 
 
-class MyAsrEngine(Engine):
+class MyAsrEngine(BaseBatchTranscribeEngine):
+    ENGINE_ID = "my-asr"
+
     def __init__(self) -> None:
         super().__init__()
         self._model = None
 
-    def _load_model(self, config: dict) -> None:
+    def _load_model(self, model_id: str | None) -> None:
         if self._model is None:
-            # load your engine ID model here
+            # Replace with the library/model initialization.
             self._model = object()
 
-    def process(self, input: EngineRequest, ctx: BatchTaskContext) -> EngineResponse:
-        self._load_model(input.config)
+    def transcribe_audio(
+        self,
+        task_request: TaskRequest,
+        ctx: BatchTaskContext,
+    ) -> Transcript:
+        params = task_request.get_transcribe_params()
+        self._load_model(params.loaded_model_id)
 
-        audio_path = input.audio_path
-        language = input.config.get("language") or "en"
+        if task_request.audio_path is None:
+            raise ValueError("transcription requires an audio artifact")
 
-        # replace this with real inference
+        # Replace this block with inference against task_request.audio_path.
+        words = [
+            self.build_word(
+                text="hello",
+                start=0.0,
+                end=0.5,
+                confidence=0.9,
+                alignment_method=AlignmentMethod.ATTENTION,
+            ),
+            self.build_word(
+                text=" world",
+                start=0.5,
+                end=1.0,
+                confidence=0.9,
+                alignment_method=AlignmentMethod.ATTENTION,
+            ),
+        ]
         segments = [
-            Segment(
+            self.build_segment(
                 start=0.0,
                 end=1.0,
                 text="hello world",
-                words=[
-                    Word(
-                        text="hello",
-                        start=0.0,
-                        end=0.5,
-                        confidence=0.9,
-                        alignment_method=AlignmentMethod.ATTENTION,
-                    ),
-                    Word(
-                        text="world",
-                        start=0.5,
-                        end=1.0,
-                        confidence=0.9,
-                        alignment_method=AlignmentMethod.ATTENTION,
-                    ),
-                ],
+                words=words,
+                language=params.language,
+                confidence=0.9,
             )
         ]
 
-        out = TranscribeOutput(
+        language = (
+            params.language
+            if params.language and params.language != "auto"
+            else "und"
+        )
+        return self.build_transcript(
             text="hello world",
             segments=segments,
             language=language,
-            engine_id="my-asr",
-            timestamp_granularity_requested=TimestampGranularity.WORD,
-            timestamp_granularity_actual=TimestampGranularity.WORD,
+            language_source="requested" if language != "und" else None,
+            engine_id=self.engine_id,
+            duration=1.0,
             alignment_method=AlignmentMethod.ATTENTION,
+            words_expected=True,
         )
-        return EngineResponse(data=out)
+
+
+if __name__ == "__main__":
+    MyAsrEngine().run()
 ```
 
-Notes:
+Use `ctx.logger` or `self.logger` for structured logging. Engine inference code
+must not download from object storage, publish Redis events, or construct
+`s3://` paths; the runner materializes input artifacts and persists declared
+outputs.
 
-1. Transcribe engines usually return no `produced_artifacts` (payload-only output).
-2. Use `ctx` for metadata/logging context only.
+### Optional long-audio chunking
 
-### 3.1 Handling audio duration limits (optional)
-
-If your engine has a per-request audio duration ceiling — either a hard
-model cap (audio LLMs like Gemma 4 E4B with a 30s encoder limit) or a
-VRAM-driven soft ceiling (e.g. NeMo Parakeet on L4, which linearly grows
-activation beyond ~100 minutes) — override
-`get_max_audio_duration_s(task_request)` in your engine class. When the
-input audio exceeds that limit, the base engine auto-chunks via Silero
-VAD, runs `transcribe_audio()` per chunk, and merges results
-transparently. The chunked path also has OOM backoff and aggregate
-telemetry, so you get safety and observability for free.
+Override `get_max_audio_duration_s()` only when the model has a hard or
+VRAM-driven request limit:
 
 ```python
 class MyAsrEngine(BaseBatchTranscribeEngine):
-    def get_max_audio_duration_s(self, task_request):
-        return 1500  # per-chunk ceiling in seconds
+    def get_max_audio_duration_s(self, task_request: TaskRequest) -> float | None:
+        return 1500
 ```
 
-Return `None` (or omit the override — that's the default) for engines
-that handle any length natively (HF-ASR, faster-whisper, ONNX, and the
-majority of transcribe engines). See
-[M86](../plan/milestones/M86-shared-vad-chunking.md) for the full
-chunking contract.
+When audio exceeds the limit, the base class splits it at VAD boundaries,
+retries smaller chunks after CUDA OOM, and offsets/combines the resulting
+transcripts. Return `None`, the default, when the runtime handles arbitrary
+lengths itself.
 
-## 4. Write Tests First (Recommended Minimal Set)
-
-Create a focused unit test for your new engine:
+## 4. Add a contract test
 
 ```python
 from pathlib import Path
 
-from dalston.common.artifacts import MaterializedArtifact
-from dalston.engine_sdk.context import BatchTaskContext
-from dalston.engine_sdk.types import EngineRequest
+from dalston.engine_sdk import BatchTaskContext, TaskRequest, Transcript
+
+from engine import MyAsrEngine
 
 
-def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
+def test_my_asr_returns_transcript(tmp_path: Path) -> None:
     audio = tmp_path / "audio.wav"
-    audio.write_bytes(b"fake")
+    audio.write_bytes(b"fixture")
 
-    task_input = EngineRequest(
+    request = TaskRequest(
         task_id="task-1",
         job_id="job-1",
         stage="transcribe",
-        materialized_artifacts={
-            "audio": MaterializedArtifact(
-                artifact_id="task-prepare:prepared_audio",
-                kind="audio",
-                local_path=audio,
-            )
-        },
-        config={},
+        audio_path=audio,
+        config={"language": "en", "word_timestamps": True},
     )
-    ctx = BatchTaskContext(
+    context = BatchTaskContext(
         engine_id="my-asr",
         instance="test",
         task_id="task-1",
@@ -215,38 +198,52 @@ def test_my_asr_process_returns_transcribe_output(tmp_path: Path) -> None:
         stage="transcribe",
     )
 
-    output = engine.process(task_input, ctx)
-    assert output.data.engine_id == "my-asr"
-    assert output.data.text
+    response = MyAsrEngine().process(request, context)
+    assert isinstance(response.data, Transcript)
+    assert response.data.engine_id == "my-asr"
+    assert response.data.text == "hello world"
+    assert response.data.timestamp_granularity.value == "word"
 ```
 
-## 5. Quick Local Execution Without Redis/S3
+Use a real decodable audio fixture once inference is connected; the byte stub
+is suitable only for the placeholder implementation above.
 
-Use the M52 file-based local runner command as the default developer loop:
+## 5. Run it without Redis or S3
+
+Create a JSON configuration:
+
+```json
+{
+  "language": "en",
+  "word_timestamps": true
+}
+```
+
+Then invoke the local filesystem runner:
 
 ```bash
 python -m dalston.engine_sdk.local_runner run \
-  --engine engines.stt-transcribe.faster-whisper.engine:FasterWhisperEngine \
+  --engine engines/stt-transcribe/my-asr/engine.py:MyAsrEngine \
   --stage transcribe \
   --audio ./fixtures/audio.wav \
   --config ./fixtures/transcribe-config.json \
   --output ./tmp/response.json
 ```
 
-Advanced stages can include optional JSON inputs:
+For stages that consume earlier task results, use `--previous-responses`:
 
 ```bash
 python -m dalston.engine_sdk.local_runner run \
-  --engine engines.stt-align.phoneme-align.engine:PhonemeAlignEngine \
+  --engine engines/stt-align/phoneme-align/engine.py:PhonemeAlignEngine \
   --stage align \
   --config ./fixtures/align-config.json \
   --payload ./fixtures/align-payload.json \
-  --previous-outputs ./fixtures/previous-outputs.json \
+  --previous-responses ./fixtures/previous-responses.json \
   --artifacts ./fixtures/artifacts.json \
   --output ./tmp/response.json
 ```
 
-`response.json` always uses the canonical envelope:
+The output uses the canonical task envelope:
 
 ```json
 {
@@ -259,9 +256,9 @@ python -m dalston.engine_sdk.local_runner run \
 }
 ```
 
-## 6. Validation Commands
+## 6. Validate
 
-Run your engine tests + M51/M52 guardrails:
+Run focused tests before the full suite:
 
 ```bash
 pytest tests/unit/test_m51_enforcement.py -q
@@ -272,22 +269,14 @@ pytest tests/unit/test_m52_engine_input_contract.py -q
 pytest tests/integration/test_engine_typed_outputs.py -q
 ```
 
-If you added new stage-specific tests, include them in the same run.
+Common integration mistakes are capability/output disagreement, returning a
+plain legacy output shape instead of `Transcript`, importing storage clients in
+engine code, and using `--previous-outputs` instead of
+`--previous-responses`.
 
-## 7. Common Mistakes
+## 7. Add deployment wiring
 
-1. Importing `dalston.engine_sdk.io` (or `boto3`/`redis`) in engine code.
-2. Building/parsing `s3://...` paths in `process`.
-3. Returning plain dict output when typed `TranscribeOutput` is expected.
-4. Forgetting language/timestamp capability alignment between `engine.py` and `engine.yaml`.
-5. Skipping `test_m51_enforcement.py` after engine edits.
-
-## 8. If You Also Need Deployment Wiring
-
-If this engine should run in the stack, add a service in compose by copying an existing transcribe engine service and updating:
-
-1. build context to `engines/stt-transcribe/my-asr`
-2. `DALSTON_ENGINE_ID=my-asr`
-3. any engine-specific environment variables
-
-No orchestrator code change is required for normal capability-based selection.
+For a distributed worker, copy an existing transcription service in
+`docker-compose.yml` and update its build/image, `DALSTON_ENGINE_ID`, model
+configuration, and resource settings. Capability-driven selection normally
+requires no orchestrator code change.

@@ -113,23 +113,10 @@ Audio redaction based on detected PII.
 |-----------|-------------|-----|
 | `audio-redact` | Replace PII segments with silence/beep | No |
 
-### REFINE
-
-LLM-based transcript refinement.
-
-| Engine ID | Description | GPU |
-|-----------|-------------|-----|
-| `llm-cleanup` | Error correction, speaker naming, punctuation | No |
-
-### MERGE
-
-Combine outputs from multiple stages.
-
-| Engine ID | Description | GPU |
-|-----------|-------------|-----|
-| `transcript-merger` | Merge transcription + diarization + alignment | No |
-| `channel-merger` | Merge parallel channel transcriptions | No |
-| `final-merger` | Combine all results into final output | No |
+Final transcript assembly is orchestrator logic, not a distributed engine
+stage. Optional PII detection and audio redaction run as post-processing after
+assembly. Legacy refine/merge contracts are retained only for compatibility
+and lite-profile internals.
 
 ---
 
@@ -187,34 +174,6 @@ performance:
   rtf_gpu: 0.05
   rtf_cpu: 0.8
   warm_start_latency_ms: 50
-```
-
-### Utility Engine Schema
-
-For single-purpose utility engines:
-
-```yaml
-# Utility engine.yaml (e.g., engines/stt-merge/final-merger/engine.yaml)
-schema_version: "1.1"
-id: final-merger
-engine_id: final-merger                   # Same as ID for utilities
-stage: merge
-name: Final Merger
-version: 1.0.0
-description: Merges all pipeline stage outputs into final transcript.
-
-execution_profile: container
-
-container:
-  gpu: none
-  memory: 2G
-
-capabilities:
-  streaming: false
-
-hardware:
-  supports_cpu: true
-  min_ram_gb: 2
 ```
 
 ### Schema Field Reference
@@ -289,7 +248,8 @@ chunking contract, OOM backoff, and aggregate telemetry rules.
 Valid `pipeline_tag` values:
 
 - HF standard: `automatic-speech-recognition`, `speaker-diarization`, `voice-activity-detection`, `audio-classification`
-- Dalston extensions: `dalston:audio-preparation`, `dalston:merge`, `dalston:pii-redaction`, `dalston:audio-redaction`
+- Dalston extensions: `dalston:audio-preparation`,
+  `dalston:pii-redaction`, `dalston:audio-redaction`
 
 #### hardware (Optional)
 
@@ -330,14 +290,18 @@ The orchestrator adapts DAG shape based on selected engine capabilities:
 
 ```
 # faster-whisper (word_timestamps: false, includes_diarization: false)
-prepare → transcribe → align → diarize → merge
+prepare → transcribe → align
+prepare → diarize  (parallel branch when requested)
 
 # nemo/parakeet (word_timestamps: true, includes_diarization: false)
-prepare → transcribe → diarize → merge  (no align - native timestamps)
+prepare → transcribe
+prepare → diarize  (parallel branch when requested)
 
-# whisperx-full (word_timestamps: true, includes_diarization: true)
-prepare → transcribe → merge  (no align, no diarize - all native)
+# integrated engine (word_timestamps: true, includes_diarization: true)
+prepare → transcribe
 ```
+
+The orchestrator assembles the transcript after the terminal tasks complete.
 
 ### Ranking Criteria
 
@@ -527,9 +491,6 @@ The `loaded_model` field enables the console to show which model each engine ins
 # Scaffold a new transcription engine_id
 python -m dalston.tools.scaffold_engine my-engine --stage transcribe --gpu optional --no-dry-run
 
-# Scaffold a utility engine
-python -m dalston.tools.scaffold_engine my-merger --stage merge --gpu none --no-dry-run
-
 # List all valid stages
 python -m dalston.tools.scaffold_engine --list-stages
 ```
@@ -711,30 +672,6 @@ State-of-the-art speaker diarization.
 | `min_speakers` | int | `null` | Minimum speakers |
 | `max_speakers` | int | `null` | Maximum speakers |
 | `hf_token` | string | env | HuggingFace token |
-
----
-
-### llm-cleanup
-
-**Stage**: refine
-
-LLM-based transcript refinement.
-
-**Config**:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `provider` | string | `anthropic` | LLM provider |
-| `model` | string | `claude-sonnet-4-20250514` | Model name |
-| `tasks` | array | all | Which tasks to run |
-
-**Available Tasks**:
-
-- `fix_transcription_errors` - Correct obvious mistakes
-- `identify_speakers` - Name speakers from context
-- `improve_punctuation` - Fix punctuation and capitalization
-- `add_paragraphs` - Add paragraph breaks
-- `generate_summary` - Create content summary
 
 ---
 

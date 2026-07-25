@@ -297,7 +297,8 @@ def transcribe(
 
         dalston transcribe meeting.mp3 -o transcript.txt
 
-        dalston transcribe podcast.mp3 -f srt --speakers diarize -o podcast.srt
+        dalston transcribe podcast.mp3 --speakers diarize --no-wait --json | jq -r '.id'
+        # then: dalston export <job-id> -f srt -o podcast.srt
 
         dalston transcribe large.mp3 --no-wait --json
 

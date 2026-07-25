@@ -1,5 +1,11 @@
 # ElevenLabs STT API - Parity Gap Analysis
 
+> **Internal engineering analysis.** This file tracks gaps and proposed work;
+> it is not a current API reference or a promise of implemented behavior. See
+> the
+> [ElevenLabs compatibility guide](../../guides/41-realtime-elevenlabs-compatible.md)
+> and generated OpenAPI document for the supported surface.
+
 **Date**: 2026-03-08
 **Scope**: `POST /v1/speech-to-text`, `GET /v1/speech-to-text/transcripts/{id}`, `DELETE /v1/speech-to-text/transcripts/{id}`, `WS /v1/speech-to-text/realtime`, `POST /v1/single-use-token/{token_type}`
 **Companion milestone**: [M62: ElevenLabs Speech-to-Text API Parity](../../plan/milestones/M62-elevenlabs-api-parity.md)

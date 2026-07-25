@@ -1,5 +1,7 @@
 # Engine presets catalog — what to pick for your workload
 
+<!-- performance-data: estimate; source=engine.yaml planning metadata -->
+
 > Six engines. Each one is a different sweet spot on the
 > **accuracy / latency / VRAM / language coverage / price** tradeoff.
 > This page is the cheat sheet.
@@ -7,7 +9,8 @@
 The `dalston-aws engine up <preset>` command (and the GPU worker section of
 `launch`) takes one of six preset names. Each preset bundles an engine image,
 default model, and recommended environment overrides. The source of truth is
-`GPU_ENGINE_PRESETS` in [`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws#L81-L161).
+`GPU_ENGINE_PRESETS` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws).
 
 ---
 
@@ -41,7 +44,7 @@ block. **RTF = processing-time / audio-duration**, so lower is faster
   best of any preset on CPU, native streaming with word timestamps.
 - **Tradeoffs:** English-only with the default model. INT8 quantization for
   CPU mode — accuracy is slightly behind full-precision NeMo.
-- **Best AWS instance:** g4dn.xlarge spot (~$0.20/hr) or even a CPU `t3.large`.
+- **Typical AWS fit:** g4dn.xlarge or a CPU instance after local validation.
 
 ### `faster-whisper` — multilingual workhorse
 
@@ -146,21 +149,12 @@ More: [32-diarization-vs-transcription.md](32-diarization-vs-transcription.md).
 
 ---
 
-## Hourly costs (AWS, eu-west-2, indicative)
+## Cloud cost
 
-These come from the same numbers used in [51-aws-cost-estimator.md](51-aws-cost-estimator.md).
-
-| Preset | Min instance | On-demand $/hr | Spot $/hr | 1-hour podcast (spot) |
-|---|---|---|---|---|
-| `onnx` | g4dn.xlarge | $0.526 | ~$0.20 | ~$0.20 (or run on CPU for $0.05) |
-| `faster-whisper` | g4dn.xlarge | $0.526 | ~$0.20 | ~$0.20 |
-| `nemo` | g4dn.xlarge | $0.526 | ~$0.20 | RTF 0.0006 → finishes in seconds, ~$0.01 |
-| `hf-asr` | g4dn.xlarge | $0.526 | ~$0.20 | ~$0.20 |
-| `vllm-asr` | g6.xlarge | $1.05 | ~$0.34 | ~$0.34 |
-| `pyannote` | g4dn.xlarge | $0.526 | ~$0.20 | ~$0.20 |
-
-Spot pricing fluctuates — check `dalston-aws status` after launch for the
-locked-in price.
+Instance compatibility and minimum VRAM are useful for narrowing choices, but
+hourly and spot prices are volatile. Use the single dated snapshot in
+[51-aws-cost-estimator.md](51-aws-cost-estimator.md), then check the selected
+region/AZ immediately before launch.
 
 ---
 

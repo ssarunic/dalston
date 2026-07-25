@@ -110,6 +110,6 @@ All containers should show the same version. If they don't, rebuild
 the base image:
 
 ```bash
-docker build -f docker/Dockerfile.engine-base -t dalston/engine-base:latest .
+docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 docker compose build --no-cache <service>
 ```

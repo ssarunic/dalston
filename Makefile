@@ -6,7 +6,7 @@
 .PHONY: help dev dev-minimal dev-gpu dev-riva dev-observability stop logs logs-all ps \
         build-cpu build-gpu build-engine deploy-web \
         aws-start aws-stop aws-logs \
-        health clean clean-local validate test lint test-openai-sdk-live \
+        health clean clean-local validate docs-check test lint test-openai-sdk-live \
         test-elevenlabs-sdk-live test-e2e runtime-freshness runtime-freshness-required \
         sync-test-stack docker-gc-soft docker-gc-hard docker-gc-auto \
         install-hooks
@@ -22,7 +22,7 @@ help:
 	@echo ""
 	@echo "Local Development:"
 	@echo "  make dev             - Start full local stack (postgres, redis, minio, gateway, orchestrator, CPU engines)"
-	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + transcribe + align + merge)"
+	@echo "  make dev-minimal     - Start minimal stack (infra + gateway + orchestrator + prepare/transcribe/align)"
 	@echo "  make dev-gpu         - Start with GPU engines (layers docker-compose.gpu.yml)"
 	@echo "  make dev-riva        - Start with Riva NIM engines (requires NVIDIA GPU)"
 	@echo "  make dev-observability - Start with monitoring stack (jaeger, prometheus, grafana)"
@@ -58,6 +58,7 @@ help:
 	@echo "  make docker-gc-auto  - Docker GC with soft/hard auto escalation"
 	@echo "  make lint            - Run linters (ruff, mypy)"
 	@echo "  make validate        - Validate compose configurations"
+	@echo "  make docs-check      - Validate docs against OpenAPI, CLI, links, snippets, and generated config"
 	@echo "  make health          - Check service health"
 	@echo ""
 	@echo "Utilities:"
@@ -325,6 +326,12 @@ validate:
 	@echo "Checking log rotation and tmpfs on services..."
 	@docker compose config --format json 2>/dev/null | python3 -c "import json,sys;c=json.load(sys.stdin);skip={'minio-init'};svcs=[(n,s) for n,s in c.get('services',{}).items() if n not in skip and s.get('restart')];no_log=[n for n,s in svcs if 'max-size' not in (s.get('logging',{}).get('options',{}))];no_tmp=[n for n,s in svcs if s.get('environment',{}).get('DALSTON_ENGINE_ID') and not s.get('tmpfs')];[print(f'  WARN: {n} missing logging rotation (logging: *default-logging)') for n in sorted(no_log)];[print(f'  WARN: {n} missing tmpfs mount (tmpfs: /tmp:size=2g)') for n in sorted(no_tmp)];sys.exit(1) if no_log or no_tmp else None" || { echo "FAIL: fix warnings above in docker-compose.yml"; exit 1; }
 	@echo "All compose configurations valid"
+
+# Validate generated and executable user documentation
+docs-check:
+	$(PYTHON_TEST) scripts/generate_config_reference.py --check
+	$(PYTHON_TEST) scripts/check_docs.py
+	$(PYTHON_TEST) scripts/check_doc_snippets.py
 
 # Check service health
 health:

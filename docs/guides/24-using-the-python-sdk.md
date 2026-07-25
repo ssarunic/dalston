@@ -1,8 +1,8 @@
 # Using the Python SDK
 
-> Three classes do everything: `Dalston` for sync batch, `AsyncDalston` for
-> async batch, `AsyncRealtimeSession` for streaming. Plus webhook signature
-> helpers. That's the whole API surface.
+> Use `Dalston` or `AsyncDalston` for batch and control-plane operations.
+> Use `RealtimeSession` or `AsyncRealtimeSession` for streaming. Webhook
+> helpers verify and parse Standard Webhooks deliveries.
 
 ```bash
 pip install -e ./sdk
@@ -28,19 +28,27 @@ job = client.wait_for_completion(job.id)
 print(job.transcript.text)
 ```
 
-`transcribe()` returns immediately with a pending `Job`; `wait_for_completion()`
-polls until done (or raises if the job fails). All the knobs:
+In distributed mode, `transcribe()` normally returns a pending `Job`;
+`wait_for_completion()` polls until done (or raises if the job fails). A
+transient Lite request can complete inline. All the knobs:
 
 ```python
 job = client.transcribe(
     file="meeting.mp3",                    # or audio_url="https://..."
-    model="auto",                          # engine_id or "auto"
+    model="auto",                          # model registry ID or "auto"
     language="auto",
     vocabulary=["PostgreSQL", "Kubernetes"],
-    speaker_detection="diarize",           # "none", "diarize", "per-channel"
+    speaker_detection="diarize",           # "none", "diarize", "per_channel"
     num_speakers=2,                        # exact (overrides min/max)
+    min_speakers=2,
+    max_speakers=4,
     timestamps_granularity="word",         # "none", "segment", "word"
+    pii_detection=True,
+    pii_entity_types=["ssn", "credit_card_number"],
+    redact_pii_audio=True,
+    pii_redaction_mode="beep",
     retention=30,                          # days; 0 = transient, -1 = permanent
+    lite_profile="compliance",              # ignored by distributed mode
 )
 ```
 
@@ -53,6 +61,21 @@ for segment in job.transcript.segments:
     for word in segment.words or []:
         print(f"  {word.text}  {word.start:.2f}s")
 ```
+
+### Optional output semantics
+
+Treat language, timestamps, and confidence as capability-dependent:
+
+- `job.transcript.language_code` can be `None` or `und`.
+- `word.confidence` can be `None`.
+- `segments`, `words`, and `speakers` can be absent.
+- Requesting word timestamps does not guarantee them if the selected engine
+  lacks the capability.
+
+The native HTTP response also carries warnings and original-audio metadata that
+the current typed SDK does not expose on every dataclass. Use the REST response
+directly if those fields are required for policy decisions, and test the
+selected engine rather than assuming a field exists.
 
 ---
 
@@ -130,17 +153,43 @@ but blocking `connect()` / `send_audio()`. Use it from non-async code.
 
 ---
 
-## Job management
+## Batch and control-plane methods
 
 ```python
 client.list_jobs(status="completed", limit=50)
 job = client.get_job(job_id)
 client.cancel(job_id)
-client.get_job_artifacts(job_id)  # S3 references for raw outputs
+client.list_engines()
+client.list_models()
+client.get_model(model_id)
+client.get_realtime_status()
+client.create_session_token()
+client.list_realtime_sessions()
+client.get_realtime_session(session_id)
+client.delete_realtime_session(session_id)
 ```
 
-Full job deletion is available through the CLI (`dalston jobs delete JOB_ID`) or
-the REST API (`DELETE /v1/audio/transcriptions/{job_id}`).
+The sync and async clients expose matching methods:
+
+| Area | Methods |
+| --- | --- |
+| Jobs | `transcribe`, `get_job`, `list_jobs`, `cancel`, `wait_for_completion`, `export` |
+| Models | `list_models`, `get_model` |
+| Engines | `list_engines` |
+| Realtime control plane | `get_realtime_status`, `create_session_token`, `list_realtime_sessions`, `get_realtime_session`, `delete_realtime_session` |
+| Service | `health`, `close` |
+
+The package still defines `get_job_artifacts` and `get_session_artifacts`, but
+they target legacy `/v2` routes that the current gateway does not mount. Do not
+use them as supported control-plane operations until the routes or SDK are
+reconciled. Use the native job task-artifact endpoints instead.
+
+Model pull/remove/sync, webhook endpoint administration, audit queries, job
+rename/deletion, retained audio download, and task artifacts remain
+REST/console operations in the current SDK.
+
+Full job deletion is available through the REST API
+(`DELETE /v1/audio/transcriptions/{job_id}`) and the web console.
 
 ---
 
@@ -154,22 +203,29 @@ from dalston_sdk import (
     verify_webhook_signature,
     parse_webhook_payload,
     WebhookEventType,
+    WebhookVerificationError,
 )
 
 # In your HTTP handler:
 def webhook_handler(headers, body):
-    if not verify_webhook_signature(
-        body=body,
-        signature=headers["X-Dalston-Signature"],
-        secret="whsec_...",                     # from the console
-        timestamp=headers["X-Dalston-Timestamp"],
-        max_age=300,                            # reject replays > 5 min old
-    ):
+    try:
+        valid = verify_webhook_signature(
+            payload=body,
+            signature=headers["webhook-signature"],
+            msg_id=headers["webhook-id"],
+            timestamp=headers["webhook-timestamp"],
+            secret="whsec_...",                 # from the console
+            max_age=300,                        # reject replays > 5 min old
+        )
+    except WebhookVerificationError:
+        return 401, "invalid signature"
+    if not valid:
         return 401, "invalid signature"
 
     payload = parse_webhook_payload(body)
-    if payload.event == WebhookEventType.JOB_COMPLETED:
-        print(f"Job {payload.job_id} done — text: {payload.data.transcript.text}")
+    if payload.type == WebhookEventType.TRANSCRIPTION_COMPLETED:
+        print(f"Transcription {payload.transcription_id} completed")
+        print(payload.data)
     return 200, "ok"
 ```
 
@@ -185,7 +241,7 @@ app = FastAPI()
 
 @app.post("/webhooks/dalston")
 async def handle(payload: WebhookPayload = Depends(verify)):
-    print(payload.event, payload.job_id)
+    print(payload.type, payload.transcription_id)
 ```
 
 ---
@@ -198,7 +254,7 @@ async def handle(payload: WebhookPayload = Depends(verify)):
 job = client.transcribe("long.mp3")
 try:
     job = client.wait_for_completion(job.id, timeout=600)  # seconds
-except TimeoutError:
+except TimeoutException:
     client.cancel(job.id)
 ```
 
@@ -254,10 +310,11 @@ final = client.wait_for_completion("<the id you saved>")
 | `ServerError` | 5xx from the gateway |
 | `ConnectError` | Network failure |
 | `TimeoutException` | Request took too long |
-| `RealtimeError` | The server emitted an `error` frame on a streaming session |
+| `RealtimeException` | The server emitted an `error` frame on a streaming session |
 | `WebhookVerificationError` | Signature didn't verify |
 
-All inherit from `DalstonError`.
+The exception types above inherit from `DalstonError`. `RealtimeError` is the
+typed payload carried by a realtime error message, not an exception class.
 
 ---
 

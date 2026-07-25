@@ -217,7 +217,6 @@ Dalston uses the [Standard Webhooks](https://github.com/standard-webhooks/standa
 | `webhook-id` | Unique delivery ID (for deduplication) |
 | `webhook-timestamp` | Unix timestamp when sent |
 | `webhook-signature` | HMAC-SHA256 signature (`v1,{base64}`) |
-| `X-Dalston-Webhook-Id` | Same as `webhook-id` |
 
 ### Payload Structure
 
@@ -273,7 +272,7 @@ Verify signatures to ensure webhooks are from Dalston.
 ### Python (with SDK)
 
 ```python
-from dalston import verify_webhook_signature, WebhookVerificationError
+from dalston_sdk import verify_webhook_signature, WebhookVerificationError
 
 def handle_webhook(request):
     try:
@@ -286,47 +285,21 @@ def handle_webhook(request):
         )
     except WebhookVerificationError as e:
         return Response(status=401, body=str(e))
+    if not is_valid:
+        return Response(status=401, body="Invalid signature")
 
     # Process the webhook...
 ```
 
-### Python (manual)
-
-```python
-import base64
-import hashlib
-import hmac
-import time
-
-def verify_signature(payload: bytes, signature: str, msg_id: str,
-                     timestamp: str, secret: str, max_age: int = 300) -> bool:
-    # Check timestamp freshness
-    ts = int(timestamp)
-    if abs(time.time() - ts) > max_age:
-        return False
-
-    # Verify signature format
-    if not signature.startswith("v1,"):
-        return False
-
-    provided_sig = base64.b64decode(signature[3:])
-
-    # Standard Webhooks: sign "{msg_id}.{timestamp}.{body}"
-    signed_payload = f"{msg_id}.{timestamp}.{payload.decode()}"
-    expected = hmac.new(
-        secret.encode(),
-        signed_payload.encode(),
-        hashlib.sha256,
-    ).digest()
-
-    return hmac.compare_digest(expected, provided_sig)
-```
+For a manual implementation, including `whsec_` secret decoding and
+constant-time comparison, see
+[Webhook verification examples](../examples/webhook-verification.md).
 
 ### FastAPI Integration
 
 ```python
 from fastapi import FastAPI, Depends
-from dalston import fastapi_webhook_dependency, WebhookPayload, WebhookEventType
+from dalston_sdk import fastapi_webhook_dependency, WebhookPayload, WebhookEventType
 
 app = FastAPI()
 verify_webhook = fastapi_webhook_dependency("whsec_your_secret")
@@ -342,7 +315,7 @@ async def handle_webhook(payload: WebhookPayload = Depends(verify_webhook)):
 
 ```python
 from flask import Flask
-from dalston import flask_verify_webhook, WebhookPayload, WebhookEventType
+from dalston_sdk import flask_verify_webhook, WebhookPayload, WebhookEventType
 
 app = Flask(__name__)
 verify = flask_verify_webhook("whsec_your_secret")

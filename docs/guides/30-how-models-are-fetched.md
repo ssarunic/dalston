@@ -79,8 +79,7 @@ Take `nemo` as an example. The container starts and:
    through.
 6. Writes `.complete`. Loads the model into VRAM. Health flips to `ok`.
 
-Cold-start budgets per engine (verified from each `engine.yaml`
-`performance.warm_start_latency_ms`, plus actual download size):
+Catalog metadata gives rough download-size and warm-start planning values:
 
 | Engine | First-run download | Warm start (cache hit) |
 |---|---|---|
@@ -91,17 +90,16 @@ Cold-start budgets per engine (verified from each `engine.yaml`
 | `vllm-asr` (Voxtral Mini 3B) | ~6 GB | 5000 ms |
 | `hf-asr` (Whisper large-v3) | ~3 GB | 500 ms |
 
-> **Why warm start matters:** if your GPU worker gets reclaimed and the cache
-> survives (split mode), warm start brings the engine back in tens of
-> milliseconds to a few seconds. If the cache is gone (single-engine mode),
-> you pay the first-run download price every reclaim. This is a real cost
-> argument for split mode.
+These are metadata estimates, not performance guarantees. Network path, model
+revision, storage, framework initialization, hardware, and concurrent load can
+change cold and warm start times. Record hardware, engine/model revision, test
+date, and cache state with any benchmark.
 
 ---
 
 ## Where the cache lives on disk
 
-Each engine declares its mount in `engine.yaml`:
+Each engine declares a logical cache path in `engine.yaml`:
 
 | Engine | `model_cache` |
 |---|---|
@@ -111,7 +109,11 @@ Each engine declares its mount in `engine.yaml`:
 | `pyannote-4.0` | `/models` |
 | `hf-asr`, `hf-asr-align-pyannote`, `vllm-asr` | `/models/huggingface` |
 
-In `make dev`, these are Docker named volumes (one per service).
+In the current `docker-compose.yml`, engine cache paths are backed by the
+shared `model-cache` named volume mounted at `/models`. Framework-specific
+subdirectories keep files separate while allowing downloads to survive an
+individual engine-container replacement.
+
 In `dalston-aws` control-plane services, CPU-engine caches map under
 `/data/models` on the control plane's persistent EBS. Separate GPU workers map
 their engine caches to worker-local `/data/models`, which is lost when a spot
@@ -120,6 +122,21 @@ replacement instances.
 
 In single-engine mode (`engine up`), `/data` is on the worker's ephemeral
 EBS (deleted with the instance). Cache is lost on terminate. By design.
+
+### Automatic disk-cache eviction
+
+Runtime model managers share the engine SDK's disk-cache policy:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DALSTON_MODEL_CACHE_MAX_GB` | `0` | Maximum cache size; `0` disables size eviction |
+| `DALSTON_MODEL_CACHE_TTL_HOURS` | `0` | Maximum age since last access; `0` disables age eviction |
+| `DALSTON_MODEL_CACHE_SCAN_INTERVAL` | `600` | Seconds between scans |
+
+When both limits are disabled, the cache grows until an operator or storage
+lifecycle removes entries. Eviction skips active/in-use entries through the
+manager's lock/access tracking; still size the volume with headroom for model
+downloads and temporary files.
 
 ---
 

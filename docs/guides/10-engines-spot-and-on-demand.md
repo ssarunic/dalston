@@ -1,7 +1,9 @@
 # Engines on spot vs on-demand — the mental model
 
-> Rent a GPU only while you need it. Spot prices are roughly **65–70% cheaper**
-> than on-demand. A one-hour podcast on a g6.xlarge spot instance costs less
+<!-- performance-data: estimate; source=engine.yaml planning metadata -->
+
+> Rent a GPU only while you need it. Spot can be cheaper than on-demand, but
+> the discount and interruption rate vary. A short batch on a GPU can cost less
 > than a coffee. When you're done, `engine down` and AWS stops charging.
 
 This page explains **what** spot and on-demand actually mean inside Dalston,
@@ -22,8 +24,8 @@ take them back with **2 minutes' notice** when paying customers need that
 capacity. In Dalston's setup, spot instances cannot be stopped — only
 terminated. You restart by launching a new one. (Source:
 [`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws), the spot
-handling in `_stop_instance` raises `UnsupportedOperation` and falls through
-to terminate.)
+handling in `_stop_instance` catches AWS’s `UnsupportedOperation` response
+and terminates the one-time spot instance instead.)
 
 ---
 
@@ -45,7 +47,8 @@ default for `engine up`; on-demand is the default for the control plane in
 
 ## What `--spot` actually does
 
-When you launch with `--spot`, the script ([`infra/scripts/dalston-aws:1851`](../../infra/scripts/dalston-aws)):
+When you launch with `--spot`, `launch_instance()` in
+[`infra/scripts/dalston-aws`](../../infra/scripts/dalston-aws):
 
 1. Sorts the AZs in your region by **cheapest current spot price** and picks
    the cheapest one
@@ -144,24 +147,16 @@ Walkthrough: [21-control-plane-aws-deploy.md](21-control-plane-aws-deploy.md).
 
 ---
 
-## Cost intuition (not a quote)
+## Cost intuition
 
-Verified rough numbers from [`docs/guides/aws-deploy.md`](aws-deploy.md) and
-the AWS pricing pages:
+Split mode pins a small CPU control plane on demand so the API stays reachable
+and runs expensive GPU workers on spot only when useful. Actual savings depend
+on region, availability zone, interruption rate, utilization, and current
+prices.
 
-| Setup | On-demand | Spot |
-|---|---|---|
-| Control plane only (t3.large) | ~$60/mo | ~$20/mo |
-| Single GPU box (g4dn.xlarge) | ~$380/mo | ~$130/mo |
-| Single GPU box (g6.xlarge) | ~$760/mo | ~$250/mo |
-| **Split: t3.large on-demand + g6.xlarge spot** | — | **~$87/mo** ⭐ |
-| Single g5.xlarge on-demand 24/7 | ~$725/mo | — |
-
-The big unlock: split mode pins the small CPU box on-demand (so the API stays
-up) and runs the expensive GPU on spot. Same throughput per dollar as a single
-on-demand g5, at roughly **1/8th the cost**.
-
-Full breakdown: [51-aws-cost-estimator.md](51-aws-cost-estimator.md).
+Use the single dated price snapshot and calculation assumptions in
+[51-aws-cost-estimator.md](51-aws-cost-estimator.md). Do not copy its numbers
+into deployment guides.
 
 ---
 

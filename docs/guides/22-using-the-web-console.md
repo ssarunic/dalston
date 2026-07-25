@@ -28,9 +28,10 @@ activity feed of recent jobs, and a row of engine status pills.
 
 ### Queue Board — `/queue`
 
-Live view of the orchestrator's task queues. One column per stage
-(`prepare`, `transcribe`, `align`, `diarize`, `merge`). Tasks move
-left-to-right as they complete. Click a task to drill into its logs.
+Live view of orchestrator work, with grid, stage-board, and job-strips views.
+Stage columns are derived from current tasks, so optional stages are hidden
+when unused. Distributed jobs normally have no merge task. Click a task to
+inspect dependencies, request/response artifacts, timing, and retries.
 
 Use this when something is stuck — instantly see which stage is blocked.
 
@@ -42,8 +43,8 @@ for full detail:
 - **`/jobs/:jobId`** — JobDetail: input audio info, current status,
   timeline, transcript preview, exports (txt / json / srt / vtt),
   PII summary, retention countdown.
-- **`/jobs/:jobId/tasks/:taskId`** — TaskDetail: per-task input/output
-  artifacts, logs, retry button, timing breakdown.
+- **`/jobs/:jobId/tasks/:taskId`** — TaskDetail: dependencies, request/output
+  artifacts, retry count, and timing breakdown.
 
 ### New Job — `/jobs/new`
 
@@ -56,8 +57,8 @@ Useful for trying engine combos without writing code.
 ### Real-time Sessions — `/realtime`
 
 List of active and recent WebSocket sessions. Per-session detail at
-`/realtime/sessions/:sessionId` shows duration, language, model, transcript
-captured so far, VAD events.
+`/realtime/sessions/:sessionId` shows duration, language, model, segments,
+words, stored audio/transcript availability, and retention.
 
 ### Real-time Live — `/realtime/live`
 
@@ -71,25 +72,23 @@ speak. Uses the Dalston native WebSocket protocol with binary PCM frames.
 
 ### Engines — `/engines`
 
-Every engine the gateway knows about, with status, capacity, models loaded,
-RTF, and which stage(s) it serves. Filter by stage, mode (batch / realtime),
-or status.
+Every engine the gateway knows about, with status, capacity, loaded models,
+performance metadata, and capabilities. Filter by stage and status.
 
 ### Engine Detail — `/engines/:engineId`
 
-Per-engine timing, recent tasks processed, model load history,
-configuration parameters, link to docker container.
+Per-engine status, capabilities, capacity, loaded models, and registered
+worker instances.
 
 ### Infrastructure — `/infrastructure`
 
-The big-picture view: control plane services, Redis stream depth, Postgres
-status, S3 connectivity, GPU worker presence. The kind of page you bookmark
-when you're operating it.
+Registered infrastructure nodes and engines, including interface, status,
+capacity, GPU memory, and AWS/local placement.
 
 ### Models — `/models`
 
-Discoverable model catalog. Each engine reports the models it can load; this
-page aggregates them into one searchable list.
+Discoverable model catalog with pull, remove/purge, synchronization, and
+Hugging Face mapping workflows.
 
 ### API Keys — `/keys`
 
@@ -99,9 +98,9 @@ the full secret again after creation. Set scopes (`jobs:read`, `jobs:write`,
 
 ### Webhooks — `/webhooks`, `/webhooks/:endpointId`
 
-Configure webhook endpoints. Pick events (`job.completed`, `job.failed`,
-etc.), see delivery history, view signature secrets, replay failed
-deliveries.
+Configure webhook endpoints. Pick events (`transcription.completed`,
+`transcription.failed`, `transcription.cancelled`), see delivery history,
+rotate signing secrets, and retry failed deliveries.
 
 ### Audit Log — `/audit`
 

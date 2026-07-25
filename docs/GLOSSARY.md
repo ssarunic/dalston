@@ -1,78 +1,71 @@
 # Glossary
 
-Terminology used throughout Dalston documentation.
-
-## Core Concepts
+## Core concepts
 
 | Term | Definition |
 | --- | --- |
-| **Job** | A batch request to transcribe one audio file. Jobs are expanded into task DAGs by the Orchestrator. |
-| **Task** | An atomic unit of work in the batch pipeline. Each task runs on a specific engine and may depend on other tasks. |
-| **DAG** | Directed Acyclic Graph — the dependency structure of tasks within a job. Tasks execute in topological order. |
-| **Engine** | A containerized processor that performs a specific pipeline stage. Can be batch (stream-based) or real-time (WebSocket-based). |
-| **Stage** | A processing category in the pipeline: `prepare`, `transcribe`, `align`, `diarize`, `detect`, `refine`, `merge`. |
+| **Job** | A batch transcription request for one audio input. The orchestrator expands it into a task DAG. |
+| **Task** | One scheduled unit of pipeline work assigned to an engine. |
+| **DAG** | Directed acyclic graph describing task dependencies within a job. |
+| **Stage** | A processing category: `prepare`, `transcribe`, `align`, `diarize`, `pii_detect`, or `audio_redact`. |
+| **Engine** | A registered runtime that implements one or more batch/realtime capabilities. Unified engines may serve both interfaces with shared model state. |
+| **Artifact** | Stored or materialized input/output such as audio, a task response, transcript, redacted audio, or export. |
+| **Tenant** | Isolation boundary for jobs, API keys, sessions, webhooks, and artifacts. |
 
-## Batch Processing
-
-| Term | Definition |
-| --- | --- |
-| **Orchestrator** | The service that expands jobs into task DAGs, schedules tasks to engine streams, and manages job lifecycle. |
-| **Work Queue** | A Redis Stream + consumer-group backlog where tasks wait for engine workers. Each engine type has its own stream (`dalston:stream:{engine_id}`). |
-| **Multi-stage Engine** | An engine that handles multiple pipeline stages in one pass (e.g., WhisperX doing transcribe + align + diarize). |
-
-## Real-time Processing
+## Batch processing
 
 | Term | Definition |
 | --- | --- |
-| **Session** | A real-time transcription connection. Each WebSocket connection creates one session. |
-| **Worker** | A real-time engine instance that handles streaming transcription sessions. Workers register with the Session Router. |
-| **Session Router** | The service that manages the real-time worker pool, allocates sessions to workers, and monitors worker health. |
-| **VAD** | Voice Activity Detection — identifies speech vs. silence in audio streams. Used to trigger utterance endpoints. |
-| **Partial Transcript** | Interim transcription results that may change as more audio arrives. |
-| **Final Transcript** | Committed transcription for a completed utterance (after VAD endpoint or manual commit). |
+| **Orchestrator** | Consumes job events, selects engines, constructs/schedules task DAGs, assembles transcripts, and manages lifecycle work. |
+| **Engine stream** | Redis Stream used to dispatch distributed tasks to a compatible engine instance. |
+| **Transcript assembly** | Orchestrator logic that combines transcription/alignment results with speaker turns. It is not a distributed merge task. |
+| **Per-channel** | Speaker mode where each input channel is transcribed independently and treated as a speaker. |
+| **Post-processing** | Optional `pii_detect` and `audio_redact` work that runs after core transcript assembly. |
 
-## Hybrid Mode
-
-| Term | Definition |
-| --- | --- |
-| **Hybrid Mode** | A processing mode that combines real-time transcription with batch enhancement. Provides immediate results, then improves quality with speaker diarization and LLM cleanup. |
-| **Enhancement Job** | A batch job created from a real-time session's recorded audio. Runs additional processing stages not available in real-time. |
-
-## Storage
+## Realtime processing
 
 | Term | Definition |
 | --- | --- |
-| **Artifact** | Any file produced during processing: audio files, intermediate outputs, final transcripts, exports. |
-| **Tenant** | An isolated namespace for multi-tenancy. Jobs, API keys, and artifacts are scoped to tenants. |
+| **Session** | One realtime transcription connection and its lifecycle record where the protocol supports persistence. |
+| **Realtime worker** | An engine instance with available realtime capacity. |
+| **Session coordinator** | Orchestrator component that selects workers, allocates/releases capacity, and reconciles realtime sessions. Older documents called this the Session Router. |
+| **VAD** | Voice activity detection, used to identify speech boundaries. |
+| **Partial transcript** | Interim text that may change. |
+| **Final transcript** | Committed text for an utterance. |
+| **Resume linkage** | Native `resume_session_id` lineage between sessions. It does not currently restore transcript/decoder context. |
 
-## API
+Realtime completion does not automatically create a batch enhancement job.
+Applications that want post-session diarization must retain the recording and
+submit a separate batch request.
+
+## APIs
 
 | Term | Definition |
 | --- | --- |
-| **Dalston Native API** | Dalston's own REST and WebSocket endpoints (`/v1/audio/transcriptions/*`). |
-| **ElevenLabs Compatible API** | Drop-in replacement endpoints matching ElevenLabs conventions (`/v1/speech-to-text/*`). |
-| **Webhook** | An HTTP callback triggered on job completion or failure. |
+| **Dalston native API** | Native REST and WebSocket endpoints under `/v1/audio/transcriptions`. |
+| **ElevenLabs-compatible API** | Compatibility endpoints under `/v1/speech-to-text`. |
+| **OpenAI-compatible API** | OpenAI audio and realtime compatibility endpoints. |
+| **Webhook** | Standard Webhooks-formatted callback for transcription completion, failure, or cancellation. |
 
 ## Observability
 
 | Term | Definition |
 | --- | --- |
-| **Structured Logging** | Emitting log entries as machine-parseable data (JSON) with consistent fields, rather than free-form text strings. Enables indexing and querying in log aggregators. |
-| **Correlation ID** | A unique identifier (`request_id`) generated at the system boundary (gateway) and propagated through all downstream services, linking all log entries and traces for a single user request. |
-| **Distributed Tracing** | Recording the path of a request across multiple services as a tree of spans. Enables latency analysis and dependency visualization. Implemented via OpenTelemetry. |
-| **Span** | A single unit of work in a distributed trace. Has a start time, duration, parent span, and attributes. Examples: an HTTP request, a task processing call, a database query. |
-| **Trace** | A complete tree of spans representing the lifecycle of a request across all services. A batch transcription trace spans gateway, orchestrator, and engine spans. |
-| **Context Propagation** | Passing trace context and correlation IDs across service boundaries. In Dalston, propagated via Redis task metadata (batch) and WebSocket headers (real-time). |
-| **Metrics** | Numerical measurements of system behavior over time: counters (total requests), histograms (latency distribution), gauges (queue depth). Collected by Prometheus. |
+| **Correlation ID** | Request identifier propagated across service boundaries. |
+| **Span** | One timed unit in an OpenTelemetry trace. |
+| **Trace** | Related spans representing a request/job lifecycle. |
+| **Metric** | Counter, histogram, or gauge collected for operational analysis. |
 
-## Pipeline Stages
+## Pipeline stages
 
 | Stage | Purpose |
 | --- | --- |
-| `prepare` | Convert audio to standard format (16kHz, 16-bit WAV). Split channels if needed. |
-| `transcribe` | Convert speech to text. Produces segments with timestamps. |
-| `align` | Refine word-level timestamps using forced alignment. |
-| `diarize` | Identify and label speakers in the audio. |
-| `detect` | Detect emotions, audio events (laughter, applause), or other metadata. |
-| `refine` | LLM-based cleanup: error correction, formatting, speaker name inference. |
-| `merge` | Combine outputs from all stages into the final transcript. |
+| `prepare` | Probe and normalize audio; optionally split channels. |
+| `transcribe` | Produce text and timed segments, optionally words. |
+| `align` | Refine segment timing to word timing when the transcriber lacks it. |
+| `diarize` | Produce speaker turns. Runs from prepared audio in parallel with transcription/alignment. |
+| `pii_detect` | Detect configured PII entities in the assembled transcript. |
+| `audio_redact` | Produce silenced or beeped audio from timed PII entities. |
+
+Legacy merge/refine contracts may remain in compatibility code, but they are
+not stages in the current distributed DAG.

@@ -52,7 +52,10 @@ We use [CLA Assistant](https://cla-assistant.io/), a free GitHub integration:
 - Original copyright remains with you
 - Dalston Authors may relicense your contribution under a different license in the future
 
-Full CLA text: [docs/legal/CLA.md](../../legal/CLA.md)
+The repository does not currently include a separate CLA text. Until one is
+added and linked here, the Apache 2.0 license and the contribution process in
+the repository are the only checked-in terms; do not ask contributors to sign
+a nonexistent document.
 
 ### Alternative: Developer Certificate of Origin (DCO)
 

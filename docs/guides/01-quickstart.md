@@ -1,9 +1,9 @@
 # Quickstart — your first transcript in 5 minutes
 
 > Self-host an ElevenLabs- and OpenAI-compatible speech-to-text API.
-> **$0** on your laptop. **~$0.20/hr** on a rented spot GPU when you need one.
-> **~$87/month** all-in for a 24/7 service. You own the models, the cache,
-> and the bill.
+> Run on your laptop or your own cloud account. You own the models, cache, and
+> bill. See the dated [AWS cost estimator](51-aws-cost-estimator.md) instead of
+> relying on a copied headline price.
 
 This page gets you from zero to a finished transcript through three different
 front doors. Pick the one that matches how you already work — they all hit the
@@ -54,11 +54,10 @@ docker compose logs gateway | sed -n 's/.*API Key: //p' | tail -1
 export DALSTON_API_KEY=dk_...
 ```
 
-> **Why CPU?** Your laptop probably doesn't have an NVIDIA GPU. The CPU stack
-> uses faster-whisper at RTF 0.4 — a 1-hour podcast finishes in ~24 minutes
-> on a modern CPU. On a GPU, faster-whisper at RTF 0.03 finishes the same hour
-> in ~108 seconds (~13× faster); NeMo can be much faster for English. See
-> [12-engine-presets-catalog.md](12-engine-presets-catalog.md).
+> **Why CPU?** Your laptop probably does not have an NVIDIA GPU. The CPU stack
+> favors compatibility over throughput. See
+> [12-engine-presets-catalog.md](12-engine-presets-catalog.md) and measure the
+> selected model on your hardware before estimating completion time.
 
 ---
 
@@ -70,19 +69,41 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F file=@meeting.mp3 \
   -F model=auto \
   -F language=auto
-# → { "id": "job_abc123", "status": "pending", ... }
+# → { "id": "550e8400-e29b-41d4-a716-446655440000", "status": "pending", ... }
 ```
 
-Poll until done (a 5-minute audio file takes **~2 minutes** of CPU model time
-at RTF 0.4 — a 1-hour file takes **~24 minutes**):
+Poll until done:
 
 ```bash
-curl http://localhost:8000/v1/audio/transcriptions/job_abc123 \
+curl http://localhost:8000/v1/audio/transcriptions/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer $DALSTON_API_KEY"
-# → { "status": "completed", "transcript": { "text": "..." } }
+# → { "status": "completed", "text": "...", "segments": [...], ... }
 ```
 
 That's it. Same shape as ElevenLabs / OpenAI; drop-in friendly.
+
+---
+
+## Read results defensively
+
+Model capabilities differ, so optional result fields are not universal:
+
+- `language_code` can be `und` and language confidence can be `null` when
+  detection is inconclusive.
+- Segment/word confidence can be `null`.
+- Asking for word timestamps does not manufacture them; an engine without that
+  capability returns the timing it has and a warning.
+- Warnings can also report low speech coverage. The optional
+  `DALSTON_PREPARE_SPEECH_REGIONS=1` diagnostic adds speech-region analysis; it
+  is off by default.
+- Audio metadata describes the original upload even when the prepare stage
+  creates normalized mono/16 kHz working audio.
+
+Pipeline warnings live in the transcript metadata, which is returned by the
+JSON export (`GET /v1/audio/transcriptions/{id}/export/json` or
+`dalston export <id> -f json`) — the polled job response does not carry a
+`warnings` field. Check them and test the selected model before making word
+timing or confidence mandatory in an application.
 
 ---
 
@@ -135,15 +156,20 @@ dalston transcribe meeting.mp3
 Common knobs:
 
 ```bash
-dalston transcribe meeting.mp3 --speakers diarize --format srt -o out.srt
+JOB_ID=$(dalston transcribe meeting.mp3 --speakers diarize --no-wait --json | jq -r '.id')
+dalston jobs wait "$JOB_ID"
+dalston export "$JOB_ID" --format srt -o out.srt
 dalston transcribe meeting.mp3 --model faster-whisper --language en --show-words
 dalston listen   # real-time microphone capture
 dalston status   # health check
 dalston jobs list
 ```
 
-The CLI reads `DALSTON_SERVER` and `DALSTON_API_KEY` from the env, or
-`~/.dalston/config.yaml`. See [23-using-the-cli.md](23-using-the-cli.md).
+The CLI reads `DALSTON_SERVER` and `DALSTON_API_KEY` from the environment or
+`~/.dalston/config.yaml`. Installing `dalston-cli` gives you the client; its
+automatic localhost bootstrap additionally needs the Dalston backend
+dependencies. In this quickstart, `make dev` already provides the server. See
+[23-using-the-cli.md](23-using-the-cli.md).
 
 ---
 

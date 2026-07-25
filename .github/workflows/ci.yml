@@ -98,6 +98,25 @@ jobs:
       - name: Validate catalog-compose mapping
         run: python scripts/validate_catalog_compose.py
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install documentation runtime
+        run: |
+          uv venv
+          uv pip install -e ".[gateway,orchestrator]" -e ./sdk -e ./cli
+
+      - name: Check generated references and documented surfaces
+        run: uv run --no-sync make docs-check
+
   test:
     runs-on: ubuntu-latest
     services:

@@ -7,7 +7,8 @@ M31/M36: Uses capability-driven engine selection. The selector resolves
 model IDs (e.g., "parakeet-tdt-1.1b") to engine_id + loaded_model_id.
 
 Mono pipeline (non-per-channel):
-    prepare → transcribe → [align] → [diarize]
+    prepare ──→ transcribe → [align]
+       └──────→ [diarize]
 
 Per-channel pipeline:
     prepare (split_channels=true)
@@ -124,7 +125,8 @@ async def build_task_dag(
         prepare → transcribe → [align]
 
     Mode: diarize
-        prepare → transcribe → [align] → diarize
+        prepare ──→ transcribe → [align]
+           └──────→ diarize
 
     Mode: per_channel (stereo audio)
         prepare ─┬→ transcribe_ch0 → [align_ch0]
@@ -235,11 +237,12 @@ def _build_dag_with_engines(
     task graph with capability-driven engine selection.
 
     Mono pipeline shape:
-        prepare → transcribe → [align] → [diarize]
+        prepare ──→ transcribe → [align]
+           └──────→ [diarize]
 
-    Diarize runs sequentially after transcribe/align (depends on transcribe
-    or align, whichever is last). The orchestrator assembles transcript.json
-    on job completion via _assemble_linear_transcript.
+    Diarize depends only on prepare and runs in parallel with
+    transcribe/align. The orchestrator assembles transcript.json on job
+    completion via _assemble_linear_transcript.
 
     Per-channel pipelines (speaker_detection="per_channel") are handled by
     _build_per_channel_dag_with_engines (no merge stage).

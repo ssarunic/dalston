@@ -56,7 +56,9 @@ Auth supports both:
 | `vad.speech_end` | `timestamp` |
 | `transcript.partial` | `text`, `start`, `end` (interim, may change) |
 | `transcript.final` | `text`, `start`, `end`, `confidence`, `words` (final) |
-| `session.end` | `total_duration`, `total_speech_duration`, `transcript`, `segments` |
+| `session.end` | `total_audio_seconds`, `total_speech_duration`, `transcript`, `segments`, optional storage URIs |
+| `warning` | Processing-lag details and thresholds |
+| `session.terminated` | Termination reason, recoverability, and optional recovery hint |
 | `error` | `code`, `message`, `recoverable` |
 
 ---
@@ -205,8 +207,10 @@ ws.onmessage = (event) => {
 ## Resume / continuation
 
 Add `resume_session_id=<previous_session_id>` to the URL when reconnecting.
-The server links the new session to the old one and preserves transcript
-context. Great for clients that drop and reconnect (mobile, flaky networks).
+The server links the new session record to the old one and reports
+`resumed_from` in `session.begin`. It does not currently replay transcript
+state or restore decoder context; the client must preserve any text it already
+received.
 
 ---
 
@@ -218,18 +222,19 @@ context. Great for clients that drop and reconnect (mobile, flaky networks).
 | `interim_results` | true | Disable if you only care about final transcripts |
 | `word_timestamps` | false | Set true for word-by-word display; engine must support it |
 | `vocabulary` | none | Boost domain-specific terms (max 100, 50 chars each) |
-| `store_audio` | false (env-default in SDK: true) | Save to S3 for post-processing / batch enrichment |
-| `store_transcript` | false (env-default in SDK: true) | Auto-create a Job record for the session |
-| `retention` | server default | Override retention for stored data |
-| `resume_session_id` | none | Reconnect after disconnect |
+| `retention` | server default | `0` transient; non-zero permits session audio/transcript storage |
+| `resume_session_id` | none | Link the new session to an earlier session |
+| `pii_detection` | false | Detect PII in a stored transcript |
+| `redact_pii_audio` | false | Produce redacted audio; requires PII and non-zero retention |
 
 ---
 
 ## Comparing to ElevenLabs/OpenAI compat layers
 
-This protocol is **30%+ more efficient** than the JSON-base64 protocols in
-bytes-on-the-wire. It also gives you VAD events directly (`vad.speech_*`),
-typed errors with `recoverable`, and resume-by-ID.
+Raw binary audio avoids base64's approximately one-third payload expansion.
+Total protocol savings depend on chunk size and message overhead. Native
+messages also expose VAD events (`vad.speech_*`), processing-lag warnings,
+typed errors, and session lineage.
 
 The trade is that it's Dalston-specific — no existing client SDK speaks it
 (other than this repo's). If you have ElevenLabs or OpenAI client code,
