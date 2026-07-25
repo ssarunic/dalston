@@ -11,4 +11,4 @@ soundfile>=0.13.1
 transformers>=5.9.0
 
 # Audio and numerical processing
-numpy>=2.4.4
+numpy>=2.4.6
