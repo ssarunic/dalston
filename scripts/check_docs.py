@@ -9,7 +9,6 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-import click
 from typer.main import get_command
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +152,17 @@ def check_api_paths(files: Iterable[Path]) -> list[str]:
     return errors
 
 
+def _option_names(command: object) -> set[str]:
+    # typer >= 0.26 vendors click (typer._click), so typer-built parameters
+    # are not instances of the installed click's Option; duck-type instead.
+    return {
+        option
+        for parameter in getattr(command, "params", [])
+        if getattr(parameter, "param_type_name", None) == "option"
+        for option in (*parameter.opts, *parameter.secondary_opts)
+    }
+
+
 def cli_tree() -> tuple[
     set[str],
     dict[str, set[str]],
@@ -161,26 +171,18 @@ def cli_tree() -> tuple[
     from dalston_cli.main import app
 
     root = get_command(app)
-    assert isinstance(root, click.Group)
-    roots = set(root.commands)
+    root_commands = getattr(root, "commands", None)
+    assert root_commands is not None, "CLI root is not a command group"
+    roots = set(root_commands)
     groups: dict[str, set[str]] = {}
     options: dict[tuple[str, ...], set[str]] = {}
-    for name, command in root.commands.items():
-        options[(name,)] = {
-            option
-            for parameter in command.params
-            if isinstance(parameter, click.Option)
-            for option in (*parameter.opts, *parameter.secondary_opts)
-        }
-        if isinstance(command, click.Group):
-            groups[name] = set(command.commands)
-            for child_name, child in command.commands.items():
-                options[(name, child_name)] = {
-                    option
-                    for parameter in child.params
-                    if isinstance(parameter, click.Option)
-                    for option in (*parameter.opts, *parameter.secondary_opts)
-                }
+    for name, command in root_commands.items():
+        options[(name,)] = _option_names(command)
+        subcommands = getattr(command, "commands", None)
+        if subcommands is not None:
+            groups[name] = set(subcommands)
+            for child_name, child in subcommands.items():
+                options[(name, child_name)] = _option_names(child)
     return roots, groups, options
 
 
