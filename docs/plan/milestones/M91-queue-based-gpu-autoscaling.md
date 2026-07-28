@@ -6,7 +6,7 @@
 | **Duration**       | 5–8 days                                                     |
 | **Dependencies**   | M80 (Engine Control Plane), M64 (Registry Unification), M87 (Queue Board) |
 | **Deliverable**    | `dalston-aws autoscale` control loop (systemd timer on control plane), non-interactive spot launch with GPU-type fallback, tag-based stateless fleet discovery, GPU-worker dead-man switch, on-demand engine acceptance in `engine_selector`, stale-task watchdog, dry-run mode, phased ops runbook |
-| **Status**         | Not Started                                                  |
+| **Status**         | Implemented — pending live dry-run validation                |
 
 ## User Story
 

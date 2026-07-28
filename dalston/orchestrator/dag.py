@@ -222,9 +222,14 @@ async def build_task_dag(
         # wait timeout (task_stale_timeout_s) instead of the default, so a
         # cold spot-worker boot (3-8 min) doesn't fail the job. Stored in
         # Task.config (JSON column) so the fact survives DB round-trips.
-        on_demand_stages = {stage for stage, sel in selections.items() if sel.on_demand}
+        # Matched by engine_id, not stage: per-channel tasks carry suffixed
+        # stage names (transcribe_ch0) that would never match the abstract
+        # selection stages.
+        on_demand_engine_ids = {
+            sel.engine_id for sel in selections.values() if sel.on_demand
+        }
         for task in tasks:
-            if task.stage in on_demand_stages:
+            if task.engine_id in on_demand_engine_ids:
                 task.config["_on_demand_wait"] = True
         dalston.telemetry.set_span_attribute("dalston.dag.task_count", len(tasks))
         return tasks

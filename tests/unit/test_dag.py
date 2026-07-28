@@ -376,3 +376,86 @@ class TestBuildTaskDagNemo:
         assert transcribe_task.engine_id == "nemo"
         # loaded_model_id tells the engine which specific model to load
         assert transcribe_task.config["loaded_model_id"] == "nvidia/parakeet-tdt-1.1b"
+
+
+class TestOnDemandWaitStamping:
+    """M91: _on_demand_wait must reach every task of an on-demand engine,
+    including per-channel tasks whose stage names carry _chN suffixes."""
+
+    @staticmethod
+    def _selection(engine_id: str, stage: str, on_demand: bool):
+        from dalston.engine_sdk.types import EngineCapabilities
+        from dalston.orchestrator.engine_selector import EngineSelectionResult
+
+        return EngineSelectionResult(
+            engine_id=engine_id,
+            capabilities=EngineCapabilities(
+                engine_id=engine_id, version="1.0.0", stages=[stage]
+            ),
+            selection_reason="test",
+            on_demand=on_demand,
+        )
+
+    @pytest.mark.asyncio
+    async def test_per_channel_tasks_get_on_demand_flag(self):
+        from unittest.mock import AsyncMock, patch
+
+        from dalston.orchestrator.dag import build_task_dag
+        from dalston.orchestrator.engine_selector import PipelineEngineSelection
+
+        parameters = {"speaker_detection": "per_channel", "num_channels": 2}
+        selection = PipelineEngineSelection(
+            stages={
+                "prepare": self._selection("audio-prepare", "prepare", False),
+                "transcribe": self._selection("nemo", "transcribe", True),
+            },
+            effective_parameters=parameters,
+        )
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_pipeline_engines",
+            new_callable=AsyncMock,
+            return_value=selection,
+        ):
+            tasks = await build_task_dag(
+                uuid4(), "s3://bucket/audio.wav", parameters, None, None
+            )
+
+        transcribe_tasks = [t for t in tasks if t.stage.startswith("transcribe")]
+        assert transcribe_tasks, "expected per-channel transcribe tasks"
+        assert all(t.stage.startswith("transcribe_ch") for t in transcribe_tasks)
+        for t in transcribe_tasks:
+            assert t.config.get("_on_demand_wait") is True
+        prepare_task = next(t for t in tasks if t.stage == "prepare")
+        assert "_on_demand_wait" not in prepare_task.config
+
+    @pytest.mark.asyncio
+    async def test_mono_tasks_get_on_demand_flag_only_for_flagged_engine(self):
+        from unittest.mock import AsyncMock, patch
+
+        from dalston.orchestrator.dag import build_task_dag
+        from dalston.orchestrator.engine_selector import PipelineEngineSelection
+
+        parameters = {"speaker_detection": "diarize"}
+        selection = PipelineEngineSelection(
+            stages={
+                "prepare": self._selection("audio-prepare", "prepare", False),
+                "transcribe": self._selection("nemo", "transcribe", True),
+                "diarize": self._selection("pyannote-4.0", "diarize", True),
+            },
+            effective_parameters=parameters,
+        )
+
+        with patch(
+            "dalston.orchestrator.engine_selector.select_pipeline_engines",
+            new_callable=AsyncMock,
+            return_value=selection,
+        ):
+            tasks = await build_task_dag(
+                uuid4(), "s3://bucket/audio.wav", parameters, None, None
+            )
+
+        by_stage = {t.stage: t for t in tasks}
+        assert by_stage["transcribe"].config.get("_on_demand_wait") is True
+        assert by_stage["diarize"].config.get("_on_demand_wait") is True
+        assert "_on_demand_wait" not in by_stage["prepare"].config

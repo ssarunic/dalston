@@ -4,18 +4,24 @@
 Usage:
     dalston-aws setup -t TEMPLATE [--region R]     # provision infra (S3, IAM, SG)
     dalston-aws launch [control-plane|gpu]          # launch instances
+    dalston-aws launch control-plane --autoscale    # + M91 GPU autoscaler timer
     dalston-aws terminate [control-plane|gpu]       # terminate instances
     dalston-aws up / down                           # start/stop without terminating
     dalston-aws patch                               # trigger on-demand OS patching
+    dalston-aws autoscale --once [--dry-run]        # one M91 scaling tick (runs on CP)
+    dalston-aws autoscale --provision               # retrofit autoscaler onto running CP
     dalston-aws status / ssh [main|gpu] / teardown
 
 Templates:
     YAML files in infra/templates/ define instance types, spot preferences,
-    and compose profiles. Presets: cpu, split, gpu.
+    and compose profiles. Presets: cpu, split, gpu. The M91 autoscale policy
+    lives at infra/templates/autoscale-policy.yaml.
 
 Prerequisites:
     - AWS credentials configured (boto3 must be able to call sts:GetCallerIdentity)
     - pip install boto3 pyyaml
+    - pip install redis (only for the `autoscale` tick command; installed on the
+      control plane automatically by --autoscale/--provision)
 """
 
 from __future__ import annotations
@@ -2554,6 +2560,10 @@ class SpotCapacityError(RuntimeError):
     """No configured GPU type has spot capacity in any AZ right now."""
 
 
+class LaunchLockHeldError(RuntimeError):
+    """Another dalston-aws launch holds the flock single-flight lock."""
+
+
 def shape_tag_value(engines: list[str]) -> str:
     """Canonical order-independent shape label, e.g. 'nemo+pyannote'."""
     return "+".join(sorted(engines))
@@ -3043,7 +3053,7 @@ def _apply_decision(
         except SpotCapacityError as e:
             audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
             return f"no spot capacity: {e}"
-        except OSError:
+        except LaunchLockHeldError:
             return "launch lock held (manual launch in progress?); skipping tick"
     if action == ScaleAction.TERMINATE:
         # Newest first (older workers have warm model caches); only
@@ -3673,15 +3683,18 @@ def cmd_launch(args: argparse.Namespace) -> None:
     if target in ("gpu", None):
         if tmpl.gpu_worker:
             engines = args.engines.split(",") if args.engines else None
-            with _launch_lock():
-                _launch_gpu(
-                    st,
-                    tmpl,
-                    spot=spot_override,
-                    gpu_type=args.gpu_type,
-                    engines=engines,
-                    region=args.region,
-                )
+            try:
+                with _launch_lock():
+                    _launch_gpu(
+                        st,
+                        tmpl,
+                        spot=spot_override,
+                        gpu_type=args.gpu_type,
+                        engines=engines,
+                        region=args.region,
+                    )
+            except LaunchLockHeldError as e:
+                die(str(e))
         elif target == "gpu":
             die("Template has no gpu_worker config.")
 
@@ -4142,10 +4155,12 @@ def _launch_lock() -> Any:
         try:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            die(
+            # Raise (don't die()) so the autoscaler can skip the tick
+            # gracefully; interactive callers convert this to die().
+            raise LaunchLockHeldError(
                 f"Another dalston-aws launch is in progress (lock at {lock_path}). "
                 f"Wait for it to finish, or remove the lock file if stale."
-            )
+            ) from None
         try:
             yield
         finally:
