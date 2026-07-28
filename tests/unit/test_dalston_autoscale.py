@@ -287,3 +287,17 @@ class TestBootTimeoutValidation:
                     ]
                 }
             )
+
+    def test_negative_drain_wait_rejected(self):
+        with pytest.raises(PolicyError, match="drain_wait_s"):
+            parse_policy(
+                {
+                    "shapes": [
+                        {
+                            "engines": ["nemo"],
+                            "stream_engine_ids": ["nemo"],
+                            "drain_wait_s": -1,
+                        }
+                    ]
+                }
+            )
