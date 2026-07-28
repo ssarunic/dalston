@@ -89,6 +89,16 @@ def _make_engine_hash(
     }
 
 
+def _async_iter(items: list[str]):
+    """Async generator over items, mimicking redis.scan_iter."""
+
+    async def gen():
+        for item in items:
+            yield item
+
+    return gen()
+
+
 def _mock_principal():
     """Create a mock principal."""
     return MagicMock()
@@ -106,6 +116,10 @@ class TestGetNodes:
 
     async def _call_endpoint(self, redis: AsyncMock) -> NodesResponse:
         """Call get_nodes with mocked dependencies."""
+        # scan_iter (M91.7 pending-shadow merge) must be an async iterator;
+        # default to empty unless the test configured it explicitly.
+        if isinstance(redis.scan_iter, AsyncMock):
+            redis.scan_iter = MagicMock(return_value=_async_iter([]))
         principal = _mock_principal()
         with patch(
             "dalston.gateway.api.console.get_security_manager",
@@ -359,3 +373,99 @@ class TestGetNodes:
 
         assert result.nodes[0].gpu_memory_total_gb == 0.0
         assert result.nodes[0].gpu_memory_used_gb == 0.0
+
+
+@pytest.mark.asyncio
+class TestBootingShadowNodes:
+    """M91.7: autoscaler-published pending records merge as booting shadows."""
+
+    PENDING_KEY = "dalston:autoscale:pending:i-0abc"
+
+    def _pending_hash(self, instance_id: str = "i-0abc") -> dict[str, str]:
+        return {
+            "instance_id": instance_id,
+            "shape": "nemo+pyannote",
+            "gpu_type": "g4dn.xlarge",
+            "managed_by": "autoscaler",
+            "launch_time": datetime.now(UTC).isoformat(),
+            "boot_timeout_s": "1800",
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
+    async def _call(self, redis: AsyncMock) -> NodesResponse:
+        with patch(
+            "dalston.gateway.api.console.get_security_manager",
+            return_value=MagicMock(require_permission=MagicMock()),
+        ):
+            return await get_nodes(principal=MagicMock(), redis=redis)
+
+    async def test_pending_record_renders_booting_shadow(self):
+        redis = AsyncMock()
+        redis.smembers = AsyncMock(return_value=set())
+        redis.scan_iter = MagicMock(return_value=_async_iter([self.PENDING_KEY]))
+        redis.hgetall = AsyncMock(return_value=self._pending_hash())
+
+        result = await self._call(redis)
+
+        assert len(result.nodes) == 1
+        shadow = result.nodes[0]
+        assert shadow.state == "booting"
+        assert shadow.node_id == "i-0abc"
+        assert shadow.aws_instance_type == "g4dn.xlarge"
+        assert shadow.shape == "nemo+pyannote"
+        assert shadow.managed_by == "autoscaler"
+        assert shadow.boot_timeout_s == 1800
+        assert shadow.booting_since is not None
+        assert shadow.engines == []
+
+    async def test_shadow_dropped_when_node_is_live(self):
+        """A worker that registered between ticks shows only as a live node."""
+        engine_hash = _make_engine_hash(
+            instance="nemo-i-0abc",
+            engine_id="nemo",
+            node_id="i-0abc",
+            hostname="dalston-gpu",
+            deploy_env="aws",
+        )
+        pending_hash = self._pending_hash("i-0abc")
+
+        redis = AsyncMock()
+        redis.smembers = AsyncMock(return_value={"nemo-i-0abc"})
+        redis.scan_iter = MagicMock(return_value=_async_iter([self.PENDING_KEY]))
+
+        async def hgetall(key: str) -> dict[str, str]:
+            if key.startswith("dalston:autoscale:pending:"):
+                return pending_hash
+            return engine_hash
+
+        redis.hgetall = AsyncMock(side_effect=hgetall)
+
+        result = await self._call(redis)
+
+        assert len(result.nodes) == 1
+        assert result.nodes[0].state == "live"
+        assert result.nodes[0].node_id == "i-0abc"
+
+    async def test_booting_shadow_sorts_first(self):
+        engine_hash = _make_engine_hash(
+            instance="fw-1",
+            engine_id="faster-whisper",
+            node_id="local-host",
+            hostname="local-host",
+        )
+        pending_hash = self._pending_hash("i-0abc")
+
+        redis = AsyncMock()
+        redis.smembers = AsyncMock(return_value={"fw-1"})
+        redis.scan_iter = MagicMock(return_value=_async_iter([self.PENDING_KEY]))
+
+        async def hgetall(key: str) -> dict[str, str]:
+            if key.startswith("dalston:autoscale:pending:"):
+                return pending_hash
+            return engine_hash
+
+        redis.hgetall = AsyncMock(side_effect=hgetall)
+
+        result = await self._call(redis)
+
+        assert [n.state for n in result.nodes] == ["booting", "live"]

@@ -436,3 +436,46 @@ class TestDownAndTerminateRouting:
         daws.cmd_terminate(args)
 
         assert calls == [("gpu", "i-0123")]
+
+
+class TestPublishPendingNodes:
+    def test_writes_pending_and_deletes_live(self, daws) -> None:
+        import dalston_autoscale as das
+
+        r = MagicMock()
+        now = datetime.now(UTC)
+        launch = now - timedelta(seconds=120)
+        fleet = das.FleetSnapshot(
+            live_instance_ids=("i-live",), pending_instance_ids=("i-boot",)
+        )
+        workers = {
+            "i-boot": {
+                "instance_id": "i-boot",
+                "managed_by": "autoscaler",
+                "instance_type": "g4dn.xlarge",
+                "launch_time": launch,
+            },
+            "i-live": {"instance_id": "i-live", "managed_by": "autoscaler"},
+        }
+
+        daws._publish_pending_nodes(r, _policy(daws), fleet, workers, now)
+
+        key = "dalston:autoscale:pending:i-boot"
+        r.hset.assert_called_once()
+        assert r.hset.call_args[0][0] == key
+        mapping = r.hset.call_args[1]["mapping"]
+        assert mapping["shape"] == "nemo+pyannote"
+        assert mapping["gpu_type"] == "g4dn.xlarge"
+        assert mapping["managed_by"] == "autoscaler"
+        assert mapping["launch_time"] == launch.isoformat()
+        r.expire.assert_called_once_with(key, daws.AUTOSCALE_PENDING_TTL_S)
+        r.delete.assert_called_once_with("dalston:autoscale:pending:i-live")
+
+    def test_no_pending_no_writes(self, daws) -> None:
+        import dalston_autoscale as das
+
+        r = MagicMock()
+        daws._publish_pending_nodes(
+            r, _policy(daws), das.FleetSnapshot(), {}, datetime.now(UTC)
+        )
+        assert not r.hset.called

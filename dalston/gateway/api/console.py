@@ -30,6 +30,7 @@ from dalston.common.audit import AuditService
 from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.registry import (
+    AUTOSCALE_PENDING_KEY_PREFIX,
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
     _parse_datetime,
@@ -631,7 +632,14 @@ class NodeEngine(BaseModel):
 
 
 class NodeView(BaseModel):
-    """A compute node hosting one or more engine instances."""
+    """A compute node hosting one or more engine instances.
+
+    M91.7: nodes with state="booting" are shadow entries published by the
+    autoscaler's EC2 tag scan — the instance exists but its engines have
+    not registered yet, so the registry can't see it. They carry no
+    engines and flip to a real node (same node_id == EC2 instance id)
+    once heartbeats appear.
+    """
 
     node_id: str
     hostname: str
@@ -642,6 +650,11 @@ class NodeView(BaseModel):
     engines: list[NodeEngine]
     gpu_memory_used_gb: float
     gpu_memory_total_gb: float
+    state: str = "live"  # "live" | "booting"
+    booting_since: datetime | None = None
+    shape: str | None = None
+    managed_by: str | None = None
+    boot_timeout_s: int | None = None
 
 
 class NodesResponse(BaseModel):
@@ -730,8 +743,48 @@ async def get_nodes(
             )
         )
 
-    # Sort: AWS nodes first, then by hostname
-    node_views.sort(key=lambda n: (0 if n.deploy_env == "aws" else 1, n.hostname))
+    # M91.7: merge autoscaler-published shadow records for booting workers.
+    # The autoscaler's EC2 tag scan sees an instance from the moment
+    # RunInstances returns; the registry only sees it minutes later when
+    # its engines heartbeat. A shadow whose instance id already has a live
+    # node is dropped (the worker registered between ticks).
+    async for key in redis.scan_iter(
+        match=f"{AUTOSCALE_PENDING_KEY_PREFIX}*", count=100
+    ):
+        data = await redis.hgetall(key)
+        instance_id = data.get("instance_id") or key.removeprefix(
+            AUTOSCALE_PENDING_KEY_PREFIX
+        )
+        if not instance_id or instance_id in nodes:
+            continue
+        node_views.append(
+            NodeView(
+                node_id=instance_id,
+                hostname="",
+                deploy_env="aws",
+                aws_az=None,
+                aws_instance_type=data.get("gpu_type") or None,
+                engine_count=0,
+                engines=[],
+                gpu_memory_used_gb=0.0,
+                gpu_memory_total_gb=0.0,
+                state="booting",
+                booting_since=_parse_datetime(data.get("launch_time")),
+                shape=data.get("shape") or None,
+                managed_by=data.get("managed_by") or None,
+                boot_timeout_s=_safe_int(data.get("boot_timeout_s", "0"), 0) or None,
+            )
+        )
+
+    # Sort: booting shadows first (that's what an operator is watching),
+    # then AWS nodes, then by hostname
+    node_views.sort(
+        key=lambda n: (
+            0 if n.state == "booting" else 1,
+            0 if n.deploy_env == "aws" else 1,
+            n.hostname,
+        )
+    )
 
     return NodesResponse(nodes=node_views)
 

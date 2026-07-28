@@ -315,6 +315,9 @@ const infrastructure = {
   localDev: 'Local dev',
   aws: 'AWS',
   cpuOnly: 'CPU only',
+  booting: 'Booting',
+  bootingHint: 'Instance launched — engines not registered yet',
+  stuckBooting: 'Stuck — will be reaped by the autoscaler',
 } as const
 
 const engines = {

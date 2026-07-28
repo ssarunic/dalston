@@ -235,6 +235,30 @@ Safety net for the lazy-accept path: if a task sits **undelivered** (stream lag,
 
 ---
 
+### 91.7: Booting-worker visibility on the Infrastructure screen
+
+**Files modified:**
+
+- `infra/scripts/dalston-aws` — each autoscale tick publishes a shadow record per booting worker
+- `dalston/gateway/api/console.py` — `GET /api/console/nodes` merges shadow records as `state: "booting"` nodes
+- `web/src/pages/Infrastructure.tsx` (+ types/strings) — shadow card with elapsed boot time
+
+**Problem:** the Infrastructure screen is registry-driven, and engines only heartbeat at the *end* of a 3–8 min boot (Tailscale → NVMe → image pulls → model load → register). A booting worker is invisible exactly when the operator wants to watch it — and a wedged boot (e.g. expired Tailscale auth key) is indistinguishable from no instance at all.
+
+**Design — the autoscaler publishes its observed fleet state.** The tick already computes tag-discovered instances that are not yet fully registered (`pending`). It now writes one Redis hash per pending worker:
+
+```
+dalston:autoscale:pending:{instance_id}
+  shape, gpu_type, managed_by, launch_time, boot_timeout_s, updated_at
+  TTL 180s (3 ticks — records self-clean if the timer stops)
+```
+
+Records are written every tick **including dry-run** (telemetry, not actuation), and deleted the tick the worker turns live (TTL is the backstop). `get_nodes` merges any pending record whose instance id has no live registry node as a `NodeView` with `state="booting"`, `booting_since`, `shape`, and `boot_timeout_s`; the UI renders a shadow card with elapsed boot time, flipping to the real card when heartbeats appear (registry `node_id` == EC2 instance id, so dedupe is a string match). A shadow older than `boot_timeout_s` renders as "stuck — will be reaped".
+
+**Why external observation rather than worker self-reporting:** a self-reporter depends on the exact chain (network → Tailscale → Redis) whose failure causes dark workers — it is silent precisely in the failure modes the screen exists to expose. The EC2 tag scan is a different trust domain: the instance is visible from the second RunInstances returns, cooperation-free. Worker-side boot-*phase* reporting (pulling-images / preloading-models / starting-engines) is a compatible future enhancement that would enrich the same shadow card; it is additive, not an alternative.
+
+---
+
 ## Cost Model
 
 | Regime | GPU demand | Fleet behaviour | GPU cost (spot ≈ $0.30–0.40/hr) |

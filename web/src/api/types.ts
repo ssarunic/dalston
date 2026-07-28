@@ -338,6 +338,12 @@ export interface NodeView {
   engines: NodeEngine[]
   gpu_memory_used_gb: number
   gpu_memory_total_gb: number
+  /** M91.7: "booting" = autoscaler shadow node, engines not yet registered */
+  state: 'live' | 'booting'
+  booting_since: string | null
+  shape: string | null
+  managed_by: string | null
+  boot_timeout_s: number | null
 }
 
 export interface NodesResponse {
