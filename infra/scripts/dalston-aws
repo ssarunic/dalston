@@ -308,6 +308,8 @@ class DeploymentState:
     api_key: str = ""
     iam_role: str = ""
     instance_profile: str = ""
+    control_plane_iam_role: str = ""
+    control_plane_instance_profile: str = ""
     sg_id: str = ""
     instance_id: str = ""
     data_volume_id: str = ""
@@ -615,13 +617,8 @@ def create_s3_bucket(region: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
-    iam = iam_client()
-    role_name = f"{NAME_PREFIX}-ec2-role"
-    profile_name = f"{NAME_PREFIX}-instance-profile"
-    account_id = aws_account_id(region)
-
-    # Create role if needed
+def _ensure_role_with_profile(iam: Any, role_name: str, profile_name: str) -> None:
+    """Idempotently create an EC2-assumable role and its instance profile."""
     try:
         iam.get_role(RoleName=role_name)
         log(f"IAM role {role_name} already exists")
@@ -644,7 +641,31 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
             Tags=[{"Key": "Project", "Value": "dalston"}],
         )
 
-    # S3 access policy (idempotent upsert)
+    try:
+        iam.get_instance_profile(InstanceProfileName=profile_name)
+        log(f"Instance profile {profile_name} already exists")
+    except ClientError:
+        log(f"Creating instance profile: {profile_name}")
+        iam.create_instance_profile(
+            InstanceProfileName=profile_name,
+            Tags=[{"Key": "Project", "Value": "dalston"}],
+        )
+        iam.add_role_to_instance_profile(
+            InstanceProfileName=profile_name,
+            RoleName=role_name,
+        )
+        log("Waiting for IAM instance profile to propagate...")
+        time.sleep(10)
+
+
+def _put_baseline_policies(
+    iam: Any, role_name: str, region: str, s3_bucket: str
+) -> None:
+    """S3 + SSM policies both the GPU-worker and control-plane roles need.
+
+    Shared helper so the two roles' baseline permissions can't drift apart.
+    """
+    account_id = aws_account_id(region)
     bucket_arn = f"arn:aws:s3:::{s3_bucket}"
     iam.put_role_policy(
         RoleName=role_name,
@@ -691,24 +712,86 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
     iam.attach_role_policy(RoleName=role_name, PolicyArn=ssm_managed_policy)
     log("Attached AmazonSSMManagedInstanceCore for patch management")
 
-    # Instance profile
-    try:
-        iam.get_instance_profile(InstanceProfileName=profile_name)
-        log(f"Instance profile {profile_name} already exists")
-    except ClientError:
-        log(f"Creating instance profile: {profile_name}")
-        iam.create_instance_profile(
-            InstanceProfileName=profile_name,
-            Tags=[{"Key": "Project", "Value": "dalston"}],
-        )
-        iam.add_role_to_instance_profile(
-            InstanceProfileName=profile_name,
-            RoleName=role_name,
-        )
-        log("Waiting for IAM instance profile to propagate...")
-        time.sleep(10)
 
+def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
+    """Shared minimal role for GPU workers (and pre-M91 control planes)."""
+    iam = iam_client()
+    role_name = f"{NAME_PREFIX}-ec2-role"
+    profile_name = f"{NAME_PREFIX}-instance-profile"
+    _ensure_role_with_profile(iam, role_name, profile_name)
+    _put_baseline_policies(iam, role_name, region, s3_bucket)
     log("IAM role + instance profile ready")
+    return role_name, profile_name
+
+
+def create_control_plane_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
+    """Dedicated control-plane role: baseline + autoscaler EC2 permissions.
+
+    Kept separate from the GPU-worker role so workers never hold EC2
+    launch/terminate rights via their IMDS credentials. Two guardrails:
+    TerminateInstances is tag-conditioned to dalston:managed-by=autoscaler
+    (a bug in the loop cannot terminate the control plane or hand-launched
+    workers), and iam:PassRole is scoped to exactly the GPU-worker role.
+    """
+    iam = iam_client()
+    role_name = f"{NAME_PREFIX}-control-plane-role"
+    profile_name = f"{NAME_PREFIX}-control-plane-profile"
+    account_id = aws_account_id(region)
+    _ensure_role_with_profile(iam, role_name, profile_name)
+    _put_baseline_policies(iam, role_name, region, s3_bucket)
+
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName=f"{NAME_PREFIX}-autoscaler-ec2",
+        PolicyDocument=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:RunInstances",
+                            "ec2:CreateTags",
+                            "ec2:DescribeInstances",
+                            "ec2:DescribeInstanceTypes",
+                            "ec2:DescribeSubnets",
+                            "ec2:DescribeVpcs",
+                            "ec2:DescribeImages",
+                            "ec2:DescribeSecurityGroups",
+                            "ec2:DescribeSpotPriceHistory",
+                            "ec2:DescribeSpotInstanceRequests",
+                            "ec2:CancelSpotInstanceRequests",
+                        ],
+                        "Resource": "*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["ec2:TerminateInstances"],
+                        "Resource": "*",
+                        "Condition": {
+                            "StringEquals": {
+                                "ec2:ResourceTag/dalston:managed-by": "autoscaler"
+                            }
+                        },
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["iam:PassRole"],
+                        "Resource": (
+                            f"arn:aws:iam::{account_id}:role/{NAME_PREFIX}-ec2-role"
+                        ),
+                    },
+                    {
+                        # Deep Learning AMI lookup (public SSM parameter)
+                        "Effect": "Allow",
+                        "Action": ["ssm:GetParameter"],
+                        "Resource": (f"arn:aws:ssm:{region}::parameter/aws/service/*"),
+                    },
+                ],
+            }
+        ),
+    )
+    log("Control-plane IAM role + instance profile ready (autoscaler-capable)")
     return role_name, profile_name
 
 
@@ -1057,6 +1140,62 @@ systemctl enable dalston-tailscale-serve.service
 # ---------------------------------------------------------------------------
 
 
+def _autoscale_provision_script(ctx: dict[str, Any]) -> str:
+    """Bash that provisions the M91 autoscaler on the control plane.
+
+    Used both baked into cloud-init (launch control-plane --autoscale) and
+    piped over SSH to retrofit a running control plane (autoscale
+    --provision). Writes the launch-context YAML (the control plane has no
+    laptop aws-state.yaml), seeds the policy from the repo template only if
+    absent so manual edits survive, and installs a 60s systemd timer.
+    """
+    ctx_yaml = yaml.dump(ctx, default_flow_style=False, sort_keys=False)
+    return f"""\
+echo "Provisioning GPU autoscaler (M91)..."
+dnf install -y python3-pip >/dev/null 2>&1 || true
+pip3 install --quiet boto3 pyyaml redis 2>/dev/null \\
+  || pip3 install --quiet --break-system-packages boto3 pyyaml redis
+
+cat > /data/dalston/autoscale-context.yaml << 'ASCTXEOF'
+{ctx_yaml}ASCTXEOF
+chmod 600 /data/dalston/autoscale-context.yaml
+
+if [ ! -f /data/dalston/autoscale-policy.yaml ]; then
+  cp /data/dalston/infra/templates/autoscale-policy.yaml \\
+     /data/dalston/autoscale-policy.yaml
+  echo "Seeded autoscale policy from repo template"
+fi
+
+cat > /etc/systemd/system/dalston-autoscale.service << 'ASSVCEOF'
+[Unit]
+Description=Dalston GPU autoscale tick (M91)
+After=docker.service
+
+[Service]
+Type=oneshot
+# HF_TOKEN for pyannote worker user-data lives in the compose secrets file
+EnvironmentFile=-/data/dalston/.env
+ExecStart=/usr/bin/python3 /data/dalston/infra/scripts/dalston-aws autoscale --once
+ASSVCEOF
+
+cat > /etc/systemd/system/dalston-autoscale.timer << 'ASTMREOF'
+[Unit]
+Description=Dalston GPU autoscale every 60s
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+ASTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-autoscale.timer
+echo "Autoscaler enabled (60s tick). Disable: systemctl disable --now dalston-autoscale.timer"
+"""
+
+
 def generate_user_data(
     s3_bucket: str,
     region: str,
@@ -1065,6 +1204,7 @@ def generate_user_data(
     registry: str | None = None,
     observability: bool = False,
     api_key: str = "",
+    autoscale_ctx: dict[str, Any] | None = None,
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -1322,7 +1462,10 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
 """
     )
 
-    return header + variables + body
+    autoscale_block = (
+        "\n" + _autoscale_provision_script(autoscale_ctx) if autoscale_ctx else ""
+    )
+    return header + variables + body + autoscale_block
 
 
 _BUDGET_OVERRIDABLE_KEYS: tuple[str, ...] = (
@@ -2916,7 +3059,67 @@ def _apply_decision(
     return "no action"
 
 
+def _autoscale_provision_remote() -> None:
+    """Retrofit the autoscaler onto a running control plane (run from laptop).
+
+    Swaps the instance profile to the dedicated control-plane role in place
+    (ReplaceIamInstanceProfileAssociation — no stop/relaunch), then pipes
+    the same provisioning script cloud-init would have run over SSH.
+    """
+    st = require_state()
+    if not st.instance_id:
+        die("No control plane in state. Run 'dalston-aws launch control-plane' first.")
+    if not st.template:
+        die("No template recorded in state. Re-run 'dalston-aws setup -t TEMPLATE'.")
+    if not st.control_plane_instance_profile:
+        die(
+            "No control-plane IAM profile in state. "
+            "Re-run 'dalston-aws setup -t split' first (idempotent)."
+        )
+    if get_instance_state(st.region, st.instance_id) != "running":
+        die("Control plane is not running. Start it with 'dalston-aws up' first.")
+    tmpl = load_template(st.template)
+
+    ec2 = ec2_client(st.region)
+    assocs = ec2.describe_iam_instance_profile_associations(
+        Filters=[{"Name": "instance-id", "Values": [st.instance_id]}]
+    )["IamInstanceProfileAssociations"]
+    active = [a for a in assocs if a["State"] == "associated"]
+    profile_name = st.control_plane_instance_profile
+    if active:
+        current = active[0]["IamInstanceProfile"]["Arn"].split("/")[-1]
+        if current != profile_name:
+            log(f"Replacing instance profile in place: {current} -> {profile_name}")
+            ec2.replace_iam_instance_profile_association(
+                AssociationId=active[0]["AssociationId"],
+                IamInstanceProfile={"Name": profile_name},
+            )
+    else:
+        ec2.associate_iam_instance_profile(
+            IamInstanceProfile={"Name": profile_name}, InstanceId=st.instance_id
+        )
+
+    script = _autoscale_provision_script(_autoscale_ctx_dict(st, tmpl))
+    encoded = base64.b64encode(script.encode()).decode()
+    key_file = STATE_DIR / f"{st.key_name}.pem"
+    host = _resolve_tailscale_host("dalston-control-plane")
+    log(f"Provisioning autoscaler on {host} over SSH...")
+    rc = _ssh_run(host, "ec2-user", key_file, f"echo {encoded} | base64 -d | sudo bash")
+    if rc != 0:
+        die(f"Provisioning script failed (exit {rc}).")
+    audit("autoscale.provision", instance=st.instance_id)
+    log(
+        "Autoscaler provisioned. Inspect with: dalston-aws ssh, then "
+        "'journalctl -u dalston-autoscale.service -f' and "
+        "'sudo systemctl list-timers dalston-autoscale.timer'. "
+        "Disable: 'sudo systemctl disable --now dalston-autoscale.timer'."
+    )
+
+
 def cmd_autoscale(args: argparse.Namespace) -> None:
+    if args.provision:
+        _autoscale_provision_remote()
+        return
     try:
         import redis
     except ImportError:
@@ -2994,6 +3197,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
         existing.iam_role, existing.instance_profile = create_iam_role(
             existing.region, existing.s3_bucket
         )
+        (
+            existing.control_plane_iam_role,
+            existing.control_plane_instance_profile,
+        ) = create_control_plane_iam_role(existing.region, existing.s3_bucket)
         existing.key_name = ensure_key_pair(
             existing.region, existing.key_name or key_name
         )
@@ -3031,8 +3238,11 @@ def cmd_setup(args: argparse.Namespace) -> None:
     # 1. S3 bucket
     st.s3_bucket = create_s3_bucket(region)
 
-    # 2. IAM role
+    # 2. IAM roles (shared GPU-worker role + autoscaler-capable control plane)
     st.iam_role, st.instance_profile = create_iam_role(region, st.s3_bucket)
+    st.control_plane_iam_role, st.control_plane_instance_profile = (
+        create_control_plane_iam_role(region, st.s3_bucket)
+    )
 
     # 3. Key pair
     st.key_name = ensure_key_pair(region, key_name)
@@ -3116,8 +3326,31 @@ def cmd_status(args: argparse.Namespace) -> None:
     cmd_status_impl(st)
 
 
+def _autoscale_ctx_dict(
+    st: DeploymentState, tmpl: DeploymentTemplate
+) -> dict[str, Any]:
+    """Launch context the on-control-plane autoscaler needs (no state file there)."""
+    if not st.gpu_sg_id:
+        die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
+    return {
+        "region": st.region,
+        "gpu_sg_id": st.gpu_sg_id,
+        "key_name": st.key_name,
+        # GPU workers keep the shared minimal role — never the CP role
+        "instance_profile": st.instance_profile,
+        "s3_bucket": st.s3_bucket,
+        "registry": tmpl.registry or "",
+        "observability": st.observability,
+        "redis_url": "redis://localhost:6379",
+    }
+
+
 def _launch_control_plane(
-    st: DeploymentState, tmpl: DeploymentTemplate, *, observability: bool = False
+    st: DeploymentState,
+    tmpl: DeploymentTemplate,
+    *,
+    observability: bool = False,
+    autoscale: bool = False,
 ) -> None:
     """Launch the control plane instance."""
     if st.instance_id:
@@ -3160,7 +3393,23 @@ def _launch_control_plane(
                 raise
 
     obs_suffix = " with observability" if observability else ""
-    log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}...")
+    as_suffix = " + autoscaler" if autoscale else ""
+    log(
+        f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}{as_suffix}..."
+    )
+    st.observability = observability
+    autoscale_ctx = _autoscale_ctx_dict(st, tmpl) if autoscale else None
+    if autoscale and not st.control_plane_instance_profile:
+        die(
+            "Autoscale needs the dedicated control-plane IAM role. "
+            "Re-run 'dalston-aws setup -t split' first."
+        )
+    cp_profile = st.control_plane_instance_profile or st.instance_profile
+    if not st.control_plane_instance_profile:
+        warn(
+            "No dedicated control-plane IAM profile in state (pre-M91 setup). "
+            "Using the shared profile; re-run 'dalston-aws setup' to provision it."
+        )
     ud = generate_user_data(
         st.s3_bucket,
         st.region,
@@ -3169,8 +3418,8 @@ def _launch_control_plane(
         registry=tmpl.registry,
         observability=observability,
         api_key=st.api_key,
+        autoscale_ctx=autoscale_ctx,
     )
-    st.observability = observability
     st.instance_id = launch_instance(
         st.region,
         cp.instance_type,
@@ -3179,7 +3428,7 @@ def _launch_control_plane(
         tag,
         cp.spot,
         st.key_name,
-        st.instance_profile,
+        cp_profile,
         allowed_azs=allowed_azs,
     )
     wait_instance_running(st.region, st.instance_id)
@@ -3415,7 +3664,12 @@ def cmd_launch(args: argparse.Namespace) -> None:
     spot_override = True if args.spot else (False if args.on_demand else None)
 
     if target in ("control-plane", None):
-        _launch_control_plane(st, tmpl, observability=args.observability)
+        _launch_control_plane(
+            st,
+            tmpl,
+            observability=args.observability,
+            autoscale=getattr(args, "autoscale", False),
+        )
     if target in ("gpu", None):
         if tmpl.gpu_worker:
             engines = args.engines.split(",") if args.engines else None
@@ -4533,6 +4787,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="AWS region for GPU worker (default: same as control plane)",
     )
+    p_launch.add_argument(
+        "--autoscale",
+        action="store_true",
+        default=False,
+        help=(
+            "Provision the M91 GPU autoscaler on the control plane at launch "
+            "(60s systemd timer; default off). For a running control plane "
+            "use 'dalston-aws autoscale --provision' instead."
+        ),
+    )
     p_launch.set_defaults(func=cmd_launch)
 
     # patch
@@ -4599,6 +4863,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--context",
         default=DEFAULT_AUTOSCALE_CONTEXT_PATH,
         help=f"Autoscale launch-context YAML (default: {DEFAULT_AUTOSCALE_CONTEXT_PATH})",
+    )
+    p_autoscale.add_argument(
+        "--provision",
+        action="store_true",
+        help=(
+            "Retrofit the autoscaler onto the RUNNING control plane over SSH "
+            "(run from the laptop): swaps in the control-plane IAM profile, "
+            "writes context/policy, installs the 60s systemd timer"
+        ),
     )
     p_autoscale.set_defaults(func=cmd_autoscale)
 
