@@ -1146,7 +1146,7 @@ systemctl enable dalston-tailscale-serve.service
 # ---------------------------------------------------------------------------
 
 
-def _autoscale_provision_script(ctx: dict[str, Any]) -> str:
+def _autoscale_provision_script(ctx: dict[str, Any], *, dry_run: bool = False) -> str:
     """Bash that provisions the M91 autoscaler on the control plane.
 
     Used both baked into cloud-init (launch control-plane --autoscale) and
@@ -1154,7 +1154,14 @@ def _autoscale_provision_script(ctx: dict[str, Any]) -> str:
     --provision). Writes the launch-context YAML (the control plane has no
     laptop aws-state.yaml), seeds the policy from the repo template only if
     absent so manual edits survive, and installs a 60s systemd timer.
+
+    dry_run installs the timer running `autoscale --once --dry-run` — the
+    spec's observation phase: decisions are computed and logged every tick
+    but nothing is ever launched or terminated. Re-provision without
+    dry_run to enable actuation.
     """
+    tick_flags = " --dry-run" if dry_run else ""
+    mode_note = "DRY-RUN (observation only)" if dry_run else "LIVE actuation"
     ctx_yaml = yaml.dump(ctx, default_flow_style=False, sort_keys=False)
     return f"""\
 echo "Provisioning GPU autoscaler (M91)..."
@@ -1181,7 +1188,7 @@ After=docker.service
 Type=oneshot
 # HF_TOKEN for pyannote worker user-data lives in the compose secrets file
 EnvironmentFile=-/data/dalston/.env
-ExecStart=/usr/bin/python3 /data/dalston/infra/scripts/dalston-aws autoscale --once
+ExecStart=/usr/bin/python3 /data/dalston/infra/scripts/dalston-aws autoscale --once{tick_flags}
 ASSVCEOF
 
 cat > /etc/systemd/system/dalston-autoscale.timer << 'ASTMREOF'
@@ -1198,7 +1205,8 @@ ASTMREOF
 
 systemctl daemon-reload
 systemctl enable --now dalston-autoscale.timer
-echo "Autoscaler enabled (60s tick). Disable: systemctl disable --now dalston-autoscale.timer"
+echo "Autoscaler enabled (60s tick, {mode_note})."
+echo "Disable: systemctl disable --now dalston-autoscale.timer"
 """
 
 
@@ -3181,12 +3189,14 @@ def _apply_decision(
     return "no action"
 
 
-def _autoscale_provision_remote() -> None:
+def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
     """Retrofit the autoscaler onto a running control plane (run from laptop).
 
     Swaps the instance profile to the dedicated control-plane role in place
     (ReplaceIamInstanceProfileAssociation — no stop/relaunch), then pipes
     the same provisioning script cloud-init would have run over SSH.
+    With dry_run, the installed timer runs `autoscale --once --dry-run`
+    (observation only) — re-run without --dry-run to enable actuation.
     """
     st = require_state()
     if not st.instance_id:
@@ -3221,26 +3231,29 @@ def _autoscale_provision_remote() -> None:
             IamInstanceProfile={"Name": profile_name}, InstanceId=st.instance_id
         )
 
-    script = _autoscale_provision_script(_autoscale_ctx_dict(st, tmpl))
+    script = _autoscale_provision_script(_autoscale_ctx_dict(st, tmpl), dry_run=dry_run)
     encoded = base64.b64encode(script.encode()).decode()
     key_file = STATE_DIR / f"{st.key_name}.pem"
     host = _resolve_tailscale_host("dalston-control-plane")
-    log(f"Provisioning autoscaler on {host} over SSH...")
+    mode = "dry-run (observation only)" if dry_run else "LIVE actuation"
+    log(f"Provisioning autoscaler on {host} over SSH ({mode})...")
     rc = _ssh_run(host, "ec2-user", key_file, f"echo {encoded} | base64 -d | sudo bash")
     if rc != 0:
         die(f"Provisioning script failed (exit {rc}).")
-    audit("autoscale.provision", instance=st.instance_id)
+    audit("autoscale.provision", instance=st.instance_id, dry_run=dry_run)
     log(
-        "Autoscaler provisioned. Inspect with: dalston-aws ssh, then "
-        "'journalctl -u dalston-autoscale.service -f' and "
+        f"Autoscaler provisioned in {mode} mode. Inspect with: dalston-aws ssh, "
+        "then 'journalctl -u dalston-autoscale.service -f' and "
         "'sudo systemctl list-timers dalston-autoscale.timer'. "
         "Disable: 'sudo systemctl disable --now dalston-autoscale.timer'."
     )
+    if dry_run:
+        log("Enable actuation later with: dalston-aws autoscale --provision")
 
 
 def cmd_autoscale(args: argparse.Namespace) -> None:
     if args.provision:
-        _autoscale_provision_remote()
+        _autoscale_provision_remote(dry_run=args.dry_run)
         return
     try:
         import redis
@@ -5019,7 +5032,10 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Retrofit the autoscaler onto the RUNNING control plane over SSH "
             "(run from the laptop): swaps in the control-plane IAM profile, "
-            "writes context/policy, installs the 60s systemd timer"
+            "writes context/policy, installs the 60s systemd timer. Combine "
+            "with --dry-run to install in observation-only mode (the timer "
+            "runs 'autoscale --once --dry-run'); re-run without --dry-run "
+            "to enable actuation"
         ),
     )
     p_autoscale.set_defaults(func=cmd_autoscale)

@@ -225,3 +225,65 @@ class TestDecide:
         payload = d.to_dict()
         assert payload["per_engine"]["nemo"] == {"lag": 2, "in_flight": 1}
         assert payload["action"] == "launch"
+
+
+class TestBootTimeoutValidation:
+    def test_default_boot_timeout(self):
+        assert make_policy().boot_timeout_s == 1800
+
+    def test_negative_boot_timeout_rejected(self):
+        with pytest.raises(PolicyError, match="boot_timeout_s"):
+            parse_policy(
+                {
+                    "shapes": [
+                        {
+                            "engines": ["nemo"],
+                            "stream_engine_ids": ["nemo"],
+                            "boot_timeout_s": -1,
+                        }
+                    ]
+                }
+            )
+
+    def test_too_small_boot_timeout_rejected(self):
+        # zero/tiny values would reap every worker the moment it launches
+        with pytest.raises(PolicyError, match="boot_timeout_s"):
+            parse_policy(
+                {
+                    "shapes": [
+                        {
+                            "engines": ["nemo"],
+                            "stream_engine_ids": ["nemo"],
+                            "boot_timeout_s": 60,
+                        }
+                    ]
+                }
+            )
+
+    def test_minimum_boot_timeout_accepted(self):
+        shapes = parse_policy(
+            {
+                "shapes": [
+                    {
+                        "engines": ["nemo"],
+                        "stream_engine_ids": ["nemo"],
+                        "boot_timeout_s": 300,
+                    }
+                ]
+            }
+        )
+        assert shapes[0].boot_timeout_s == 300
+
+    def test_negative_cooldown_rejected(self):
+        with pytest.raises(PolicyError, match="scale_down_after_s"):
+            parse_policy(
+                {
+                    "shapes": [
+                        {
+                            "engines": ["nemo"],
+                            "stream_engine_ids": ["nemo"],
+                            "scale_down_after_s": -5,
+                        }
+                    ]
+                }
+            )

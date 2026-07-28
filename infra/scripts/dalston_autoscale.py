@@ -140,6 +140,18 @@ class ShapePolicy:
             ) from exc
         if policy.tasks_per_instance < 1:
             raise PolicyError(f"shape '{name}': tasks_per_instance must be >= 1")
+        # boot_timeout_s drives termination of pending workers — zero or
+        # tiny values would reap every worker the moment it launches.
+        if policy.boot_timeout_s < 300:
+            raise PolicyError(
+                f"shape '{name}': boot_timeout_s must be >= 300 "
+                f"(got {policy.boot_timeout_s}); workers need minutes to "
+                "boot, join Tailscale, and download models"
+            )
+        if policy.scale_down_after_s < 0 or policy.drain_wait_s < 0:
+            raise PolicyError(
+                f"shape '{name}': scale_down_after_s and drain_wait_s must be >= 0"
+            )
         if not 0 <= policy.min_instances <= policy.max_instances:
             raise PolicyError(
                 f"shape '{name}': need 0 <= min_instances <= max_instances "

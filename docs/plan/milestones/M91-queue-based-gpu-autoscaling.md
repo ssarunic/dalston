@@ -181,7 +181,9 @@ shapes:
     min_instances: 0              # scale-to-zero
     max_instances: 5              # sized for 500 eps/day sustained (~3.5) + burst headroom
     scale_down_after_s: 2100      # 35 min: ALL engines lag==0 AND PEL==0 this long
-    gpu_type_preference: [g6.xlarge, g4dn.xlarge, g5.xlarge]
+    drain_wait_s: 60              # bounded PEL wait before terminate gives up this tick
+    boot_timeout_s: 1800          # reap a running-but-never-registered worker (wedged boot)
+    gpu_type_preference: [g4dn.xlarge, g6.xlarge, g5.xlarge]  # operator AZ availability
 ```
 
 Scale-down rules (the part that prevents wasted work):
@@ -296,15 +298,18 @@ curl -s -X POST http://<cp>:8000/v1/audio/transcriptions ... | jq '.status'
 
 # Backlog triggers launch (live mode): tasks appear on both streams, one instance launches
 redis-cli XINFO GROUPS dalston:stream:nemo
-dalston-aws autoscale --once | jq '.action'          # "launch"
+dalston-aws autoscale --once | jq '.[].action'       # "launch" (output is a per-shape array)
 aws ec2 describe-instances --filters "Name=tag:dalston:role,Values=gpu-worker" \
   --query 'Reservations[].Instances[].State.Name'    # one "pending"/"running"
 
 # Scale-down: queue empty (lag+PEL==0 on BOTH streams) for cooldown → drain + terminate
-tail -f ~/.dalston/audit.log                          # autoscaler.scale_down entry
+tail -f ~/.dalston/audit.log                          # autoscale.terminate entry
 
-# Dead-man switch: stop the control plane with a worker running
-dalston-aws down
+# Dead-man switch: sever Redis contact with a worker still running.
+# NOTE: `dalston-aws down` can't test this — it terminates autoscaler workers
+# itself before stopping the control plane. Stop the CP out-of-band instead:
+aws ec2 stop-instances --instance-ids <control-plane-id>
+# (or on the CP: docker compose stop redis)
 # Expect: worker terminates itself within ~10 min (check EC2 console / describe-instances)
 
 # Watchdog: disable the timer, submit a job, wait DALSTON_TASK_STALE_TIMEOUT_S
@@ -316,7 +321,7 @@ dalston-aws down
 ## Checkpoint
 
 - [ ] `launch_gpu_worker` / `terminate_gpu_worker` / `discover_gpu_workers` callable non-interactively; workers tagged; spot fallback walks `gpu_type_preference` and raises `SpotCapacityError` when exhausted
-- [ ] `dalston-aws down` / `terminate control-plane` terminates all tagged GPU workers
+- [ ] `terminate control-plane` terminates **all** tagged GPU workers first; `dalston-aws down` terminates autoscaler-managed workers and stops manual ones (a stopped on-demand manual worker stays resumable via `up`)
 - [ ] Dead-man switch: worker self-terminates after ~10 min without Redis contact
 - [ ] `autoscale --once`: desired = `clamp(ceil(max backlog / 20), 0, max)`; single-flight (pending instances counted); scale-down only when the whole shape has `lag==0 && PEL==0` for the cooldown; drains all co-located engines before terminate; every action audited
 - [ ] Fleet state derived from EC2 tags + registry only — `aws-state.yaml` no longer tracks GPU workers; laptop `status`/`terminate gpu` read tags
