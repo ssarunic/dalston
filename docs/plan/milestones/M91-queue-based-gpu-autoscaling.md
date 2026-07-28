@@ -6,7 +6,7 @@
 | **Duration**       | 5–8 days                                                     |
 | **Dependencies**   | M80 (Engine Control Plane), M64 (Registry Unification), M87 (Queue Board) |
 | **Deliverable**    | `dalston-aws autoscale` control loop (systemd timer on control plane), non-interactive spot launch with GPU-type fallback, tag-based stateless fleet discovery, GPU-worker dead-man switch, on-demand engine acceptance in `engine_selector`, stale-task watchdog, dry-run mode, phased ops runbook |
-| **Status**         | Not Started                                                  |
+| **Status**         | Implemented — pending live dry-run validation                |
 
 ## User Story
 
@@ -63,7 +63,7 @@ Two consequences reviewers should hold in mind:
 ## Architecture
 
 ```
-                    laptop: dalston-aws start/stop --autoscale   (only manual act)
+                    laptop: dalston-aws up/down, launch --autoscale  (only manual act)
                                         │
 ┌───────────────────────────── CONTROL PLANE (always-on EC2) ─────────────────────────────┐
 │                                                                                          │
@@ -153,7 +153,7 @@ Ships independently: manual `dalston-aws launch gpu` gains tagging and the fallb
 
 **Deliverables:**
 
-A one-minute timer on each GPU worker that pings control-plane Redis over Tailscale; after 10 consecutive failures it runs `shutdown -h now` (terminates a spot instance). ~15 lines of shell. Covers: control plane stopped or crashed, deliberate `dalston-aws stop`, Tailscale/auth-key failure, any orphaning. Ships independently and is valuable even without the autoscaler.
+A one-minute timer on each GPU worker that pings control-plane Redis over Tailscale; after 10 consecutive failures it runs `shutdown -h now` (terminates a spot instance). ~15 lines of shell. Covers: control plane stopped or crashed, deliberate `dalston-aws down`, Tailscale/auth-key failure, any orphaning. Ships independently and is valuable even without the autoscaler.
 
 ---
 
@@ -181,7 +181,9 @@ shapes:
     min_instances: 0              # scale-to-zero
     max_instances: 5              # sized for 500 eps/day sustained (~3.5) + burst headroom
     scale_down_after_s: 2100      # 35 min: ALL engines lag==0 AND PEL==0 this long
-    gpu_type_preference: [g6.xlarge, g4dn.xlarge, g5.xlarge]
+    drain_wait_s: 60              # bounded PEL wait before terminate gives up this tick
+    boot_timeout_s: 1800          # reap a running-but-never-registered worker (wedged boot)
+    gpu_type_preference: [g4dn.xlarge, g6.xlarge, g5.xlarge]  # operator AZ availability
 ```
 
 Scale-down rules (the part that prevents wasted work):
@@ -204,7 +206,7 @@ Scale-down rules (the part that prevents wasted work):
 
 **Deliverables:**
 
-`dalston-aws start --autoscale` → control plane boots with the timer enabled; the laptop's only remaining role is starting/stopping the control plane. Default **off**: a control plane started without the flag behaves exactly as today. Rollback = disable the timer; manual commands unaffected.
+`dalston-aws launch control-plane --autoscale` (or `autoscale --provision` on a running control plane) → control plane runs with the timer enabled; the laptop's only remaining role is starting/stopping the control plane. Default **off**: a control plane started without the flag behaves exactly as today. Rollback = disable the timer; manual commands unaffected.
 
 ---
 
@@ -296,15 +298,18 @@ curl -s -X POST http://<cp>:8000/v1/audio/transcriptions ... | jq '.status'
 
 # Backlog triggers launch (live mode): tasks appear on both streams, one instance launches
 redis-cli XINFO GROUPS dalston:stream:nemo
-dalston-aws autoscale --once | jq '.action'          # "launch"
+dalston-aws autoscale --once | jq '.[].action'       # "launch" (output is a per-shape array)
 aws ec2 describe-instances --filters "Name=tag:dalston:role,Values=gpu-worker" \
   --query 'Reservations[].Instances[].State.Name'    # one "pending"/"running"
 
 # Scale-down: queue empty (lag+PEL==0 on BOTH streams) for cooldown → drain + terminate
-tail -f ~/.dalston/audit.log                          # autoscaler.scale_down entry
+tail -f ~/.dalston/audit.log                          # autoscale.terminate entry
 
-# Dead-man switch: stop the control plane with a worker running
-dalston-aws stop
+# Dead-man switch: sever Redis contact with a worker still running.
+# NOTE: `dalston-aws down` can't test this — it terminates autoscaler workers
+# itself before stopping the control plane. Stop the CP out-of-band instead:
+aws ec2 stop-instances --instance-ids <control-plane-id>
+# (or on the CP: docker compose stop redis)
 # Expect: worker terminates itself within ~10 min (check EC2 console / describe-instances)
 
 # Watchdog: disable the timer, submit a job, wait DALSTON_TASK_STALE_TIMEOUT_S
@@ -316,7 +321,7 @@ dalston-aws stop
 ## Checkpoint
 
 - [ ] `launch_gpu_worker` / `terminate_gpu_worker` / `discover_gpu_workers` callable non-interactively; workers tagged; spot fallback walks `gpu_type_preference` and raises `SpotCapacityError` when exhausted
-- [ ] `dalston-aws stop` / `terminate control-plane` terminates all tagged GPU workers
+- [ ] `terminate control-plane` terminates **all** tagged GPU workers first; `dalston-aws down` terminates autoscaler-managed workers and stops manual ones (a stopped on-demand manual worker stays resumable via `up`)
 - [ ] Dead-man switch: worker self-terminates after ~10 min without Redis contact
 - [ ] `autoscale --once`: desired = `clamp(ceil(max backlog / 20), 0, max)`; single-flight (pending instances counted); scale-down only when the whole shape has `lag==0 && PEL==0` for the cooldown; drains all co-located engines before terminate; every action audited
 - [ ] Fleet state derived from EC2 tags + registry only — `aws-state.yaml` no longer tracks GPU workers; laptop `status`/`terminate gpu` read tags

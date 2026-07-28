@@ -4,18 +4,24 @@
 Usage:
     dalston-aws setup -t TEMPLATE [--region R]     # provision infra (S3, IAM, SG)
     dalston-aws launch [control-plane|gpu]          # launch instances
+    dalston-aws launch control-plane --autoscale    # + M91 GPU autoscaler timer
     dalston-aws terminate [control-plane|gpu]       # terminate instances
     dalston-aws up / down                           # start/stop without terminating
     dalston-aws patch                               # trigger on-demand OS patching
+    dalston-aws autoscale --once [--dry-run]        # one M91 scaling tick (runs on CP)
+    dalston-aws autoscale --provision               # retrofit autoscaler onto running CP
     dalston-aws status / ssh [main|gpu] / teardown
 
 Templates:
     YAML files in infra/templates/ define instance types, spot preferences,
-    and compose profiles. Presets: cpu, split, gpu.
+    and compose profiles. Presets: cpu, split, gpu. The M91 autoscale policy
+    lives at infra/templates/autoscale-policy.yaml.
 
 Prerequisites:
     - AWS credentials configured (boto3 must be able to call sts:GetCallerIdentity)
     - pip install boto3 pyyaml
+    - pip install redis (only for the `autoscale` tick command; installed on the
+      control plane automatically by --autoscale/--provision)
 """
 
 from __future__ import annotations
@@ -54,6 +60,22 @@ from typing import Any, NoReturn
 import boto3
 import yaml
 from botocore.exceptions import ClientError, WaiterError
+
+# Pure autoscale decision logic (stdlib-only) ships as a sibling module so
+# pytest can import it without touching AWS/Redis. When this script runs
+# directly, its directory is already on sys.path; the insert covers callers
+# that execute it from elsewhere (e.g. systemd with an absolute path).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dalston_autoscale import (  # noqa: E402
+    BacklogSnapshot,
+    EngineBacklog,
+    FleetSnapshot,
+    PolicyError,
+    ScaleAction,
+    ShapePolicy,
+    decide,
+    parse_policy,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -292,6 +314,8 @@ class DeploymentState:
     api_key: str = ""
     iam_role: str = ""
     instance_profile: str = ""
+    control_plane_iam_role: str = ""
+    control_plane_instance_profile: str = ""
     sg_id: str = ""
     instance_id: str = ""
     data_volume_id: str = ""
@@ -599,13 +623,8 @@ def create_s3_bucket(region: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
-    iam = iam_client()
-    role_name = f"{NAME_PREFIX}-ec2-role"
-    profile_name = f"{NAME_PREFIX}-instance-profile"
-    account_id = aws_account_id(region)
-
-    # Create role if needed
+def _ensure_role_with_profile(iam: Any, role_name: str, profile_name: str) -> None:
+    """Idempotently create an EC2-assumable role and its instance profile."""
     try:
         iam.get_role(RoleName=role_name)
         log(f"IAM role {role_name} already exists")
@@ -628,7 +647,31 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
             Tags=[{"Key": "Project", "Value": "dalston"}],
         )
 
-    # S3 access policy (idempotent upsert)
+    try:
+        iam.get_instance_profile(InstanceProfileName=profile_name)
+        log(f"Instance profile {profile_name} already exists")
+    except ClientError:
+        log(f"Creating instance profile: {profile_name}")
+        iam.create_instance_profile(
+            InstanceProfileName=profile_name,
+            Tags=[{"Key": "Project", "Value": "dalston"}],
+        )
+        iam.add_role_to_instance_profile(
+            InstanceProfileName=profile_name,
+            RoleName=role_name,
+        )
+        log("Waiting for IAM instance profile to propagate...")
+        time.sleep(10)
+
+
+def _put_baseline_policies(
+    iam: Any, role_name: str, region: str, s3_bucket: str
+) -> None:
+    """S3 + SSM policies both the GPU-worker and control-plane roles need.
+
+    Shared helper so the two roles' baseline permissions can't drift apart.
+    """
+    account_id = aws_account_id(region)
     bucket_arn = f"arn:aws:s3:::{s3_bucket}"
     iam.put_role_policy(
         RoleName=role_name,
@@ -675,24 +718,86 @@ def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
     iam.attach_role_policy(RoleName=role_name, PolicyArn=ssm_managed_policy)
     log("Attached AmazonSSMManagedInstanceCore for patch management")
 
-    # Instance profile
-    try:
-        iam.get_instance_profile(InstanceProfileName=profile_name)
-        log(f"Instance profile {profile_name} already exists")
-    except ClientError:
-        log(f"Creating instance profile: {profile_name}")
-        iam.create_instance_profile(
-            InstanceProfileName=profile_name,
-            Tags=[{"Key": "Project", "Value": "dalston"}],
-        )
-        iam.add_role_to_instance_profile(
-            InstanceProfileName=profile_name,
-            RoleName=role_name,
-        )
-        log("Waiting for IAM instance profile to propagate...")
-        time.sleep(10)
 
+def create_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
+    """Shared minimal role for GPU workers (and pre-M91 control planes)."""
+    iam = iam_client()
+    role_name = f"{NAME_PREFIX}-ec2-role"
+    profile_name = f"{NAME_PREFIX}-instance-profile"
+    _ensure_role_with_profile(iam, role_name, profile_name)
+    _put_baseline_policies(iam, role_name, region, s3_bucket)
     log("IAM role + instance profile ready")
+    return role_name, profile_name
+
+
+def create_control_plane_iam_role(region: str, s3_bucket: str) -> tuple[str, str]:
+    """Dedicated control-plane role: baseline + autoscaler EC2 permissions.
+
+    Kept separate from the GPU-worker role so workers never hold EC2
+    launch/terminate rights via their IMDS credentials. Two guardrails:
+    TerminateInstances is tag-conditioned to dalston:managed-by=autoscaler
+    (a bug in the loop cannot terminate the control plane or hand-launched
+    workers), and iam:PassRole is scoped to exactly the GPU-worker role.
+    """
+    iam = iam_client()
+    role_name = f"{NAME_PREFIX}-control-plane-role"
+    profile_name = f"{NAME_PREFIX}-control-plane-profile"
+    account_id = aws_account_id(region)
+    _ensure_role_with_profile(iam, role_name, profile_name)
+    _put_baseline_policies(iam, role_name, region, s3_bucket)
+
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName=f"{NAME_PREFIX}-autoscaler-ec2",
+        PolicyDocument=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ec2:RunInstances",
+                            "ec2:CreateTags",
+                            "ec2:DescribeInstances",
+                            "ec2:DescribeInstanceTypes",
+                            "ec2:DescribeSubnets",
+                            "ec2:DescribeVpcs",
+                            "ec2:DescribeImages",
+                            "ec2:DescribeSecurityGroups",
+                            "ec2:DescribeSpotPriceHistory",
+                            "ec2:DescribeSpotInstanceRequests",
+                            "ec2:CancelSpotInstanceRequests",
+                        ],
+                        "Resource": "*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["ec2:TerminateInstances"],
+                        "Resource": "*",
+                        "Condition": {
+                            "StringEquals": {
+                                "ec2:ResourceTag/dalston:managed-by": "autoscaler"
+                            }
+                        },
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["iam:PassRole"],
+                        "Resource": (
+                            f"arn:aws:iam::{account_id}:role/{NAME_PREFIX}-ec2-role"
+                        ),
+                    },
+                    {
+                        # Deep Learning AMI lookup (public SSM parameter)
+                        "Effect": "Allow",
+                        "Action": ["ssm:GetParameter"],
+                        "Resource": (f"arn:aws:ssm:{region}::parameter/aws/service/*"),
+                    },
+                ],
+            }
+        ),
+    )
+    log("Control-plane IAM role + instance profile ready (autoscaler-capable)")
     return role_name, profile_name
 
 
@@ -1041,6 +1146,70 @@ systemctl enable dalston-tailscale-serve.service
 # ---------------------------------------------------------------------------
 
 
+def _autoscale_provision_script(ctx: dict[str, Any], *, dry_run: bool = False) -> str:
+    """Bash that provisions the M91 autoscaler on the control plane.
+
+    Used both baked into cloud-init (launch control-plane --autoscale) and
+    piped over SSH to retrofit a running control plane (autoscale
+    --provision). Writes the launch-context YAML (the control plane has no
+    laptop aws-state.yaml), seeds the policy from the repo template only if
+    absent so manual edits survive, and installs a 60s systemd timer.
+
+    dry_run installs the timer running `autoscale --once --dry-run` — the
+    spec's observation phase: decisions are computed and logged every tick
+    but nothing is ever launched or terminated. Re-provision without
+    dry_run to enable actuation.
+    """
+    tick_flags = " --dry-run" if dry_run else ""
+    mode_note = "DRY-RUN (observation only)" if dry_run else "LIVE actuation"
+    ctx_yaml = yaml.dump(ctx, default_flow_style=False, sort_keys=False)
+    return f"""\
+echo "Provisioning GPU autoscaler (M91)..."
+dnf install -y python3-pip >/dev/null 2>&1 || true
+pip3 install --quiet boto3 pyyaml redis 2>/dev/null \\
+  || pip3 install --quiet --break-system-packages boto3 pyyaml redis
+
+cat > /data/dalston/autoscale-context.yaml << 'ASCTXEOF'
+{ctx_yaml}ASCTXEOF
+chmod 600 /data/dalston/autoscale-context.yaml
+
+if [ ! -f /data/dalston/autoscale-policy.yaml ]; then
+  cp /data/dalston/infra/templates/autoscale-policy.yaml \\
+     /data/dalston/autoscale-policy.yaml
+  echo "Seeded autoscale policy from repo template"
+fi
+
+cat > /etc/systemd/system/dalston-autoscale.service << 'ASSVCEOF'
+[Unit]
+Description=Dalston GPU autoscale tick (M91)
+After=docker.service
+
+[Service]
+Type=oneshot
+# HF_TOKEN for pyannote worker user-data lives in the compose secrets file
+EnvironmentFile=-/data/dalston/.env
+ExecStart=/usr/bin/python3 /data/dalston/infra/scripts/dalston-aws autoscale --once{tick_flags}
+ASSVCEOF
+
+cat > /etc/systemd/system/dalston-autoscale.timer << 'ASTMREOF'
+[Unit]
+Description=Dalston GPU autoscale every 60s
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+ASTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-autoscale.timer
+echo "Autoscaler enabled (60s tick, {mode_note})."
+echo "Disable: systemctl disable --now dalston-autoscale.timer"
+"""
+
+
 def generate_user_data(
     s3_bucket: str,
     region: str,
@@ -1049,6 +1218,7 @@ def generate_user_data(
     registry: str | None = None,
     observability: bool = False,
     api_key: str = "",
+    autoscale_ctx: dict[str, Any] | None = None,
 ) -> str:
     ghcr_registry = registry or os.environ.get("GHCR_REGISTRY", DEFAULT_GHCR_REGISTRY)
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -1306,7 +1476,10 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
 """
     )
 
-    return header + variables + body
+    autoscale_block = (
+        "\n" + _autoscale_provision_script(autoscale_ctx) if autoscale_ctx else ""
+    )
+    return header + variables + body + autoscale_block
 
 
 _BUDGET_OVERRIDABLE_KEYS: tuple[str, ...] = (
@@ -1888,6 +2061,53 @@ systemctl enable --now dalston-patch.timer
 systemctl start dalston-patch.service --no-block
 echo "Daily security patching enabled (4:00 AM UTC, first run triggered now)"
 
+# Dead-man switch (M91.2): self-terminate when control-plane Redis is
+# unreachable for 10 consecutive one-minute checks. Covers control plane
+# stopped/crashed, Tailscale/auth-key failure, and orphaned spot workers.
+# A real RESP PING (not a bare TCP connect) also catches Redis wedged with
+# the port still open. One-time spot cannot restart: shutdown == terminate.
+cat > /opt/dalston/deadman.sh << 'DEADEOF'
+#!/bin/bash
+FAILS_FILE=/run/dalston-deadman-fails
+if timeout 5 bash -c 'exec 3<>/dev/tcp/dalston-control-plane/6379; printf "PING\r\n" >&3; read -t 3 -r resp <&3; [[ "$resp" == *PONG* ]]'; then
+  echo 0 > "$FAILS_FILE"
+else
+  n=$(( $(cat "$FAILS_FILE" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$FAILS_FILE"
+  logger "dalston-deadman: control-plane Redis ping failed ($n/10)"
+  if [ "$n" -ge 10 ]; then
+    logger "dalston-deadman: no Redis contact for 10 checks, shutting down"
+    shutdown -h now
+  fi
+fi
+DEADEOF
+chmod +x /opt/dalston/deadman.sh
+
+cat > /etc/systemd/system/dalston-deadman.service << 'DEADSVCEOF'
+[Unit]
+Description=Dalston dead-man switch (self-terminate without control-plane Redis)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dalston/deadman.sh
+DEADSVCEOF
+
+cat > /etc/systemd/system/dalston-deadman.timer << 'DEADTMREOF'
+[Unit]
+Description=Dalston dead-man switch check every minute
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+DEADTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-deadman.timer
+echo "Dead-man switch enabled (10 min without Redis -> self-terminate)"
+
 echo ""
 echo "=========================================="
 echo "GPU worker bootstrap completed at $(date)"
@@ -1946,6 +2166,8 @@ def launch_instance(
     instance_profile: str,
     ami_id: str | None = None,
     allowed_azs: list[str] | None = None,
+    extra_tags: list[dict[str, str]] | None = None,
+    shutdown_behavior: str | None = None,
 ) -> str:
     """Launch an EC2 instance, trying each AZ in the default VPC.
 
@@ -1954,6 +2176,17 @@ def launch_instance(
     existing ``/data`` EBS volume that the caller intends to re-attach —
     EBS is AZ-locked so the instance must come up in the same AZ as the
     volume or the persisted state is unreachable.
+
+    ``extra_tags`` are applied atomically in the RunInstances call — for
+    fleet tags this matters: a post-launch CreateTags that fails would
+    leave an instance invisible to tag discovery and untouchable by the
+    tag-conditioned autoscaler IAM policy.
+
+    ``shutdown_behavior`` ("stop"|"terminate") sets
+    InstanceInitiatedShutdownBehavior. GPU workers pass "terminate" so an
+    OS-level `shutdown -h now` (the dead-man switch) terminates the
+    instance — the EBS-backed default is *stop*, which would hide the
+    worker from the pending/running tag scan while still billing EBS.
 
     Returns the instance ID on success or raises on failure.
     """
@@ -2050,10 +2283,14 @@ def launch_instance(
                     "Tags": [
                         {"Key": "Name", "Value": name_tag},
                         {"Key": "Project", "Value": "dalston"},
+                        *(extra_tags or []),
                     ],
                 }
             ],
         }
+
+        if shutdown_behavior:
+            run_kwargs["InstanceInitiatedShutdownBehavior"] = shutdown_behavior
 
         if use_spot:
             run_kwargs["InstanceMarketOptions"] = {
@@ -2311,6 +2548,8 @@ def launch_gpu_interactive(
                 key_name,
                 instance_profile,
                 ami_id=gpu_ami,
+                extra_tags=fleet_tags(engines or [], "manual"),
+                shutdown_behavior="terminate",
             )
             return instance_id, gpu_type
         except RuntimeError:
@@ -2326,6 +2565,178 @@ def launch_gpu_interactive(
                 die("GPU worker launch aborted.")
             _check_gpu_compat(engines or [], choice)
             gpu_type = choice
+
+
+# ---------------------------------------------------------------------------
+# Tag-based GPU fleet (M91)
+# ---------------------------------------------------------------------------
+
+# EC2 tags identifying autoscaler-visible GPU workers. Tags — not the laptop
+# state file — are the source of truth for fleet membership: the autoscaler
+# on the control plane launches workers the laptop never sees, and the two
+# must coexist without coordination. `aws-state.yaml` remains authoritative
+# only for control-plane resources plus per-worker Tailscale hostnames
+# (an SSH/Prometheus convenience the tags cannot provide).
+TAG_ROLE = "dalston:role"
+TAG_SHAPE = "dalston:shape"
+TAG_MANAGED_BY = "dalston:managed-by"
+ROLE_GPU_WORKER = "gpu-worker"
+
+
+class SpotCapacityError(RuntimeError):
+    """No configured GPU type has spot capacity in any AZ right now."""
+
+
+class LaunchLockHeldError(RuntimeError):
+    """Another dalston-aws launch holds the flock single-flight lock."""
+
+
+def shape_tag_value(engines: list[str]) -> str:
+    """Canonical order-independent shape label, e.g. 'nemo+pyannote'."""
+    return "+".join(sorted(engines))
+
+
+def fleet_tags(engines: list[str], managed_by: str) -> list[dict[str, str]]:
+    """The M91 fleet tags, for atomic application at RunInstances time."""
+    return [
+        {"Key": TAG_ROLE, "Value": ROLE_GPU_WORKER},
+        {"Key": TAG_SHAPE, "Value": shape_tag_value(engines)},
+        {"Key": TAG_MANAGED_BY, "Value": managed_by},
+    ]
+
+
+def tag_gpu_worker(
+    region: str, instance_id: str, engines: list[str], managed_by: str
+) -> None:
+    """Backfill the M91 fleet tags onto an already-running worker.
+
+    New launches get these tags atomically via RunInstances
+    TagSpecifications; this helper exists for adopting pre-M91 workers.
+    """
+    ec2_client(region).create_tags(
+        Resources=[instance_id],
+        Tags=fleet_tags(engines, managed_by),
+    )
+
+
+def launch_gpu_worker(
+    region: str,
+    sg_id: str,
+    user_data_fn: Callable[[str], str],
+    name_tag: str,
+    use_spot: bool,
+    key_name: str,
+    instance_profile: str,
+    gpu_type_preference: list[str],
+    engines: list[str],
+    managed_by: str = "autoscaler",
+) -> tuple[str, str]:
+    """Non-interactive GPU worker launch walking an ordered fallback list.
+
+    Tries each type in ``gpu_type_preference`` across all AZs (via
+    :func:`launch_instance`'s per-AZ retry), regenerating cloud-init per
+    type so VRAM budgets match the GPU actually launched. Types whose GPU
+    cannot satisfy an engine's ``min_gpu_compute`` are skipped rather than
+    aborting — the autoscaler must never die() on a preference-list entry.
+
+    Returns ``(instance_id, gpu_type)``. Raises :class:`SpotCapacityError`
+    when every type is exhausted; the caller backs off and the next timer
+    tick retries.
+    """
+    gpu_ami = get_gpu_ami(region)
+    min_cc_required = max(
+        (GPU_ENGINE_PRESETS.get(e, {}).get("min_gpu_compute", 0.0) for e in engines),
+        default=0.0,
+    )
+    last_err: Exception | None = None
+    for gpu_type in gpu_type_preference:
+        gpu_cc = _gpu_compute_for_instance_type(gpu_type)
+        if min_cc_required and gpu_cc and gpu_cc < min_cc_required:
+            warn(f"Skipping {gpu_type}: compute {gpu_cc} < required {min_cc_required}")
+            continue
+        try:
+            instance_id = launch_instance(
+                region,
+                gpu_type,
+                sg_id,
+                user_data_fn(gpu_type),
+                name_tag,
+                use_spot,
+                key_name,
+                instance_profile,
+                ami_id=gpu_ami,
+                extra_tags=fleet_tags(engines, managed_by),
+                shutdown_behavior="terminate",
+            )
+        except RuntimeError as e:
+            last_err = e
+            warn(f"No capacity for {gpu_type}, trying next preference...")
+            continue
+        return instance_id, gpu_type
+    raise SpotCapacityError(
+        f"No spot capacity for any of {gpu_type_preference} in {region}: {last_err}"
+    )
+
+
+def terminate_gpu_worker(region: str, instance_id: str) -> None:
+    """Cancel spot request and terminate one worker (whole shape dies together)."""
+    cancel_spot_requests_for_instances(region, [instance_id])
+    ec2_client(region).terminate_instances(InstanceIds=[instance_id])
+
+
+def discover_gpu_workers(region: str) -> list[dict]:
+    """Live fleet from EC2 tags — the single source of truth for GPU workers.
+
+    Returns pending/running instances tagged ``dalston:role=gpu-worker`` as
+    dicts with instance_id/state/instance_type/spot/shape/managed_by/
+    launch_time, sorted oldest-first (stable terminate order).
+    """
+    resp = ec2_client(region).describe_instances(
+        Filters=[
+            {"Name": f"tag:{TAG_ROLE}", "Values": [ROLE_GPU_WORKER]},
+            {"Name": "instance-state-name", "Values": ["pending", "running"]},
+        ]
+    )
+    workers: list[dict] = []
+    for res in resp.get("Reservations", []):
+        for inst in res.get("Instances", []):
+            tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+            shape = tags.get(TAG_SHAPE, "")
+            workers.append(
+                {
+                    "instance_id": inst["InstanceId"],
+                    "state": inst["State"]["Name"],
+                    "instance_type": inst.get("InstanceType", ""),
+                    "spot": inst.get("InstanceLifecycle") == "spot",
+                    "engines": shape.split("+") if shape else [],
+                    "managed_by": tags.get(TAG_MANAGED_BY, "manual"),
+                    "launch_time": inst.get("LaunchTime"),
+                }
+            )
+    workers.sort(key=lambda w: (str(w.get("launch_time") or ""), w["instance_id"]))
+    return workers
+
+
+def _adopt_legacy_gpu_tags(st: DeploymentState) -> None:
+    """Backfill M91 tags onto state-tracked workers launched before tagging.
+
+    Idempotent; folded into commands the operator already runs so the
+    transition needs no dedicated migration step. State entries are kept —
+    they still carry the Tailscale hostname for SSH/Prometheus.
+    """
+    adopted = 0
+    for w in st.gpu_workers or []:
+        w_region = w.get("region", st.region)
+        inst = describe_instance(w_region, w["instance_id"])
+        if not inst or inst["State"]["Name"] not in ("pending", "running"):
+            continue
+        tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+        if tags.get(TAG_ROLE) == ROLE_GPU_WORKER:
+            continue
+        tag_gpu_worker(w_region, w["instance_id"], w.get("engines") or [], "manual")
+        adopted += 1
+    if adopted:
+        log(f"Migrated {adopted} legacy GPU worker(s) to tag-based tracking.")
 
 
 # ---------------------------------------------------------------------------
@@ -2460,6 +2871,439 @@ def cancel_spot_requests_for_instances(region: str, instance_ids: list[str]) -> 
 
 
 # ---------------------------------------------------------------------------
+# Autoscaler (M91) — runs on the control plane via systemd timer
+# ---------------------------------------------------------------------------
+
+# The control plane has no laptop aws-state.yaml, so `--autoscale`
+# provisioning writes this context file with the launch parameters the
+# autoscaler needs. The policy file is operator-tunable and read every tick.
+DEFAULT_AUTOSCALE_CONTEXT_PATH = "/data/dalston/autoscale-context.yaml"
+DEFAULT_AUTOSCALE_POLICY_PATH = "/data/dalston/autoscale-policy.yaml"
+
+# Mirrors dalston/common/registry.py + streams_types.py key naming. Kept as
+# literals: this script deliberately has no dalston-package dependency.
+REGISTRY_INSTANCE_KEY_PREFIX = "dalston:engine:instance:"
+REGISTRY_EVENTS_CHANNEL = "dalston:engine:events"
+STREAM_KEY_PREFIX = "dalston:stream:"
+STREAM_CONSUMER_GROUP = "engines"
+AUTOSCALE_STATE_KEY_PREFIX = "dalston:autoscale:state:"
+
+
+@dataclass
+class AutoscaleContext:
+    region: str
+    gpu_sg_id: str
+    key_name: str
+    instance_profile: str
+    s3_bucket: str
+    registry: str = ""
+    observability: bool = False
+    redis_url: str = "redis://localhost:6379"
+
+
+def load_autoscale_context(path: Path) -> AutoscaleContext:
+    if not path.exists():
+        die(
+            f"Autoscale context not found: {path}. Provision it with "
+            "'dalston-aws launch control-plane --autoscale' (or write it "
+            "by hand — see AutoscaleContext fields)."
+        )
+    data = yaml.safe_load(path.read_text()) or {}
+    known = set(AutoscaleContext.__dataclass_fields__)
+    ctx = AutoscaleContext(**{k: v for k, v in data.items() if k in known})
+    missing = [
+        f
+        for f in ("region", "gpu_sg_id", "key_name", "instance_profile", "s3_bucket")
+        if not getattr(ctx, f)
+    ]
+    if missing:
+        die(f"Autoscale context {path} missing required field(s): {missing}")
+    return ctx
+
+
+def _fetch_engine_backlog(r: Any, engine_id: str) -> EngineBacklog:
+    """lag + PEL for one engine stream, via a single XINFO GROUPS call.
+
+    Mirrors the gateway queue board's reading (console.py) — reimplemented
+    here because this script runs on the bare control-plane host without the
+    dalston package. Missing stream/group means nothing was ever enqueued:
+    backlog 0.
+    """
+    lag = 0
+    pel = 0
+    try:
+        for group in r.xinfo_groups(f"{STREAM_KEY_PREFIX}{engine_id}"):
+            if group.get("name") == STREAM_CONSUMER_GROUP:
+                lag = max(0, int(group.get("lag") or 0))
+                pel = max(0, int(group.get("pending") or 0))
+                break
+    except Exception as exc:  # redis.ResponseError on missing key
+        if "no such key" not in str(exc).lower():
+            raise
+    return EngineBacklog(engine_id=engine_id, lag=lag, pending=pel)
+
+
+def _registry_nodes_by_engine(r: Any) -> dict[str, set[str]]:
+    """engine_id -> node_ids with live (unexpired) registry records."""
+    nodes: dict[str, set[str]] = {}
+    for key in r.scan_iter(match=f"{REGISTRY_INSTANCE_KEY_PREFIX}*", count=200):
+        engine_id, node_id = r.hmget(key, "engine_id", "node_id")
+        if engine_id and node_id:
+            nodes.setdefault(engine_id, set()).add(node_id)
+    return nodes
+
+
+def _fetch_autoscale_fleet(
+    region: str, r: Any, policy: ShapePolicy
+) -> tuple[FleetSnapshot, dict[str, str], dict[str, Any]]:
+    """Tag-discovered fleet for the shape, split live/pending via registry.
+
+    Registry node_id is the EC2 instance id (IMDSv2), so the cross-reference
+    is a straight string match. Returns the snapshot plus instance_id ->
+    managed_by (terminate only ever picks autoscaler-managed instances) and
+    instance_id -> launch_time (for the stuck-boot reaper).
+    """
+    by_engine = _registry_nodes_by_engine(r)
+    shape = shape_tag_value(list(policy.engines))
+    live: list[str] = []
+    pending: list[str] = []
+    managed_by: dict[str, str] = {}
+    launch_times: dict[str, Any] = {}
+    for d in discover_gpu_workers(region):
+        if shape_tag_value(d["engines"]) != shape:
+            continue
+        iid = d["instance_id"]
+        managed_by[iid] = d["managed_by"]
+        launch_times[iid] = d.get("launch_time")
+        if d["state"] == "running" and all(
+            iid in by_engine.get(eid, set()) for eid in policy.stream_engine_ids
+        ):
+            live.append(iid)
+        else:
+            pending.append(iid)
+    return FleetSnapshot(tuple(live), tuple(pending)), managed_by, launch_times
+
+
+def _update_idle_state(
+    r: Any, policy: ShapePolicy, idle_now: bool, *, dry_run: bool, now: datetime
+) -> float | None:
+    """Track how long the shape has been continuously idle, in Redis.
+
+    The key self-expires (cooldown + slack) so a stopped timer can't leave
+    stale "idle since last week" state behind. Dry-run keeps its own shadow
+    key (never touching live state) so repeated dry-run ticks can observe
+    the cooldown actually elapsing and validate a would-terminate decision.
+    """
+    prefix = AUTOSCALE_STATE_KEY_PREFIX + ("dryrun:" if dry_run else "")
+    key = f"{prefix}{policy.name}"
+    if not idle_now:
+        r.delete(key)
+        return None
+    idle_since_raw = r.hget(key, "idle_since")
+    idle_s: float | None = None
+    if idle_since_raw:
+        try:
+            idle_s = (now - datetime.fromisoformat(idle_since_raw)).total_seconds()
+        except ValueError:
+            idle_since_raw = None
+    if not idle_since_raw:
+        r.hset(key, "idle_since", now.isoformat())
+    r.expire(key, policy.scale_down_after_s + 600)
+    return idle_s
+
+
+def _publish_autoscale_event(r: Any, event_type: str, **payload: Any) -> None:
+    """Publish a scale event on the registry pub/sub channel.
+
+    Deliberately NOT the durable dalston:events:stream — the orchestrator
+    dispatcher dead-letters unknown event types. The registry channel is
+    fire-and-forget pub/sub: consumer-less publishes are a no-op, and any
+    future console/observability listener can subscribe without a schema
+    migration.
+    """
+    try:
+        r.publish(
+            REGISTRY_EVENTS_CHANNEL,
+            json.dumps({"type": event_type, **payload}, default=str),
+        )
+    except Exception as e:  # never let telemetry fail a scaling action
+        warn(f"Failed to publish {event_type}: {e}")
+
+
+def _reap_stuck_pending(
+    r: Any,
+    ctx: AutoscaleContext,
+    policy: ShapePolicy,
+    fleet: FleetSnapshot,
+    managed_by: dict[str, str],
+    launch_times: dict[str, Any],
+    now: datetime,
+    *,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    """Find (and unless dry-run, terminate) workers stuck mid-boot.
+
+    A running instance whose engines never register stays `pending`, which
+    suppresses every further launch (single-flight) and is ineligible for
+    scale-down — one wedged boot would otherwise stall the queue forever
+    while billing. Bounded by policy.boot_timeout_s; only autoscaler-managed
+    instances are ever reaped. Returns (stuck, reaped).
+    """
+    stuck = []
+    for iid in fleet.pending_instance_ids:
+        if managed_by.get(iid) != "autoscaler":
+            continue
+        launched = launch_times.get(iid)
+        if launched is None:
+            continue
+        age_s = (now - launched).total_seconds()
+        if age_s >= policy.boot_timeout_s:
+            stuck.append(iid)
+    if dry_run:
+        return stuck, []
+    reaped = []
+    for iid in stuck:
+        warn(
+            f"Reaping stuck worker {iid}: pending > {policy.boot_timeout_s}s "
+            "without full engine registration"
+        )
+        try:
+            terminate_gpu_worker(ctx.region, iid)
+        except ClientError as e:
+            warn(f"Failed to reap {iid}: {e}")
+            continue
+        reaped.append(iid)
+        audit("autoscale.boot_timeout", shape=policy.name, gpu_instance=iid)
+        _publish_autoscale_event(
+            r, "autoscaler.boot_timeout", shape=policy.name, instance_id=iid
+        )
+    return stuck, reaped
+
+
+def _autoscale_launch(r: Any, ctx: AutoscaleContext, policy: ShapePolicy) -> str:
+    engines = list(policy.engines)
+    worker_name = "-".join(engines)
+
+    def _ud(gpu_type: str) -> str:
+        return generate_gpu_worker_user_data(
+            ctx.s3_bucket,
+            ctx.region,
+            worker_name=worker_name,
+            engines=engines,
+            registry=ctx.registry,
+            observability=ctx.observability,
+            gpu_type=gpu_type,
+        )
+
+    instance_id, gpu_type = launch_gpu_worker(
+        ctx.region,
+        ctx.gpu_sg_id,
+        _ud,
+        f"{NAME_PREFIX}-gpu-{worker_name}",
+        True,
+        ctx.key_name,
+        ctx.instance_profile,
+        list(policy.gpu_type_preference),
+        engines,
+        managed_by="autoscaler",
+    )
+    audit(
+        "autoscale.launch",
+        shape=policy.name,
+        gpu_instance=instance_id,
+        gpu_type=gpu_type,
+    )
+    _publish_autoscale_event(
+        r,
+        "autoscaler.scale_up",
+        shape=policy.name,
+        instance_id=instance_id,
+        gpu_type=gpu_type,
+    )
+    return f"launched {instance_id} ({gpu_type})"
+
+
+def _autoscale_terminate(
+    r: Any, ctx: AutoscaleContext, policy: ShapePolicy, instance_id: str
+) -> str:
+    """Advisory drain, bounded PEL wait, then terminate.
+
+    The draining status is overwritten by the engine's own heartbeat, so the
+    real gate is the PEL re-check: decide() only chose terminate with the
+    whole shape idle, and this closes the decision-to-terminate race window
+    where a fresh task could have been claimed by the doomed instance.
+    """
+    for key in r.scan_iter(match=f"{REGISTRY_INSTANCE_KEY_PREFIX}*", count=200):
+        if r.hget(key, "node_id") == instance_id:
+            r.hset(key, "status", "draining")
+    deadline = time.time() + policy.drain_wait_s
+    while True:
+        if all(
+            _fetch_engine_backlog(r, eid).pending == 0
+            for eid in policy.stream_engine_ids
+        ):
+            break
+        if time.time() >= deadline:
+            audit(
+                "autoscale.drain_timeout", shape=policy.name, gpu_instance=instance_id
+            )
+            return f"drain timeout on {instance_id}; retrying next tick"
+        time.sleep(5)
+    terminate_gpu_worker(ctx.region, instance_id)
+    r.delete(f"{AUTOSCALE_STATE_KEY_PREFIX}{policy.name}")
+    audit("autoscale.terminate", shape=policy.name, gpu_instance=instance_id)
+    _publish_autoscale_event(
+        r, "autoscaler.scale_down", shape=policy.name, instance_id=instance_id
+    )
+    return f"terminated {instance_id}"
+
+
+def _apply_decision(
+    r: Any,
+    ctx: AutoscaleContext,
+    policy: ShapePolicy,
+    action: ScaleAction,
+    fleet: FleetSnapshot,
+    managed_by: dict[str, str],
+) -> str:
+    if action == ScaleAction.LAUNCH:
+        try:
+            with _launch_lock():
+                return _autoscale_launch(r, ctx, policy)
+        except SpotCapacityError as e:
+            audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
+            return f"no spot capacity: {e}"
+        except LaunchLockHeldError:
+            return "launch lock held (manual launch in progress?); skipping tick"
+    if action == ScaleAction.TERMINATE:
+        # Newest first (older workers have warm model caches); only
+        # autoscaler-managed instances — IAM enforces the same boundary.
+        candidates = [
+            iid
+            for iid in fleet.live_instance_ids
+            if managed_by.get(iid) == "autoscaler"
+        ]
+        if not candidates:
+            return "no autoscaler-managed instance to terminate (manual fleet)"
+        return _autoscale_terminate(r, ctx, policy, candidates[-1])
+    return "no action"
+
+
+def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
+    """Retrofit the autoscaler onto a running control plane (run from laptop).
+
+    Swaps the instance profile to the dedicated control-plane role in place
+    (ReplaceIamInstanceProfileAssociation — no stop/relaunch), then pipes
+    the same provisioning script cloud-init would have run over SSH.
+    With dry_run, the installed timer runs `autoscale --once --dry-run`
+    (observation only) — re-run without --dry-run to enable actuation.
+    """
+    st = require_state()
+    if not st.instance_id:
+        die("No control plane in state. Run 'dalston-aws launch control-plane' first.")
+    if not st.template:
+        die("No template recorded in state. Re-run 'dalston-aws setup -t TEMPLATE'.")
+    if not st.control_plane_instance_profile:
+        die(
+            "No control-plane IAM profile in state. "
+            "Re-run 'dalston-aws setup -t split' first (idempotent)."
+        )
+    if get_instance_state(st.region, st.instance_id) != "running":
+        die("Control plane is not running. Start it with 'dalston-aws up' first.")
+    tmpl = load_template(st.template)
+
+    ec2 = ec2_client(st.region)
+    assocs = ec2.describe_iam_instance_profile_associations(
+        Filters=[{"Name": "instance-id", "Values": [st.instance_id]}]
+    )["IamInstanceProfileAssociations"]
+    active = [a for a in assocs if a["State"] == "associated"]
+    profile_name = st.control_plane_instance_profile
+    if active:
+        current = active[0]["IamInstanceProfile"]["Arn"].split("/")[-1]
+        if current != profile_name:
+            log(f"Replacing instance profile in place: {current} -> {profile_name}")
+            ec2.replace_iam_instance_profile_association(
+                AssociationId=active[0]["AssociationId"],
+                IamInstanceProfile={"Name": profile_name},
+            )
+    else:
+        ec2.associate_iam_instance_profile(
+            IamInstanceProfile={"Name": profile_name}, InstanceId=st.instance_id
+        )
+
+    script = _autoscale_provision_script(_autoscale_ctx_dict(st, tmpl), dry_run=dry_run)
+    encoded = base64.b64encode(script.encode()).decode()
+    key_file = STATE_DIR / f"{st.key_name}.pem"
+    host = _resolve_tailscale_host("dalston-control-plane")
+    mode = "dry-run (observation only)" if dry_run else "LIVE actuation"
+    log(f"Provisioning autoscaler on {host} over SSH ({mode})...")
+    rc = _ssh_run(host, "ec2-user", key_file, f"echo {encoded} | base64 -d | sudo bash")
+    if rc != 0:
+        die(f"Provisioning script failed (exit {rc}).")
+    audit("autoscale.provision", instance=st.instance_id, dry_run=dry_run)
+    log(
+        f"Autoscaler provisioned in {mode} mode. Inspect with: dalston-aws ssh, "
+        "then 'journalctl -u dalston-autoscale.service -f' and "
+        "'sudo systemctl list-timers dalston-autoscale.timer'. "
+        "Disable: 'sudo systemctl disable --now dalston-autoscale.timer'."
+    )
+    if dry_run:
+        log("Enable actuation later with: dalston-aws autoscale --provision")
+
+
+def cmd_autoscale(args: argparse.Namespace) -> None:
+    if args.provision:
+        _autoscale_provision_remote(dry_run=args.dry_run)
+        return
+    try:
+        import redis
+    except ImportError:
+        die("The 'autoscale' command needs redis-py on this host: pip install redis")
+
+    ctx = load_autoscale_context(Path(args.context))
+    policy_path = Path(args.policy)
+    if not policy_path.exists():
+        die(f"Autoscale policy not found: {policy_path}")
+    try:
+        shapes = parse_policy(yaml.safe_load(policy_path.read_text()) or {})
+    except PolicyError as e:
+        die(f"Bad autoscale policy {policy_path}: {e}")
+
+    r = redis.Redis.from_url(ctx.redis_url, decode_responses=True, socket_timeout=10)
+    now = datetime.now(UTC)
+    results = []
+    for policy in shapes:
+        backlog = BacklogSnapshot(
+            tuple(_fetch_engine_backlog(r, eid) for eid in policy.stream_engine_ids)
+        )
+        fleet, managed_by, launch_times = _fetch_autoscale_fleet(ctx.region, r, policy)
+        idle_now = backlog.all_idle and fleet.total > 0
+        idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
+        decision = decide(policy, backlog, fleet, idle_since_s=idle_s)
+        result = decision.to_dict()
+        # Reap workers stuck mid-boot before anything else: they hold the
+        # single-flight slot, so no scale action is meaningful this tick.
+        stuck, reaped = _reap_stuck_pending(
+            r, ctx, policy, fleet, managed_by, launch_times, now, dry_run=args.dry_run
+        )
+        if stuck:
+            result["stuck_pending"] = stuck
+            result["applied"] = (
+                f"dry-run (would reap stuck pending: {stuck})"
+                if args.dry_run
+                else f"reaped stuck pending: {reaped}"
+            )
+        elif args.dry_run:
+            result["applied"] = "dry-run"
+        else:
+            result["applied"] = _apply_decision(
+                r, ctx, policy, decision.action, fleet, managed_by
+            )
+        results.append(result)
+    print(json.dumps(results, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -2500,6 +3344,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
         existing.iam_role, existing.instance_profile = create_iam_role(
             existing.region, existing.s3_bucket
         )
+        (
+            existing.control_plane_iam_role,
+            existing.control_plane_instance_profile,
+        ) = create_control_plane_iam_role(existing.region, existing.s3_bucket)
         existing.key_name = ensure_key_pair(
             existing.region, existing.key_name or key_name
         )
@@ -2537,8 +3385,11 @@ def cmd_setup(args: argparse.Namespace) -> None:
     # 1. S3 bucket
     st.s3_bucket = create_s3_bucket(region)
 
-    # 2. IAM role
+    # 2. IAM roles (shared GPU-worker role + autoscaler-capable control plane)
     st.iam_role, st.instance_profile = create_iam_role(region, st.s3_bucket)
+    st.control_plane_iam_role, st.control_plane_instance_profile = (
+        create_control_plane_iam_role(region, st.s3_bucket)
+    )
 
     # 3. Key pair
     st.key_name = ensure_key_pair(region, key_name)
@@ -2575,8 +3426,30 @@ def cmd_status_impl(st: DeploymentState) -> None:
     label = "Control plane" if st.scenario == "split" else "Instance"
     log(f"  {label}: {st.instance_id}  state={state}  ip={ip or 'none'}")
 
-    if st.scenario == "split" and st.gpu_workers:
-        for w in st.gpu_workers:
+    if st.scenario == "split":
+        # Fleet reality comes from EC2 tags (autoscaler-launched workers are
+        # invisible to the laptop state file); state entries contribute the
+        # Tailscale hostname and any cross-region workers the tag scan of
+        # st.region cannot see.
+        state_by_id = {w["instance_id"]: w for w in st.gpu_workers or []}
+        seen: set[str] = set()
+        for d in discover_gpu_workers(st.region):
+            seen.add(d["instance_id"])
+            w = state_by_id.get(d["instance_id"], {})
+            name = w.get("name") or shape_tag_value(d["engines"]) or "gpu"
+            host = w.get("hostname") or f"managed-by={d['managed_by']}"
+            gpu_inst = describe_instance(st.region, d["instance_id"])
+            gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
+            pricing = "spot" if d["spot"] else "on-demand"
+            log(
+                f"  GPU '{name}' [{host}]:  {d['instance_id']}  "
+                f"state={d['state']}  ip={gpu_ip or 'none'}  "
+                f"{d['instance_type']} ({pricing})  "
+                f"engines={','.join(d['engines'])}"
+            )
+        for w in st.gpu_workers or []:
+            if w["instance_id"] in seen:
+                continue
             w_region = w.get("region", st.region)
             gpu_inst = describe_instance(w_region, w["instance_id"])
             gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
@@ -2596,11 +3469,35 @@ def cmd_status_impl(st: DeploymentState) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     st = require_state()
+    _adopt_legacy_gpu_tags(st)
     cmd_status_impl(st)
 
 
+def _autoscale_ctx_dict(
+    st: DeploymentState, tmpl: DeploymentTemplate
+) -> dict[str, Any]:
+    """Launch context the on-control-plane autoscaler needs (no state file there)."""
+    if not st.gpu_sg_id:
+        die("GPU security group not provisioned. Re-run 'dalston-aws setup -t split'.")
+    return {
+        "region": st.region,
+        "gpu_sg_id": st.gpu_sg_id,
+        "key_name": st.key_name,
+        # GPU workers keep the shared minimal role — never the CP role
+        "instance_profile": st.instance_profile,
+        "s3_bucket": st.s3_bucket,
+        "registry": tmpl.registry or "",
+        "observability": st.observability,
+        "redis_url": "redis://localhost:6379",
+    }
+
+
 def _launch_control_plane(
-    st: DeploymentState, tmpl: DeploymentTemplate, *, observability: bool = False
+    st: DeploymentState,
+    tmpl: DeploymentTemplate,
+    *,
+    observability: bool = False,
+    autoscale: bool = False,
 ) -> None:
     """Launch the control plane instance."""
     if st.instance_id:
@@ -2643,7 +3540,23 @@ def _launch_control_plane(
                 raise
 
     obs_suffix = " with observability" if observability else ""
-    log(f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}...")
+    as_suffix = " + autoscaler" if autoscale else ""
+    log(
+        f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}{as_suffix}..."
+    )
+    st.observability = observability
+    autoscale_ctx = _autoscale_ctx_dict(st, tmpl) if autoscale else None
+    if autoscale and not st.control_plane_instance_profile:
+        die(
+            "Autoscale needs the dedicated control-plane IAM role. "
+            "Re-run 'dalston-aws setup -t split' first."
+        )
+    cp_profile = st.control_plane_instance_profile or st.instance_profile
+    if not st.control_plane_instance_profile:
+        warn(
+            "No dedicated control-plane IAM profile in state (pre-M91 setup). "
+            "Using the shared profile; re-run 'dalston-aws setup' to provision it."
+        )
     ud = generate_user_data(
         st.s3_bucket,
         st.region,
@@ -2652,8 +3565,8 @@ def _launch_control_plane(
         registry=tmpl.registry,
         observability=observability,
         api_key=st.api_key,
+        autoscale_ctx=autoscale_ctx,
     )
-    st.observability = observability
     st.instance_id = launch_instance(
         st.region,
         cp.instance_type,
@@ -2662,7 +3575,7 @@ def _launch_control_plane(
         tag,
         cp.spot,
         st.key_name,
-        st.instance_profile,
+        cp_profile,
         allowed_azs=allowed_azs,
     )
     wait_instance_running(st.region, st.instance_id)
@@ -2897,19 +3810,27 @@ def cmd_launch(args: argparse.Namespace) -> None:
     spot_override = True if args.spot else (False if args.on_demand else None)
 
     if target in ("control-plane", None):
-        _launch_control_plane(st, tmpl, observability=args.observability)
+        _launch_control_plane(
+            st,
+            tmpl,
+            observability=args.observability,
+            autoscale=getattr(args, "autoscale", False),
+        )
     if target in ("gpu", None):
         if tmpl.gpu_worker:
             engines = args.engines.split(",") if args.engines else None
-            with _launch_lock():
-                _launch_gpu(
-                    st,
-                    tmpl,
-                    spot=spot_override,
-                    gpu_type=args.gpu_type,
-                    engines=engines,
-                    region=args.region,
-                )
+            try:
+                with _launch_lock():
+                    _launch_gpu(
+                        st,
+                        tmpl,
+                        spot=spot_override,
+                        gpu_type=args.gpu_type,
+                        engines=engines,
+                        region=args.region,
+                    )
+            except LaunchLockHeldError as e:
+                die(str(e))
         elif target == "gpu":
             die("Template has no gpu_worker config.")
 
@@ -2919,12 +3840,37 @@ def cmd_launch(args: argparse.Namespace) -> None:
 def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     """Terminate GPU worker(s). If name is None, terminate all.
 
-    Each `--name` token may match either the worker label (e.g. `pyannote`)
-    or the full Tailscale hostname (e.g. `dalston-gpu-pyannote-1`). Matching
-    against `name` is the only way to terminate *all* replicas of an
-    engine in one call; matching against `hostname` targets a single replica.
+    "Terminate all" is driven by the EC2 tag scan (plus any cross-region
+    state entries), so autoscaler-launched workers the laptop state file
+    never recorded are terminated too. Each `--name` token may match the
+    worker label (e.g. `pyannote`), the full Tailscale hostname (e.g.
+    `dalston-gpu-pyannote-1`), or a raw instance id (`i-...`) for
+    autoscaler-launched workers that have no state entry.
     """
-    if not st.gpu_workers:
+    _adopt_legacy_gpu_tags(st)
+    state_workers = list(st.gpu_workers or [])
+    state_by_id = {w["instance_id"]: w for w in state_workers}
+
+    # (instance_id, region, label) targets, tag scan first then any
+    # state-only entries (cross-region workers the scan cannot see).
+    targets: list[tuple[str, str, str]] = []
+    for d in discover_gpu_workers(st.region):
+        w = state_by_id.get(d["instance_id"], {})
+        label = (
+            w.get("hostname")
+            or w.get("name")
+            or shape_tag_value(d["engines"])
+            or d["instance_id"]
+        )
+        targets.append((d["instance_id"], st.region, label))
+    seen = {iid for iid, _, _ in targets}
+    for w in state_workers:
+        if w["instance_id"] not in seen:
+            targets.append(
+                (w["instance_id"], w.get("region", st.region), _worker_label(w))
+            )
+
+    if not targets:
         log("No GPU workers to terminate.")
         return
 
@@ -2932,51 +3878,44 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     if name is not None:
         keys = {n.strip() for n in name.split(",") if n.strip()}
 
-    def _matches(w: dict[str, Any]) -> bool:
+    def _matches(iid: str, label: str) -> bool:
         if keys is None:
             return True
-        return w["name"] in keys or w.get("hostname", "") in keys
+        w = state_by_id.get(iid, {})
+        return bool(keys & {iid, label, w.get("name", ""), w.get("hostname", "")})
 
     if keys is not None:
-        # Validate every key matches at least one worker so a typo doesn't
-        # silently no-op.
-        unmatched = {
-            k
-            for k in keys
-            if not any(w["name"] == k or w.get("hostname") == k for w in st.gpu_workers)
-        }
+        matchable: set[str] = set()
+        for iid, _, label in targets:
+            w = state_by_id.get(iid, {})
+            matchable |= {iid, label, w.get("name", ""), w.get("hostname", "")}
+        unmatched = keys - matchable
         if unmatched:
-            avail = sorted(
-                {w["name"] for w in st.gpu_workers}
-                | {w.get("hostname", "") for w in st.gpu_workers if w.get("hostname")}
-            )
+            avail = sorted(m for m in matchable if m)
             die(f"Unknown GPU worker key(s): {sorted(unmatched)}. Available: {avail}")
 
-    to_remove = []
-
-    for w in st.gpu_workers:
-        if not _matches(w):
+    terminated_ids: set[str] = set()
+    for iid, w_region, label in targets:
+        if not _matches(iid, label):
             continue
-        iid = w["instance_id"]
-        label = _worker_label(w)
-        w_region = w.get("region", st.region)
         state = get_instance_state(w_region, iid)
         if state in ("terminated", "shutting-down"):
-            to_remove.append(w)
+            terminated_ids.add(iid)
             continue
         audit("terminate.gpu", gpu_instance=iid, worker=label)
-        cancel_spot_requests_for_instances(w_region, [iid])
         log(f"Terminating GPU worker '{label}' ({iid})...")
         try:
-            ec2_client(w_region).terminate_instances(InstanceIds=[iid])
-            to_remove.append(w)
+            terminate_gpu_worker(w_region, iid)
+            terminated_ids.add(iid)
         except ClientError as e:
             warn(f"Failed to terminate '{label}' ({iid}): {e}")
 
-    for w in to_remove:
-        st.gpu_workers.remove(w)
-    if not st.gpu_workers:
-        st.gpu_workers = None
+    if st.gpu_workers:
+        st.gpu_workers = [
+            w for w in st.gpu_workers if w["instance_id"] not in terminated_ids
+        ]
+        if not st.gpu_workers:
+            st.gpu_workers = None
     save_state(st)
     if keys:
         log(f"GPU worker(s) {', '.join(sorted(keys))} terminated.")
@@ -3025,9 +3964,12 @@ def cmd_terminate(args: argparse.Namespace) -> None:
         if confirm != "yes":
             die("Aborted.")
 
-    # GPU first, then control plane
-    if target in ("gpu", None):
-        gpu_name = getattr(args, "name", None)
+    # GPU first, then control plane. Terminating the control plane always
+    # terminates all tagged GPU workers too (M91 invariant): without the
+    # control plane they can't receive work, and relying on each worker's
+    # dead-man switch would bill for up to ~15 more minutes.
+    if target in ("gpu", "control-plane", None):
+        gpu_name = getattr(args, "name", None) if target == "gpu" else None
         _terminate_gpu(st, name=gpu_name)
     if target in ("control-plane", None):
         _terminate_control_plane(st)
@@ -3175,11 +4117,28 @@ def cmd_down(args: argparse.Namespace) -> None:
         die("No instances to stop. Run 'dalston-aws launch control-plane' first.")
     audit("down", instance=st.instance_id)
     log("Stopping instance(s)...")
-    ec2 = ec2_client(st.region)
-    _stop_instance(ec2, st.region, st.instance_id)
+    # GPU workers first, then the control plane. Autoscaler-managed workers
+    # are always TERMINATED (never stopped): a stopped instance is invisible
+    # to the pending/running tag scan and would silently bill EBS forever —
+    # the M91 invariant is that taking the control plane down leaves no
+    # autoscaler-managed capacity behind. Manual workers keep the stop path
+    # (one-time spot falls back to terminate inside _stop_instance; a
+    # stopped on-demand manual worker is resumable via `up`).
+    _adopt_legacy_gpu_tags(st)
+    handled: set[str] = set()
+    for d in discover_gpu_workers(st.region):
+        handled.add(d["instance_id"])
+        if d["managed_by"] == "autoscaler":
+            log(f"  {d['instance_id']}: autoscaler-managed — terminating")
+            terminate_gpu_worker(st.region, d["instance_id"])
+        else:
+            _stop_instance(ec2_client(st.region), st.region, d["instance_id"])
     for w in st.gpu_workers or []:
+        if w["instance_id"] in handled:
+            continue
         w_region = w.get("region", st.region)
         _stop_instance(ec2_client(w_region), w_region, w["instance_id"])
+    _stop_instance(ec2_client(st.region), st.region, st.instance_id)
     log("Done. Use 'dalston-aws up' to restart.")
 
 
@@ -3343,10 +4302,12 @@ def _launch_lock() -> Any:
         try:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            die(
+            # Raise (don't die()) so the autoscaler can skip the tick
+            # gracefully; interactive callers convert this to die().
+            raise LaunchLockHeldError(
                 f"Another dalston-aws launch is in progress (lock at {lock_path}). "
                 f"Wait for it to finish, or remove the lock file if stale."
-            )
+            ) from None
         try:
             yield
         finally:
@@ -3988,6 +4949,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="AWS region for GPU worker (default: same as control plane)",
     )
+    p_launch.add_argument(
+        "--autoscale",
+        action="store_true",
+        default=False,
+        help=(
+            "Provision the M91 GPU autoscaler on the control plane at launch "
+            "(60s systemd timer; default off). For a running control plane "
+            "use 'dalston-aws autoscale --provision' instead."
+        ),
+    )
     p_launch.set_defaults(func=cmd_launch)
 
     # patch
@@ -4025,6 +4996,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-resolve Tailscale hostnames for GPU workers with unresolved entries",
     )
     p_reconcile.set_defaults(func=cmd_reconcile)
+
+    # autoscale — one M91 scaling tick (systemd timer runs this on the
+    # control plane; --dry-run works anywhere with Redis access)
+    p_autoscale = sub.add_parser(
+        "autoscale",
+        help=(
+            "Run one queue-based GPU autoscale tick: read backlog + fleet, "
+            "launch or drain-and-terminate at most one spot worker per shape"
+        ),
+    )
+    p_autoscale.add_argument(
+        "--once",
+        action="store_true",
+        help="Run a single tick (the only mode; the systemd timer provides the loop)",
+    )
+    p_autoscale.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the full decision as JSON without launching/terminating anything",
+    )
+    p_autoscale.add_argument(
+        "--policy",
+        default=DEFAULT_AUTOSCALE_POLICY_PATH,
+        help=f"Autoscale policy YAML (default: {DEFAULT_AUTOSCALE_POLICY_PATH})",
+    )
+    p_autoscale.add_argument(
+        "--context",
+        default=DEFAULT_AUTOSCALE_CONTEXT_PATH,
+        help=f"Autoscale launch-context YAML (default: {DEFAULT_AUTOSCALE_CONTEXT_PATH})",
+    )
+    p_autoscale.add_argument(
+        "--provision",
+        action="store_true",
+        help=(
+            "Retrofit the autoscaler onto the RUNNING control plane over SSH "
+            "(run from the laptop): swaps in the control-plane IAM profile, "
+            "writes context/policy, installs the 60s systemd timer. Combine "
+            "with --dry-run to install in observation-only mode (the timer "
+            "runs 'autoscale --once --dry-run'); re-run without --dry-run "
+            "to enable actuation"
+        ),
+    )
+    p_autoscale.set_defaults(func=cmd_autoscale)
 
     # engine — single-engine, Tailscale-only GPU deployment (no control plane)
     p_engine = sub.add_parser(

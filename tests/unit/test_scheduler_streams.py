@@ -240,3 +240,94 @@ class TestQueueTaskWithStreams:
             mock_redis.sadd.assert_called_once_with(
                 WAITING_ENGINE_TASKS_KEY, str(sample_task.id)
             )
+
+    @pytest.mark.asyncio
+    async def test_on_demand_task_forces_wait_mode_with_long_timeout(
+        self, mock_redis, mock_registry, mock_catalog
+    ):
+        """M91: _on_demand_wait tasks wait even when the global is fail_fast."""
+        mock_registry.is_engine_available = AsyncMock(return_value=False)
+
+        on_demand_task = Task(
+            id=uuid4(),
+            job_id=uuid4(),
+            stage="transcribe",
+            engine_id="nemo",
+            status=TaskStatus.READY,
+            request_uri="s3://bucket/audio.wav",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            config={"language": "en", "_on_demand_wait": True},
+        )
+
+        settings = MockSettings()
+        settings.engine_unavailable_behavior = "fail_fast"
+        settings.task_stale_timeout_s = 1800
+
+        with (
+            patch(
+                "dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock
+            ) as mock_add_task,
+            patch(
+                "dalston.orchestrator.scheduler.publish_engine_needed",
+                new_callable=AsyncMock,
+            ) as mock_publish_engine_needed,
+            patch(
+                "dalston.orchestrator.scheduler.write_task_request",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_add_task.return_value = "1234567890-0"
+
+            await queue_task(
+                redis=mock_redis,
+                task=on_demand_task,
+                settings=settings,
+                registry=mock_registry,
+                catalog=mock_catalog,
+            )
+
+            # No EngineUnavailableError despite global fail_fast; task queued
+            mock_add_task.assert_called_once()
+            mock_publish_engine_needed.assert_called_once()
+            mock_redis.sadd.assert_called_once_with(
+                WAITING_ENGINE_TASKS_KEY, str(on_demand_task.id)
+            )
+            # Metadata carries the long on-demand deadline, not the 300s
+            # default. hset is called more than once (metadata, then
+            # stream_message_id) — find the metadata write.
+            metadata = next(
+                call.kwargs["mapping"]
+                for call in mock_redis.hset.call_args_list
+                if "waiting_for_engine" in call.kwargs.get("mapping", {})
+            )
+            assert metadata["waiting_for_engine"] == "true"
+            assert metadata["wait_timeout_s"] == "1800"
+
+    @pytest.mark.asyncio
+    async def test_non_on_demand_task_still_fails_fast(
+        self, mock_redis, mock_registry, mock_catalog, sample_task
+    ):
+        """M91 regression guard: unflagged tasks keep fail_fast behavior."""
+        from dalston.orchestrator.scheduler import EngineUnavailableError
+
+        mock_registry.is_engine_available = AsyncMock(return_value=False)
+        # fail_fast path builds a detailed error from registry + catalog
+        mock_registry.get_all = AsyncMock(return_value=[])
+        mock_catalog.get_engines_for_stage = MagicMock(return_value=[])
+
+        with (
+            patch("dalston.orchestrator.scheduler.add_task", new_callable=AsyncMock),
+            patch(
+                "dalston.orchestrator.scheduler.write_task_request",
+                new_callable=AsyncMock,
+            ),
+        ):
+            with pytest.raises(EngineUnavailableError):
+                await queue_task(
+                    redis=mock_redis,
+                    task=sample_task,
+                    settings=MockSettings(),
+                    registry=mock_registry,
+                    catalog=mock_catalog,
+                )

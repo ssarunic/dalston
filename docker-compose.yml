@@ -53,6 +53,7 @@ x-core-env: &core-env
   DATABASE_URL: postgresql+asyncpg://dalston:${POSTGRES_PASSWORD:-password}@postgres:5432/dalston
   DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR: ${DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR:-wait}
   DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS: ${DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS:-300}
+  DALSTON_TASK_STALE_TIMEOUT_S: ${DALSTON_TASK_STALE_TIMEOUT_S:-1800}
 
 # Dependencies for batch engines
 x-batch-depends: &batch-depends

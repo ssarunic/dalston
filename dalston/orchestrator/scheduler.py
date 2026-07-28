@@ -300,6 +300,15 @@ async def queue_task(
     engine_wait_timeout_seconds = int(
         getattr(settings, "engine_wait_timeout_seconds", 300)
     )
+    # M91: tasks accepted via the on-demand catalog fallback were enqueued
+    # knowing no engine is live — the selector already committed to waiting
+    # for the autoscaler, so fail_fast here would be self-contradictory.
+    # Force wait-mode and size the timeout for spot launch + cold boot.
+    if task.config and task.config.get("_on_demand_wait"):
+        engine_unavailable_behavior = "wait"
+        engine_wait_timeout_seconds = int(
+            getattr(settings, "task_stale_timeout_s", 1800)
+        )
     engine_available = await registry.is_engine_available(task.engine_id)
     waiting_for_engine = False
 

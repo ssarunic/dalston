@@ -41,12 +41,18 @@ class CatalogEntry:
     """A engine_id entry in the catalog.
 
     Extends EngineCapabilities with deployment metadata (image name).
+
+    on_demand (M91): the engine is scale-to-zero-safe — jobs may be accepted
+    and enqueued with zero live instances, because an external autoscaler
+    launches capacity from queue backlog. The selector falls back to catalog
+    capabilities for these engines instead of raising NoCapableEngineError.
     """
 
     engine_id: str
     image: str
     capabilities: EngineCapabilities
     execution_profile: ExecutionProfile = DEFAULT_EXECUTION_PROFILE
+    on_demand: bool = False
 
 
 class EngineCatalog:
@@ -189,11 +195,18 @@ class EngineCatalog:
                 f"{execution_profile!r}"
             )
 
+        on_demand = engine_data.get("on_demand", False)
+        if not isinstance(on_demand, bool):
+            raise TypeError(
+                f"on_demand must be a boolean, got {type(on_demand).__name__}"
+            )
+
         return CatalogEntry(
             engine_id=engine_id,
             image=engine_data.get("image", f"dalston/{engine_id}:latest"),
             execution_profile=execution_profile,
             capabilities=capabilities,
+            on_demand=on_demand,
         )
 
     # =========================================================================

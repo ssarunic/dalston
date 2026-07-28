@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-23T16:02:13.683078+00:00",
+  "generated_at": "2026-07-28T12:50:41.872214+00:00",
   "schema_version": "3.0",
   "engine_count": 14,
   "engines": {
@@ -12,6 +12,7 @@
       "description": "Word-level timestamp alignment using CTC forced alignment with\nwav2vec2 models. Standalone reimplementation of the phoneme alignment\nalgorithm from the WhisperX paper (Bain et al., INTERSPEECH 2023).\n\nDoes not depend on the whisperx package. Uses torchaudio pipeline\nmodels for major European languages and HuggingFace wav2vec2 models\nfor 35+ additional languages.",
       "image": "dalston/stt-align-phoneme-align:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "align"
@@ -48,6 +49,7 @@
       "description": "Composite engine that runs transcription (faster-whisper), phoneme-level\nalignment (phoneme-align), and speaker diarization (pyannote-4.0),\nreturning a merged stage-keyed result.\n\nPipeline: transcribe and diarize run in parallel; align runs sequentially\nafter transcribe completes (it requires the transcript as input).\n\nThis is a Layer 2 composite engine per ENGINE_COMPOSABILITY \u00a75.\nChildren are called via HTTP \u2014 each must be running as a separate\nservice with M79 HTTP endpoints.\n\nChild URLs are resolved via Docker-DNS convention (service name as\nhostname) or explicit environment variable overrides:\n  DALSTON_CHILD_URL_FASTER_WHISPER=http://faster-whisper:9100\n  DALSTON_CHILD_URL_PHONEME_ALIGN=http://phoneme-align:9100\n  DALSTON_CHILD_URL_PYANNOTE_4_0=http://pyannote-4-0:9100",
       "image": "dalston/stt-None-whisper-align-pyannote:1.1.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe",
@@ -84,6 +86,7 @@
       "description": "Detects personally identifiable information using GLiNER (zero-shot NER)\nas the primary detector, supplemented by Presidio for checksum-validated\npatterns (credit cards via Luhn, IBANs via mod-97).",
       "image": "dalston/stt-pii_detect-pii-presidio:2.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "pii_detect"
@@ -118,6 +121,7 @@
       "description": "Speaker diarization using NVIDIA NeMo Multi-scale Diarization Decoder.\nNeural end-to-end system with built-in overlap detection.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports optional min/max speaker count hints.\nCPU inference supported but slow (~2x realtime).",
       "image": "dalston/stt-diarize-nemo-msdd:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "diarize"
@@ -155,6 +159,7 @@
       "description": "Speaker diarization using NVIDIA NeMo SortformerEncLabelModel.\nEnd-to-end Transformer encoder model that directly predicts speaker labels\nfrom audio, resolving the permutation problem via arrival-time ordering.\n\nNo HuggingFace token required - models are open under CC-BY-4.0 license.\nSupports up to 4 speakers with native overlap handling and low DER.\nSupports optional min/max speaker count hints.",
       "image": "dalston/stt-diarize-nemo-sortformer:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "diarize"
@@ -192,6 +197,7 @@
       "description": "Speaker diarization using pyannote-audio 4.0 with the new Community-1 pipeline.\nIdentifies who speaks when in an audio file.\n\nNew in 4.0:\n  - VBx clustering for improved speaker counting and assignment\n  - Exclusive mode for single-speaker segments (better Whisper alignment)\n  - NumPy 2.0 and modern dependency compatibility\n\nRequires HuggingFace token (HF_TOKEN) for accessing gated models.\nSupports optional min/max speaker count hints for improved accuracy.",
       "image": "dalston/stt-diarize-pyannote-4.0:1.0.0",
       "execution_profile": "container",
+      "on_demand": true,
       "capabilities": {
         "stages": [
           "diarize"
@@ -228,6 +234,7 @@
       "description": "Converts any audio format to 16kHz, 16-bit, mono WAV.\nExtracts duration and audio metadata using ffprobe.\nRequired as the first stage of all batch pipelines.",
       "image": "dalston/stt-prepare-audio-prepare:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "prepare"
@@ -262,6 +269,7 @@
       "description": "Redacts audio by replacing PII segments with silence or beep tones.\nUses FFmpeg for efficient single-pass processing. Requires PII detection\noutput with entity timing information.",
       "image": "dalston/stt-audio_redact-audio-redactor:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "audio_redact"
@@ -296,6 +304,7 @@
       "description": "Real-time streaming transcription using faster-whisper (CTranslate2).\nVAD-chunked transcription with word-level timestamps.",
       "image": "dalston/stt-transcribe-faster-whisper:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe"
@@ -333,6 +342,7 @@
       "description": "Real-time VAD-chunked transcription via HuggingFace Transformers ASR pipelines.\nSupports any model with pipeline_tag=automatic-speech-recognition on HuggingFace Hub\n(Whisper, Wav2Vec2, HuBERT, MMS, community fine-tunes).",
       "image": "dalston/stt-transcribe-hf-asr:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe"
@@ -370,6 +380,7 @@
       "description": "Real-time streaming transcription using NVIDIA NeMo Parakeet FastConformer.\nCache-aware streaming for ~100ms end-to-end latency with native word timestamps.",
       "image": "dalston/stt-transcribe-nemo:1.0.0",
       "execution_profile": "container",
+      "on_demand": true,
       "capabilities": {
         "stages": [
           "transcribe"
@@ -407,6 +418,7 @@
       "description": "Real-time VAD-chunked transcription via ONNX Runtime.\nSimpler deployment than NeMo (no PyTorch) with slightly higher per-utterance latency.",
       "image": "dalston/stt-transcribe-onnx:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe"
@@ -444,6 +456,7 @@
       "description": "Unified batch + realtime transcription using NVIDIA Riva NIM as a gRPC\nsidecar.  The engine itself is a thin CPU adapter; all GPU inference runs\nin the Riva NIM container.\n\nBatch: streams audio chunks via streaming_recognize(interim_results=False).\nRT: VAD-chunked utterances via offline_recognize() with periodic\nre-transcription for partial results.",
       "image": "dalston/stt-transcribe-riva:1.1.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe"
@@ -478,6 +491,7 @@
       "description": "Real-time transcription using audio-capable LLMs via vLLM.\nSupports Voxtral (Mistral) and Qwen2-Audio model families.",
       "image": "dalston/stt-transcribe-vllm-asr:1.0.0",
       "execution_profile": "container",
+      "on_demand": false,
       "capabilities": {
         "stages": [
           "transcribe"

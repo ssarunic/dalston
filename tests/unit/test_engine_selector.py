@@ -74,12 +74,15 @@ def make_engine_state(
 
 def make_catalog_entry(
     engine_id: str = "test-engine",
+    on_demand: bool = False,
+    rtf_gpu: float | None = None,
 ) -> CatalogEntry:
     """Create CatalogEntry for testing."""
     return CatalogEntry(
         engine_id=engine_id,
         image=f"dalston/{engine_id}:latest",
-        capabilities=make_capabilities(engine_id=engine_id),
+        capabilities=make_capabilities(engine_id=engine_id, rtf_gpu=rtf_gpu),
+        on_demand=on_demand,
     )
 
 
@@ -839,3 +842,115 @@ class TestSelectPipelineEngines:
 
             with pytest.raises(NoDownloadedModelError):
                 await select_pipeline_engines(parameters, mock_registry, mock_catalog)
+
+
+# =============================================================================
+# Test M91 on-demand catalog fallback (lazy acceptance)
+# =============================================================================
+
+
+class TestOnDemandFallback:
+    @pytest.fixture
+    def mock_registry(self):
+        registry = AsyncMock()
+        registry.get_by_stage.return_value = []
+        registry.get_engine.return_value = None
+        return registry
+
+    @pytest.fixture
+    def mock_catalog(self):
+        catalog = MagicMock(spec=EngineCatalog)
+        catalog.find_engines.return_value = []
+        return catalog
+
+    @pytest.mark.asyncio
+    async def test_zero_fleet_selects_on_demand_engine_from_catalog(
+        self, mock_registry, mock_catalog
+    ):
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("nemo", on_demand=True)
+        ]
+
+        result = await select_engine("transcribe", {}, mock_registry, mock_catalog)
+
+        assert result.engine_id == "nemo"
+        assert result.on_demand is True
+        assert "on_demand catalog fallback" in result.selection_reason
+
+    @pytest.mark.asyncio
+    async def test_zero_fleet_without_flag_still_fails_fast(
+        self, mock_registry, mock_catalog
+    ):
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("faster-whisper", on_demand=False)
+        ]
+
+        with pytest.raises(NoCapableEngineError):
+            await select_engine("transcribe", {}, mock_registry, mock_catalog)
+
+    @pytest.mark.asyncio
+    async def test_fastest_on_demand_engine_wins(self, mock_registry, mock_catalog):
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("slow", on_demand=True, rtf_gpu=0.5),
+            make_catalog_entry("fast", on_demand=True, rtf_gpu=0.05),
+            make_catalog_entry("no-rtf", on_demand=True),
+        ]
+
+        result = await select_engine("transcribe", {}, mock_registry, mock_catalog)
+
+        assert result.engine_id == "fast"
+
+    @pytest.mark.asyncio
+    async def test_user_named_cold_on_demand_engine_accepted(
+        self, mock_registry, mock_catalog
+    ):
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("nemo", on_demand=True)
+        ]
+
+        result = await select_engine(
+            "transcribe",
+            {},
+            mock_registry,
+            mock_catalog,
+            user_preference="nemo",
+        )
+
+        assert result.engine_id == "nemo"
+        assert result.on_demand is True
+
+    @pytest.mark.asyncio
+    async def test_user_named_cold_engine_without_flag_rejected(
+        self, mock_registry, mock_catalog
+    ):
+        # another engine is on_demand, but not the one the user asked for
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("nemo", on_demand=True),
+            make_catalog_entry("faster-whisper", on_demand=False),
+        ]
+
+        with pytest.raises(NoCapableEngineError):
+            await select_engine(
+                "transcribe",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="faster-whisper",
+            )
+
+    @pytest.mark.asyncio
+    async def test_live_engine_still_preferred_over_fallback(
+        self, mock_registry, mock_catalog
+    ):
+        caps = make_capabilities("live-engine")
+        mock_registry.get_by_stage.return_value = [
+            make_engine_state("live-engine", capabilities=caps)
+        ]
+        mock_catalog.find_engines.return_value = [
+            make_catalog_entry("nemo", on_demand=True)
+        ]
+
+        result = await select_engine("transcribe", {}, mock_registry, mock_catalog)
+
+        assert result.engine_id == "live-engine"
+        assert result.on_demand is False
