@@ -1888,6 +1888,53 @@ systemctl enable --now dalston-patch.timer
 systemctl start dalston-patch.service --no-block
 echo "Daily security patching enabled (4:00 AM UTC, first run triggered now)"
 
+# Dead-man switch (M91.2): self-terminate when control-plane Redis is
+# unreachable for 10 consecutive one-minute checks. Covers control plane
+# stopped/crashed, Tailscale/auth-key failure, and orphaned spot workers.
+# A real RESP PING (not a bare TCP connect) also catches Redis wedged with
+# the port still open. One-time spot cannot restart: shutdown == terminate.
+cat > /opt/dalston/deadman.sh << 'DEADEOF'
+#!/bin/bash
+FAILS_FILE=/run/dalston-deadman-fails
+if timeout 5 bash -c 'exec 3<>/dev/tcp/dalston-control-plane/6379; printf "PING\r\n" >&3; read -t 3 -r resp <&3; [[ "$resp" == *PONG* ]]'; then
+  echo 0 > "$FAILS_FILE"
+else
+  n=$(( $(cat "$FAILS_FILE" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$FAILS_FILE"
+  logger "dalston-deadman: control-plane Redis ping failed ($n/10)"
+  if [ "$n" -ge 10 ]; then
+    logger "dalston-deadman: no Redis contact for 10 checks, shutting down"
+    shutdown -h now
+  fi
+fi
+DEADEOF
+chmod +x /opt/dalston/deadman.sh
+
+cat > /etc/systemd/system/dalston-deadman.service << 'DEADSVCEOF'
+[Unit]
+Description=Dalston dead-man switch (self-terminate without control-plane Redis)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dalston/deadman.sh
+DEADSVCEOF
+
+cat > /etc/systemd/system/dalston-deadman.timer << 'DEADTMREOF'
+[Unit]
+Description=Dalston dead-man switch check every minute
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+DEADTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-deadman.timer
+echo "Dead-man switch enabled (10 min without Redis -> self-terminate)"
+
 echo ""
 echo "=========================================="
 echo "GPU worker bootstrap completed at $(date)"
