@@ -63,7 +63,7 @@ Two consequences reviewers should hold in mind:
 ## Architecture
 
 ```
-                    laptop: dalston-aws start/stop --autoscale   (only manual act)
+                    laptop: dalston-aws up/down, launch --autoscale  (only manual act)
                                         │
 ┌───────────────────────────── CONTROL PLANE (always-on EC2) ─────────────────────────────┐
 │                                                                                          │
@@ -153,7 +153,7 @@ Ships independently: manual `dalston-aws launch gpu` gains tagging and the fallb
 
 **Deliverables:**
 
-A one-minute timer on each GPU worker that pings control-plane Redis over Tailscale; after 10 consecutive failures it runs `shutdown -h now` (terminates a spot instance). ~15 lines of shell. Covers: control plane stopped or crashed, deliberate `dalston-aws stop`, Tailscale/auth-key failure, any orphaning. Ships independently and is valuable even without the autoscaler.
+A one-minute timer on each GPU worker that pings control-plane Redis over Tailscale; after 10 consecutive failures it runs `shutdown -h now` (terminates a spot instance). ~15 lines of shell. Covers: control plane stopped or crashed, deliberate `dalston-aws down`, Tailscale/auth-key failure, any orphaning. Ships independently and is valuable even without the autoscaler.
 
 ---
 
@@ -204,7 +204,7 @@ Scale-down rules (the part that prevents wasted work):
 
 **Deliverables:**
 
-`dalston-aws start --autoscale` → control plane boots with the timer enabled; the laptop's only remaining role is starting/stopping the control plane. Default **off**: a control plane started without the flag behaves exactly as today. Rollback = disable the timer; manual commands unaffected.
+`dalston-aws launch control-plane --autoscale` (or `autoscale --provision` on a running control plane) → control plane runs with the timer enabled; the laptop's only remaining role is starting/stopping the control plane. Default **off**: a control plane started without the flag behaves exactly as today. Rollback = disable the timer; manual commands unaffected.
 
 ---
 
@@ -304,7 +304,7 @@ aws ec2 describe-instances --filters "Name=tag:dalston:role,Values=gpu-worker" \
 tail -f ~/.dalston/audit.log                          # autoscaler.scale_down entry
 
 # Dead-man switch: stop the control plane with a worker running
-dalston-aws stop
+dalston-aws down
 # Expect: worker terminates itself within ~10 min (check EC2 console / describe-instances)
 
 # Watchdog: disable the timer, submit a job, wait DALSTON_TASK_STALE_TIMEOUT_S
@@ -316,7 +316,7 @@ dalston-aws stop
 ## Checkpoint
 
 - [ ] `launch_gpu_worker` / `terminate_gpu_worker` / `discover_gpu_workers` callable non-interactively; workers tagged; spot fallback walks `gpu_type_preference` and raises `SpotCapacityError` when exhausted
-- [ ] `dalston-aws stop` / `terminate control-plane` terminates all tagged GPU workers
+- [ ] `dalston-aws down` / `terminate control-plane` terminates all tagged GPU workers
 - [ ] Dead-man switch: worker self-terminates after ~10 min without Redis contact
 - [ ] `autoscale --once`: desired = `clamp(ceil(max backlog / 20), 0, max)`; single-flight (pending instances counted); scale-down only when the whole shape has `lag==0 && PEL==0` for the cooldown; drains all co-located engines before terminate; every action audited
 - [ ] Fleet state derived from EC2 tags + registry only — `aws-state.yaml` no longer tracks GPU workers; laptop `status`/`terminate gpu` read tags

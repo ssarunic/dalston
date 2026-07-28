@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_GPU_TYPE_PREFERENCE = ("g4dn.xlarge", "g6.xlarge", "g5.xlarge")
 
@@ -98,6 +98,12 @@ class ShapePolicy:
     max_instances: int = 5
     scale_down_after_s: int = 2100
     drain_wait_s: int = 60
+    # Reap a running-but-never-registered worker after this long: a wedged
+    # boot (bad image, OOM on model load) otherwise counts as pending
+    # forever, suppressing all further launches while billing. Sized for
+    # image pull + model download on a cold NVMe (worst case well over the
+    # 3-8 min happy path).
+    boot_timeout_s: int = 1800
     gpu_type_preference: tuple[str, ...] = DEFAULT_GPU_TYPE_PREFERENCE
 
     @classmethod
@@ -122,6 +128,7 @@ class ShapePolicy:
                 max_instances=int(d.get("max_instances", 5)),
                 scale_down_after_s=int(d.get("scale_down_after_s", 2100)),
                 drain_wait_s=int(d.get("drain_wait_s", 60)),
+                boot_timeout_s=int(d.get("boot_timeout_s", 1800)),
                 gpu_type_preference=tuple(
                     str(t)
                     for t in d.get("gpu_type_preference", DEFAULT_GPU_TYPE_PREFERENCE)
@@ -163,7 +170,7 @@ def parse_policy(data: dict) -> list[ShapePolicy]:
     return shapes
 
 
-class ScaleAction(str, Enum):
+class ScaleAction(StrEnum):
     NONE = "none"
     LAUNCH = "launch"
     TERMINATE = "terminate"
