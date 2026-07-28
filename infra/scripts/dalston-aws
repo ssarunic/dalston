@@ -55,6 +55,22 @@ import boto3
 import yaml
 from botocore.exceptions import ClientError, WaiterError
 
+# Pure autoscale decision logic (stdlib-only) ships as a sibling module so
+# pytest can import it without touching AWS/Redis. When this script runs
+# directly, its directory is already on sys.path; the insert covers callers
+# that execute it from elsewhere (e.g. systemd with an absolute path).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dalston_autoscale import (  # noqa: E402
+    BacklogSnapshot,
+    EngineBacklog,
+    FleetSnapshot,
+    PolicyError,
+    ScaleAction,
+    ShapePolicy,
+    decide,
+    parse_policy,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -2665,6 +2681,279 @@ def cancel_spot_requests_for_instances(region: str, instance_ids: list[str]) -> 
 
 
 # ---------------------------------------------------------------------------
+# Autoscaler (M91) — runs on the control plane via systemd timer
+# ---------------------------------------------------------------------------
+
+# The control plane has no laptop aws-state.yaml, so `--autoscale`
+# provisioning writes this context file with the launch parameters the
+# autoscaler needs. The policy file is operator-tunable and read every tick.
+DEFAULT_AUTOSCALE_CONTEXT_PATH = "/data/dalston/autoscale-context.yaml"
+DEFAULT_AUTOSCALE_POLICY_PATH = "/data/dalston/autoscale-policy.yaml"
+
+# Mirrors dalston/common/registry.py + streams_types.py key naming. Kept as
+# literals: this script deliberately has no dalston-package dependency.
+REGISTRY_INSTANCE_KEY_PREFIX = "dalston:engine:instance:"
+STREAM_KEY_PREFIX = "dalston:stream:"
+STREAM_CONSUMER_GROUP = "engines"
+AUTOSCALE_STATE_KEY_PREFIX = "dalston:autoscale:state:"
+
+
+@dataclass
+class AutoscaleContext:
+    region: str
+    gpu_sg_id: str
+    key_name: str
+    instance_profile: str
+    s3_bucket: str
+    registry: str = ""
+    observability: bool = False
+    redis_url: str = "redis://localhost:6379"
+
+
+def load_autoscale_context(path: Path) -> AutoscaleContext:
+    if not path.exists():
+        die(
+            f"Autoscale context not found: {path}. Provision it with "
+            "'dalston-aws launch control-plane --autoscale' (or write it "
+            "by hand — see AutoscaleContext fields)."
+        )
+    data = yaml.safe_load(path.read_text()) or {}
+    known = set(AutoscaleContext.__dataclass_fields__)
+    ctx = AutoscaleContext(**{k: v for k, v in data.items() if k in known})
+    missing = [
+        f
+        for f in ("region", "gpu_sg_id", "key_name", "instance_profile", "s3_bucket")
+        if not getattr(ctx, f)
+    ]
+    if missing:
+        die(f"Autoscale context {path} missing required field(s): {missing}")
+    return ctx
+
+
+def _fetch_engine_backlog(r: Any, engine_id: str) -> EngineBacklog:
+    """lag + PEL for one engine stream, via a single XINFO GROUPS call.
+
+    Mirrors the gateway queue board's reading (console.py) — reimplemented
+    here because this script runs on the bare control-plane host without the
+    dalston package. Missing stream/group means nothing was ever enqueued:
+    backlog 0.
+    """
+    lag = 0
+    pel = 0
+    try:
+        for group in r.xinfo_groups(f"{STREAM_KEY_PREFIX}{engine_id}"):
+            if group.get("name") == STREAM_CONSUMER_GROUP:
+                lag = max(0, int(group.get("lag") or 0))
+                pel = max(0, int(group.get("pending") or 0))
+                break
+    except Exception as exc:  # redis.ResponseError on missing key
+        if "no such key" not in str(exc).lower():
+            raise
+    return EngineBacklog(engine_id=engine_id, lag=lag, pending=pel)
+
+
+def _registry_nodes_by_engine(r: Any) -> dict[str, set[str]]:
+    """engine_id -> node_ids with live (unexpired) registry records."""
+    nodes: dict[str, set[str]] = {}
+    for key in r.scan_iter(match=f"{REGISTRY_INSTANCE_KEY_PREFIX}*", count=200):
+        engine_id, node_id = r.hmget(key, "engine_id", "node_id")
+        if engine_id and node_id:
+            nodes.setdefault(engine_id, set()).add(node_id)
+    return nodes
+
+
+def _fetch_autoscale_fleet(
+    region: str, r: Any, policy: ShapePolicy
+) -> tuple[FleetSnapshot, dict[str, str]]:
+    """Tag-discovered fleet for the shape, split live/pending via registry.
+
+    Registry node_id is the EC2 instance id (IMDSv2), so the cross-reference
+    is a straight string match. Returns the snapshot plus instance_id ->
+    managed_by (terminate only ever picks autoscaler-managed instances).
+    """
+    by_engine = _registry_nodes_by_engine(r)
+    shape = shape_tag_value(list(policy.engines))
+    live: list[str] = []
+    pending: list[str] = []
+    managed_by: dict[str, str] = {}
+    for d in discover_gpu_workers(region):
+        if shape_tag_value(d["engines"]) != shape:
+            continue
+        iid = d["instance_id"]
+        managed_by[iid] = d["managed_by"]
+        if d["state"] == "running" and all(
+            iid in by_engine.get(eid, set()) for eid in policy.stream_engine_ids
+        ):
+            live.append(iid)
+        else:
+            pending.append(iid)
+    return FleetSnapshot(tuple(live), tuple(pending)), managed_by
+
+
+def _update_idle_state(
+    r: Any, policy: ShapePolicy, idle_now: bool, *, dry_run: bool, now: datetime
+) -> float | None:
+    """Track how long the shape has been continuously idle, in Redis.
+
+    The key self-expires (cooldown + slack) so a stopped timer can't leave
+    stale "idle since last week" state behind. Dry-run never writes.
+    """
+    key = f"{AUTOSCALE_STATE_KEY_PREFIX}{policy.name}"
+    if not idle_now:
+        if not dry_run:
+            r.delete(key)
+        return None
+    idle_since_raw = r.hget(key, "idle_since")
+    idle_s: float | None = None
+    if idle_since_raw:
+        try:
+            idle_s = (now - datetime.fromisoformat(idle_since_raw)).total_seconds()
+        except ValueError:
+            idle_since_raw = None
+    if not idle_since_raw and not dry_run:
+        r.hset(key, "idle_since", now.isoformat())
+    if not dry_run:
+        r.expire(key, policy.scale_down_after_s + 600)
+    return idle_s
+
+
+def _autoscale_launch(ctx: AutoscaleContext, policy: ShapePolicy) -> str:
+    engines = list(policy.engines)
+    worker_name = "-".join(engines)
+
+    def _ud(gpu_type: str) -> str:
+        return generate_gpu_worker_user_data(
+            ctx.s3_bucket,
+            ctx.region,
+            worker_name=worker_name,
+            engines=engines,
+            registry=ctx.registry,
+            observability=ctx.observability,
+            gpu_type=gpu_type,
+        )
+
+    instance_id, gpu_type = launch_gpu_worker(
+        ctx.region,
+        ctx.gpu_sg_id,
+        _ud,
+        f"{NAME_PREFIX}-gpu-{worker_name}",
+        True,
+        ctx.key_name,
+        ctx.instance_profile,
+        list(policy.gpu_type_preference),
+        engines,
+        managed_by="autoscaler",
+    )
+    audit(
+        "autoscale.launch",
+        shape=policy.name,
+        gpu_instance=instance_id,
+        gpu_type=gpu_type,
+    )
+    return f"launched {instance_id} ({gpu_type})"
+
+
+def _autoscale_terminate(
+    r: Any, ctx: AutoscaleContext, policy: ShapePolicy, instance_id: str
+) -> str:
+    """Advisory drain, bounded PEL wait, then terminate.
+
+    The draining status is overwritten by the engine's own heartbeat, so the
+    real gate is the PEL re-check: decide() only chose terminate with the
+    whole shape idle, and this closes the decision-to-terminate race window
+    where a fresh task could have been claimed by the doomed instance.
+    """
+    for key in r.scan_iter(match=f"{REGISTRY_INSTANCE_KEY_PREFIX}*", count=200):
+        if r.hget(key, "node_id") == instance_id:
+            r.hset(key, "status", "draining")
+    deadline = time.time() + policy.drain_wait_s
+    while True:
+        if all(
+            _fetch_engine_backlog(r, eid).pending == 0
+            for eid in policy.stream_engine_ids
+        ):
+            break
+        if time.time() >= deadline:
+            audit(
+                "autoscale.drain_timeout", shape=policy.name, gpu_instance=instance_id
+            )
+            return f"drain timeout on {instance_id}; retrying next tick"
+        time.sleep(5)
+    terminate_gpu_worker(ctx.region, instance_id)
+    r.delete(f"{AUTOSCALE_STATE_KEY_PREFIX}{policy.name}")
+    audit("autoscale.terminate", shape=policy.name, gpu_instance=instance_id)
+    return f"terminated {instance_id}"
+
+
+def _apply_decision(
+    r: Any,
+    ctx: AutoscaleContext,
+    policy: ShapePolicy,
+    action: ScaleAction,
+    fleet: FleetSnapshot,
+    managed_by: dict[str, str],
+) -> str:
+    if action == ScaleAction.LAUNCH:
+        try:
+            with _launch_lock():
+                return _autoscale_launch(ctx, policy)
+        except SpotCapacityError as e:
+            audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
+            return f"no spot capacity: {e}"
+        except OSError:
+            return "launch lock held (manual launch in progress?); skipping tick"
+    if action == ScaleAction.TERMINATE:
+        # Newest first (older workers have warm model caches); only
+        # autoscaler-managed instances — IAM enforces the same boundary.
+        candidates = [
+            iid
+            for iid in fleet.live_instance_ids
+            if managed_by.get(iid) == "autoscaler"
+        ]
+        if not candidates:
+            return "no autoscaler-managed instance to terminate (manual fleet)"
+        return _autoscale_terminate(r, ctx, policy, candidates[-1])
+    return "no action"
+
+
+def cmd_autoscale(args: argparse.Namespace) -> None:
+    try:
+        import redis
+    except ImportError:
+        die("The 'autoscale' command needs redis-py on this host: pip install redis")
+
+    ctx = load_autoscale_context(Path(args.context))
+    policy_path = Path(args.policy)
+    if not policy_path.exists():
+        die(f"Autoscale policy not found: {policy_path}")
+    try:
+        shapes = parse_policy(yaml.safe_load(policy_path.read_text()) or {})
+    except PolicyError as e:
+        die(f"Bad autoscale policy {policy_path}: {e}")
+
+    r = redis.Redis.from_url(ctx.redis_url, decode_responses=True, socket_timeout=10)
+    now = datetime.now(UTC)
+    results = []
+    for policy in shapes:
+        backlog = BacklogSnapshot(
+            tuple(_fetch_engine_backlog(r, eid) for eid in policy.stream_engine_ids)
+        )
+        fleet, managed_by = _fetch_autoscale_fleet(ctx.region, r, policy)
+        idle_now = backlog.all_idle and fleet.total > 0
+        idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
+        decision = decide(policy, backlog, fleet, idle_since_s=idle_s)
+        result = decision.to_dict()
+        if args.dry_run:
+            result["applied"] = "dry-run"
+        else:
+            result["applied"] = _apply_decision(
+                r, ctx, policy, decision.action, fleet, managed_by
+            )
+        results.append(result)
+    print(json.dumps(results, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -4281,6 +4570,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-resolve Tailscale hostnames for GPU workers with unresolved entries",
     )
     p_reconcile.set_defaults(func=cmd_reconcile)
+
+    # autoscale — one M91 scaling tick (systemd timer runs this on the
+    # control plane; --dry-run works anywhere with Redis access)
+    p_autoscale = sub.add_parser(
+        "autoscale",
+        help=(
+            "Run one queue-based GPU autoscale tick: read backlog + fleet, "
+            "launch or drain-and-terminate at most one spot worker per shape"
+        ),
+    )
+    p_autoscale.add_argument(
+        "--once",
+        action="store_true",
+        help="Run a single tick (the only mode; the systemd timer provides the loop)",
+    )
+    p_autoscale.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the full decision as JSON without launching/terminating anything",
+    )
+    p_autoscale.add_argument(
+        "--policy",
+        default=DEFAULT_AUTOSCALE_POLICY_PATH,
+        help=f"Autoscale policy YAML (default: {DEFAULT_AUTOSCALE_POLICY_PATH})",
+    )
+    p_autoscale.add_argument(
+        "--context",
+        default=DEFAULT_AUTOSCALE_CONTEXT_PATH,
+        help=f"Autoscale launch-context YAML (default: {DEFAULT_AUTOSCALE_CONTEXT_PATH})",
+    )
+    p_autoscale.set_defaults(func=cmd_autoscale)
 
     # engine — single-engine, Tailscale-only GPU deployment (no control plane)
     p_engine = sub.add_parser(

@@ -1,0 +1,26 @@
+# M91 GPU autoscale policy. Provisioned to /data/dalston/autoscale-policy.yaml
+# on the control plane by `dalston-aws launch control-plane --autoscale` (only
+# if absent — manual edits there survive). Read fresh every 60s tick, so edits
+# apply without restarts. See docs/plan/milestones/M91-queue-based-gpu-autoscaling.md.
+schema_version: 1
+shapes:
+  - name: nemo+pyannote
+    # GPU_ENGINE_PRESETS keys launched together on one instance
+    engines: [nemo, pyannote]
+    # registry/stream ids the backlog + liveness checks watch
+    stream_engine_ids: [nemo, pyannote-4.0]
+    # 1 instance per 20 queued+in-flight tasks (of the busiest engine)
+    tasks_per_instance: 20
+    # scale-to-zero when idle
+    min_instances: 0
+    # sized for ~500 eps/day sustained (~3.5 instances) + burst headroom
+    max_instances: 5
+    # 35 min fully idle (lag==0 and in-flight==0 on every engine) before
+    # terminating — first knob to retune from real arrival data
+    scale_down_after_s: 2100
+    # bounded wait for in-flight tasks to finish before terminate gives up
+    # for this tick
+    drain_wait_s: 60
+    # g4dn first: best spot availability in eu-west-2 AZs used by this
+    # deployment (operator choice, 2026-07); g6/g5 only as capacity fallback
+    gpu_type_preference: [g4dn.xlarge, g6.xlarge, g5.xlarge]
