@@ -564,13 +564,26 @@ async def select_engine(
             loaded_model_id = _resolve_loaded_model_id(db_model, stage)
 
             engine = await registry.get_engine(engine_id)
+            on_demand_fallback = False
+            capabilities: EngineCapabilities | None = None
             if engine is None or not engine.is_healthy:
-                raise ModelSelectionError(
-                    code="runtime_unavailable",
-                    stage=stage,
-                    model_id=user_preference,
-                    engine_id=engine_id,
-                )
+                # M91: a pinned model on a cold on-demand engine must be
+                # accepted, not rejected — this is how scale-to-zero clients
+                # submit (explicit model, zero live workers). The DB model is
+                # already validated ready; capabilities come from the catalog
+                # and the autoscaler launches the worker from queue backlog.
+                entry = catalog.get_engine(engine_id)
+                if entry is None or not entry.on_demand:
+                    raise ModelSelectionError(
+                        code="runtime_unavailable",
+                        stage=stage,
+                        model_id=user_preference,
+                        engine_id=engine_id,
+                    )
+                on_demand_fallback = True
+                capabilities = entry.capabilities
+            else:
+                capabilities = engine.capabilities
 
             # Check model's language requirements
             if db_model.languages is not None:
@@ -582,27 +595,33 @@ async def select_engine(
                     raise NoCapableEngineError(
                         stage=stage,
                         requirements=requirements,
-                        candidates=[engine],
+                        candidates=[engine] if engine else [],
                         catalog_alternatives=catalog_alts,
                     )
 
+            selection_reason = (
+                "database model lookup (on_demand catalog fallback, no live instance)"
+                if on_demand_fallback
+                else "database model lookup"
+            )
             logger.info(
                 "engine_selected",
                 stage=stage,
                 selected_engine=engine_id,
                 loaded_model_id=loaded_model_id,
-                selection_reason="database model lookup",
+                selection_reason=selection_reason,
                 original_model_id=user_preference,
             )
 
             return EngineSelectionResult(
                 engine_id=engine_id,
-                capabilities=engine.capabilities
+                capabilities=capabilities
                 or EngineCapabilities(
                     engine_id=engine_id, version="unknown", stages=[stage]
                 ),
-                selection_reason="database model lookup",
+                selection_reason=selection_reason,
                 loaded_model_id=loaded_model_id,
+                on_demand=on_demand_fallback,
             )
 
         if user_preference_is_model:

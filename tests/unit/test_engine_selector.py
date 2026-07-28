@@ -401,6 +401,8 @@ class TestSelectEngine:
         mock_db = AsyncMock()
         mock_db.execute.return_value = _ScalarOneResult(db_model)
         mock_registry.get_engine.return_value = None
+        # not an on_demand engine — no M91 catalog fallback
+        mock_catalog.get_engine.return_value = None
 
         with pytest.raises(ModelSelectionError) as exc_info:
             await select_engine(
@@ -954,3 +956,77 @@ class TestOnDemandFallback:
 
         assert result.engine_id == "live-engine"
         assert result.on_demand is False
+
+    @pytest.mark.asyncio
+    async def test_pinned_model_on_cold_on_demand_engine_accepted(
+        self, mock_registry, mock_catalog
+    ):
+        """M91: an explicit model pin must not bypass lazy acceptance.
+
+        Scale-to-zero clients submit with a pinned model (e.g. thestill
+        pins nvidia/parakeet-tdt-0.6b-v3); the DB-model path previously
+        raised runtime_unavailable before the on-demand fallback could run.
+        """
+        db_model = SimpleNamespace(
+            id="nvidia/parakeet-tdt-0.6b-v3",
+            stage="transcribe",
+            status="ready",
+            engine_id="nemo",
+            loaded_model_id="nvidia/parakeet-tdt-0.6b-v3",
+            source="nvidia/parakeet-tdt-0.6b-v3",
+            languages=None,
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+        mock_registry.get_engine.return_value = None
+        mock_catalog.get_engine.return_value = make_catalog_entry(
+            "nemo", on_demand=True
+        )
+
+        result = await select_engine(
+            "transcribe",
+            {},
+            mock_registry,
+            mock_catalog,
+            user_preference="nvidia/parakeet-tdt-0.6b-v3",
+            db=mock_db,
+            user_preference_is_model=True,
+        )
+
+        assert result.engine_id == "nemo"
+        assert result.on_demand is True
+        assert result.loaded_model_id == "nvidia/parakeet-tdt-0.6b-v3"
+        assert "on_demand catalog fallback" in result.selection_reason
+
+    @pytest.mark.asyncio
+    async def test_pinned_model_on_cold_non_on_demand_engine_still_fails(
+        self, mock_registry, mock_catalog
+    ):
+        db_model = SimpleNamespace(
+            id="large-v3-turbo",
+            stage="transcribe",
+            status="ready",
+            engine_id="faster-whisper",
+            loaded_model_id="large-v3-turbo",
+            source="large-v3-turbo",
+            languages=None,
+        )
+        mock_db = AsyncMock()
+        mock_db.execute.return_value = _ScalarOneResult(db_model)
+        mock_registry.get_engine.return_value = None
+        mock_catalog.get_engine.return_value = make_catalog_entry(
+            "faster-whisper", on_demand=False
+        )
+
+        with pytest.raises(ModelSelectionError) as exc_info:
+            await select_engine(
+                "transcribe",
+                {},
+                mock_registry,
+                mock_catalog,
+                user_preference="large-v3-turbo",
+                db=mock_db,
+                user_preference_is_model=True,
+            )
+
+        assert exc_info.value.code == "runtime_unavailable"
