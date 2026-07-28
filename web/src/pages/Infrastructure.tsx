@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -7,7 +8,7 @@ import type { NodeView, NodeEngine } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
 import { stagePillClass, STAGE_ORDER } from '@/lib/stages'
-import { AlertCircle, Network, Server } from 'lucide-react'
+import { AlertCircle, Loader2, Network, Server } from 'lucide-react'
 
 /** Sort rank for an engine by its pipeline stage. Unknown stages go last. */
 function stageRank(stage: string): number {
@@ -115,6 +116,73 @@ function EngineRow({ engine }: { engine: NodeEngine }) {
   )
 }
 
+// Wall-clock external store, quantized to whole seconds so the snapshot
+// is stable within a tick (useSyncExternalStore requirement).
+function subscribeEverySecond(onTick: () => void) {
+  const id = setInterval(onTick, 1000)
+  return () => clearInterval(id)
+}
+const nowSeconds = () => Math.floor(Date.now() / 1000)
+
+/** Wall-clock in ms that ticks every second, render-pure. */
+function useNowMs(): number | null {
+  return useSyncExternalStore(subscribeEverySecond, nowSeconds, nowSeconds) * 1000
+}
+
+/** Elapsed time between an ISO timestamp and nowMs, e.g. "4m 12s". */
+function formatElapsed(sinceIso: string, nowMs: number): string {
+  const seconds = Math.max(0, Math.floor((nowMs - Date.parse(sinceIso)) / 1000))
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
+// M91.7: shadow card for a worker the autoscaler launched but whose
+// engines have not registered yet. Flips to a real NodeCard (same
+// node_id) once heartbeats appear.
+function BootingNodeCard({ node }: { node: NodeView }) {
+  const nowMs = useNowMs()
+  const elapsedS =
+    node.booting_since && nowMs !== null
+      ? Math.floor((nowMs - Date.parse(node.booting_since)) / 1000)
+      : null
+  const stuck =
+    elapsedS !== null && node.boot_timeout_s !== null && elapsedS > node.boot_timeout_s
+
+  return (
+    <Card className={cn('border-dashed', stuck ? 'border-red-500/50' : 'border-amber-500/40')}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Loader2
+            className={cn(
+              'h-4 w-4 shrink-0',
+              stuck ? 'text-red-400' : 'animate-spin text-amber-500',
+            )}
+          />
+          <div className="min-w-0">
+            <CardTitle className="text-base font-medium truncate">{node.node_id}</CardTitle>
+            <Badge variant="warning" className="text-xs">
+              {S.infrastructure.booting}
+              {node.aws_instance_type ? ` · ${node.aws_instance_type}` : ''}
+              {node.shape ? ` · ${node.shape}` : ''}
+            </Badge>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className={cn('text-sm', stuck ? 'text-red-400' : 'text-muted-foreground')}>
+          {stuck ? S.infrastructure.stuckBooting : S.infrastructure.bootingHint}
+        </p>
+        {node.booting_since && nowMs !== null && (
+          <p className="text-xs text-muted-foreground mt-1 tabular-nums">
+            {formatElapsed(node.booting_since, nowMs)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // Node card
 function NodeCard({ node }: { node: NodeView }) {
   const hasGpu = node.gpu_memory_total_gb > 0
@@ -219,17 +287,24 @@ export function Infrastructure() {
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
           {[...data.nodes]
             .sort((a, b) => {
-              // AWS first, then by earliest pipeline stage, then hostname
+              // Booting shadows first, then AWS, then by earliest pipeline
+              // stage, then hostname
+              const bootCmp = (a.state === 'booting' ? 0 : 1) - (b.state === 'booting' ? 0 : 1)
+              if (bootCmp !== 0) return bootCmp
               const envCmp = (a.deploy_env === 'aws' ? 0 : 1) - (b.deploy_env === 'aws' ? 0 : 1)
               if (envCmp !== 0) return envCmp
-              const stageA = Math.min(...a.engines.map((e) => stageRank(e.stage)))
-              const stageB = Math.min(...b.engines.map((e) => stageRank(e.stage)))
+              const stageA = Math.min(...a.engines.map((e) => stageRank(e.stage)), 99)
+              const stageB = Math.min(...b.engines.map((e) => stageRank(e.stage)), 99)
               if (stageA !== stageB) return stageA - stageB
               return a.hostname.localeCompare(b.hostname)
             })
-            .map((node) => (
-              <NodeCard key={node.node_id} node={node} />
-            ))}
+            .map((node) =>
+              node.state === 'booting' ? (
+                <BootingNodeCard key={node.node_id} node={node} />
+              ) : (
+                <NodeCard key={node.node_id} node={node} />
+              ),
+            )}
         </div>
       )}
     </div>

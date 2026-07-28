@@ -2888,6 +2888,12 @@ REGISTRY_EVENTS_CHANNEL = "dalston:engine:events"
 STREAM_KEY_PREFIX = "dalston:stream:"
 STREAM_CONSUMER_GROUP = "engines"
 AUTOSCALE_STATE_KEY_PREFIX = "dalston:autoscale:state:"
+# Shadow records for booting workers (M91.7); read by the gateway's
+# /api/console/nodes so the Infrastructure screen can show instances the
+# registry can't see yet. TTL = 3 ticks so records self-clean if the
+# timer stops.
+AUTOSCALE_PENDING_KEY_PREFIX = "dalston:autoscale:pending:"
+AUTOSCALE_PENDING_TTL_S = 180
 
 
 @dataclass
@@ -2956,33 +2962,67 @@ def _registry_nodes_by_engine(r: Any) -> dict[str, set[str]]:
 
 def _fetch_autoscale_fleet(
     region: str, r: Any, policy: ShapePolicy
-) -> tuple[FleetSnapshot, dict[str, str], dict[str, Any]]:
+) -> tuple[FleetSnapshot, dict[str, dict]]:
     """Tag-discovered fleet for the shape, split live/pending via registry.
 
     Registry node_id is the EC2 instance id (IMDSv2), so the cross-reference
     is a straight string match. Returns the snapshot plus instance_id ->
-    managed_by (terminate only ever picks autoscaler-managed instances) and
-    instance_id -> launch_time (for the stuck-boot reaper).
+    discover_gpu_workers dict (managed_by, launch_time, instance_type) for
+    the reaper, terminate filtering, and pending-node publishing.
     """
     by_engine = _registry_nodes_by_engine(r)
     shape = shape_tag_value(list(policy.engines))
     live: list[str] = []
     pending: list[str] = []
-    managed_by: dict[str, str] = {}
-    launch_times: dict[str, Any] = {}
+    workers: dict[str, dict] = {}
     for d in discover_gpu_workers(region):
         if shape_tag_value(d["engines"]) != shape:
             continue
         iid = d["instance_id"]
-        managed_by[iid] = d["managed_by"]
-        launch_times[iid] = d.get("launch_time")
+        workers[iid] = d
         if d["state"] == "running" and all(
             iid in by_engine.get(eid, set()) for eid in policy.stream_engine_ids
         ):
             live.append(iid)
         else:
             pending.append(iid)
-    return FleetSnapshot(tuple(live), tuple(pending)), managed_by, launch_times
+    return FleetSnapshot(tuple(live), tuple(pending)), workers
+
+
+def _publish_pending_nodes(
+    r: Any,
+    policy: ShapePolicy,
+    fleet: FleetSnapshot,
+    workers: dict[str, dict],
+    now: datetime,
+) -> None:
+    """Publish shadow records for booting workers (M91.7).
+
+    Written every tick including dry-run — this is telemetry, not
+    actuation. Deleted the tick the worker turns live; the TTL is the
+    backstop for a stopped timer. The gateway merges these into
+    /api/console/nodes as state="booting" so the Infrastructure screen
+    shows workers the registry can't see yet.
+    """
+    for iid in fleet.pending_instance_ids:
+        w = workers.get(iid, {})
+        launch_time = w.get("launch_time")
+        key = f"{AUTOSCALE_PENDING_KEY_PREFIX}{iid}"
+        r.hset(
+            key,
+            mapping={
+                "instance_id": iid,
+                "shape": policy.name,
+                "gpu_type": w.get("instance_type", ""),
+                "managed_by": w.get("managed_by", "manual"),
+                "launch_time": launch_time.isoformat() if launch_time else "",
+                "boot_timeout_s": str(policy.boot_timeout_s),
+                "updated_at": now.isoformat(),
+            },
+        )
+        r.expire(key, AUTOSCALE_PENDING_TTL_S)
+    for iid in fleet.live_instance_ids:
+        r.delete(f"{AUTOSCALE_PENDING_KEY_PREFIX}{iid}")
 
 
 def _update_idle_state(
@@ -3277,7 +3317,10 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
         backlog = BacklogSnapshot(
             tuple(_fetch_engine_backlog(r, eid) for eid in policy.stream_engine_ids)
         )
-        fleet, managed_by, launch_times = _fetch_autoscale_fleet(ctx.region, r, policy)
+        fleet, workers = _fetch_autoscale_fleet(ctx.region, r, policy)
+        managed_by = {iid: w["managed_by"] for iid, w in workers.items()}
+        launch_times = {iid: w.get("launch_time") for iid, w in workers.items()}
+        _publish_pending_nodes(r, policy, fleet, workers, now)
         idle_now = backlog.all_idle and fleet.total > 0
         idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
         decision = decide(policy, backlog, fleet, idle_since_s=idle_s)

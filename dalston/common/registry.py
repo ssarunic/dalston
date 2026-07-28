@@ -41,6 +41,10 @@ UNIFIED_INSTANCE_KEY_PREFIX = "dalston:engine:instance:"
 UNIFIED_RUNTIME_SET_PREFIX = "dalston:engine:engine_id:"
 UNIFIED_STAGE_SET_PREFIX = "dalston:engine:stage:"
 UNIFIED_EVENTS_CHANNEL = "dalston:engine:events"
+# M91.7: shadow records for booting GPU workers, written by the autoscaler
+# (infra/scripts/dalston-aws keeps a mirrored literal — it deliberately has
+# no dalston-package dependency). Read by the gateway's /api/console/nodes.
+AUTOSCALE_PENDING_KEY_PREFIX = "dalston:autoscale:pending:"
 
 # Heartbeat configuration
 HEARTBEAT_TTL = 60  # seconds
