@@ -1165,9 +1165,10 @@ def _autoscale_provision_script(ctx: dict[str, Any], *, dry_run: bool = False) -
     ctx_yaml = yaml.dump(ctx, default_flow_style=False, sort_keys=False)
     return f"""\
 echo "Provisioning GPU autoscaler (M91)..."
-dnf install -y python3-pip >/dev/null 2>&1 || true
-pip3 install --quiet boto3 pyyaml redis 2>/dev/null \\
-  || pip3 install --quiet --break-system-packages boto3 pyyaml redis
+# AL2023's default /usr/bin/python3 is 3.9; dalston-aws needs >= 3.11
+dnf install -y python3.11 python3.11-pip >/dev/null 2>&1 || true
+python3.11 -m pip install --quiet boto3 pyyaml redis 2>/dev/null \\
+  || python3.11 -m pip install --quiet --break-system-packages boto3 pyyaml redis
 
 cat > /data/dalston/autoscale-context.yaml << 'ASCTXEOF'
 {ctx_yaml}ASCTXEOF
@@ -1188,7 +1189,7 @@ After=docker.service
 Type=oneshot
 # HF_TOKEN for pyannote worker user-data lives in the compose secrets file
 EnvironmentFile=-/data/dalston/.env
-ExecStart=/usr/bin/python3 /data/dalston/infra/scripts/dalston-aws autoscale --once{tick_flags}
+ExecStart=/usr/bin/python3.11 /data/dalston/infra/scripts/dalston-aws autoscale --once{tick_flags}
 ASSVCEOF
 
 cat > /etc/systemd/system/dalston-autoscale.timer << 'ASTMREOF'
