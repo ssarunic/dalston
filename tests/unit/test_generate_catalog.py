@@ -133,6 +133,23 @@ class TestTransformRuntimeToEntry:
         assert entry["hardware"]["gpu_required"] is True
         assert entry["hardware"]["gpu_optional"] is False
 
+    def test_on_demand_defaults_to_false(self, valid_engine_id_yaml: dict) -> None:
+        """M91: engines without the flag are not scale-to-zero-safe."""
+        entry = transform_engine_id_to_entry(valid_engine_id_yaml, Path("test.yaml"))
+        assert entry["on_demand"] is False
+
+    def test_on_demand_true_passes_through(self, valid_engine_id_yaml: dict) -> None:
+        """M91: on_demand: true flows into the catalog entry."""
+        valid_engine_id_yaml["on_demand"] = True
+        entry = transform_engine_id_to_entry(valid_engine_id_yaml, Path("test.yaml"))
+        assert entry["on_demand"] is True
+
+    def test_on_demand_non_bool_rejected(self, valid_engine_id_yaml: dict) -> None:
+        """M91: strict-parse discipline — non-boolean on_demand fails loud."""
+        valid_engine_id_yaml["on_demand"] = "yes"
+        with pytest.raises(ValueError, match="on_demand"):
+            transform_engine_id_to_entry(valid_engine_id_yaml, Path("test.yaml"))
+
 
 class TestFindRuntimeYamls:
     """Tests for find_engine_id_yamls function."""
