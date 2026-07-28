@@ -148,6 +148,20 @@ SETTING_DEFINITIONS: list[SettingDefinition] = [
         min_value=10,
         max_value=3600,
     ),
+    SettingDefinition(
+        namespace="engines",
+        key="task_stale_timeout_s",
+        label="On-demand engine wait timeout (seconds)",
+        description=(
+            "How long tasks for scale-to-zero (on-demand) engines wait for "
+            "the autoscaler to launch a worker before the job fails"
+        ),
+        value_type="int",
+        default_value=1800,
+        env_var="DALSTON_TASK_STALE_TIMEOUT_S",
+        min_value=60,
+        max_value=14400,
+    ),
     # --- audio ---
     SettingDefinition(
         namespace="audio",
@@ -221,6 +235,7 @@ _ENV_TO_SETTINGS_FIELD: dict[str, str] = {
     "DALSTON_RATE_LIMIT_CONCURRENT_SESSIONS": "rate_limit_concurrent_sessions",
     "DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR": "engine_unavailable_behavior",
     "DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS": "engine_wait_timeout_seconds",
+    "DALSTON_TASK_STALE_TIMEOUT_S": "task_stale_timeout_s",
     "DALSTON_AUDIO_URL_MAX_SIZE_GB": "audio_url_max_size_gb",
     "DALSTON_AUDIO_URL_TIMEOUT_SECONDS": "audio_url_timeout_seconds",
     "DALSTON_RETENTION_CLEANUP_INTERVAL_SECONDS": "retention_cleanup_interval_seconds",

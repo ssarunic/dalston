@@ -414,13 +414,13 @@ class StaleTaskScanner:
         return True
 
     async def _scan_waiting_engine_timeouts(self) -> int:
-        """Fail READY/PENDING tasks that exceeded wait-for-engine deadline."""
-        if (
-            getattr(self._settings, "engine_unavailable_behavior", "fail_fast")
-            != "wait"
-        ):
-            return 0
+        """Fail READY/PENDING tasks that exceeded wait-for-engine deadline.
 
+        Not gated on engine_unavailable_behavior: M91 on-demand tasks enter
+        wait-mode per-task even when the global setting is fail_fast, so the
+        waiting set can be non-empty regardless. The SMEMBERS check below
+        keeps the common empty case a single cheap call.
+        """
         waiting_task_ids = await self._redis.smembers(WAITING_ENGINE_TASKS_KEY)
         if not waiting_task_ids:
             return 0

@@ -185,6 +185,16 @@ class Settings(BaseSettings):
             "doesn't pick it up within this timeout."
         ),
     )
+    task_stale_timeout_s: int = Field(
+        default=1800,
+        alias="DALSTON_TASK_STALE_TIMEOUT_S",
+        description=(
+            "Wait timeout for tasks whose engine was selected on-demand with "
+            "zero live instances (M91 scale-to-zero). Sized for several "
+            "autoscaler ticks + spot launch + model cold boot; the job fails "
+            "with an explicit 'no worker became available' error after this."
+        ),
+    )
 
     # Audio URL Download
     audio_url_max_size_gb: float = Field(
