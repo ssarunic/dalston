@@ -2329,6 +2329,164 @@ def launch_gpu_interactive(
 
 
 # ---------------------------------------------------------------------------
+# Tag-based GPU fleet (M91)
+# ---------------------------------------------------------------------------
+
+# EC2 tags identifying autoscaler-visible GPU workers. Tags — not the laptop
+# state file — are the source of truth for fleet membership: the autoscaler
+# on the control plane launches workers the laptop never sees, and the two
+# must coexist without coordination. `aws-state.yaml` remains authoritative
+# only for control-plane resources plus per-worker Tailscale hostnames
+# (an SSH/Prometheus convenience the tags cannot provide).
+TAG_ROLE = "dalston:role"
+TAG_SHAPE = "dalston:shape"
+TAG_MANAGED_BY = "dalston:managed-by"
+ROLE_GPU_WORKER = "gpu-worker"
+
+
+class SpotCapacityError(RuntimeError):
+    """No configured GPU type has spot capacity in any AZ right now."""
+
+
+def shape_tag_value(engines: list[str]) -> str:
+    """Canonical order-independent shape label, e.g. 'nemo+pyannote'."""
+    return "+".join(sorted(engines))
+
+
+def tag_gpu_worker(
+    region: str, instance_id: str, engines: list[str], managed_by: str
+) -> None:
+    """Apply the M91 fleet tags to a launched GPU worker."""
+    ec2_client(region).create_tags(
+        Resources=[instance_id],
+        Tags=[
+            {"Key": TAG_ROLE, "Value": ROLE_GPU_WORKER},
+            {"Key": TAG_SHAPE, "Value": shape_tag_value(engines)},
+            {"Key": TAG_MANAGED_BY, "Value": managed_by},
+        ],
+    )
+
+
+def launch_gpu_worker(
+    region: str,
+    sg_id: str,
+    user_data_fn: Callable[[str], str],
+    name_tag: str,
+    use_spot: bool,
+    key_name: str,
+    instance_profile: str,
+    gpu_type_preference: list[str],
+    engines: list[str],
+    managed_by: str = "autoscaler",
+) -> tuple[str, str]:
+    """Non-interactive GPU worker launch walking an ordered fallback list.
+
+    Tries each type in ``gpu_type_preference`` across all AZs (via
+    :func:`launch_instance`'s per-AZ retry), regenerating cloud-init per
+    type so VRAM budgets match the GPU actually launched. Types whose GPU
+    cannot satisfy an engine's ``min_gpu_compute`` are skipped rather than
+    aborting — the autoscaler must never die() on a preference-list entry.
+
+    Returns ``(instance_id, gpu_type)``. Raises :class:`SpotCapacityError`
+    when every type is exhausted; the caller backs off and the next timer
+    tick retries.
+    """
+    gpu_ami = get_gpu_ami(region)
+    min_cc_required = max(
+        (GPU_ENGINE_PRESETS.get(e, {}).get("min_gpu_compute", 0.0) for e in engines),
+        default=0.0,
+    )
+    last_err: Exception | None = None
+    for gpu_type in gpu_type_preference:
+        gpu_cc = _gpu_compute_for_instance_type(gpu_type)
+        if min_cc_required and gpu_cc and gpu_cc < min_cc_required:
+            warn(f"Skipping {gpu_type}: compute {gpu_cc} < required {min_cc_required}")
+            continue
+        try:
+            instance_id = launch_instance(
+                region,
+                gpu_type,
+                sg_id,
+                user_data_fn(gpu_type),
+                name_tag,
+                use_spot,
+                key_name,
+                instance_profile,
+                ami_id=gpu_ami,
+            )
+        except RuntimeError as e:
+            last_err = e
+            warn(f"No capacity for {gpu_type}, trying next preference...")
+            continue
+        tag_gpu_worker(region, instance_id, engines, managed_by)
+        return instance_id, gpu_type
+    raise SpotCapacityError(
+        f"No spot capacity for any of {gpu_type_preference} in {region}: {last_err}"
+    )
+
+
+def terminate_gpu_worker(region: str, instance_id: str) -> None:
+    """Cancel spot request and terminate one worker (whole shape dies together)."""
+    cancel_spot_requests_for_instances(region, [instance_id])
+    ec2_client(region).terminate_instances(InstanceIds=[instance_id])
+
+
+def discover_gpu_workers(region: str) -> list[dict]:
+    """Live fleet from EC2 tags — the single source of truth for GPU workers.
+
+    Returns pending/running instances tagged ``dalston:role=gpu-worker`` as
+    dicts with instance_id/state/instance_type/spot/shape/managed_by/
+    launch_time, sorted oldest-first (stable terminate order).
+    """
+    resp = ec2_client(region).describe_instances(
+        Filters=[
+            {"Name": f"tag:{TAG_ROLE}", "Values": [ROLE_GPU_WORKER]},
+            {"Name": "instance-state-name", "Values": ["pending", "running"]},
+        ]
+    )
+    workers: list[dict] = []
+    for res in resp.get("Reservations", []):
+        for inst in res.get("Instances", []):
+            tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+            shape = tags.get(TAG_SHAPE, "")
+            workers.append(
+                {
+                    "instance_id": inst["InstanceId"],
+                    "state": inst["State"]["Name"],
+                    "instance_type": inst.get("InstanceType", ""),
+                    "spot": inst.get("InstanceLifecycle") == "spot",
+                    "engines": shape.split("+") if shape else [],
+                    "managed_by": tags.get(TAG_MANAGED_BY, "manual"),
+                    "launch_time": inst.get("LaunchTime"),
+                }
+            )
+    workers.sort(key=lambda w: (str(w.get("launch_time") or ""), w["instance_id"]))
+    return workers
+
+
+def _adopt_legacy_gpu_tags(st: DeploymentState) -> None:
+    """Backfill M91 tags onto state-tracked workers launched before tagging.
+
+    Idempotent; folded into commands the operator already runs so the
+    transition needs no dedicated migration step. State entries are kept —
+    they still carry the Tailscale hostname for SSH/Prometheus.
+    """
+    adopted = 0
+    for w in st.gpu_workers or []:
+        w_region = w.get("region", st.region)
+        inst = describe_instance(w_region, w["instance_id"])
+        if not inst or inst["State"]["Name"] not in ("pending", "running"):
+            continue
+        tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+        if tags.get(TAG_ROLE) == ROLE_GPU_WORKER:
+            continue
+        tag_gpu_worker(w_region, w["instance_id"], w.get("engines") or [], "manual")
+        adopted += 1
+    if adopted:
+        log(f"Migrated {adopted} legacy GPU worker(s) to tag-based tracking.")
+
+
+# ---------------------------------------------------------------------------
 # EBS data volume
 # ---------------------------------------------------------------------------
 
@@ -2575,8 +2733,30 @@ def cmd_status_impl(st: DeploymentState) -> None:
     label = "Control plane" if st.scenario == "split" else "Instance"
     log(f"  {label}: {st.instance_id}  state={state}  ip={ip or 'none'}")
 
-    if st.scenario == "split" and st.gpu_workers:
-        for w in st.gpu_workers:
+    if st.scenario == "split":
+        # Fleet reality comes from EC2 tags (autoscaler-launched workers are
+        # invisible to the laptop state file); state entries contribute the
+        # Tailscale hostname and any cross-region workers the tag scan of
+        # st.region cannot see.
+        state_by_id = {w["instance_id"]: w for w in st.gpu_workers or []}
+        seen: set[str] = set()
+        for d in discover_gpu_workers(st.region):
+            seen.add(d["instance_id"])
+            w = state_by_id.get(d["instance_id"], {})
+            name = w.get("name") or shape_tag_value(d["engines"]) or "gpu"
+            host = w.get("hostname") or f"managed-by={d['managed_by']}"
+            gpu_inst = describe_instance(st.region, d["instance_id"])
+            gpu_ip = (gpu_inst.get("PublicIpAddress", "") or "") if gpu_inst else ""
+            pricing = "spot" if d["spot"] else "on-demand"
+            log(
+                f"  GPU '{name}' [{host}]:  {d['instance_id']}  "
+                f"state={d['state']}  ip={gpu_ip or 'none'}  "
+                f"{d['instance_type']} ({pricing})  "
+                f"engines={','.join(d['engines'])}"
+            )
+        for w in st.gpu_workers or []:
+            if w["instance_id"] in seen:
+                continue
             w_region = w.get("region", st.region)
             gpu_inst = describe_instance(w_region, w["instance_id"])
             gpu_state = gpu_inst["State"]["Name"] if gpu_inst else "terminated"
@@ -2596,6 +2776,7 @@ def cmd_status_impl(st: DeploymentState) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     st = require_state()
+    _adopt_legacy_gpu_tags(st)
     cmd_status_impl(st)
 
 
@@ -2841,6 +3022,7 @@ def _launch_gpu(
         gpu_type,
         engines=engines,
     )
+    tag_gpu_worker(gpu_region, instance_id, engines, "manual")
     wait_instance_running(gpu_region, instance_id)
 
     gpu_inst = describe_instance(gpu_region, instance_id)
@@ -2919,12 +3101,37 @@ def cmd_launch(args: argparse.Namespace) -> None:
 def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     """Terminate GPU worker(s). If name is None, terminate all.
 
-    Each `--name` token may match either the worker label (e.g. `pyannote`)
-    or the full Tailscale hostname (e.g. `dalston-gpu-pyannote-1`). Matching
-    against `name` is the only way to terminate *all* replicas of an
-    engine in one call; matching against `hostname` targets a single replica.
+    "Terminate all" is driven by the EC2 tag scan (plus any cross-region
+    state entries), so autoscaler-launched workers the laptop state file
+    never recorded are terminated too. Each `--name` token may match the
+    worker label (e.g. `pyannote`), the full Tailscale hostname (e.g.
+    `dalston-gpu-pyannote-1`), or a raw instance id (`i-...`) for
+    autoscaler-launched workers that have no state entry.
     """
-    if not st.gpu_workers:
+    _adopt_legacy_gpu_tags(st)
+    state_workers = list(st.gpu_workers or [])
+    state_by_id = {w["instance_id"]: w for w in state_workers}
+
+    # (instance_id, region, label) targets, tag scan first then any
+    # state-only entries (cross-region workers the scan cannot see).
+    targets: list[tuple[str, str, str]] = []
+    for d in discover_gpu_workers(st.region):
+        w = state_by_id.get(d["instance_id"], {})
+        label = (
+            w.get("hostname")
+            or w.get("name")
+            or shape_tag_value(d["engines"])
+            or d["instance_id"]
+        )
+        targets.append((d["instance_id"], st.region, label))
+    seen = {iid for iid, _, _ in targets}
+    for w in state_workers:
+        if w["instance_id"] not in seen:
+            targets.append(
+                (w["instance_id"], w.get("region", st.region), _worker_label(w))
+            )
+
+    if not targets:
         log("No GPU workers to terminate.")
         return
 
@@ -2932,51 +3139,44 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
     if name is not None:
         keys = {n.strip() for n in name.split(",") if n.strip()}
 
-    def _matches(w: dict[str, Any]) -> bool:
+    def _matches(iid: str, label: str) -> bool:
         if keys is None:
             return True
-        return w["name"] in keys or w.get("hostname", "") in keys
+        w = state_by_id.get(iid, {})
+        return bool(keys & {iid, label, w.get("name", ""), w.get("hostname", "")})
 
     if keys is not None:
-        # Validate every key matches at least one worker so a typo doesn't
-        # silently no-op.
-        unmatched = {
-            k
-            for k in keys
-            if not any(w["name"] == k or w.get("hostname") == k for w in st.gpu_workers)
-        }
+        matchable: set[str] = set()
+        for iid, _, label in targets:
+            w = state_by_id.get(iid, {})
+            matchable |= {iid, label, w.get("name", ""), w.get("hostname", "")}
+        unmatched = keys - matchable
         if unmatched:
-            avail = sorted(
-                {w["name"] for w in st.gpu_workers}
-                | {w.get("hostname", "") for w in st.gpu_workers if w.get("hostname")}
-            )
+            avail = sorted(m for m in matchable if m)
             die(f"Unknown GPU worker key(s): {sorted(unmatched)}. Available: {avail}")
 
-    to_remove = []
-
-    for w in st.gpu_workers:
-        if not _matches(w):
+    terminated_ids: set[str] = set()
+    for iid, w_region, label in targets:
+        if not _matches(iid, label):
             continue
-        iid = w["instance_id"]
-        label = _worker_label(w)
-        w_region = w.get("region", st.region)
         state = get_instance_state(w_region, iid)
         if state in ("terminated", "shutting-down"):
-            to_remove.append(w)
+            terminated_ids.add(iid)
             continue
         audit("terminate.gpu", gpu_instance=iid, worker=label)
-        cancel_spot_requests_for_instances(w_region, [iid])
         log(f"Terminating GPU worker '{label}' ({iid})...")
         try:
-            ec2_client(w_region).terminate_instances(InstanceIds=[iid])
-            to_remove.append(w)
+            terminate_gpu_worker(w_region, iid)
+            terminated_ids.add(iid)
         except ClientError as e:
             warn(f"Failed to terminate '{label}' ({iid}): {e}")
 
-    for w in to_remove:
-        st.gpu_workers.remove(w)
-    if not st.gpu_workers:
-        st.gpu_workers = None
+    if st.gpu_workers:
+        st.gpu_workers = [
+            w for w in st.gpu_workers if w["instance_id"] not in terminated_ids
+        ]
+        if not st.gpu_workers:
+            st.gpu_workers = None
     save_state(st)
     if keys:
         log(f"GPU worker(s) {', '.join(sorted(keys))} terminated.")
@@ -3175,11 +3375,20 @@ def cmd_down(args: argparse.Namespace) -> None:
         die("No instances to stop. Run 'dalston-aws launch control-plane' first.")
     audit("down", instance=st.instance_id)
     log("Stopping instance(s)...")
-    ec2 = ec2_client(st.region)
-    _stop_instance(ec2, st.region, st.instance_id)
+    # GPU workers first (tag scan catches autoscaler-launched ones the state
+    # file never recorded; spot workers terminate since they can't stop),
+    # then the control plane.
+    _adopt_legacy_gpu_tags(st)
+    stopped: set[str] = set()
+    for d in discover_gpu_workers(st.region):
+        stopped.add(d["instance_id"])
+        _stop_instance(ec2_client(st.region), st.region, d["instance_id"])
     for w in st.gpu_workers or []:
+        if w["instance_id"] in stopped:
+            continue
         w_region = w.get("region", st.region)
         _stop_instance(ec2_client(w_region), w_region, w["instance_id"])
+    _stop_instance(ec2_client(st.region), st.region, st.instance_id)
     log("Done. Use 'dalston-aws up' to restart.")
 
 
