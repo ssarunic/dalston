@@ -1,6 +1,9 @@
 schema_version: "1.1"
 id: pyannote-4.0
 engine_id: pyannote-4.0
+# M91: scale-to-zero-safe — jobs are accepted with zero live instances and
+# the queue-based autoscaler launches a spot worker from backlog
+on_demand: true
 stage: diarize
 name: Pyannote Speaker Diarization 4.0
 version: 1.0.0

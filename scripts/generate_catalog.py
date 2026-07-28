@@ -102,6 +102,12 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
     # Extract performance info
     performance = data.get("performance", {})
 
+    on_demand = data.get("on_demand", False)
+    if not isinstance(on_demand, bool):
+        raise ValueError(
+            f"Invalid on_demand {on_demand!r} in {yaml_path}; expected a boolean"
+        )
+
     entry = {
         "id": engine_id,
         "engine_id": engine_file_id,  # Engine file ID for capability routing
@@ -109,6 +115,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
         "version": version,
         "stage": stage,
         "execution_profile": execution_profile,
+        "on_demand": on_demand,
         "description": data.get("description", "").strip(),
         "image": derive_image_name(engine_id, stage, version),
         "capabilities": {
@@ -171,6 +178,7 @@ def generate_catalog(engines_dir: Path) -> dict:
                 "description": entry["description"],
                 "image": entry["image"],
                 "execution_profile": entry["execution_profile"],
+                "on_demand": entry["on_demand"],
                 "capabilities": entry["capabilities"],
                 "hardware": entry["hardware"],
                 "performance": entry["performance"],

@@ -120,6 +120,10 @@ class EngineSelectionResult:
     capabilities: EngineCapabilities
     selection_reason: str
     loaded_model_id: str | None = None
+    # M91: engine was selected from catalog capabilities with zero live
+    # instances (scale-to-zero fallback); its tasks get the long on-demand
+    # wait timeout so a cold spot-worker boot doesn't fail the job.
+    on_demand: bool = False
 
 
 @dataclass
@@ -446,6 +450,44 @@ def _rank_and_select(
     )
 
 
+def _catalog_on_demand_fallback(
+    stage: str,
+    catalog_alts: list[CatalogEntry],
+    engine_id: str | None = None,
+) -> EngineSelectionResult | None:
+    """M91 lazy acceptance: select a cold engine from catalog capabilities.
+
+    catalog_alts is already stage- and requirement-filtered
+    (catalog.find_engines). Only engines flagged ``on_demand: true`` qualify
+    — everything else keeps today's fail-fast NoCapableEngineError. When
+    ``engine_id`` is given (explicit user preference), only that engine
+    qualifies. Fastest engine (lowest rtf_gpu) wins among several.
+
+    Redis streams accept messages without a consumer: the task queues, the
+    backlog triggers an autoscaler launch, and the worker consumes on boot.
+    """
+    candidates = [
+        e
+        for e in catalog_alts
+        if e.on_demand and (engine_id is None or e.engine_id == engine_id)
+    ]
+    if not candidates:
+        return None
+    winner = min(candidates, key=lambda e: e.capabilities.rtf_gpu or float("inf"))
+    logger.info(
+        "on_demand_catalog_fallback_selected",
+        stage=stage,
+        engine_id=winner.engine_id,
+        user_preference=engine_id,
+    )
+    return EngineSelectionResult(
+        engine_id=winner.engine_id,
+        capabilities=winner.capabilities,
+        selection_reason="on_demand catalog fallback (no live instance, scale-to-zero)",
+        on_demand=True,
+    )
+
+
 async def select_engine(
     stage: str,
     requirements: dict,
@@ -573,8 +615,15 @@ async def select_engine(
         # Not a model ID, try as direct engine ID
         engine = await registry.get_engine(user_preference)
         if engine is None or not engine.is_available:
-            # User-specified engine not running
+            # User-specified engine not running. M91: if the catalog flags
+            # it on_demand, accept from catalog capabilities — the task
+            # queues and the autoscaler launches a worker from backlog.
             catalog_alts = catalog.find_engines(stage, requirements)
+            fallback = _catalog_on_demand_fallback(
+                stage, catalog_alts, engine_id=user_preference
+            )
+            if fallback is not None:
+                return fallback
             raise NoCapableEngineError(
                 stage=stage,
                 requirements=requirements,
@@ -622,9 +671,13 @@ async def select_engine(
         )
     ]
 
-    # 4. No capable engine - build helpful error
+    # 4. No capable engine. M91: fall back to catalog capabilities for
+    # on_demand-flagged engines (scale-to-zero) before failing the job.
     if not capable:
         catalog_alts = catalog.find_engines(stage, requirements)
+        fallback = _catalog_on_demand_fallback(stage, catalog_alts)
+        if fallback is not None:
+            return fallback
         raise NoCapableEngineError(
             stage=stage,
             requirements=requirements,

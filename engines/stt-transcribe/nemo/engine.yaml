@@ -1,6 +1,9 @@
 schema_version: "1.1"
 id: stt-rt-parakeet
 engine_id: nemo
+# M91: scale-to-zero-safe — jobs are accepted with zero live instances and
+# the queue-based autoscaler launches a spot worker from backlog
+on_demand: true
 stage: transcribe
 mode: realtime
 name: Parakeet Realtime
