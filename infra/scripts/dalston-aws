@@ -112,6 +112,8 @@ BACKUP_VOLUME_TAG = {"Key": "dalston:backup", "Value": "daily"}
 DLM_SNAPSHOT_TIME = "04:45"  # UTC
 DLM_SNAPSHOT_RETAIN = 7
 DLM_ROLE_NAME = f"{NAME_PREFIX}-dlm-role"
+# DLM rejects descriptions outside [0-9A-Za-z _-] — no colons/slashes/parens
+DLM_POLICY_DESCRIPTION = f"{NAME_PREFIX} daily data volume snapshot M94"
 
 # GPU engine presets: name → (ghcr_image_suffix, engine_id, container_name, needs_hf_token)
 GPU_ENGINE_PRESETS: dict[str, dict] = {
@@ -3575,7 +3577,7 @@ def _ensure_dlm_policy(region: str) -> None:
     taking no snapshots (M94).
     """
     dlm = dlm_client(region)
-    desc = f"{NAME_PREFIX}: daily /data volume snapshot (M94)"
+    desc = DLM_POLICY_DESCRIPTION
     role_arn = _ensure_dlm_role()
     details = {
         "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",

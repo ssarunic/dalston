@@ -10,6 +10,7 @@ without AWS credentials.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -48,6 +49,13 @@ class TestLifecycleRules:
         assert aws.BACKUP_S3_PREFIX.startswith(backups["Filter"]["Prefix"])
         assert backups["Expiration"]["Days"] == aws.BACKUP_RETENTION_DAYS
         assert backups["Status"] == "Enabled"
+
+
+class TestDlmPolicy:
+    def test_description_uses_dlm_legal_charset(self, aws):
+        # The DLM API rejects CreateLifecyclePolicy descriptions outside
+        # [0-9A-Za-z _-] — colons, slashes, and parens all fail live.
+        assert re.fullmatch(r"[0-9A-Za-z _-]+", aws.DLM_POLICY_DESCRIPTION)
 
 
 class TestProvisionScript:
