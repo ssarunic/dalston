@@ -10,6 +10,8 @@ Usage:
     dalston-aws patch                               # trigger on-demand OS patching
     dalston-aws autoscale --once [--dry-run]        # one M91 scaling tick (runs on CP)
     dalston-aws autoscale --provision               # retrofit autoscaler onto running CP
+    dalston-aws backup --once                       # one pg_dump→S3 backup (runs on CP)
+    dalston-aws backup --provision                  # M94: retrofit nightly backup onto running CP
     dalston-aws status / ssh [main|gpu] / teardown
 
 Templates:
@@ -100,6 +102,16 @@ GPU_INSTANCE_TYPE = "g4dn.xlarge"
 CPU_INSTANCE_TYPE = "t3.xlarge"
 CTRL_INSTANCE_TYPE = "t3.large"
 LOKI_DRIVER_VERSION = "latest"
+
+# M94 nightly Postgres backups
+BACKUP_S3_PREFIX = "backups/postgres/"
+BACKUP_RETENTION_DAYS = 30
+BACKUP_TIMER_ONCALENDAR = "*-*-* 04:15:00"  # after the 03:30 patch timer
+BACKUP_PG_CONTAINER = f"{NAME_PREFIX}-postgres-1"  # compose v2 default naming
+BACKUP_VOLUME_TAG = {"Key": "dalston:backup", "Value": "daily"}
+DLM_SNAPSHOT_TIME = "04:45"  # UTC
+DLM_SNAPSHOT_RETAIN = 7
+DLM_ROLE_NAME = f"{NAME_PREFIX}-dlm-role"
 
 # GPU engine presets: name → (ghcr_image_suffix, engine_id, container_name, needs_hf_token)
 GPU_ENGINE_PRESETS: dict[str, dict] = {
@@ -442,6 +454,13 @@ def sts_client(region: str):
     return _clients[key]
 
 
+def dlm_client(region: str):
+    key = f"dlm:{region}"
+    if key not in _clients:
+        _clients[key] = boto3.client("dlm", region_name=region)
+    return _clients[key]
+
+
 # ---------------------------------------------------------------------------
 # AWS helpers
 # ---------------------------------------------------------------------------
@@ -593,29 +612,43 @@ def create_s3_bucket(region: str) -> str:
         },
     )
 
-    # Lifecycle rules
-    s3.put_bucket_lifecycle_configuration(
-        Bucket=bucket,
-        LifecycleConfiguration={
-            "Rules": [
-                {
-                    "ID": "cleanup-temp",
-                    "Status": "Enabled",
-                    "Filter": {"Prefix": "temp/"},
-                    "Expiration": {"Days": 7},
-                },
-                {
-                    "ID": "cleanup-jobs",
-                    "Status": "Enabled",
-                    "Filter": {"Prefix": "jobs/"},
-                    "Expiration": {"Days": 30},
-                },
-            ]
-        },
-    )
+    ensure_bucket_lifecycle(region, bucket)
 
     log("S3 bucket created with encryption + lifecycle rules")
     return bucket
+
+
+# put_bucket_lifecycle_configuration replaces the whole rule set, so every
+# writer must supply the complete list — append new rules here, never inline.
+S3_LIFECYCLE_RULES: list[dict] = [
+    {
+        "ID": "cleanup-temp",
+        "Status": "Enabled",
+        "Filter": {"Prefix": "temp/"},
+        "Expiration": {"Days": 7},
+    },
+    {
+        "ID": "cleanup-jobs",
+        "Status": "Enabled",
+        "Filter": {"Prefix": "jobs/"},
+        "Expiration": {"Days": 30},
+    },
+    {
+        "ID": "cleanup-backups",
+        "Status": "Enabled",
+        # Deliberately broader than BACKUP_S3_PREFIX so any future
+        # backups/<other>/ families inherit the same retention
+        "Filter": {"Prefix": "backups/"},
+        "Expiration": {"Days": BACKUP_RETENTION_DAYS},
+    },
+]
+
+
+def ensure_bucket_lifecycle(region: str, bucket: str) -> None:
+    s3_client(region).put_bucket_lifecycle_configuration(
+        Bucket=bucket,
+        LifecycleConfiguration={"Rules": S3_LIFECYCLE_RULES},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1211,6 +1244,77 @@ echo "Disable: systemctl disable --now dalston-autoscale.timer"
 """
 
 
+def _backup_provision_script() -> str:
+    """Bash that provisions the M94 nightly Postgres backup on the control plane.
+
+    Baked into cloud-init for every control-plane launch (default-on — a
+    backup you must remember to enable is not a backup) and piped over SSH
+    to retrofit a running control plane (backup --provision). Installs a
+    daily timer that runs `dalston-aws backup --once`: pg_dump the postgres
+    container and upload to the artifact bucket under backups/postgres/.
+    Bucket and region come from .env.aws via the unit's EnvironmentFile.
+    """
+    return f"""\
+echo "Provisioning nightly Postgres backup (M94)..."
+# AL2023's default /usr/bin/python3 is 3.9; dalston-aws needs >= 3.11
+dnf install -y python3.11 python3.11-pip >/dev/null 2>&1 || true
+python3.11 -m pip install --quiet boto3 pyyaml 2>/dev/null \\
+  || python3.11 -m pip install --quiet --break-system-packages boto3 pyyaml
+
+mkdir -p /data/backups
+
+# The unit runs the repo clone on the CP — a pre-M94 checkout has no
+# 'backup' subcommand, so refresh it and refuse to install a broken timer.
+# The clone lives under a uid-1000-owned mount while this runs as root, so
+# git needs safe.directory or it rejects the pull as dubious ownership.
+git config --global --add safe.directory /data/dalston
+(cd /data/dalston && git pull --ff-only) \\
+  || echo "WARNING: git pull failed; continuing with existing checkout"
+if ! python3.11 /data/dalston/infra/scripts/dalston-aws backup --help >/dev/null 2>&1; then
+  echo "ERROR: /data/dalston checkout lacks the 'backup' subcommand — not installing the timer" >&2
+  exit 1
+fi
+
+cat > /etc/systemd/system/dalston-backup.service << 'BKSVCEOF'
+[Unit]
+Description=Dalston nightly Postgres backup (M94)
+After=docker.service dalston.service
+StartLimitIntervalSec=2h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+# oneshot + Restart is supported since systemd 244 (AL2023 ships 252):
+# retry transient pg_dump/S3 failures instead of losing the nightly attempt
+Restart=on-failure
+RestartSec=10min
+# oneshot has no start timeout by default — a hung pg_dump/docker/S3 call
+# would otherwise block retries and every later timer activation forever
+TimeoutStartSec=45min
+EnvironmentFile=/data/dalston/.env.aws
+ExecStart=/usr/bin/python3.11 /data/dalston/infra/scripts/dalston-aws backup --once
+BKSVCEOF
+
+cat > /etc/systemd/system/dalston-backup.timer << 'BKTMREOF'
+[Unit]
+Description=Dalston nightly Postgres backup
+
+[Timer]
+OnCalendar={BACKUP_TIMER_ONCALENDAR}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+BKTMREOF
+
+systemctl daemon-reload
+systemctl enable --now dalston-backup.timer
+echo "Nightly Postgres backup enabled (OnCalendar={BACKUP_TIMER_ONCALENDAR} UTC)."
+echo "Run one now: systemctl start dalston-backup.service"
+echo "Disable: systemctl disable --now dalston-backup.timer"
+"""
+
+
 def generate_user_data(
     s3_bucket: str,
     region: str,
@@ -1480,7 +1584,9 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
     autoscale_block = (
         "\n" + _autoscale_provision_script(autoscale_ctx) if autoscale_ctx else ""
     )
-    return header + variables + body + autoscale_block
+    # Nightly Postgres backup is default-on for every control-plane launch (M94)
+    backup_block = "\n" + _backup_provision_script()
+    return header + variables + body + backup_block + autoscale_block
 
 
 _BUDGET_OVERRIDABLE_KEYS: tuple[str, ...] = (
@@ -2764,6 +2870,7 @@ def create_and_attach_data_volume(
                 "Tags": [
                     {"Key": "Name", "Value": f"{NAME_PREFIX}-data"},
                     {"Key": "Project", "Value": "dalston"},
+                    BACKUP_VOLUME_TAG,  # targeted by the M94 DLM snapshot policy
                 ],
             }
         ],
@@ -3230,6 +3337,21 @@ def _apply_decision(
     return "no action"
 
 
+def _pipe_provision_script_over_ssh(script: str, key_name: str, what: str) -> None:
+    """Run a provisioning script as root on the control plane over SSH.
+
+    Shared by the autoscale and backup retrofit paths so the
+    encode → resolve host → ssh → check-rc sequence can't drift apart.
+    """
+    encoded = base64.b64encode(script.encode()).decode()
+    key_file = STATE_DIR / f"{key_name}.pem"
+    host = _resolve_tailscale_host("dalston-control-plane")
+    log(f"Provisioning {what} on {host} over SSH...")
+    rc = _ssh_run(host, "ec2-user", key_file, f"echo {encoded} | base64 -d | sudo bash")
+    if rc != 0:
+        die(f"Provisioning script failed (exit {rc}).")
+
+
 def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
     """Retrofit the autoscaler onto a running control plane (run from laptop).
 
@@ -3273,14 +3395,8 @@ def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
         )
 
     script = _autoscale_provision_script(_autoscale_ctx_dict(st, tmpl), dry_run=dry_run)
-    encoded = base64.b64encode(script.encode()).decode()
-    key_file = STATE_DIR / f"{st.key_name}.pem"
-    host = _resolve_tailscale_host("dalston-control-plane")
     mode = "dry-run (observation only)" if dry_run else "LIVE actuation"
-    log(f"Provisioning autoscaler on {host} over SSH ({mode})...")
-    rc = _ssh_run(host, "ec2-user", key_file, f"echo {encoded} | base64 -d | sudo bash")
-    if rc != 0:
-        die(f"Provisioning script failed (exit {rc}).")
+    _pipe_provision_script_over_ssh(script, st.key_name, f"autoscaler ({mode})")
     audit("autoscale.provision", instance=st.instance_id, dry_run=dry_run)
     log(
         f"Autoscaler provisioned in {mode} mode. Inspect with: dalston-aws ssh, "
@@ -3345,6 +3461,218 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             )
         results.append(result)
     print(json.dumps(results, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# M94 nightly Postgres backups
+# ---------------------------------------------------------------------------
+
+
+def _backup_once() -> None:
+    """Dump the control-plane Postgres and upload it to S3 (runs on the CP).
+
+    Reads DALSTON_S3_BUCKET / AWS_REGION from the environment (the systemd
+    unit sets EnvironmentFile=/data/dalston/.env.aws); the laptop
+    aws-state.yaml does not exist here, same as `autoscale --once`.
+    """
+    bucket = os.environ.get("DALSTON_S3_BUCKET", "")
+    region = os.environ.get("AWS_REGION", "")
+    if not bucket or not region:
+        die("backup --once needs DALSTON_S3_BUCKET and AWS_REGION in the environment")
+
+    # Persistent=true can fire this mid-boot before compose has postgres up;
+    # wait for readiness instead of relying on unit ordering alone.
+    for _ in range(30):
+        ready = subprocess.run(
+            ["docker", "exec", BACKUP_PG_CONTAINER, "pg_isready", "-U", "dalston"],
+            capture_output=True,
+        )
+        if ready.returncode == 0:
+            break
+        time.sleep(10)
+    else:
+        die(f"{BACKUP_PG_CONTAINER} not ready after 5 minutes")
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    staging_dir = Path("/data/backups")
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staging = staging_dir / f"{NAME_PREFIX}-{timestamp}.dump"
+    key = f"{BACKUP_S3_PREFIX}{staging.name}"
+
+    log(f"Dumping postgres ({BACKUP_PG_CONTAINER}, pg_dump -Fc)...")
+    try:
+        with staging.open("wb") as fh:
+            proc = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    BACKUP_PG_CONTAINER,
+                    "pg_dump",
+                    "-U",
+                    "dalston",
+                    "-Fc",
+                    "dalston",
+                ],
+                stdout=fh,
+                stderr=subprocess.PIPE,
+            )
+        if proc.returncode != 0:
+            die(
+                f"pg_dump failed (exit {proc.returncode}): "
+                f"{proc.stderr.decode().strip()}"
+            )
+        size = staging.stat().st_size
+        if size == 0:
+            die("pg_dump produced an empty dump — aborting upload")
+        s3_client(region).upload_file(str(staging), bucket, key)
+    finally:
+        staging.unlink(missing_ok=True)
+    log(f"Backup uploaded: s3://{bucket}/{key} ({size / 1_048_576:.1f} MiB)")
+
+
+def _ensure_dlm_role() -> str:
+    """Create (once) the service role DLM assumes to take snapshots."""
+    iam = iam_client()
+    try:
+        role = iam.get_role(RoleName=DLM_ROLE_NAME)
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "NoSuchEntity":
+            raise
+        role = iam.create_role(
+            RoleName=DLM_ROLE_NAME,
+            AssumeRolePolicyDocument=json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"Service": "dlm.amazonaws.com"},
+                            "Action": "sts:AssumeRole",
+                        }
+                    ],
+                }
+            ),
+        )
+        log(f"Created DLM service role {DLM_ROLE_NAME}")
+    # Unconditional and idempotent: re-attaching an attached managed policy
+    # is a no-op, and this heals a create interrupted before the attach —
+    # otherwise the role would exist but never gain snapshot permissions.
+    iam.attach_role_policy(
+        RoleName=DLM_ROLE_NAME,
+        PolicyArn=(
+            "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+        ),
+    )
+    return role["Role"]["Arn"]
+
+
+def _ensure_dlm_policy(region: str) -> None:
+    """Idempotently create-or-reconcile the daily data-volume snapshot policy.
+
+    An existing policy is matched by description, then unconditionally
+    reset to the canonical state/role/tags/schedule — a DISABLED, errored,
+    or hand-edited policy would otherwise pass a presence check while
+    taking no snapshots (M94).
+    """
+    dlm = dlm_client(region)
+    desc = f"{NAME_PREFIX}: daily /data volume snapshot (M94)"
+    role_arn = _ensure_dlm_role()
+    details = {
+        "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",
+        "ResourceTypes": ["VOLUME"],
+        "TargetTags": [BACKUP_VOLUME_TAG],
+        "Schedules": [
+            {
+                "Name": "daily",
+                "CreateRule": {
+                    "Interval": 24,
+                    "IntervalUnit": "HOURS",
+                    "Times": [DLM_SNAPSHOT_TIME],
+                },
+                "RetainRule": {"Count": DLM_SNAPSHOT_RETAIN},
+                "CopyTags": True,
+            }
+        ],
+    }
+
+    existing = dlm.get_lifecycle_policies()["Policies"]
+    match = next((p for p in existing if p.get("Description") == desc), None)
+    if match:
+        dlm.update_lifecycle_policy(
+            PolicyId=match["PolicyId"],
+            ExecutionRoleArn=role_arn,
+            State="ENABLED",
+            Description=desc,
+            PolicyDetails=details,
+        )
+        log(f"DLM snapshot policy reconciled ({match['PolicyId']}, ENABLED)")
+        return
+
+    for attempt in range(5):
+        try:
+            dlm.create_lifecycle_policy(
+                ExecutionRoleArn=role_arn,
+                Description=desc,
+                State="ENABLED",
+                PolicyDetails=details,
+            )
+            break
+        except ClientError as e:
+            # A freshly created IAM role takes a few seconds to propagate
+            if attempt == 4 or e.response["Error"]["Code"] != "InvalidRequestException":
+                raise
+            time.sleep(5)
+    log(
+        f"DLM daily snapshot policy created "
+        f"({DLM_SNAPSHOT_TIME} UTC, retain {DLM_SNAPSHOT_RETAIN})"
+    )
+
+
+def _backup_provision_remote() -> None:
+    """Retrofit the nightly backup onto a running control plane (run from laptop).
+
+    Ensures the backups/ lifecycle rule, the data-volume DLM tag, and the
+    DLM snapshot policy with operator credentials, then pipes the same
+    provisioning script cloud-init runs at launch over SSH. Idempotent.
+    """
+    st = require_state()
+    if not st.instance_id:
+        die("No control plane in state. Run 'dalston-aws launch control-plane' first.")
+    if not st.s3_bucket:
+        die("No S3 bucket in state. Re-run 'dalston-aws setup' first.")
+    if get_instance_state(st.region, st.instance_id) != "running":
+        die("Control plane is not running. Start it with 'dalston-aws up' first.")
+
+    ensure_bucket_lifecycle(st.region, st.s3_bucket)
+    log(f"Ensured backups/ lifecycle rule ({BACKUP_RETENTION_DAYS}-day retention)")
+    if st.data_volume_id:
+        ec2_client(st.region).create_tags(
+            Resources=[st.data_volume_id], Tags=[BACKUP_VOLUME_TAG]
+        )
+        log(f"Tagged data volume {st.data_volume_id} for DLM snapshots")
+    else:
+        log("WARNING: no data volume in state — DLM policy will match nothing")
+    _ensure_dlm_policy(st.region)
+
+    _pipe_provision_script_over_ssh(
+        _backup_provision_script(), st.key_name, "nightly backup"
+    )
+    audit("backup.provision", instance=st.instance_id)
+    log(
+        "Nightly backup provisioned. Inspect with: dalston-aws ssh, then "
+        "'sudo systemctl list-timers dalston-backup.timer' and "
+        "'journalctl -u dalston-backup.service'. "
+        "Run one now: 'sudo systemctl start dalston-backup.service'."
+    )
+
+
+def cmd_backup(args: argparse.Namespace) -> None:
+    if args.provision:
+        _backup_provision_remote()
+        return
+    if not args.once:
+        die("backup needs --once (one dump now, on the control plane) or --provision")
+    _backup_once()
 
 
 # ---------------------------------------------------------------------------
@@ -3627,6 +3955,16 @@ def _launch_control_plane(
         st.region, st.instance_id, existing_volume, cp.data_volume_gb
     )
     save_state(st)
+
+    # M94: backups are default-on — cloud-init installs the pg_dump timer,
+    # so the operator-side pieces (volume tag for pre-M94 volumes, backups/
+    # lifecycle rule, DLM snapshot policy) must land here too, not only in
+    # `backup --provision`.
+    ec2_client(st.region).create_tags(
+        Resources=[st.data_volume_id], Tags=[BACKUP_VOLUME_TAG]
+    )
+    ensure_bucket_lifecycle(st.region, st.s3_bucket)
+    _ensure_dlm_policy(st.region)
 
     ip = get_instance_ip(st.region, st.instance_id)
     audit("launch.control-plane", instance=st.instance_id, ip=ip)
@@ -5083,6 +5421,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_autoscale.set_defaults(func=cmd_autoscale)
+
+    # backup — M94 nightly Postgres pg_dump→S3 (systemd timer runs --once
+    # on the control plane; --provision retrofits an existing deployment)
+    p_backup = sub.add_parser(
+        "backup",
+        help=(
+            "Nightly Postgres backup: pg_dump the control-plane DB to the "
+            f"artifact bucket under {BACKUP_S3_PREFIX} "
+            f"({BACKUP_RETENTION_DAYS}-day retention)"
+        ),
+    )
+    p_backup.add_argument(
+        "--once",
+        action="store_true",
+        help=(
+            "Run a single dump-and-upload now (runs on the control plane; "
+            "the systemd timer provides the nightly loop)"
+        ),
+    )
+    p_backup.add_argument(
+        "--provision",
+        action="store_true",
+        help=(
+            "Retrofit the nightly backup onto the RUNNING control plane over "
+            "SSH (run from the laptop): ensures the backups/ lifecycle rule "
+            "and the DLM daily-snapshot policy, then installs the "
+            "04:15 UTC timer"
+        ),
+    )
+    p_backup.set_defaults(func=cmd_backup)
 
     # engine — single-engine, Tailscale-only GPU deployment (no control plane)
     p_engine = sub.add_parser(
