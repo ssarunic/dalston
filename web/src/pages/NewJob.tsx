@@ -551,7 +551,7 @@ export function NewJob() {
                         <input
                           ref={fileInputRef}
                           type="file"
-                          accept="audio/*"
+                          accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg,.aac,.opus,.webm"
                           onChange={handleFileSelect}
                           className="hidden"
                         />
