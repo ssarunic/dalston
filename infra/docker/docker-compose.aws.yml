@@ -20,9 +20,11 @@ services:
     environment:
       <<: *aws-s3
       DALSTON_S3_PUBLIC_ENDPOINT_URL: ${DALSTON_S3_PUBLIC_ENDPOINT_URL:-}
-    # Bind to all interfaces for Tailscale access
+    # Loopback binding for `tailscale serve` (which proxies to localhost).
+    # Direct tailnet access comes from the base mapping, which binds the
+    # Tailscale IP via DALSTON_BIND_IP (written to .env.aws at boot).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   orchestrator:
     environment:

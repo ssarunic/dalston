@@ -156,18 +156,20 @@ Explicitly excluded: Tailscale SSH session recording (beta, plan-gated, needs a 
 
 ---
 
-### 93.5: Interface-restrict published container ports
+### 93.5: Interface-restrict published ports + generated credentials
 
 **Files modified:**
 
-- `docker-compose.yml` — parameterize publish address: `"${DALSTON_BIND_IP:-0.0.0.0}:5432:5432"` (same for 6379, 9090); Postgres uses `${DALSTON_PG_BIND_IP:-0.0.0.0}`
-- `infra/docker/docker-compose.aws.yml`, `infra/docker/docker-compose.observability.aws.yml` — same pattern for 8000, 3001, 16686, 3100, 4317/4318
-- `infra/scripts/dalston-aws` — `generate_user_data()`: after `tailscale up`, export `DALSTON_BIND_IP=$(tailscale ip -4)` and `DALSTON_PG_BIND_IP=127.0.0.1` into the compose environment
+- `docker-compose.yml` — every published port parameterized with a **loopback default**: `"${DALSTON_BIND_IP:-127.0.0.1}:6379:6379"` (same for 8000, 9000/9001, 16686, 4317/4318, 9090, 3001, 3100); Postgres uses its own `"${DALSTON_PG_BIND_IP:-127.0.0.1}"` so it stays on loopback even on AWS. Grafana: `GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-dalston}`
+- `infra/docker/docker-compose.aws.yml` — gateway override becomes `127.0.0.1:8000:8000` (loopback for `tailscale serve`, which proxies from localhost; direct tailnet access comes from the base mapping via `DALSTON_BIND_IP`)
+- `infra/scripts/dalston-aws` — `ensure_control_plane_secrets()` (called from `setup` and `up`) creates generate-once SecureStrings `/dalston/ctrl/postgres-password` and `/dalston/ctrl/grafana-admin-password` (never overwritten — the Postgres data dir keeps the password it was initialised with); a `secrets` subcommand prints them; the control-plane user data resolves credentials as **existing `.env` → SSM → legacy default**, writes them into `.env.aws`/`.env` (chmod 600), and builds `DATABASE_URL` from the resolved value; `/usr/local/bin/dalston-bind-ip.sh` (systemd `ExecStartPre`, ordered after `dalston-tailscale.service`) upserts `DALSTON_BIND_IP=$(tailscale ip -4)` into `.env.aws` on every service start (the IP changes on relaunch)
 
 **Deliverables:**
 
 - On AWS: Postgres published on loopback only (nothing remote uses it — GPU engines speak Redis + S3; admin access is `tailscale ssh` + local psql). All other services publish on the `tailscale0` address only, so the SG stops being the sole layer for Docker-published ports (Docker's DNAT bypasses host INPUT rules; bind address is the reliable control).
-- Local dev unchanged: defaults keep today's behaviour when the vars are unset.
+- Postgres and Grafana passwords are no longer the publicly-known repo defaults on AWS; they are generated once, recorded in SSM (retrievable via `dalston-aws secrets`), and never need to live in the operator's local `.env`.
+- Local dev: known default passwords are kept deliberately (loopback-only binding is the control that matters on a laptop; random local secrets add bootstrap friction with no payoff). The bind-default change means the dev stack is no longer reachable from the LAN unless `DALSTON_BIND_IP=0.0.0.0` is set explicitly.
+- **Migration for pre-M93 deployments** (data volume initialised with `password`): boot is safe — the `.env`-first precedence keeps old credentials working. To rotate: `new=$(dalston-aws secrets ...)`; `docker compose exec postgres psql -U dalston -c "ALTER USER dalston PASSWORD '<new>'"`; update `POSTGRES_PASSWORD` in `/data/dalston/.env`; `systemctl restart dalston`. Grafana similarly persists its admin password in `grafana-data` — rotate with `docker compose exec grafana grafana-cli admin reset-admin-password <new>`.
 - Verify before merge: Prometheus→GPU scrape and GPU→ctrl Redis/Loki/OTLP paths already use Tailscale MagicDNS names (`CTRL_PLANE_HOST="dalston-control-plane"`), so they keep working; the SG-to-SG rules for 5432/6379/4317/3100 are vestigial and may be dropped or kept as harmless defence-in-depth.
 
 ---
@@ -279,6 +281,7 @@ tailscale ssh ec2-user@dalston-control-plane -- \
 - [ ] Grants policy active: personal devices isolated, GPU↔ctrl limited to service ports
 - [ ] Tailscale SSH verified from Mac; all port-22 SG rules removed; `_ensure_cross_region_sg()` creates zero ingress
 - [ ] `dalston-aws ssh` uses `tailscale ssh` (PEM retired)
-- [ ] AWS deploys publish Postgres on loopback and all other services on `tailscale0` only; local dev behaviour unchanged
+- [ ] AWS deploys publish Postgres on loopback and all other services on `tailscale0` only; local dev defaults to loopback (LAN access is opt-in via `DALSTON_BIND_IP=0.0.0.0`)
+- [ ] Postgres/Grafana passwords generated once into `/dalston/ctrl/*` SSM SecureStrings, readable via `dalston-aws secrets`; hardcoded `password`/`dalston` gone from the bootstrap path
 - [ ] Foundational GuardDuty enabled with severity≥4 alerting
 - [ ] Monthly AL2023 release-upgrade timer present; reboot-required signal lands in the patch log

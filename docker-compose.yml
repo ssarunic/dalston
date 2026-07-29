@@ -118,7 +118,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: dalston
     ports:
-      - "5432:5432"
+      - "${DALSTON_PG_BIND_IP:-127.0.0.1}:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
@@ -143,7 +143,7 @@ services:
       --auto-aof-rewrite-percentage 100
       --auto-aof-rewrite-min-size 64mb
     ports:
-      - "6379:6379"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -161,8 +161,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:9000:9000"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -193,9 +193,9 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:1.54
     ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:16686:16686"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:4317:4317"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:4318:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     profiles: [observability]
@@ -208,7 +208,7 @@ services:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -226,9 +226,9 @@ services:
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:3001:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: dalston
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-dalston}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dalston-overview.json
@@ -240,7 +240,7 @@ services:
   loki:
     image: grafana/loki:3.6.7
     ports:
-      - "3100:3100"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:3100:3100"
     volumes:
       - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
@@ -269,7 +269,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.gateway
     ports:
-      - "8000:8000"
+      - "${DALSTON_BIND_IP:-127.0.0.1}:8000:8000"
     environment:
       <<: [*core-env, *observability-env]
       DALSTON_MODEL_DIR: /models

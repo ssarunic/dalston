@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
 """Download stage artifacts from S3 for recent diarization jobs."""
 
+import os
 import subprocess
 from pathlib import Path
 
-BUCKET = "dalston-artifacts-178457246645"
-REGION = "eu-west-2"
+REGION = os.environ.get("DALSTON_S3_REGION", "eu-west-2")
+
+
+def _bucket() -> str:
+    """DALSTON_S3_BUCKET if set, else derive from the caller's AWS account."""
+    if bucket := os.environ.get("DALSTON_S3_BUCKET"):
+        return bucket
+    account = subprocess.run(
+        ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return f"dalston-artifacts-{account}"
+
+
+BUCKET = _bucket()
 OUT_DIR = Path(__file__).parent / "artifacts"
 
 JOBS = {
