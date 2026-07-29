@@ -6,7 +6,7 @@
 | **Duration**       | 1–2 days                                                     |
 | **Dependencies**   | None (reuses the M91 control-plane provisioning patterns)    |
 | **Deliverable**    | `dalston-aws backup` command (`--once` / `--provision`), `dalston-backup` systemd timer on the control plane, `backups/` S3 lifecycle rule, DLM daily-snapshot policy, restore runbook |
-| **Status**         | Implemented — pending control-plane provisioning (operator runs `backup --provision`) |
+| **Status**         | Completed — live since 2026-07-29 (provisioned, first dump verified, restore drill passed) |
 
 ## User Story
 
@@ -250,12 +250,18 @@ aws ec2 describe-snapshots --owner-ids self \
   --filters "Name=tag:dalston:backup,Values=daily" --query "Snapshots[].StartTime"
 # expect: entries appear after the first 04:45 UTC window
 
-# Restore drill — prove a dump actually restores (scratch DB, non-destructive)
+# Restore drill — prove a dump actually restores (scratch DB, non-destructive).
+# pg_restore must read stdin DIRECTLY (no `sh -c … /dev/stdin` — that fails
+# with "did not find magic string" on the alpine postgres image).
 tailscale ssh ec2-user@dalston-control-plane -- bash -c '
   export DALSTON_S3_BUCKET=$(grep "^DALSTON_S3_BUCKET=" /data/dalston/.env.aws | cut -d= -f2)
+  docker exec dalston-postgres-1 createdb -U dalston restore_test
   aws s3 cp "s3://$DALSTON_S3_BUCKET/backups/postgres/<latest>.dump" - \
-    | docker exec -i dalston-postgres-1 sh -c "createdb -U dalston restore_test && pg_restore -U dalston -d restore_test --no-owner /dev/stdin && psql -U dalston -d restore_test -c \"select count(*) from api_keys\" && dropdb -U dalston restore_test"'
+    | docker exec -i dalston-postgres-1 pg_restore -U dalston -d restore_test --no-owner
+  docker exec dalston-postgres-1 psql -U dalston -d restore_test -c "select count(*) from api_keys"
+  docker exec dalston-postgres-1 dropdb -U dalston restore_test'
 # expect: row count > 0, no errors
+# (drill passed 2026-07-29: 7 api_keys, 2250 jobs restored from the first live dump)
 ```
 
 ---
@@ -269,5 +275,5 @@ tailscale ssh ec2-user@dalston-control-plane -- bash -c '
 - [x] DLM daily policy (retain 7) targets the tagged data volume; service role auto-created
 - [x] Fresh `setup` → `launch` gets both layers with no manual step (launch path tags volume + ensures lifecycle and DLM policy)
 - [x] Unit tests cover the provision script, lifecycle rules, user-data assembly, and CLI wiring (`tests/unit/test_dalston_aws_backup.py`)
-- [ ] Restore drill from a real dump passes (scratch-DB `pg_restore` returns data)
-- [ ] Live control plane provisioned by the operator; first nightly dump observed in S3
+- [x] Restore drill from a real dump passes (scratch-DB `pg_restore` returns data — 7 api_keys, 2250 jobs on 2026-07-29)
+- [x] Live control plane provisioned; first dump in S3 (`dalston-20260729T125435Z.dump`, 0.8 MiB); DLM policy ENABLED; timer next-fire 04:15 UTC
