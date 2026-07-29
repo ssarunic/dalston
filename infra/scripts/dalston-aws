@@ -3977,6 +3977,9 @@ def _launch_control_plane(
         if state in ("running", "stopped"):
             die(f"Control plane already exists ({st.instance_id}, state={state}).")
 
+    # User data reads these at boot — they must exist before launch.
+    ensure_control_plane_secrets(st.region)
+
     cp = tmpl.control_plane
     compose_profiles = " ".join(f"--profile {p}" for p in (cp.compose_profiles or []))
     tag = (
@@ -4502,6 +4505,7 @@ def cmd_up(args: argparse.Namespace) -> None:
         die("No instances to start. Run 'dalston-aws launch control-plane' first.")
     audit("up", instance=st.instance_id)
     log("Starting instance(s)...")
+    ensure_control_plane_secrets(st.region)
     ec2 = ec2_client(st.region)
 
     cp_state = get_instance_state(st.region, st.instance_id)
