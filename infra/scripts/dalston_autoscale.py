@@ -212,6 +212,51 @@ def parse_policy(data: dict) -> list[ShapePolicy]:
     return shapes
 
 
+# Settings-override whitelist (M95.5). fallback/cost fields are YAML-only
+# by design — enforced by never adding them here.
+OVERRIDE_KEYS = (
+    "tasks_per_instance",
+    "min_instances",
+    "max_instances",
+    "scale_down_after_s",
+)
+
+
+def apply_overrides(
+    policy: ShapePolicy, overrides: dict
+) -> tuple[ShapePolicy, tuple[str, ...], str | None]:
+    """Layer console-settings overrides onto a YAML-derived policy.
+
+    Returns (effective_policy, applied_keys, error). Only OVERRIDE_KEYS are
+    read; unknown hash fields are ignored. Validation runs on the COMBINED
+    policy via ShapePolicy.from_dict — on failure every override for the
+    shape is discarded (never partially applied) and the error string is
+    returned for the tick snapshot's policy echo. Never raises: a bad
+    console value must not stop scaling.
+    """
+    applied = tuple(k for k in OVERRIDE_KEYS if k in overrides)
+    if not applied:
+        return policy, (), None
+    merged: dict = {
+        "name": policy.name,
+        "engines": list(policy.engines),
+        "stream_engine_ids": list(policy.stream_engine_ids),
+        "tasks_per_instance": policy.tasks_per_instance,
+        "min_instances": policy.min_instances,
+        "max_instances": policy.max_instances,
+        "scale_down_after_s": policy.scale_down_after_s,
+        "drain_wait_s": policy.drain_wait_s,
+        "boot_timeout_s": policy.boot_timeout_s,
+        "gpu_type_preference": list(policy.gpu_type_preference),
+    }
+    for key in applied:
+        merged[key] = overrides[key]
+    try:
+        return ShapePolicy.from_dict(merged), applied, None
+    except PolicyError as exc:
+        return policy, (), str(exc)
+
+
 class ScaleAction(StrEnum):
     NONE = "none"
     LAUNCH = "launch"

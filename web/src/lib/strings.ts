@@ -455,6 +455,17 @@ const settings = {
   resetting: 'Resetting...',
   resetConfirm: 'This will revert all settings in this section to their default values.',
   validationError: 'Validation error',
+  // M95: nullable settings that inherit from the control plane
+  inheritFromControlPlane: 'Inherit from control plane',
+  inheritConfirm:
+    'This will clear all overrides in this section, so the control-plane policy file applies again.',
+  inheritedFrom: (value: unknown) => `Inherited from control plane: ${String(value)}`,
+  inheritedUnknown: 'Unknown — autoscaler not reporting',
+  clearToInherit: 'Clear override (inherit from control plane)',
+  overrideRejected: (detail: string) =>
+    `Overrides rejected by the autoscaler and not in effect: ${detail}`,
+  pendingNotPickedUp: 'pending — not yet picked up by the autoscaler',
+  inherited: 'Inherited',
 } as const
 
 const realtimeLive = {

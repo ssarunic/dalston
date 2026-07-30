@@ -572,6 +572,14 @@ export interface SettingValue {
   max_value?: number | null
   options?: string[] | null
   option_labels?: string[] | null
+  /** M95: unset (no DB row) means inherit from an external source. */
+  nullable?: boolean
+  /** What the external consumer reports as in force. */
+  effective_value?: unknown
+  /** False when the external source can't answer — render "unknown", never a guess. */
+  effective_known?: boolean
+  /** Set when the external consumer rejected the override. */
+  override_error?: string | null
 }
 
 export interface NamespaceSettings {
@@ -581,6 +589,12 @@ export interface NamespaceSettings {
   editable: boolean
   settings: SettingValue[]
   updated_at: string | null
+  /** M95: external consumer rejected the overrides (banner). */
+  override_error?: string | null
+  /** Keys saved but not yet picked up by the external consumer. */
+  overrides_pending?: string[]
+  /** Whether the post-write Redis mirror sync succeeded. */
+  redis_synced?: boolean | null
 }
 
 export interface NamespaceSummary {
