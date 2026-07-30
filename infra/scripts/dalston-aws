@@ -70,9 +70,12 @@ from botocore.exceptions import ClientError, WaiterError
 # that execute it from elsewhere (e.g. systemd with an absolute path).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dalston_autoscale import (  # noqa: E402
+    AutoscaleTickSnapshot,
     BacklogSnapshot,
+    BlockedInfo,
     EngineBacklog,
     FleetSnapshot,
+    PolicyEcho,
     PolicyError,
     ScaleAction,
     ShapePolicy,
@@ -3112,6 +3115,19 @@ AUTOSCALE_STATE_KEY_PREFIX = "dalston:autoscale:state:"
 # timer stops.
 AUTOSCALE_PENDING_KEY_PREFIX = "dalston:autoscale:pending:"
 AUTOSCALE_PENDING_TTL_S = 180
+# M95 console visibility: per-tick decision snapshot (JSON string), the
+# persistent configured-shapes marker, and sustained spot-failure state.
+# The tick TTL is deliberately ~20x the gateway's 3-min stale threshold —
+# a stale-but-present snapshot is what makes "not reporting" renderable;
+# shape removal is handled by the marker rewrite, not TTL.
+AUTOSCALE_TICK_KEY_PREFIX = "dalston:autoscale:tick:"
+AUTOSCALE_TICK_TTL_S = 3600
+AUTOSCALE_SHAPES_KEY = "dalston:autoscale:shapes"
+AUTOSCALE_BLOCKED_KEY_PREFIX = "dalston:autoscale:blocked:"
+AUTOSCALE_BLOCKED_TTL_S = 3600
+# Settings-overrides hash written by the gateway (M95.4); read in the tick
+# starting M95.5.
+AUTOSCALE_OVERRIDES_KEY = "dalston:autoscale:overrides"
 
 
 @dataclass
@@ -3218,7 +3234,12 @@ def _fetch_autoscale_fleet(
             live.append(iid)
         else:
             pending.append(iid)
-    return FleetSnapshot(tuple(live), tuple(pending)), workers
+    return FleetSnapshot(
+        tuple(live),
+        tuple(pending),
+        spot_live_instance_ids=tuple(i for i in live if workers[i]["spot"]),
+        spot_pending_instance_ids=tuple(i for i in pending if workers[i]["spot"]),
+    ), workers
 
 
 def _publish_pending_nodes(
@@ -3255,6 +3276,87 @@ def _publish_pending_nodes(
         r.expire(key, AUTOSCALE_PENDING_TTL_S)
     for iid in fleet.live_instance_ids:
         r.delete(f"{AUTOSCALE_PENDING_KEY_PREFIX}{iid}")
+
+
+def _shape_key(prefix: str, shape: str, *, dry_run: bool) -> str:
+    """Shadow-prefixed per-shape key under dry-run (M91 convention)."""
+    return f"{prefix}dryrun:{shape}" if dry_run else f"{prefix}{shape}"
+
+
+def _marker_key(*, dry_run: bool) -> str:
+    return f"{AUTOSCALE_SHAPES_KEY}:dryrun" if dry_run else AUTOSCALE_SHAPES_KEY
+
+
+def _publish_shapes_marker(
+    r: Any, shapes: list[ShapePolicy], now: datetime, *, dry_run: bool
+) -> None:
+    """Atomically rewrite the configured-shapes marker from the policy (M95).
+
+    The marker mirrors the current policy — it never accumulates history —
+    so a shape removed from the YAML disappears from the console within one
+    tick. No TTL: the gateway uses this to tell "autoscaler configured but
+    silent" from "no autoscaler"; explicit deprovisioning deletes it.
+    """
+    key = _marker_key(dry_run=dry_run)
+    pipe = r.pipeline(transaction=True)
+    pipe.delete(key)
+    if shapes:
+        pipe.hset(key, mapping={s.name: now.isoformat() for s in shapes})
+    pipe.execute()
+
+
+def _read_blocked_state(r: Any, shape: str, *, dry_run: bool) -> BlockedInfo | None:
+    """Read the sustained spot-failure state for a shape, if any."""
+    data = r.hgetall(_shape_key(AUTOSCALE_BLOCKED_KEY_PREFIX, shape, dry_run=dry_run))
+    if not data:
+        return None
+    try:
+        kind = data["kind"]
+        if kind not in ("spot_quota", "spot_capacity"):
+            return None
+        return BlockedInfo(
+            kind=kind,
+            since=data["since"],
+            consecutive_ticks=int(data["ticks"]),
+            detail=data.get("detail", ""),
+        )
+    except (KeyError, ValueError):
+        return None
+
+
+def _write_blocked_state(
+    r: Any, shape: str, kind: str, detail: str, now: datetime, *, dry_run: bool
+) -> None:
+    """Record a failed spot launch attempt, incrementing the tick streak.
+
+    Dedicated key on purpose: _update_idle_state deletes the state hash
+    whenever backlog exists — exactly when blocked tracking matters.
+    """
+    existing = _read_blocked_state(r, shape, dry_run=dry_run)
+    key = _shape_key(AUTOSCALE_BLOCKED_KEY_PREFIX, shape, dry_run=dry_run)
+    r.hset(
+        key,
+        mapping={
+            "kind": kind,
+            "since": existing.since if existing else now.isoformat(),
+            "ticks": str(existing.consecutive_ticks + 1 if existing else 1),
+            "detail": detail,
+        },
+    )
+    r.expire(key, AUTOSCALE_BLOCKED_TTL_S)
+
+
+def _clear_blocked_state(r: Any, shape: str, *, dry_run: bool) -> None:
+    r.delete(_shape_key(AUTOSCALE_BLOCKED_KEY_PREFIX, shape, dry_run=dry_run))
+
+
+def _write_tick_snapshot(r: Any, shape: str, snapshot: dict, *, dry_run: bool) -> None:
+    """Publish the per-tick decision snapshot the console reads (M95)."""
+    r.set(
+        _shape_key(AUTOSCALE_TICK_KEY_PREFIX, shape, dry_run=dry_run),
+        json.dumps(snapshot, default=str),
+        ex=AUTOSCALE_TICK_TTL_S,
+    )
 
 
 def _update_idle_state(
@@ -3438,22 +3540,34 @@ def _apply_decision(
     action: ScaleAction,
     fleet: FleetSnapshot,
     managed_by: dict[str, str],
+    now: datetime,
 ) -> str:
     if action == ScaleAction.LAUNCH:
         try:
             with _launch_lock():
-                return _autoscale_launch(r, ctx, policy)
+                msg = _autoscale_launch(r, ctx, policy)
+            _clear_blocked_state(r, policy.name, dry_run=False)
+            return msg
         except SpotQuotaError as e:
             audit("autoscale.spot_quota_reached", shape=policy.name, error=str(e))
+            _write_blocked_state(
+                r, policy.name, "spot_quota", str(e), now, dry_run=False
+            )
             return (
                 "at account spot quota; backlog drains at current capacity "
                 f"(quota frees when a worker terminates): {e}"
             )
         except SpotCapacityError as e:
             audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
+            _write_blocked_state(
+                r, policy.name, "spot_capacity", str(e), now, dry_run=False
+            )
             return f"no spot capacity: {e}"
         except LaunchLockHeldError:
+            # Not a spot failure — leave any blocked streak untouched.
             return "launch lock held (manual launch in progress?); skipping tick"
+    # Any tick that needs no launch ends the blocked streak.
+    _clear_blocked_state(r, policy.name, dry_run=False)
     if action == ScaleAction.TERMINATE:
         # Newest first (older workers have warm model caches); only
         # autoscaler-managed instances — IAM enforces the same boundary.
@@ -3565,6 +3679,9 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
 
     r = redis.Redis.from_url(ctx.redis_url, decode_responses=True, socket_timeout=10)
     now = datetime.now(UTC)
+    # Marker rewrite is independent of per-shape outcomes: written right
+    # after the policy parses so a mid-loop exception can never skip it.
+    _publish_shapes_marker(r, shapes, now, dry_run=args.dry_run)
     results = []
     for policy in shapes:
         backlog = BacklogSnapshot(
@@ -3577,26 +3694,36 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
         idle_now = backlog.all_idle and fleet.total > 0
         idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
         decision = decide(policy, backlog, fleet, idle_since_s=idle_s)
-        result = decision.to_dict()
         # Reap workers stuck mid-boot before anything else: they hold the
         # single-flight slot, so no scale action is meaningful this tick.
         stuck, reaped = _reap_stuck_pending(
             r, ctx, policy, fleet, managed_by, launch_times, now, dry_run=args.dry_run
         )
         if stuck:
-            result["stuck_pending"] = stuck
-            result["applied"] = (
+            applied = (
                 f"dry-run (would reap stuck pending: {stuck})"
                 if args.dry_run
                 else f"reaped stuck pending: {reaped}"
             )
         elif args.dry_run:
-            result["applied"] = "dry-run"
+            applied = "dry-run"
         else:
-            result["applied"] = _apply_decision(
-                r, ctx, policy, decision.action, fleet, managed_by
+            applied = _apply_decision(
+                r, ctx, policy, decision.action, fleet, managed_by, now
             )
-        results.append(result)
+        snapshot = AutoscaleTickSnapshot(
+            ts=now.isoformat(),
+            decision=decision,
+            applied=applied,
+            spot_live=fleet.spot_live,
+            on_demand_live=fleet.on_demand_live,
+            policy=PolicyEcho.from_policy(policy),
+            blocked=_read_blocked_state(r, policy.name, dry_run=args.dry_run),
+            idle_since_s=idle_s,
+            stuck_pending=tuple(stuck) if stuck else (),
+        )
+        _write_tick_snapshot(r, policy.name, snapshot.to_dict(), dry_run=args.dry_run)
+        results.append(snapshot.to_dict())
     print(json.dumps(results, indent=2, default=str))
 
 

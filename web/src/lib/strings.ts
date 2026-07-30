@@ -320,6 +320,33 @@ const infrastructure = {
   stuckBooting: 'Stuck — will be reaped by the autoscaler',
 } as const
 
+// M95: autoscaler strip on the Infrastructure page
+const autoscalerStrip = {
+  title: (shape: string) => `Autoscaler · ${shape}`,
+  fleet: (live: number, booting: number, max: number) =>
+    `live ${live} · booting ${booting} · max ${max}`,
+  formula: (backlog: number, perInstance: number, wants: number) =>
+    `Backlog ${backlog} ÷ ${perInstance} per instance → wants ${wants}`,
+  idle: (max: number | null) =>
+    max === null
+      ? 'idle · scales up on demand'
+      : `idle · 0 of ${max} · scales up on demand`,
+  cooldownTerminating: (count: number, inTime: string) =>
+    `idle · terminating ${count} in ${inTime}`,
+  cooldownStarting: 'idle · cooldown running',
+  spotQuota: (backlog: number) =>
+    `At spot quota — backlog ${backlog}, retrying every minute. Quota frees when a worker terminates.`,
+  spotCapacity: (backlog: number) =>
+    `No spot capacity — backlog ${backlog}, retrying every minute.`,
+  criticalDeadline: (inTime: string) => `Earliest waiting task may fail in ~${inTime}`,
+  criticalBlockedFor: (forTime: string) => `Spot launching blocked for ${forTime}`,
+  stale: 'Autoscaler not reporting — check dalston-autoscale.timer',
+  staleSince: (since: string) =>
+    `Autoscaler not reporting since ${since} — check dalston-autoscale.timer`,
+  onDemand: (count: number) =>
+    `running ${count} on-demand — spot unavailable`,
+} as const
+
 const engines = {
   title: 'Engines',
   subtitle: 'Pipeline stages and processing capacity',
@@ -737,6 +764,7 @@ export const S = {
   infrastructure,
   engines,
   engineDetail,
+  autoscalerStrip,
   apiKeys,
   createKeyDialog,
   keyCreatedModal,

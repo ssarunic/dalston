@@ -134,6 +134,7 @@ class TestApplyDecisionRouting:
             das.ScaleAction.LAUNCH,
             das.FleetSnapshot(),
             {},
+            datetime.now(UTC),
         )
 
         assert entered and launch.called
@@ -162,6 +163,7 @@ class TestApplyDecisionRouting:
             das.ScaleAction.LAUNCH,
             das.FleetSnapshot(),
             {},
+            datetime.now(UTC),
         )
 
         assert "no spot capacity" in result
@@ -184,6 +186,7 @@ class TestApplyDecisionRouting:
             das.ScaleAction.LAUNCH,
             das.FleetSnapshot(),
             {},
+            datetime.now(UTC),
         )
 
         assert "launch lock held" in result
@@ -207,6 +210,7 @@ class TestApplyDecisionRouting:
             das.ScaleAction.TERMINATE,
             fleet,
             managed,
+            datetime.now(UTC),
         )
 
         # newest autoscaler-managed instance, never the manual one
@@ -226,6 +230,7 @@ class TestApplyDecisionRouting:
             das.ScaleAction.TERMINATE,
             das.FleetSnapshot(live_instance_ids=("i-manual",)),
             {"i-manual": "manual"},
+            datetime.now(UTC),
         )
 
         assert not term.called
@@ -483,3 +488,274 @@ class TestPublishPendingNodes:
             r, _policy(daws), das.FleetSnapshot(), {}, datetime.now(UTC)
         )
         assert not r.hset.called
+
+
+# ---------------------------------------------------------------------------
+# M95: shapes marker, blocked state, tick snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestShapesMarker:
+    def test_atomic_rewrite_from_policy(self, daws) -> None:
+        r = MagicMock()
+        pipe = MagicMock()
+        r.pipeline.return_value = pipe
+        now = datetime.now(UTC)
+
+        daws._publish_shapes_marker(r, [_policy(daws)], now, dry_run=False)
+
+        r.pipeline.assert_called_once_with(transaction=True)
+        pipe.delete.assert_called_once_with("dalston:autoscale:shapes")
+        pipe.hset.assert_called_once_with(
+            "dalston:autoscale:shapes",
+            mapping={"nemo+pyannote": now.isoformat()},
+        )
+        pipe.execute.assert_called_once()
+
+    def test_empty_shapes_still_deletes_but_skips_hset(self, daws) -> None:
+        r = MagicMock()
+        pipe = MagicMock()
+        r.pipeline.return_value = pipe
+
+        daws._publish_shapes_marker(r, [], datetime.now(UTC), dry_run=False)
+
+        pipe.delete.assert_called_once()
+        assert not pipe.hset.called
+        pipe.execute.assert_called_once()
+
+    def test_dry_run_uses_shadow_key(self, daws) -> None:
+        r = MagicMock()
+        pipe = MagicMock()
+        r.pipeline.return_value = pipe
+
+        daws._publish_shapes_marker(r, [_policy(daws)], datetime.now(UTC), dry_run=True)
+
+        pipe.delete.assert_called_once_with("dalston:autoscale:shapes:dryrun")
+
+
+class TestBlockedState:
+    """The counter must accumulate across ticks WITH backlog present —
+    the reason this state has its own key instead of the idle-state hash
+    (which is deleted whenever backlog exists)."""
+
+    def test_first_failure_starts_streak(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        now = datetime.now(UTC)
+
+        daws._write_blocked_state(
+            r, "nemo+pyannote", "spot_quota", "quota hit", now, dry_run=False
+        )
+
+        key = "dalston:autoscale:blocked:nemo+pyannote"
+        mapping = r.hset.call_args[1]["mapping"]
+        assert r.hset.call_args[0][0] == key
+        assert mapping["kind"] == "spot_quota"
+        assert mapping["since"] == now.isoformat()
+        assert mapping["ticks"] == "1"
+        r.expire.assert_called_once_with(key, daws.AUTOSCALE_BLOCKED_TTL_S)
+
+    def test_streak_accumulates_and_preserves_since(self, daws) -> None:
+        r = MagicMock()
+        first_since = "2026-07-30T11:58:00+00:00"
+        r.hgetall.return_value = {
+            "kind": "spot_quota",
+            "since": first_since,
+            "ticks": "5",
+            "detail": "quota hit",
+        }
+
+        daws._write_blocked_state(
+            r,
+            "nemo+pyannote",
+            "spot_quota",
+            "quota hit again",
+            datetime.now(UTC),
+            dry_run=False,
+        )
+
+        mapping = r.hset.call_args[1]["mapping"]
+        assert mapping["ticks"] == "6"
+        assert mapping["since"] == first_since
+
+    def test_read_round_trip(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "kind": "spot_capacity",
+            "since": "2026-07-30T11:58:00+00:00",
+            "ticks": "3",
+            "detail": "no capacity",
+        }
+
+        info = daws._read_blocked_state(r, "nemo+pyannote", dry_run=False)
+
+        assert info is not None
+        assert info.kind == "spot_capacity"
+        assert info.consecutive_ticks == 3
+
+    def test_read_malformed_returns_none(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {"kind": "not-a-kind", "ticks": "1", "since": "x"}
+        assert daws._read_blocked_state(r, "s", dry_run=False) is None
+        r.hgetall.return_value = {"kind": "spot_quota", "ticks": "NaN", "since": "x"}
+        assert daws._read_blocked_state(r, "s", dry_run=False) is None
+
+    def test_clear_deletes_key(self, daws) -> None:
+        r = MagicMock()
+        daws._clear_blocked_state(r, "nemo+pyannote", dry_run=False)
+        r.delete.assert_called_once_with("dalston:autoscale:blocked:nemo+pyannote")
+
+    def test_apply_decision_launch_success_clears_streak(
+        self, daws, monkeypatch
+    ) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def fake_lock():
+            yield
+
+        monkeypatch.setattr(daws, "_launch_lock", fake_lock)
+        monkeypatch.setattr(daws, "_autoscale_launch", MagicMock(return_value="ok"))
+        clear = MagicMock()
+        monkeypatch.setattr(daws, "_clear_blocked_state", clear)
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+        assert clear.called
+
+    def test_apply_decision_quota_error_writes_streak(self, daws, monkeypatch) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def fake_lock():
+            yield
+
+        monkeypatch.setattr(daws, "_launch_lock", fake_lock)
+        monkeypatch.setattr(
+            daws,
+            "_autoscale_launch",
+            MagicMock(side_effect=daws.SpotQuotaError("quota")),
+        )
+        monkeypatch.setattr(daws, "audit", MagicMock())
+        write = MagicMock()
+        monkeypatch.setattr(daws, "_write_blocked_state", write)
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+        assert write.call_args[0][2] == "spot_quota"
+
+    def test_apply_decision_lock_held_leaves_streak(self, daws, monkeypatch) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def held_lock():
+            raise daws.LaunchLockHeldError("held")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(daws, "_launch_lock", held_lock)
+        write = MagicMock()
+        clear = MagicMock()
+        monkeypatch.setattr(daws, "_write_blocked_state", write)
+        monkeypatch.setattr(daws, "_clear_blocked_state", clear)
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+        assert not write.called
+        assert not clear.called
+
+    def test_apply_decision_no_launch_needed_clears_streak(
+        self, daws, monkeypatch
+    ) -> None:
+        import dalston_autoscale as das
+
+        clear = MagicMock()
+        monkeypatch.setattr(daws, "_clear_blocked_state", clear)
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.NONE,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+        assert clear.called
+
+
+class TestTickSnapshotWrite:
+    def test_writes_json_with_ttl(self, daws) -> None:
+        import json as _json
+
+        r = MagicMock()
+        daws._write_tick_snapshot(
+            r, "nemo+pyannote", {"schema_version": 1}, dry_run=False
+        )
+        args, kwargs = r.set.call_args
+        assert args[0] == "dalston:autoscale:tick:nemo+pyannote"
+        assert _json.loads(args[1]) == {"schema_version": 1}
+        assert kwargs["ex"] == daws.AUTOSCALE_TICK_TTL_S
+
+    def test_dry_run_uses_shadow_key(self, daws) -> None:
+        r = MagicMock()
+        daws._write_tick_snapshot(r, "nemo+pyannote", {}, dry_run=True)
+        assert r.set.call_args[0][0] == "dalston:autoscale:tick:dryrun:nemo+pyannote"
+
+
+class TestFetchFleetSpotSplit:
+    def test_spot_flags_populate_fleet_subsets(self, daws, monkeypatch) -> None:
+        workers = [
+            {
+                "instance_id": "i-spot",
+                "state": "running",
+                "instance_type": "g4dn.xlarge",
+                "spot": True,
+                "engines": ["nemo", "pyannote"],
+                "managed_by": "autoscaler",
+                "launch_time": None,
+            },
+            {
+                "instance_id": "i-od-boot",
+                "state": "pending",
+                "instance_type": "g6.xlarge",
+                "spot": False,
+                "engines": ["nemo", "pyannote"],
+                "managed_by": "autoscaler",
+                "launch_time": None,
+            },
+        ]
+        monkeypatch.setattr(daws, "discover_gpu_workers", lambda region: workers)
+        monkeypatch.setattr(
+            daws,
+            "_registry_nodes_by_engine",
+            lambda r: {"nemo": {"i-spot"}, "pyannote-4.0": {"i-spot"}},
+        )
+
+        fleet, _ = daws._fetch_autoscale_fleet("eu-west-2", MagicMock(), _policy(daws))
+
+        assert fleet.live_instance_ids == ("i-spot",)
+        assert fleet.pending_instance_ids == ("i-od-boot",)
+        assert fleet.spot_live_instance_ids == ("i-spot",)
+        assert fleet.spot_pending_instance_ids == ()
+        assert fleet.on_demand_total == 1

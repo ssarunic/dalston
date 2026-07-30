@@ -23,10 +23,18 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Literal
 
 DEFAULT_GPU_TYPE_PREFERENCE = ("g4dn.xlarge", "g6.xlarge", "g5.xlarge")
 
 POLICY_SCHEMA_VERSION = 1
+
+# Version of the dalston:autoscale:tick:<shape> JSON snapshot (M95) — a
+# public contract read by the gateway's /api/console/nodes. Distinct from
+# POLICY_SCHEMA_VERSION: different artifact, different lifecycle. The
+# gateway degrades a shape to "stale" on an unknown version rather than
+# failing the whole response, so bumping this is safe but deliberate.
+AUTOSCALE_TICK_SCHEMA_VERSION = 1
 
 
 class PolicyError(ValueError):
@@ -68,10 +76,16 @@ class FleetSnapshot:
     live: every engine of the shape has a fresh registry record on the node.
     pending: tag-visible (pending/running) but not yet fully registered —
     counts toward capacity so a booting worker suppresses further launches.
+
+    The spot_* tuples (M95) are subsets of the corresponding id tuples,
+    from EC2's InstanceLifecycle. An instance absent from both spot tuples
+    counts as on-demand — fails safe against undercounting paid capacity.
     """
 
     live_instance_ids: tuple[str, ...] = ()
     pending_instance_ids: tuple[str, ...] = ()
+    spot_live_instance_ids: tuple[str, ...] = ()
+    spot_pending_instance_ids: tuple[str, ...] = ()
 
     @property
     def live(self) -> int:
@@ -84,6 +98,22 @@ class FleetSnapshot:
     @property
     def total(self) -> int:
         return self.live + self.pending
+
+    @property
+    def spot_live(self) -> int:
+        return len(self.spot_live_instance_ids)
+
+    @property
+    def on_demand_live(self) -> int:
+        return self.live - self.spot_live
+
+    @property
+    def on_demand_pending(self) -> int:
+        return self.pending - len(self.spot_pending_instance_ids)
+
+    @property
+    def on_demand_total(self) -> int:
+        return self.on_demand_live + self.on_demand_pending
 
 
 @dataclass(frozen=True)
@@ -213,6 +243,107 @@ class ScaleDecision:
                 for b in self.backlogs
             },
         }
+
+
+@dataclass(frozen=True)
+class PolicyEcho:
+    """Effective policy values echoed into the tick snapshot (M95).
+
+    The console shows what the autoscaler actually used this tick — after
+    settings overrides — making the override plumbing self-verifying.
+    """
+
+    tasks_per_instance: int
+    min_instances: int
+    max_instances: int
+    scale_down_after_s: int
+    overrides_applied: tuple[str, ...] = ()
+    override_error: str | None = None
+
+    @classmethod
+    def from_policy(
+        cls,
+        policy: ShapePolicy,
+        *,
+        overrides_applied: tuple[str, ...] = (),
+        override_error: str | None = None,
+    ) -> PolicyEcho:
+        return cls(
+            tasks_per_instance=policy.tasks_per_instance,
+            min_instances=policy.min_instances,
+            max_instances=policy.max_instances,
+            scale_down_after_s=policy.scale_down_after_s,
+            overrides_applied=overrides_applied,
+            override_error=override_error,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "tasks_per_instance": self.tasks_per_instance,
+            "min_instances": self.min_instances,
+            "max_instances": self.max_instances,
+            "scale_down_after_s": self.scale_down_after_s,
+            "overrides_applied": list(self.overrides_applied),
+            "override_error": self.override_error,
+        }
+
+
+@dataclass(frozen=True)
+class BlockedInfo:
+    """Sustained spot-launch failure state, tracked across ticks (M95).
+
+    Lives in its own Redis key (dalston:autoscale:blocked:<shape>) — the
+    idle-state hash is deleted whenever backlog exists, which is exactly
+    when blocked tracking matters.
+    """
+
+    kind: Literal["spot_quota", "spot_capacity"]
+    since: str  # ISO timestamp of the first failed tick in this streak
+    consecutive_ticks: int
+    detail: str
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "since": self.since,
+            "consecutive_ticks": self.consecutive_ticks,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
+class AutoscaleTickSnapshot:
+    """The dalston:autoscale:tick:<shape> payload — a versioned public
+    contract read by the gateway (M95). Typed construction so a future
+    edit can't silently drop or reorder a field via dict mutation.
+    """
+
+    ts: str
+    decision: ScaleDecision
+    applied: str
+    spot_live: int
+    on_demand_live: int
+    policy: PolicyEcho
+    blocked: BlockedInfo | None
+    idle_since_s: float | None
+    stuck_pending: tuple[str, ...] = ()
+    schema_version: int = AUTOSCALE_TICK_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        d = self.decision.to_dict()
+        d.update(
+            schema_version=self.schema_version,
+            ts=self.ts,
+            applied=self.applied,
+            spot_live=self.spot_live,
+            on_demand_live=self.on_demand_live,
+            idle_since_s=self.idle_since_s,
+            policy=self.policy.to_dict(),
+            blocked=self.blocked.to_dict() if self.blocked else None,
+        )
+        if self.stuck_pending:
+            d["stuck_pending"] = list(self.stuck_pending)
+        return d
 
 
 def desired_instances(policy: ShapePolicy, max_backlog: int) -> int:

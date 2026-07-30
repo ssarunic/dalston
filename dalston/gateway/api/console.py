@@ -13,6 +13,7 @@ POST /api/console/settings/{namespace}/reset - Reset to defaults
 """
 
 import asyncio
+import json
 import os
 import re
 from datetime import UTC, datetime, timedelta
@@ -31,12 +32,16 @@ from dalston.common.events import publish_job_cancel_requested
 from dalston.common.models import JobStatus, TaskStatus
 from dalston.common.registry import (
     AUTOSCALE_PENDING_KEY_PREFIX,
+    AUTOSCALE_SHAPES_KEY,
+    AUTOSCALE_TICK_KEY_PREFIX,
+    AUTOSCALE_TICK_SCHEMA_VERSION,
     UNIFIED_INSTANCE_KEY_PREFIX,
     UNIFIED_INSTANCE_SET_KEY,
     _parse_datetime,
     _parse_json_list,
+    is_autoscale_tick_stale,
 )
-from dalston.common.streams_types import CONSUMER_GROUP
+from dalston.common.streams_types import CONSUMER_GROUP, WAITING_ENGINE_TASKS_KEY
 from dalston.common.utils import compute_duration_ms, compute_interval_union_ms
 from dalston.db.models import TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
@@ -657,10 +662,177 @@ class NodeView(BaseModel):
     boot_timeout_s: int | None = None
 
 
+class AutoscalerPolicyEcho(BaseModel):
+    """Effective policy values the autoscaler used this tick (M95)."""
+
+    tasks_per_instance: int | None = None
+    min_instances: int | None = None
+    max_instances: int | None = None
+    scale_down_after_s: int | None = None
+    overrides_applied: list[str] = []
+    override_error: str | None = None
+
+
+class AutoscalerBlockedInfo(BaseModel):
+    """Sustained spot-launch failure state (M95)."""
+
+    kind: str
+    since: datetime
+    consecutive_ticks: int
+    detail: str | None = None
+
+
+class AutoscalerShapeView(BaseModel):
+    """One autoscaled shape's latest tick snapshot (M95).
+
+    Everything except shape/stale/last_tick_at is nullable: a stale,
+    corrupt, or newer-schema snapshot degrades this one shape to nulls
+    rather than failing the whole /nodes response.
+    """
+
+    shape: str
+    stale: bool
+    last_tick_at: datetime | None
+    ts: datetime | None = None
+    action: str | None = None
+    applied: str | None = None
+    desired: int | None = None
+    live: int | None = None
+    pending: int | None = None
+    spot_live: int | None = None
+    on_demand_live: int | None = None
+    max_backlog: int | None = None
+    per_engine: dict[str, dict[str, int]] = {}
+    idle_since_s: float | None = None
+    policy: AutoscalerPolicyEcho | None = None
+    blocked: AutoscalerBlockedInfo | None = None
+    earliest_wait_deadline_at: datetime | None = None
+
+
 class NodesResponse(BaseModel):
     """Response for infrastructure topology endpoint."""
 
     nodes: list[NodeView]
+    autoscaler: list[AutoscalerShapeView] = []
+
+
+# Mirrors dalston/orchestrator/scheduler.py's TASK_METADATA_KEY — inlined
+# rather than imported so the gateway API module doesn't pull in the
+# orchestrator's dependency graph.
+_TASK_METADATA_KEY_PREFIX = "dalston:task:"
+
+
+def _parse_tick_snapshot(
+    shape: str, raw: str | None, last_tick_at: datetime | None, now: datetime
+) -> AutoscalerShapeView:
+    """Parse one shape's tick snapshot, degrading to a stale view on any
+    failure (corrupt JSON, unknown schema_version, missing fields)."""
+    stale_view = AutoscalerShapeView(shape=shape, stale=True, last_tick_at=last_tick_at)
+    if raw is None:
+        return stale_view
+    try:
+        snap = json.loads(raw)
+        if snap.get("schema_version") != AUTOSCALE_TICK_SCHEMA_VERSION:
+            logger.warning(
+                "autoscale_tick_unknown_schema",
+                shape=shape,
+                schema_version=snap.get("schema_version"),
+            )
+            return stale_view
+        policy = snap.get("policy") or {}
+        blocked = snap.get("blocked")
+        return AutoscalerShapeView(
+            shape=shape,
+            stale=is_autoscale_tick_stale(snap.get("ts"), now),
+            last_tick_at=last_tick_at,
+            ts=_parse_datetime(snap.get("ts")),
+            action=snap.get("action"),
+            applied=snap.get("applied"),
+            desired=snap.get("desired"),
+            live=snap.get("live"),
+            pending=snap.get("pending"),
+            spot_live=snap.get("spot_live"),
+            on_demand_live=snap.get("on_demand_live"),
+            max_backlog=snap.get("max_backlog"),
+            per_engine=snap.get("per_engine") or {},
+            idle_since_s=snap.get("idle_since_s"),
+            policy=AutoscalerPolicyEcho(**policy) if policy else None,
+            blocked=AutoscalerBlockedInfo(**blocked) if blocked else None,
+        )
+    except Exception:
+        logger.warning("autoscale_tick_unparseable", shape=shape, exc_info=True)
+        return stale_view
+
+
+async def _fetch_earliest_wait_deadlines(redis: Redis) -> dict[str, datetime]:
+    """engine_id -> earliest wait_deadline_at among tasks waiting for an
+    engine (M95). Reads the authoritative store: the waiting-tasks set plus
+    per-task metadata hashes — not the streams, whose entries lack the
+    deadline and persist after acknowledgement."""
+    waiting_ids = await redis.smembers(WAITING_ENGINE_TASKS_KEY)
+    if not waiting_ids:
+        return {}
+    pipe = redis.pipeline(transaction=False)
+    for task_id in waiting_ids:
+        pipe.hmget(
+            f"{_TASK_METADATA_KEY_PREFIX}{task_id}", "engine_id", "wait_deadline_at"
+        )
+    earliest: dict[str, datetime] = {}
+    for engine_id, deadline_raw in await pipe.execute():
+        deadline = _parse_datetime(deadline_raw)
+        if not engine_id or deadline is None:
+            continue
+        if engine_id not in earliest or deadline < earliest[engine_id]:
+            earliest[engine_id] = deadline
+    return earliest
+
+
+async def _build_autoscaler_views(
+    redis: Redis, now: datetime
+) -> list[AutoscalerShapeView]:
+    """Build the per-shape autoscaler views from the shapes marker (M95).
+
+    The marker — not snapshot-key presence — decides which shapes exist:
+    expired snapshots must read as "not reporting", never as "no
+    autoscaler". Empty marker (local dev, lite mode) -> empty list.
+    """
+    try:
+        shapes_marker = await redis.hgetall(AUTOSCALE_SHAPES_KEY)
+    except Exception:
+        logger.warning("autoscale_shapes_marker_unreadable", exc_info=True)
+        return []
+    if not isinstance(shapes_marker, dict) or not shapes_marker:
+        return []
+    try:
+        wait_by_engine = await _fetch_earliest_wait_deadlines(redis)
+    except Exception:
+        logger.warning("autoscale_wait_deadlines_unreadable", exc_info=True)
+        wait_by_engine = {}
+    views: list[AutoscalerShapeView] = []
+    for shape, last_tick_iso in sorted(shapes_marker.items()):
+        last_tick_at = _parse_datetime(last_tick_iso)
+        try:
+            raw = await redis.get(f"{AUTOSCALE_TICK_KEY_PREFIX}{shape}")
+            view = _parse_tick_snapshot(shape, raw, last_tick_at, now)
+        except Exception:
+            logger.warning("autoscale_view_failed", shape=shape, exc_info=True)
+            view = AutoscalerShapeView(
+                shape=shape, stale=True, last_tick_at=last_tick_at
+            )
+        if view.per_engine:
+            # per_engine's keys are the shape's stream_engine_ids — the only
+            # place they're observable from the gateway (the policy YAML
+            # lives on the control plane).
+            view.earliest_wait_deadline_at = min(
+                (
+                    wait_by_engine[eid]
+                    for eid in view.per_engine
+                    if eid in wait_by_engine
+                ),
+                default=None,
+            )
+        views.append(view)
+    return views
 
 
 @router.get(
@@ -786,7 +958,10 @@ async def get_nodes(
         )
     )
 
-    return NodesResponse(nodes=node_views)
+    return NodesResponse(
+        nodes=node_views,
+        autoscaler=await _build_autoscaler_views(redis, now),
+    )
 
 
 # Job listing for console

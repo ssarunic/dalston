@@ -1,12 +1,14 @@
-import { useSyncExternalStore } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusDot, type DotStatus } from '@/components/StatusDot'
+import { AutoscalerStrip } from '@/components/AutoscalerStrip'
 import { useNodes } from '@/hooks/useNodes'
+import { useNowMs } from '@/hooks/useNowMs'
 import type { NodeView, NodeEngine } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { S } from '@/lib/strings'
+import { formatElapsed } from '@/lib/time'
 import { stagePillClass, STAGE_ORDER } from '@/lib/stages'
 import { AlertCircle, Loader2, Network, Server } from 'lucide-react'
 
@@ -114,27 +116,6 @@ function EngineRow({ engine }: { engine: NodeEngine }) {
       </div>
     </div>
   )
-}
-
-// Wall-clock external store, quantized to whole seconds so the snapshot
-// is stable within a tick (useSyncExternalStore requirement).
-function subscribeEverySecond(onTick: () => void) {
-  const id = setInterval(onTick, 1000)
-  return () => clearInterval(id)
-}
-const nowSeconds = () => Math.floor(Date.now() / 1000)
-
-/** Wall-clock in ms that ticks every second, render-pure. */
-function useNowMs(): number | null {
-  return useSyncExternalStore(subscribeEverySecond, nowSeconds, nowSeconds) * 1000
-}
-
-/** Elapsed time between an ISO timestamp and nowMs, e.g. "4m 12s". */
-function formatElapsed(sinceIso: string, nowMs: number): string {
-  const seconds = Math.max(0, Math.floor((nowMs - Date.parse(sinceIso)) / 1000))
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return m > 0 ? `${m}m ${s}s` : `${s}s`
 }
 
 // M91.7: shadow card for a worker the autoscaler launched but whose
@@ -280,6 +261,14 @@ export function Infrastructure() {
       )}
 
       {isLoading && <LoadingSkeleton />}
+
+      {data && data.autoscaler.length > 0 && (
+        <div className="space-y-3">
+          {data.autoscaler.map((view) => (
+            <AutoscalerStrip key={view.shape} view={view} />
+          ))}
+        </div>
+      )}
 
       {data && data.nodes.length === 0 && <EmptyState />}
 
