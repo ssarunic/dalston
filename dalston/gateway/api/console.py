@@ -47,6 +47,7 @@ from dalston.db.models import TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
 from dalston.gateway.dependencies import (
     get_audit_service,
+    get_autoscale_overrides_mirror,
     get_console_service,
     get_db,
     get_jobs_service,
@@ -60,6 +61,9 @@ from dalston.gateway.error_codes import Err
 from dalston.gateway.models.responses import JobCancelledResponse
 from dalston.gateway.security.permissions import Permission
 from dalston.gateway.security.principal import Principal
+from dalston.gateway.services.autoscale_settings import (
+    EXTERNAL_INHERITANCE_SOURCES,
+)
 from dalston.gateway.services.console import ConsoleService, normalize_stage
 from dalston.gateway.services.jobs import JobsService
 from dalston.gateway.services.storage import StorageService
@@ -1240,6 +1244,11 @@ class SettingResponse(BaseModel):
     max_value: float | None = None
     options: list[str] | None = None
     option_labels: list[str] | None = None
+    # M95: nullable settings inherit from an external source when unset.
+    nullable: bool = False
+    effective_value: Any = None
+    effective_known: bool = True
+    override_error: str | None = None
 
 
 class NamespaceSettingsResponse(BaseModel):
@@ -1251,6 +1260,10 @@ class NamespaceSettingsResponse(BaseModel):
     editable: bool
     settings: list[SettingResponse]
     updated_at: datetime | None = None
+    # M95: external-inheritance enrichment (autoscale namespace).
+    override_error: str | None = None
+    overrides_pending: list[str] = []
+    redis_synced: bool | None = None
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -1258,6 +1271,78 @@ class UpdateSettingsRequest(BaseModel):
 
     settings: dict[str, Any]
     expected_updated_at: datetime | None = None
+
+
+async def _enrich_and_build_settings_response(
+    ns: Any, redis: Redis, *, redis_synced: bool | None = None
+) -> NamespaceSettingsResponse:
+    """NamespaceSettings -> response, applying external-inheritance
+    enrichment (M95) for namespaces that have a registered source.
+
+    Single construction point on purpose: it is the only place the
+    enrichment fields are wired, and the GET/PATCH/reset handlers all
+    share it.
+    """
+    from dalston.gateway.services.settings import compute_pending_overrides
+
+    source = EXTERNAL_INHERITANCE_SOURCES.get(ns.namespace)
+    namespace_error: str | None = None
+    if source is not None:
+        effective = await source.effective_values(redis, [s.key for s in ns.settings])
+        for s in ns.settings:
+            ev = effective.get(s.key)
+            if ev is None:
+                continue
+            s.effective_known = ev.known
+            s.effective_value = ev.value if ev.known else None
+            s.override_error = ev.override_error
+            if ev.override_error and namespace_error is None:
+                namespace_error = ev.override_error
+
+    return NamespaceSettingsResponse(
+        namespace=ns.namespace,
+        label=ns.label,
+        description=ns.description,
+        editable=ns.editable,
+        settings=[
+            SettingResponse(
+                key=s.key,
+                label=s.label,
+                description=s.description,
+                value_type=s.value_type,
+                value=s.value,
+                default_value=s.default_value,
+                is_overridden=s.is_overridden,
+                env_var=s.env_var,
+                min_value=s.min_value,
+                max_value=s.max_value,
+                options=s.options,
+                option_labels=s.option_labels,
+                nullable=s.nullable,
+                effective_value=s.effective_value,
+                effective_known=s.effective_known,
+                override_error=s.override_error,
+            )
+            for s in ns.settings
+        ],
+        updated_at=ns.updated_at,
+        override_error=namespace_error,
+        overrides_pending=(
+            compute_pending_overrides(ns.settings) if source is not None else []
+        ),
+        redis_synced=redis_synced,
+    )
+
+
+async def _sync_autoscale_overrides(namespace: str, db: AsyncSession) -> bool | None:
+    """Best-effort post-commit mirror sync for externally-inherited
+    namespaces. None = not applicable / mirror absent (lite mode)."""
+    if namespace not in EXTERNAL_INHERITANCE_SOURCES:
+        return None
+    mirror = get_autoscale_overrides_mirror()
+    if mirror is None:
+        return None
+    return await mirror.sync_from_session(db)
 
 
 @router.get(
@@ -1269,6 +1354,7 @@ class UpdateSettingsRequest(BaseModel):
 async def list_settings_namespaces(
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> SettingsNamespaceListResponse:
     """List all settings namespaces."""
     security_manager = get_security_manager()
@@ -1277,6 +1363,16 @@ async def list_settings_namespaces(
 
     service = SettingsService()
     summaries = await service.list_namespaces(db)
+    # M95: hide externally-inherited namespaces whose source is absent on
+    # this deployment (lite / non-autoscaled) — a tab of "unknown" knobs
+    # that configure nothing must not appear.
+    visible = []
+    for s in summaries:
+        source = EXTERNAL_INHERITANCE_SOURCES.get(s.namespace)
+        if source is not None and not await source.is_active(redis):
+            continue
+        visible.append(s)
+    summaries = visible
     return SettingsNamespaceListResponse(
         namespaces=[
             NamespaceSummaryResponse(
@@ -1303,6 +1399,7 @@ async def get_settings_namespace(
     namespace: str,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> NamespaceSettingsResponse:
     """Get settings for a namespace."""
     security_manager = get_security_manager()
@@ -1316,30 +1413,7 @@ async def get_settings_namespace(
             status_code=404, detail=Err.NAMESPACE_NOT_FOUND.format(namespace=namespace)
         )
 
-    return NamespaceSettingsResponse(
-        namespace=ns.namespace,
-        label=ns.label,
-        description=ns.description,
-        editable=ns.editable,
-        settings=[
-            SettingResponse(
-                key=s.key,
-                label=s.label,
-                description=s.description,
-                value_type=s.value_type,
-                value=s.value,
-                default_value=s.default_value,
-                is_overridden=s.is_overridden,
-                env_var=s.env_var,
-                min_value=s.min_value,
-                max_value=s.max_value,
-                options=s.options,
-                option_labels=s.option_labels,
-            )
-            for s in ns.settings
-        ],
-        updated_at=ns.updated_at,
-    )
+    return await _enrich_and_build_settings_response(ns, redis)
 
 
 @router.patch(
@@ -1358,6 +1432,7 @@ async def update_settings_namespace(
     body: UpdateSettingsRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> NamespaceSettingsResponse:
     """Update settings in a namespace."""
     security_manager = get_security_manager()
@@ -1379,6 +1454,10 @@ async def update_settings_namespace(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # M95: Postgres committed; mirror to Redis best-effort and report
+    # honestly — a failed sync heals via the 60s reconcile loop.
+    redis_synced = await _sync_autoscale_overrides(namespace, db)
 
     ns = result.namespace_settings
 
@@ -1407,29 +1486,8 @@ async def update_settings_namespace(
         except Exception:
             logger.warning("Failed to audit settings change", exc_info=True)
 
-    return NamespaceSettingsResponse(
-        namespace=ns.namespace,
-        label=ns.label,
-        description=ns.description,
-        editable=ns.editable,
-        settings=[
-            SettingResponse(
-                key=s.key,
-                label=s.label,
-                description=s.description,
-                value_type=s.value_type,
-                value=s.value,
-                default_value=s.default_value,
-                is_overridden=s.is_overridden,
-                env_var=s.env_var,
-                min_value=s.min_value,
-                max_value=s.max_value,
-                options=s.options,
-                option_labels=s.option_labels,
-            )
-            for s in ns.settings
-        ],
-        updated_at=ns.updated_at,
+    return await _enrich_and_build_settings_response(
+        ns, redis, redis_synced=redis_synced
     )
 
 
@@ -1447,6 +1505,7 @@ async def reset_settings_namespace(
     namespace: str,
     principal: Annotated[Principal, Depends(get_principal)],
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> NamespaceSettingsResponse:
     """Reset settings namespace to defaults."""
     security_manager = get_security_manager()
@@ -1460,6 +1519,8 @@ async def reset_settings_namespace(
         result = await service.reset_namespace(db, namespace)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    redis_synced = await _sync_autoscale_overrides(namespace, db)
 
     ns = result.namespace_settings
 
@@ -1481,29 +1542,8 @@ async def reset_settings_namespace(
         except Exception:
             logger.warning("Failed to audit settings reset", exc_info=True)
 
-    return NamespaceSettingsResponse(
-        namespace=ns.namespace,
-        label=ns.label,
-        description=ns.description,
-        editable=ns.editable,
-        settings=[
-            SettingResponse(
-                key=s.key,
-                label=s.label,
-                description=s.description,
-                value_type=s.value_type,
-                value=s.value,
-                default_value=s.default_value,
-                is_overridden=s.is_overridden,
-                env_var=s.env_var,
-                min_value=s.min_value,
-                max_value=s.max_value,
-                options=s.options,
-                option_labels=s.option_labels,
-            )
-            for s in ns.settings
-        ],
-        updated_at=ns.updated_at,
+    return await _enrich_and_build_settings_response(
+        ns, redis, redis_synced=redis_synced
     )
 
 

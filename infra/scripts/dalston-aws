@@ -79,6 +79,7 @@ from dalston_autoscale import (  # noqa: E402
     PolicyError,
     ScaleAction,
     ShapePolicy,
+    apply_overrides,
     decide,
     parse_policy,
 )
@@ -3682,8 +3683,18 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
     # Marker rewrite is independent of per-shape outcomes: written right
     # after the policy parses so a mid-loop exception can never skip it.
     _publish_shapes_marker(r, shapes, now, dry_run=args.dry_run)
+    # Console-settings overrides (M95.5): one global hash, applied per
+    # shape BEFORE backlog/fleet reads so an overridden tasks_per_instance
+    # affects desired_instances this same tick. A bad combination discards
+    # all overrides for the shape (audited + echoed), never dies.
+    overrides_raw = r.hgetall(AUTOSCALE_OVERRIDES_KEY) or {}
     results = []
-    for policy in shapes:
+    for base_policy in shapes:
+        policy, overrides_applied, override_error = apply_overrides(
+            base_policy, overrides_raw
+        )
+        if override_error:
+            audit("autoscale.bad_override", shape=policy.name, error=override_error)
         backlog = BacklogSnapshot(
             tuple(_fetch_engine_backlog(r, eid) for eid in policy.stream_engine_ids)
         )
@@ -3717,7 +3728,11 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             applied=applied,
             spot_live=fleet.spot_live,
             on_demand_live=fleet.on_demand_live,
-            policy=PolicyEcho.from_policy(policy),
+            policy=PolicyEcho.from_policy(
+                policy,
+                overrides_applied=overrides_applied,
+                override_error=override_error,
+            ),
             blocked=_read_blocked_state(r, policy.name, dry_run=args.dry_run),
             idle_since_s=idle_s,
             stuck_pending=tuple(stuck) if stuck else (),

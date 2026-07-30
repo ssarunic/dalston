@@ -12,6 +12,7 @@ import {
   useResetSettings,
 } from '@/hooks/useSettings'
 import type { SettingValue } from '@/api/types'
+import { deriveNullableDisplay } from '@/lib/settingsDisplay'
 import {
   Gauge,
   Server,
@@ -21,6 +22,8 @@ import {
   RotateCcw,
   Copy,
   Check,
+  Scaling,
+  X,
 } from 'lucide-react'
 
 const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
@@ -29,6 +32,7 @@ const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
   audio: AudioLines,
   retention: Archive,  // Matches JobDetail and RealtimeSessionDetail
   system: Monitor,
+  autoscale: Scaling,
 }
 
 // --------------------------------------------------------------------------
@@ -42,6 +46,8 @@ const NAMESPACE_ICONS: Record<string, typeof Gauge> = {
 function validateSettingValue(setting: SettingValue, value: unknown): string | null {
   // Empty values are invalid for numeric fields
   if (value === '' || value === null || value === undefined) {
+    // M95: blank is valid for nullable settings — it means "inherit".
+    if (setting.nullable) return null
     if (setting.value_type === 'int' || setting.value_type === 'float') {
       return S.errors.valueRequired
     }
@@ -90,16 +96,28 @@ function SettingField({
   value,
   error,
   onChange,
+  isPending = false,
 }: {
   setting: SettingValue
   value: unknown
   error: string | null
   onChange: (key: string, value: unknown) => void
+  isPending?: boolean
 }) {
-  const isOverridden = value !== setting.default_value
+  const isBlank = value === '' || value === null || value === undefined
+  // For nullable settings "modified" means an override exists at all, not
+  // a diff against a default (they have none).
+  const isOverridden = setting.nullable ? !isBlank : value !== setting.default_value
+  const display = setting.nullable ? deriveNullableDisplay(setting) : null
   const inputId = `setting-${setting.key}`
   const errorId = `${inputId}-error`
   const hasError = error !== null
+  const inheritPlaceholder =
+    display?.kind === 'inherited-known'
+      ? S.settings.inheritedFrom(display.effectiveValue)
+      : display
+        ? S.settings.inheritedUnknown
+        : undefined
 
   const baseInputClasses = "flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-offset-2"
   const normalInputClasses = `${baseInputClasses} border-input focus:ring-ring`
@@ -157,11 +175,14 @@ function SettingField({
         id={inputId}
         type="number"
         inputMode="numeric"
-        value={String(value ?? '')}
+        value={value === null || value === undefined ? '' : String(value)}
+        placeholder={inheritPlaceholder}
         onChange={(e) => {
           const raw = e.target.value
           if (raw === '') {
-            onChange(setting.key, '')
+            // Nullable: blanking means "inherit", which the API models as
+            // an explicit null (delete the row), not an empty string.
+            onChange(setting.key, setting.nullable ? null : '')
             return
           }
           const parsed =
@@ -173,12 +194,25 @@ function SettingField({
         step={setting.value_type === 'float' ? 'any' : '1'}
         aria-invalid={hasError}
         aria-describedby={hasError ? errorId : undefined}
-        className={`${hasError ? errorInputClasses : normalInputClasses} w-24`}
+        className={`${hasError ? errorInputClasses : normalInputClasses} ${
+          setting.nullable ? 'w-64' : 'w-24'
+        }`}
       />
     )
   }
 
-  const descriptionParts = [`Default: ${String(setting.default_value)}`]
+  const descriptionParts: string[] = []
+  if (setting.nullable) {
+    descriptionParts.push(
+      display?.kind === 'inherited-known'
+        ? S.settings.inheritedFrom(display.effectiveValue)
+        : display?.kind === 'inherited-unknown'
+          ? S.settings.inheritedUnknown
+          : S.settings.clearToInherit,
+    )
+  } else {
+    descriptionParts.push(`Default: ${String(setting.default_value)}`)
+  }
   if (setting.env_var) {
     descriptionParts.push(`Env: ${setting.env_var}`)
   }
@@ -199,6 +233,20 @@ function SettingField({
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           {renderInput()}
+          {setting.nullable && !isBlank && (
+            <button
+              type="button"
+              onClick={() => onChange(setting.key, null)}
+              title={S.settings.clearToInherit}
+              aria-label={S.settings.clearToInherit}
+              className="text-muted-foreground hover:text-foreground shrink-0 rounded p-1 touch-manipulation"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+          {isPending && (
+            <span className="text-xs text-amber-500">{S.settings.pendingNotPickedUp}</span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground/70 break-all">
           {descriptionParts.join(' · ')}
@@ -355,7 +403,11 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
 
     const updates: Record<string, unknown> = {}
     for (const key of dirtyKeys) {
-      updates[key] = formValues[key]
+      const setting = data.settings.find((s) => s.key === key)
+      const raw = formValues[key]
+      // M95: a blanked nullable field must be sent as an explicit null —
+      // that is what deletes the override row and restores inheritance.
+      updates[key] = setting?.nullable && raw === '' ? null : raw
     }
     try {
       await updateMutation.mutateAsync({
@@ -392,9 +444,23 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
   if (!data) return null
 
   const hasOverrides = data.settings.some((s) => s.is_overridden)
+  // M95: namespaces that inherit from an external source reset to
+  // "inherit", not to a built-in default.
+  const inheritsExternally = data.settings.some((s) => s.nullable)
+  const resetLabel = inheritsExternally
+    ? S.settings.inheritFromControlPlane
+    : S.settings.resetToDefaults
+  const pendingKeys = new Set(data.overrides_pending ?? [])
 
   return (
     <>
+      {data.override_error && (
+        <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+          <p className="text-sm text-amber-500">
+            {S.settings.overrideRejected(data.override_error)}
+          </p>
+        </div>
+      )}
       <Card>
         <CardContent className="pt-6">
           {hasOverrides && (
@@ -406,7 +472,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                 className="text-muted-foreground h-9 px-3 touch-manipulation"
               >
                 <RotateCcw className="h-4 w-4 mr-1.5" />
-                {S.settings.resetToDefaults}
+                {resetLabel}
               </Button>
             </div>
           )}
@@ -415,9 +481,14 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
               <div key={setting.key} className="py-4 first:pt-0 last:pb-0">
                 <SettingField
                   setting={setting}
-                  value={formValues[setting.key] ?? setting.value}
+                  value={
+                    setting.key in formValues
+                      ? formValues[setting.key]
+                      : setting.value
+                  }
                   error={fieldErrors[setting.key] ?? null}
                   onChange={handleChange}
+                  isPending={pendingKeys.has(setting.key)}
                 />
               </div>
             ))}
@@ -474,9 +545,11 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
       <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
         <Card className="w-full max-w-md mx-4">
           <CardHeader>
-            <CardTitle className="text-lg">Reset {data.label}</CardTitle>
+            <CardTitle className="text-lg">
+              {inheritsExternally ? resetLabel : `Reset ${data.label}`}
+            </CardTitle>
             <p className="text-sm text-muted-foreground">
-              {S.settings.resetConfirm}
+              {inheritsExternally ? S.settings.inheritConfirm : S.settings.resetConfirm}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -486,7 +559,12 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                   .filter((s) => s.is_overridden)
                   .map((s) => (
                     <div key={s.key} className="whitespace-nowrap">
-                      {s.key}: {String(s.value)} &rarr; {String(s.default_value)}
+                      {s.key}: {String(s.value)} &rarr;{' '}
+                      {s.nullable
+                        ? s.effective_known && s.effective_value != null
+                          ? `${String(s.effective_value)} (${S.settings.inherited.toLowerCase()})`
+                          : S.settings.inheritedUnknown
+                        : String(s.default_value)}
                     </div>
                   ))}
               </div>
@@ -505,7 +583,7 @@ function EditableNamespaceTab({ namespace }: { namespace: string }) {
                 onClick={handleReset}
                 disabled={resetMutation.isPending}
               >
-                {resetMutation.isPending ? S.settings.resetting : S.settings.resetToDefaults}
+                {resetMutation.isPending ? S.settings.resetting : resetLabel}
               </Button>
             </div>
           </CardContent>

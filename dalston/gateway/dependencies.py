@@ -37,6 +37,9 @@ from dalston.gateway.services.storage import StorageService
 
 if TYPE_CHECKING:
     from dalston.common.audit import AuditService
+    from dalston.gateway.services.autoscale_overrides_mirror import (
+        AutoscaleOverridesMirror,
+    )
     from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 logger = structlog.get_logger()
@@ -229,6 +232,28 @@ def get_audit_service() -> AuditService:
 
         _audit_service = AuditService(db_session_factory)
     return _audit_service
+
+
+# M95: overrides mirror, set by main.py lifespan (distributed mode only).
+_autoscale_overrides_mirror: AutoscaleOverridesMirror | None = None
+
+
+def set_autoscale_overrides_mirror(
+    mirror: AutoscaleOverridesMirror | None,
+) -> None:
+    """Register the mirror instance (called from the lifespan)."""
+    global _autoscale_overrides_mirror
+    _autoscale_overrides_mirror = mirror
+
+
+def get_autoscale_overrides_mirror() -> AutoscaleOverridesMirror | None:
+    """The overrides mirror, or None when absent (lite mode, startup).
+
+    Deliberately returns None instead of raising 503: Postgres is already
+    durably the truth for settings, so a missing mirror only means the
+    Redis sync is deferred to the reconcile loop.
+    """
+    return _autoscale_overrides_mirror
 
 
 def get_session_router() -> SessionCoordinator:
