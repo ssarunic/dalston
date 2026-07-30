@@ -407,16 +407,20 @@ class TestDownAndTerminateRouting:
             daws, "_terminate_gpu", lambda st, name=None: calls.append(("gpu", name))
         )
         monkeypatch.setattr(
-            daws, "_terminate_control_plane", lambda st: calls.append(("cp", None))
+            daws,
+            "_terminate_control_plane",
+            lambda st, delete_data=False: calls.append(("cp", delete_data)),
         )
         monkeypatch.setattr(daws, "cmd_status_impl", MagicMock())
 
         args = MagicMock()
         args.target = "control-plane"
         args.name = None
+        args.delete_data = False
         daws.cmd_terminate(args)
 
-        assert calls == [("gpu", None), ("cp", None)]
+        # /data volume is kept unless --delete-data is passed explicitly
+        assert calls == [("gpu", None), ("cp", False)]
 
     def test_terminate_gpu_target_passes_name_filter(self, daws, monkeypatch) -> None:
         st = self._state(daws)

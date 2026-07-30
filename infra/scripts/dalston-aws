@@ -3878,11 +3878,11 @@ def cmd_status_impl(st: DeploymentState) -> None:
     log(f"  S3:       {st.s3_bucket}")
     print()
 
-    inst = describe_instance(st.region, st.instance_id)
+    inst = describe_instance(st.region, st.instance_id) if st.instance_id else None
     state = inst["State"]["Name"] if inst else "terminated"
     ip = (inst.get("PublicIpAddress", "") or "") if inst else ""
     label = "Control plane" if st.scenario == "split" else "Instance"
-    log(f"  {label}: {st.instance_id}  state={state}  ip={ip or 'none'}")
+    log(f"  {label}: {st.instance_id or '(none)'}  state={state}  ip={ip or 'none'}")
 
     if st.scenario == "split":
         # Fleet reality comes from EC2 tags (autoscaler-launched workers are
@@ -4408,8 +4408,13 @@ def _terminate_gpu(st: DeploymentState, name: str | None = None) -> None:
         log("All GPU workers terminated.")
 
 
-def _terminate_control_plane(st: DeploymentState) -> None:
-    """Terminate the control plane and clean up its resources."""
+def _terminate_control_plane(st: DeploymentState, *, delete_data: bool = False) -> None:
+    """Terminate the control plane instance.
+
+    The ``/data`` volume (postgres, redis, .env, tailscale cert) is kept by
+    default so ``launch control-plane`` can re-attach it; it is deleted only
+    with an explicit ``--delete-data``. Full resource removal is ``teardown``.
+    """
     if not st.instance_id:
         log("No control plane to terminate.")
         return
@@ -4427,14 +4432,20 @@ def _terminate_control_plane(st: DeploymentState) -> None:
         wait_instance_terminated(st.region, st.instance_id)
 
     if st.data_volume_id:
-        log(f"Deleting data volume {st.data_volume_id}...")
-        try:
-            ec2.delete_volume(VolumeId=st.data_volume_id)
-        except ClientError:
-            pass
+        if delete_data:
+            log(f"Deleting data volume {st.data_volume_id} (--delete-data)...")
+            try:
+                ec2.delete_volume(VolumeId=st.data_volume_id)
+            except ClientError:
+                pass
+            st.data_volume_id = ""
+        else:
+            log(
+                f"Keeping data volume {st.data_volume_id}; "
+                f"'launch control-plane' will re-attach it."
+            )
 
     st.instance_id = ""
-    st.data_volume_id = ""
     save_state(st)
     log("Control plane terminated.")
 
@@ -4457,7 +4468,7 @@ def cmd_terminate(args: argparse.Namespace) -> None:
         gpu_name = getattr(args, "name", None) if target == "gpu" else None
         _terminate_gpu(st, name=gpu_name)
     if target in ("control-plane", None):
-        _terminate_control_plane(st)
+        _terminate_control_plane(st, delete_data=args.delete_data)
 
     cmd_status_impl(st)
 
@@ -5468,6 +5479,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=["control-plane", "gpu"],
         help="Component to terminate (default: all, requires confirmation)",
+    )
+    p_term.add_argument(
+        "--delete-data",
+        action="store_true",
+        help=(
+            "Also delete the control-plane /data volume (postgres, redis, "
+            ".env). Default keeps it for re-attachment by the next "
+            "'launch control-plane'."
+        ),
     )
     p_term.add_argument(
         "--name",
