@@ -3135,14 +3135,28 @@ def _fetch_engine_backlog(r: Any, engine_id: str) -> EngineBacklog:
     here because this script runs on the bare control-plane host without the
     dalston package. Missing stream/group means nothing was ever enqueued:
     backlog 0.
+
+    Redis reports lag=nil when entries newer than the group's
+    last-delivered-id have been XDELed (e.g. cancelled jobs) — the count
+    becomes incomputable and `nil or 0` would read as an empty queue while
+    real tasks wait. Fall back to counting the entries that still exist
+    after last-delivered-id: that is exactly the deliverable backlog.
     """
     lag = 0
     pel = 0
+    stream = f"{STREAM_KEY_PREFIX}{engine_id}"
     try:
-        for group in r.xinfo_groups(f"{STREAM_KEY_PREFIX}{engine_id}"):
+        for group in r.xinfo_groups(stream):
             if group.get("name") == STREAM_CONSUMER_GROUP:
-                lag = max(0, int(group.get("lag") or 0))
                 pel = max(0, int(group.get("pending") or 0))
+                raw_lag = group.get("lag")
+                if raw_lag is None:
+                    last = group.get("last-delivered-id") or "0-0"
+                    # Exclusive range after last-delivered-id, capped: scaling
+                    # needs backlog magnitude, not exactness beyond 500.
+                    lag = len(r.xrange(stream, min=f"({last}", max="+", count=500))
+                else:
+                    lag = max(0, int(raw_lag))
                 break
     except Exception as exc:  # redis.ResponseError on missing key
         if "no such key" not in str(exc).lower():
