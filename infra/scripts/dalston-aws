@@ -337,6 +337,7 @@ class DeploymentState:
     gpu_sg_id: str = ""
     key_name: str = ""
     observability: bool = False
+    autoscale: bool = False
     gpu_workers: list[dict] | None = None  # list of GpuWorker dicts
 
 
@@ -3503,6 +3504,12 @@ def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
 def cmd_autoscale(args: argparse.Namespace) -> None:
     if args.provision:
         _autoscale_provision_remote(dry_run=args.dry_run)
+        # Record it so the next 'launch control-plane' re-provisions the
+        # autoscaler instead of silently shedding it.
+        st = load_state()
+        if st and not st.autoscale:
+            st.autoscale = True
+            save_state(st)
         return
     try:
         import redis
@@ -4028,6 +4035,7 @@ def _launch_control_plane(
         f"Launching {tag} ({cp.instance_type}, spot={cp.spot}){obs_suffix}{as_suffix}..."
     )
     st.observability = observability
+    st.autoscale = autoscale
     autoscale_ctx = _autoscale_ctx_dict(st, tmpl) if autoscale else None
     if autoscale and not st.control_plane_instance_profile:
         die(
@@ -4303,11 +4311,19 @@ def cmd_launch(args: argparse.Namespace) -> None:
     spot_override = True if args.spot else (False if args.on_demand else None)
 
     if target in ("control-plane", None):
+        # Reconcile launch options with recorded state: an omitted flag means
+        # "keep what the deployment had"; an explicit --<flag>/--no-<flag>
+        # updates the state. Prevents relaunches from silently shedding the
+        # observability stack or the autoscaler.
+        observability = (
+            st.observability if args.observability is None else args.observability
+        )
+        autoscale = st.autoscale if args.autoscale is None else args.autoscale
         _launch_control_plane(
             st,
             tmpl,
-            observability=args.observability,
-            autoscale=getattr(args, "autoscale", False),
+            observability=observability,
+            autoscale=autoscale,
         )
     if target in ("gpu", None):
         if tmpl.gpu_worker:
@@ -5450,9 +5466,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_launch.add_argument(
         "--observability",
-        action="store_true",
-        default=False,
-        help="Deploy observability stack (Jaeger, Prometheus, Grafana, Loki) on control plane",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Deploy observability stack (Jaeger, Prometheus, Grafana, Loki) "
+            "on control plane. Omitted: keep the recorded state; "
+            "--no-observability disables and records it."
+        ),
     )
     p_launch.add_argument(
         "--region",
@@ -5461,12 +5481,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_launch.add_argument(
         "--autoscale",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=(
             "Provision the M91 GPU autoscaler on the control plane at launch "
-            "(60s systemd timer; default off). For a running control plane "
-            "use 'dalston-aws autoscale --provision' instead."
+            "(60s systemd timer). Omitted: keep the recorded state; "
+            "--no-autoscale disables and records it. For a running control "
+            "plane use 'dalston-aws autoscale --provision' instead."
         ),
     )
     p_launch.set_defaults(func=cmd_launch)
