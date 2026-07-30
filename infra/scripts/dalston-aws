@@ -1032,12 +1032,20 @@ def ensure_key_pair(region: str, key_name: str) -> str:
 
 
 def _loki_driver_cloud_init_block() -> str:
-    """Loki driver is installed at gpu-start.sh runtime instead of cloud-init.
+    """Install the Loki logging-driver plugin on the control plane.
 
-    Plugin storage lives on instance-store NVMe and is wiped on stop/start,
-    so the install must happen on every boot, not just first boot.
+    The observability compose file sets ``driver: loki`` on its services, so
+    a fresh control plane fails to start the stack without the plugin. The
+    control plane's plugin storage is on the root EBS volume and survives
+    stop/start, so a one-time cloud-init install is sufficient here — unlike
+    GPU workers, whose plugin storage is on instance-store NVMe (wiped on
+    stop/start) and therefore install it in gpu-start.sh on every boot.
     """
-    return ""
+    return """\
+# Loki docker logging driver (observability compose services use driver: loki)
+docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions || true
+
+"""
 
 
 def _tailscale_cloud_init_block(hostname: str) -> str:
