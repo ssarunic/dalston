@@ -1290,6 +1290,72 @@ echo "Disable: systemctl disable --now dalston-autoscale.timer"
 """
 
 
+def _autoscale_redis_cleanup_snippet() -> str:
+    """Bash deleting every dalston:autoscale:* key (M95).
+
+    Shared by --deprovision and the control-plane launch path: the /data
+    volume (and therefore Redis) survives terminate->relaunch, so a
+    no-TTL shapes marker from a prior life would otherwise leave the
+    console reporting a permanently-stale ghost autoscaler. Idempotent —
+    a no-op when nothing was ever provisioned.
+    """
+    return """\
+docker compose -f /data/dalston/docker-compose.yml exec -T redis sh -c '
+  redis-cli DEL dalston:autoscale:shapes dalston:autoscale:shapes:dryrun \
+    dalston:autoscale:overrides >/dev/null 2>&1
+  for pat in "dalston:autoscale:tick:*" "dalston:autoscale:blocked:*" \\
+             "dalston:autoscale:state:*" "dalston:autoscale:pending:*"; do
+    redis-cli --scan --pattern "$pat" | while read -r k; do
+      [ -n "$k" ] && redis-cli DEL "$k" >/dev/null 2>&1
+    done
+  done
+' >/dev/null 2>&1 || echo "Redis autoscale-key cleanup skipped (redis unreachable)"
+"""
+
+
+def _autoscale_deprovision_script() -> str:
+    """Bash that removes the autoscaler from the control plane (M95).
+
+    Stops and removes the timer/service, then clears the Redis state so
+    the console reverts to "no autoscaler" instead of a stale ghost.
+    Postgres settings rows are NOT touched — they live on the gateway; see
+    the --deprovision help text.
+    """
+    return f"""\
+echo "Deprovisioning GPU autoscaler..."
+systemctl disable --now dalston-autoscale.timer >/dev/null 2>&1 || true
+systemctl stop dalston-autoscale.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/dalston-autoscale.timer \\
+      /etc/systemd/system/dalston-autoscale.service
+systemctl daemon-reload
+{_autoscale_redis_cleanup_snippet()}
+echo "Autoscaler removed. Policy file left at /data/dalston/autoscale-policy.yaml."
+"""
+
+
+def _autoscale_deprovision_remote() -> None:
+    """Remove the autoscaler from a running control plane (run from laptop)."""
+    st = require_state()
+    if not st.instance_id:
+        die("No control plane in state. Nothing to deprovision.")
+    if get_instance_state(st.region, st.instance_id) != "running":
+        die("Control plane is not running; cannot deprovision over SSH.")
+    _pipe_provision_script_over_ssh(
+        _autoscale_deprovision_script(), st.key_name, "autoscaler removal"
+    )
+    audit("autoscale.deprovision", instance_id=st.instance_id)
+    if st.autoscale:
+        st.autoscale = False
+        save_state(st)
+    log("Autoscaler deprovisioned.")
+    log(
+        "Note: Settings -> Autoscale overrides remain in Postgres and the "
+        "gateway's reconcile loop will repopulate dalston:autoscale:overrides "
+        "within a minute. Reset that namespace in the console for a fully "
+        "clean state."
+    )
+
+
 def _backup_provision_script() -> str:
     """Bash that provisions the M94 nightly Postgres backup on the control plane.
 
@@ -1678,8 +1744,14 @@ echo "To redeploy: sudo /data/dalston/deploy.sh"
 """
     )
 
+    # M95: when relaunching WITHOUT the autoscaler, clear its Redis state.
+    # /data (and Redis with it) survives terminate->relaunch, so the no-TTL
+    # shapes marker from a prior life would otherwise leave the console
+    # reporting an autoscaler that no longer runs.
     autoscale_block = (
-        "\n" + _autoscale_provision_script(autoscale_ctx) if autoscale_ctx else ""
+        "\n" + _autoscale_provision_script(autoscale_ctx)
+        if autoscale_ctx
+        else "\n" + _autoscale_redis_cleanup_snippet()
     )
     # Nightly Postgres backup is default-on for every control-plane launch (M94)
     backup_block = "\n" + _backup_provision_script()
@@ -3456,7 +3528,11 @@ def _reap_stuck_pending(
     return stuck, reaped
 
 
-def _autoscale_launch(r: Any, ctx: AutoscaleContext, policy: ShapePolicy) -> str:
+def _autoscale_launch(
+    r: Any, ctx: AutoscaleContext, policy: ShapePolicy, *, use_spot: bool = True
+) -> str:
+    """Launch one worker for the shape. use_spot=False is the M95.6 paid
+    fallback, reached only after sustained spot failures."""
     engines = list(policy.engines)
     worker_name = "-".join(engines)
 
@@ -3476,18 +3552,20 @@ def _autoscale_launch(r: Any, ctx: AutoscaleContext, policy: ShapePolicy) -> str
         ctx.gpu_sg_id,
         _ud,
         f"{NAME_PREFIX}-gpu-{worker_name}",
-        True,
+        use_spot,
         ctx.key_name,
         ctx.instance_profile,
         list(policy.gpu_type_preference),
         engines,
         managed_by="autoscaler",
     )
+    lifecycle = "spot" if use_spot else "on_demand"
     audit(
-        "autoscale.launch",
+        "autoscale.launch_on_demand" if not use_spot else "autoscale.launch",
         shape=policy.name,
         gpu_instance=instance_id,
         gpu_type=gpu_type,
+        lifecycle=lifecycle,
     )
     _publish_autoscale_event(
         r,
@@ -3495,8 +3573,10 @@ def _autoscale_launch(r: Any, ctx: AutoscaleContext, policy: ShapePolicy) -> str
         shape=policy.name,
         instance_id=instance_id,
         gpu_type=gpu_type,
+        lifecycle=lifecycle,
     )
-    return f"launched {instance_id} ({gpu_type})"
+    suffix = "" if use_spot else ", on-demand"
+    return f"launched {instance_id} ({gpu_type}{suffix})"
 
 
 def _autoscale_terminate(
@@ -3543,12 +3623,15 @@ def _apply_decision(
     managed_by: dict[str, str],
     now: datetime,
 ) -> str:
-    if action == ScaleAction.LAUNCH:
+    if action in (ScaleAction.LAUNCH, ScaleAction.LAUNCH_ON_DEMAND):
+        use_spot = action == ScaleAction.LAUNCH
         try:
             with _launch_lock():
-                msg = _autoscale_launch(r, ctx, policy)
+                msg = _autoscale_launch(r, ctx, policy, use_spot=use_spot)
             _clear_blocked_state(r, policy.name, dry_run=False)
             return msg
+        # launch_gpu_worker raises the Spot* classes on both paths (the
+        # names predate the on-demand fallback); handling is identical.
         except SpotQuotaError as e:
             audit("autoscale.spot_quota_reached", shape=policy.name, error=str(e))
             _write_blocked_state(
@@ -3579,7 +3662,12 @@ def _apply_decision(
         ]
         if not candidates:
             return "no autoscaler-managed instance to terminate (manual fleet)"
-        return _autoscale_terminate(r, ctx, policy, candidates[-1])
+        # M95.6: shed paid capacity first — on-demand costs ~3x spot, so
+        # cache warmth is not worth the hourly difference.
+        spot_ids = set(fleet.spot_live_instance_ids)
+        on_demand = [iid for iid in candidates if iid not in spot_ids]
+        target = on_demand[-1] if on_demand else candidates[-1]
+        return _autoscale_terminate(r, ctx, policy, target)
     return "no action"
 
 
@@ -3664,6 +3752,9 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             st.autoscale = True
             save_state(st)
         return
+    if args.deprovision:
+        _autoscale_deprovision_remote()
+        return
     try:
         import redis
     except ImportError:
@@ -3704,7 +3795,14 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
         _publish_pending_nodes(r, policy, fleet, workers, now)
         idle_now = backlog.all_idle and fleet.total > 0
         idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
-        decision = decide(policy, backlog, fleet, idle_since_s=idle_s)
+        blocked_before = _read_blocked_state(r, policy.name, dry_run=args.dry_run)
+        decision = decide(
+            policy,
+            backlog,
+            fleet,
+            idle_since_s=idle_s,
+            blocked_ticks=blocked_before.consecutive_ticks if blocked_before else 0,
+        )
         # Reap workers stuck mid-boot before anything else: they hold the
         # single-flight slot, so no scale action is meaningful this tick.
         stuck, reaped = _reap_stuck_pending(
@@ -5756,6 +5854,19 @@ def build_parser() -> argparse.ArgumentParser:
             "with --dry-run to install in observation-only mode (the timer "
             "runs 'autoscale --once --dry-run'); re-run without --dry-run "
             "to enable actuation"
+        ),
+    )
+    p_autoscale.add_argument(
+        "--deprovision",
+        action="store_true",
+        help=(
+            "Remove the autoscaler from the RUNNING control plane over SSH: "
+            "stop and delete the systemd timer/service, then clear all "
+            "dalston:autoscale:* Redis keys so the console reverts to 'no "
+            "autoscaler' instead of a stale ghost. The policy YAML is left "
+            "in place. Settings -> Autoscale overrides live in Postgres and "
+            "are repopulated by the gateway within a minute — reset that "
+            "namespace in the console too for a fully clean state"
         ),
     )
     p_autoscale.set_defaults(func=cmd_autoscale)

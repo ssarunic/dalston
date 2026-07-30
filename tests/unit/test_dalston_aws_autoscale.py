@@ -759,3 +759,212 @@ class TestFetchFleetSpotSplit:
         assert fleet.spot_live_instance_ids == ("i-spot",)
         assert fleet.spot_pending_instance_ids == ()
         assert fleet.on_demand_total == 1
+
+
+# ---------------------------------------------------------------------------
+# M95.6: on-demand fallback routing + deprovision
+# ---------------------------------------------------------------------------
+
+
+class TestOnDemandLaunchRouting:
+    def test_launch_on_demand_action_forces_use_spot_false(
+        self, daws, monkeypatch
+    ) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def fake_lock():
+            yield
+
+        monkeypatch.setattr(daws, "_launch_lock", fake_lock)
+        launch = MagicMock(return_value="launched i-od (g6.xlarge, on-demand)")
+        monkeypatch.setattr(daws, "_autoscale_launch", launch)
+        monkeypatch.setattr(daws, "_clear_blocked_state", MagicMock())
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH_ON_DEMAND,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+
+        assert launch.call_args[1]["use_spot"] is False
+
+    def test_plain_launch_still_uses_spot(self, daws, monkeypatch) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def fake_lock():
+            yield
+
+        monkeypatch.setattr(daws, "_launch_lock", fake_lock)
+        launch = MagicMock(return_value="launched i-spot")
+        monkeypatch.setattr(daws, "_autoscale_launch", launch)
+        monkeypatch.setattr(daws, "_clear_blocked_state", MagicMock())
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+
+        assert launch.call_args[1]["use_spot"] is True
+
+    def test_on_demand_launch_failure_still_records_blocked(
+        self, daws, monkeypatch
+    ) -> None:
+        import dalston_autoscale as das
+
+        @contextmanager
+        def fake_lock():
+            yield
+
+        monkeypatch.setattr(daws, "_launch_lock", fake_lock)
+        monkeypatch.setattr(
+            daws,
+            "_autoscale_launch",
+            MagicMock(side_effect=daws.SpotCapacityError("no capacity anywhere")),
+        )
+        monkeypatch.setattr(daws, "audit", MagicMock())
+        write = MagicMock()
+        monkeypatch.setattr(daws, "_write_blocked_state", write)
+
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.LAUNCH_ON_DEMAND,
+            das.FleetSnapshot(),
+            {},
+            datetime.now(UTC),
+        )
+        assert write.called
+
+
+class TestTerminatePrefersOnDemand:
+    def test_on_demand_terminated_before_newer_spot(self, daws, monkeypatch) -> None:
+        """On-demand costs ~3x spot — shed the paid worker first even
+        though the normal rule is newest-first."""
+        import dalston_autoscale as das
+
+        term = MagicMock(return_value="terminated i-od")
+        monkeypatch.setattr(daws, "_autoscale_terminate", term)
+        monkeypatch.setattr(daws, "_clear_blocked_state", MagicMock())
+
+        fleet = das.FleetSnapshot(
+            live_instance_ids=("i-od", "i-spot-newer"),
+            spot_live_instance_ids=("i-spot-newer",),
+        )
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.TERMINATE,
+            fleet,
+            {"i-od": "autoscaler", "i-spot-newer": "autoscaler"},
+            datetime.now(UTC),
+        )
+
+        assert term.call_args[0][3] == "i-od"
+
+    def test_all_spot_fleet_keeps_newest_first(self, daws, monkeypatch) -> None:
+        import dalston_autoscale as das
+
+        term = MagicMock(return_value="terminated i-spot2")
+        monkeypatch.setattr(daws, "_autoscale_terminate", term)
+        monkeypatch.setattr(daws, "_clear_blocked_state", MagicMock())
+
+        fleet = das.FleetSnapshot(
+            live_instance_ids=("i-spot1", "i-spot2"),
+            spot_live_instance_ids=("i-spot1", "i-spot2"),
+        )
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.TERMINATE,
+            fleet,
+            {"i-spot1": "autoscaler", "i-spot2": "autoscaler"},
+            datetime.now(UTC),
+        )
+
+        assert term.call_args[0][3] == "i-spot2"
+
+    def test_manual_on_demand_is_never_terminated(self, daws, monkeypatch) -> None:
+        import dalston_autoscale as das
+
+        term = MagicMock(return_value="terminated i-auto-spot")
+        monkeypatch.setattr(daws, "_autoscale_terminate", term)
+        monkeypatch.setattr(daws, "_clear_blocked_state", MagicMock())
+
+        fleet = das.FleetSnapshot(
+            live_instance_ids=("i-manual-od", "i-auto-spot"),
+            spot_live_instance_ids=("i-auto-spot",),
+        )
+        daws._apply_decision(
+            MagicMock(),
+            _ctx(daws),
+            _policy(daws),
+            das.ScaleAction.TERMINATE,
+            fleet,
+            {"i-manual-od": "manual", "i-auto-spot": "autoscaler"},
+            datetime.now(UTC),
+        )
+
+        assert term.call_args[0][3] == "i-auto-spot"
+
+
+class TestDeprovision:
+    def test_script_removes_timer_and_service(self, daws) -> None:
+        script = daws._autoscale_deprovision_script()
+        assert "systemctl disable --now dalston-autoscale.timer" in script
+        assert "rm -f /etc/systemd/system/dalston-autoscale.timer" in script
+        assert "systemctl daemon-reload" in script
+
+    def test_script_clears_every_autoscale_key(self, daws) -> None:
+        """A surviving no-TTL shapes marker would leave the console
+        reporting a ghost autoscaler forever."""
+        script = daws._autoscale_deprovision_script()
+        for key in (
+            "dalston:autoscale:shapes",
+            "dalston:autoscale:overrides",
+            "dalston:autoscale:tick:*",
+            "dalston:autoscale:blocked:*",
+            "dalston:autoscale:state:*",
+            "dalston:autoscale:pending:*",
+        ):
+            assert key in script, f"{key} not cleaned up"
+
+    def test_policy_file_is_left_in_place(self, daws) -> None:
+        script = daws._autoscale_deprovision_script()
+        assert "rm -f /data/dalston/autoscale-policy.yaml" not in script
+
+    def test_remote_records_autoscale_false_in_state(self, daws, monkeypatch) -> None:
+        st = MagicMock()
+        st.instance_id = "i-cp"
+        st.region = "eu-west-2"
+        st.key_name = "dalston-key"
+        st.autoscale = True
+        monkeypatch.setattr(daws, "require_state", lambda: st)
+        monkeypatch.setattr(daws, "get_instance_state", lambda r, i: "running")
+        monkeypatch.setattr(daws, "_pipe_provision_script_over_ssh", MagicMock())
+        monkeypatch.setattr(daws, "audit", MagicMock())
+        save = MagicMock()
+        monkeypatch.setattr(daws, "save_state", save)
+
+        daws._autoscale_deprovision_remote()
+
+        assert st.autoscale is False
+        save.assert_called_once_with(st)
+
+    def test_relaunch_without_autoscaler_clears_stale_keys(self, daws) -> None:
+        """/data (and Redis) survives terminate->relaunch."""
+        snippet = daws._autoscale_redis_cleanup_snippet()
+        assert "dalston:autoscale:shapes" in snippet

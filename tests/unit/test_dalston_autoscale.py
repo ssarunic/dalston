@@ -520,3 +520,181 @@ class TestApplyOverrides:
         effective, _, _ = apply_overrides(base, {"tasks_per_instance": "10"})
         assert desired_instances(base, 41) == 3
         assert desired_instances(effective, 41) == 5
+
+
+# ---------------------------------------------------------------------------
+# M95.6: opt-in on-demand fallback after sustained spot failures
+# ---------------------------------------------------------------------------
+
+from dalston_autoscale import ON_DEMAND_FALLBACK_BLOCKED_TICKS  # noqa: E402
+
+BLOCKED = ON_DEMAND_FALLBACK_BLOCKED_TICKS
+
+
+def _fallback_fleet(on_demand_live: int = 0, on_demand_pending: int = 0):
+    """Fleet with only on-demand instances (spot subsets left empty)."""
+    return FleetSnapshot(
+        live_instance_ids=tuple(f"i-od-live{n}" for n in range(on_demand_live)),
+        pending_instance_ids=tuple(f"i-od-boot{n}" for n in range(on_demand_pending)),
+    )
+
+
+class TestOnDemandFallback:
+    def test_disabled_by_default_never_escalates(self):
+        """Cost safety: an unconfigured policy must never launch paid
+        capacity no matter how long spot has been blocked."""
+        d = decide(
+            make_policy(),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=999,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_escalates_at_the_threshold(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.LAUNCH_ON_DEMAND
+        assert "falling back to on-demand" in d.reason
+
+    def test_below_threshold_stays_on_spot(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED - 1,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_no_blocked_streak_stays_on_spot(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_pending_on_demand_worker_blocks_a_second_launch(self):
+        """The regression this guards: a fallback launched last tick is
+        still booting this tick, and must already count against the cap or
+        we double-launch paid capacity."""
+        d = decide(
+            make_policy(fallback_to_on_demand=True, max_on_demand=1),
+            make_backlog(nemo=(999, 0)),
+            _fallback_fleet(on_demand_pending=1),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        # single-flight also applies — either way, no second paid launch
+        assert d.action != ScaleAction.LAUNCH_ON_DEMAND
+
+    def test_live_on_demand_worker_blocks_a_second_launch(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True, max_on_demand=1),
+            make_backlog(nemo=(999, 0)),
+            _fallback_fleet(on_demand_live=1),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_higher_cap_allows_a_second_launch(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True, max_on_demand=2),
+            make_backlog(nemo=(999, 0)),
+            _fallback_fleet(on_demand_live=1),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.LAUNCH_ON_DEMAND
+
+    def test_spot_fleet_does_not_consume_on_demand_headroom(self):
+        fleet = FleetSnapshot(
+            live_instance_ids=("i-spot",),
+            spot_live_instance_ids=("i-spot",),
+        )
+        d = decide(
+            make_policy(fallback_to_on_demand=True, max_on_demand=1),
+            make_backlog(nemo=(999, 0)),
+            fleet,
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.LAUNCH_ON_DEMAND
+
+    def test_at_desired_capacity_never_escalates(self):
+        """Fallback is a spot-vs-paid choice, not a capacity decision."""
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(5, 0)),
+            make_fleet(live=1),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.NONE
+
+    def test_max_on_demand_zero_disables_escalation(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True, max_on_demand=0),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+
+class TestFallbackPolicyParsing:
+    def test_defaults_are_off(self):
+        policy = ShapePolicy.from_dict(
+            {"engines": ["nemo"], "stream_engine_ids": ["nemo"]}
+        )
+        assert policy.fallback_to_on_demand is False
+        assert policy.max_on_demand == 1
+
+    def test_parsed_from_yaml_dict(self):
+        policy = ShapePolicy.from_dict(
+            {
+                "engines": ["nemo"],
+                "stream_engine_ids": ["nemo"],
+                "fallback_to_on_demand": True,
+                "max_on_demand": 2,
+            }
+        )
+        assert policy.fallback_to_on_demand is True
+        assert policy.max_on_demand == 2
+
+    def test_negative_max_on_demand_rejected(self):
+        with pytest.raises(PolicyError, match="max_on_demand"):
+            ShapePolicy.from_dict(
+                {
+                    "engines": ["nemo"],
+                    "stream_engine_ids": ["nemo"],
+                    "max_on_demand": -1,
+                }
+            )
+
+    def test_template_parses_with_fallback_documented(self):
+        shapes = parse_policy(yaml.safe_load(POLICY_TEMPLATE.read_text()))
+        assert shapes[0].fallback_to_on_demand is False
+        assert shapes[0].max_on_demand == 1
+
+    def test_overrides_preserve_fallback_config(self):
+        """apply_overrides rebuilds the policy — cost config must survive
+        or a console knob change would silently disable paid fallback."""
+        policy = make_policy(fallback_to_on_demand=True, max_on_demand=2)
+        effective, applied, error = apply_overrides(
+            policy, {"tasks_per_instance": "10"}
+        )
+        assert error is None
+        assert applied == ("tasks_per_instance",)
+        assert effective.fallback_to_on_demand is True
+        assert effective.max_on_demand == 2

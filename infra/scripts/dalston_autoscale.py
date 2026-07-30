@@ -135,6 +135,12 @@ class ShapePolicy:
     # 3-8 min happy path).
     boot_timeout_s: int = 1800
     gpu_type_preference: tuple[str, ...] = DEFAULT_GPU_TYPE_PREFERENCE
+    # M95.6: escalate to paid on-demand capacity after sustained spot
+    # failures. Off by default — this is a cost decision (on-demand runs
+    # ~3x spot), so enabling it is a deliberate control-plane YAML edit,
+    # never a console knob (see OVERRIDE_KEYS).
+    fallback_to_on_demand: bool = False
+    max_on_demand: int = 1
 
     @classmethod
     def from_dict(cls, d: dict) -> ShapePolicy:
@@ -163,6 +169,8 @@ class ShapePolicy:
                     str(t)
                     for t in d.get("gpu_type_preference", DEFAULT_GPU_TYPE_PREFERENCE)
                 ),
+                fallback_to_on_demand=bool(d.get("fallback_to_on_demand", False)),
+                max_on_demand=int(d.get("max_on_demand", 1)),
             )
         except (TypeError, ValueError) as exc:
             raise PolicyError(
@@ -189,6 +197,8 @@ class ShapePolicy:
             )
         if not policy.gpu_type_preference:
             raise PolicyError(f"shape '{name}': gpu_type_preference is empty")
+        if policy.max_on_demand < 0:
+            raise PolicyError(f"shape '{name}': max_on_demand must be >= 0")
         return policy
 
 
@@ -248,6 +258,10 @@ def apply_overrides(
         "drain_wait_s": policy.drain_wait_s,
         "boot_timeout_s": policy.boot_timeout_s,
         "gpu_type_preference": list(policy.gpu_type_preference),
+        # Not overridable, but must survive the rebuild — omitting them
+        # would silently reset paid-fallback config to its defaults.
+        "fallback_to_on_demand": policy.fallback_to_on_demand,
+        "max_on_demand": policy.max_on_demand,
     }
     for key in applied:
         merged[key] = overrides[key]
@@ -260,7 +274,12 @@ def apply_overrides(
 class ScaleAction(StrEnum):
     NONE = "none"
     LAUNCH = "launch"
+    LAUNCH_ON_DEMAND = "launch_on_demand"  # M95.6 paid fallback
     TERMINATE = "terminate"
+
+
+# Consecutive blocked ticks (~1 min each) before escalating to on-demand.
+ON_DEMAND_FALLBACK_BLOCKED_TICKS = 5
 
 
 @dataclass(frozen=True)
@@ -402,12 +421,19 @@ def decide(
     fleet: FleetSnapshot,
     *,
     idle_since_s: float | None,
+    blocked_ticks: int = 0,
 ) -> ScaleDecision:
     """Pure scaling decision — no I/O, no clock reads.
 
     idle_since_s: seconds the shape has been continuously idle (every engine
     lag == 0 and in-flight == 0), or None when not idle / unknown. The caller
     owns this bookkeeping (Redis-held between ticks).
+
+    blocked_ticks: consecutive ticks whose spot launch failed (quota or
+    capacity). Like idle_since_s this is cross-tick state the caller holds
+    in Redis. On-demand headroom is NOT a parameter — it is derived from
+    `fleet`, so a caller cannot pass a count inconsistent with the fleet
+    it also passed.
     """
     desired = desired_instances(policy, backlog.max_backlog)
 
@@ -428,6 +454,20 @@ def decide(
             return _decision(
                 ScaleAction.NONE,
                 f"single-flight: {fleet.pending} instance(s) still booting",
+            )
+        # M95.6: spot has failed for long enough that waiting is worse than
+        # paying. on_demand_total counts booting workers too — a fallback
+        # launched last tick is still pending this tick and must already
+        # count against the cap, or we double-launch paid capacity.
+        if (
+            policy.fallback_to_on_demand
+            and blocked_ticks >= ON_DEMAND_FALLBACK_BLOCKED_TICKS
+            and fleet.on_demand_total < policy.max_on_demand
+        ):
+            return _decision(
+                ScaleAction.LAUNCH_ON_DEMAND,
+                f"spot blocked {blocked_ticks} ticks; falling back to on-demand "
+                f"({fleet.on_demand_total}/{policy.max_on_demand} in use)",
             )
         return _decision(
             ScaleAction.LAUNCH,
