@@ -2517,13 +2517,13 @@ def launch_instance(
                 warn(f"No capacity in {az}, trying next AZ...")
                 continue
             if code == "MaxSpotInstanceCountExceeded":
-                die(
+                raise SpotQuotaError(
                     f"AWS spot instance vCPU limit reached for {instance_type}. "
                     f"Request a quota increase at: "
                     f"https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas "
                     f"(search 'All G and VT Spot Instance Requests'). "
                     f"Or retry with --no-spot for on-demand pricing."
-                )
+                ) from e
             raise
 
     raise RuntimeError(f"Failed to launch {instance_type} in any AZ.")
@@ -2752,6 +2752,9 @@ def launch_gpu_interactive(
                 shutdown_behavior="terminate",
             )
             return instance_id, gpu_type
+        except SpotQuotaError as e:
+            # Retrying another type can't help — quota is account-wide.
+            die(str(e))
         except RuntimeError:
             print()
             list_gpu_spot_instances(region, engines=engines)
@@ -2785,6 +2788,16 @@ ROLE_GPU_WORKER = "gpu-worker"
 
 class SpotCapacityError(RuntimeError):
     """No configured GPU type has spot capacity in any AZ right now."""
+
+
+class SpotQuotaError(RuntimeError):
+    """Account spot-instance quota (e.g. 'All G and VT Spot Requests') reached.
+
+    Distinct from :class:`SpotCapacityError`: capacity may free up in another
+    AZ or GPU type, but quota is account-wide and shared across the whole
+    G family — walking the preference list cannot help. Callers should stop
+    launching and let the backlog drain at current capacity.
+    """
 
 
 class LaunchLockHeldError(RuntimeError):
@@ -2868,6 +2881,11 @@ def launch_gpu_worker(
                 extra_tags=fleet_tags(engines, managed_by),
                 shutdown_behavior="terminate",
             )
+        except SpotQuotaError:
+            # Quota is account-wide and shared across the G family — trying
+            # the next preference type cannot succeed. Fail fast; the caller
+            # drains the backlog at current capacity and retries next tick.
+            raise
         except RuntimeError as e:
             last_err = e
             warn(f"No capacity for {gpu_type}, trying next preference...")
@@ -3425,6 +3443,12 @@ def _apply_decision(
         try:
             with _launch_lock():
                 return _autoscale_launch(r, ctx, policy)
+        except SpotQuotaError as e:
+            audit("autoscale.spot_quota_reached", shape=policy.name, error=str(e))
+            return (
+                "at account spot quota; backlog drains at current capacity "
+                f"(quota frees when a worker terminates): {e}"
+            )
         except SpotCapacityError as e:
             audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
             return f"no spot capacity: {e}"
