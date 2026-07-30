@@ -433,3 +433,296 @@ class TestPermissions:
 
         response = client.get("/api/console/settings")
         assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# M95: autoscale namespace wiring (visibility, enrichment, mirror sync)
+# ---------------------------------------------------------------------------
+
+
+def _autoscale_snapshot(*, max_instances: int = 3, override_error=None, **policy):
+    """A fresh tick snapshot as the control-plane autoscaler publishes it."""
+    import json as _json
+
+    echo = {
+        "tasks_per_instance": 20,
+        "min_instances": 0,
+        "max_instances": max_instances,
+        "scale_down_after_s": 2100,
+        "overrides_applied": [],
+        "override_error": override_error,
+    }
+    echo.update(policy)
+    return _json.dumps(
+        {
+            "schema_version": 1,
+            "shape": "nemo+pyannote",
+            "ts": datetime.now(UTC).isoformat(),
+            "policy": echo,
+        }
+    )
+
+
+def _autoscaled_redis(snapshot: str | None = None) -> AsyncMock:
+    """Redis with a shapes marker present (i.e. an autoscaler exists)."""
+    redis = AsyncMock()
+    marker = {"nemo+pyannote": datetime.now(UTC).isoformat()}
+    redis.hlen = AsyncMock(return_value=len(marker))
+    redis.hgetall = AsyncMock(return_value=marker)
+    redis.get = AsyncMock(
+        return_value=snapshot if snapshot is not None else _autoscale_snapshot()
+    )
+    return redis
+
+
+def _no_overrides_db() -> AsyncMock:
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+    db.delete = AsyncMock()
+    return db
+
+
+class TestAutoscaleNamespaceVisibility:
+    """Lite / non-autoscaled deployments must not see knobs that
+    configure nothing."""
+
+    def test_hidden_when_no_shapes_marker(
+        self, admin_api_key, mock_redis, mock_session_router
+    ):
+        db = _no_overrides_db()
+        mock_redis.hlen = AsyncMock(return_value=0)
+        app = _make_app(admin_api_key, db, mock_redis, mock_session_router)
+
+        response = TestClient(app).get("/api/console/settings")
+
+        assert response.status_code == 200
+        namespaces = {ns["namespace"] for ns in response.json()["namespaces"]}
+        assert "autoscale" not in namespaces
+        # the other namespaces are unaffected
+        assert "rate_limits" in namespaces
+
+    def test_visible_when_autoscaler_is_configured(
+        self, admin_api_key, mock_session_router
+    ):
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        response = TestClient(app).get("/api/console/settings")
+
+        namespaces = {ns["namespace"] for ns in response.json()["namespaces"]}
+        assert "autoscale" in namespaces
+
+
+class TestAutoscaleNamespaceEnrichment:
+    """GET must report what the autoscaler is actually running, never a
+    code default."""
+
+    def test_unset_knob_reports_the_control_plane_value(
+        self, admin_api_key, mock_session_router
+    ):
+        db = _no_overrides_db()
+        app = _make_app(
+            admin_api_key,
+            db,
+            _autoscaled_redis(_autoscale_snapshot(max_instances=3)),
+            mock_session_router,
+        )
+
+        response = TestClient(app).get("/api/console/settings/autoscale")
+
+        assert response.status_code == 200
+        data = response.json()
+        by_key = {s["key"]: s for s in data["settings"]}
+        max_instances = by_key["max_instances"]
+        assert max_instances["nullable"] is True
+        assert max_instances["is_overridden"] is False
+        assert max_instances["value"] is None  # unset, not a default
+        assert max_instances["effective_known"] is True
+        assert max_instances["effective_value"] == 3  # the YAML value
+        assert data["override_error"] is None
+        assert data["overrides_pending"] == []
+
+    def test_silent_autoscaler_reports_unknown_not_a_guess(
+        self, admin_api_key, mock_session_router
+    ):
+        db = _no_overrides_db()
+        redis = _autoscaled_redis()
+        redis.get = AsyncMock(return_value=None)  # snapshot expired
+        app = _make_app(admin_api_key, db, redis, mock_session_router)
+
+        response = TestClient(app).get("/api/console/settings/autoscale")
+
+        by_key = {s["key"]: s for s in response.json()["settings"]}
+        for key in ("tasks_per_instance", "min_instances", "max_instances"):
+            assert by_key[key]["effective_known"] is False
+            assert by_key[key]["effective_value"] is None
+
+    def test_rejected_override_surfaces_on_the_namespace(
+        self, admin_api_key, mock_session_router
+    ):
+        db = _no_overrides_db()
+        app = _make_app(
+            admin_api_key,
+            db,
+            _autoscaled_redis(
+                _autoscale_snapshot(override_error="min_instances > max_instances")
+            ),
+            mock_session_router,
+        )
+
+        response = TestClient(app).get("/api/console/settings/autoscale")
+
+        assert response.json()["override_error"] == "min_instances > max_instances"
+
+    def test_non_autoscale_namespace_is_not_enriched(
+        self, admin_api_key, mock_session_router
+    ):
+        """Enrichment must not leak into the four pre-existing namespaces."""
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        response = TestClient(app).get("/api/console/settings/rate_limits")
+
+        data = response.json()
+        assert data["override_error"] is None
+        assert data["overrides_pending"] == []
+        rpm = next(s for s in data["settings"] if s["key"] == "requests_per_minute")
+        assert rpm["nullable"] is False
+        assert rpm["value"] == 600
+        assert rpm["effective_value"] == 600
+
+
+class TestAutoscaleUpdateSync:
+    """PATCH must commit Postgres first, then report the mirror outcome."""
+
+    def test_setting_a_knob_mirrors_and_reports_synced(
+        self, admin_api_key, mock_session_router
+    ):
+        from dalston.gateway import dependencies
+
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        mirror = MagicMock()
+        mirror.sync_from_session = AsyncMock(return_value=True)
+        original = dependencies._autoscale_overrides_mirror
+        dependencies._autoscale_overrides_mirror = mirror
+        try:
+            response = TestClient(app).patch(
+                "/api/console/settings/autoscale",
+                json={"settings": {"tasks_per_instance": 10}},
+            )
+        finally:
+            dependencies._autoscale_overrides_mirror = original
+
+        assert response.status_code == 200
+        assert response.json()["redis_synced"] is True
+        mirror.sync_from_session.assert_awaited_once()
+        # Postgres committed before the mirror ran
+        db.commit.assert_awaited()
+
+    def test_failed_mirror_still_succeeds_and_reports_honestly(
+        self, admin_api_key, mock_session_router
+    ):
+        """Postgres is the truth; the reconcile loop is the backstop."""
+        from dalston.gateway import dependencies
+
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        mirror = MagicMock()
+        mirror.sync_from_session = AsyncMock(return_value=False)
+        original = dependencies._autoscale_overrides_mirror
+        dependencies._autoscale_overrides_mirror = mirror
+        try:
+            response = TestClient(app).patch(
+                "/api/console/settings/autoscale",
+                json={"settings": {"tasks_per_instance": 10}},
+            )
+        finally:
+            dependencies._autoscale_overrides_mirror = original
+
+        assert response.status_code == 200
+        assert response.json()["redis_synced"] is False
+
+    def test_missing_mirror_is_not_an_error(self, admin_api_key, mock_session_router):
+        """Lite mode / pre-startup: the knob is still durably set."""
+        from dalston.gateway import dependencies
+
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        original = dependencies._autoscale_overrides_mirror
+        dependencies._autoscale_overrides_mirror = None
+        try:
+            response = TestClient(app).patch(
+                "/api/console/settings/autoscale",
+                json={"settings": {"tasks_per_instance": 10}},
+            )
+        finally:
+            dependencies._autoscale_overrides_mirror = original
+
+        assert response.status_code == 200
+        assert response.json()["redis_synced"] is None
+
+    def test_null_unsets_a_knob_via_the_api(self, admin_api_key, mock_session_router):
+        """The round-trip the spec requires: null deletes the row."""
+        existing = MagicMock(spec=SettingModel)
+        existing.key = "max_instances"
+        existing.value = {"v": 5}
+        existing.namespace = "autoscale"
+        existing.updated_at = datetime(2026, 7, 30, 12, 0, 0, tzinfo=UTC)
+
+        db = AsyncMock()
+        first = MagicMock()
+        first.scalars.return_value.all.return_value = [existing]
+        first.scalar_one_or_none.return_value = existing
+        after = MagicMock()
+        after.scalars.return_value.all.return_value = []
+        after.scalar_one_or_none.return_value = None
+
+        # call 1: per-key select for the upsert/delete branch
+        # call 2: refetch after commit (cache was invalidated)
+        calls = 0
+
+        async def execute(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return first if calls <= 1 else after
+
+        db.execute = AsyncMock(side_effect=execute)
+        db.commit = AsyncMock()
+        db.delete = AsyncMock()
+        db.add = MagicMock()
+
+        app = _make_app(admin_api_key, db, _autoscaled_redis(), mock_session_router)
+
+        response = TestClient(app).patch(
+            "/api/console/settings/autoscale",
+            json={"settings": {"max_instances": None}},
+        )
+
+        assert response.status_code == 200
+        db.delete.assert_awaited_once_with(existing)
+        assert not db.add.called
+        by_key = {s["key"]: s for s in response.json()["settings"]}
+        assert by_key["max_instances"]["is_overridden"] is False
+        assert by_key["max_instances"]["effective_value"] == 3  # back to the YAML
+
+    def test_null_rejected_for_a_non_nullable_namespace(
+        self, admin_api_key, mock_redis, mock_session_router
+    ):
+        db = _no_overrides_db()
+        app = _make_app(admin_api_key, db, mock_redis, mock_session_router)
+
+        response = TestClient(app).patch(
+            "/api/console/settings/rate_limits",
+            json={"settings": {"requests_per_minute": None}},
+        )
+
+        assert response.status_code == 400
