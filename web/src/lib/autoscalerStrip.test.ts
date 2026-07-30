@@ -96,6 +96,22 @@ describe('deriveStripState', () => {
     expect(state).toMatchObject({ kind: 'cooldown', idleSinceS: 0 })
   })
 
+  it('warmFloor: idle at an always-on minimum is not a cooldown', () => {
+    // min_instances=1 keeps live==desired==1 forever; that worker is never
+    // terminated, so "cooldown running" would be a promise that never lands.
+    const state = deriveStripState(
+      makeView({ max_backlog: 0, live: 1, desired: 1, idle_since_s: 99999 }),
+    )
+    expect(state).toEqual({ kind: 'warmFloor', live: 1 })
+  })
+
+  it('cooldown only once there is surplus above desired', () => {
+    const state = deriveStripState(
+      makeView({ max_backlog: 0, live: 2, desired: 1, idle_since_s: 60 }),
+    )
+    expect(state).toMatchObject({ kind: 'cooldown', live: 2, desired: 1 })
+  })
+
   it('idle: scaled to zero', () => {
     const state = deriveStripState(
       makeView({ max_backlog: 0, live: 0, pending: 0, desired: 0 }),

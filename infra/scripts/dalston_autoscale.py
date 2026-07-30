@@ -154,6 +154,16 @@ class ShapePolicy:
         if not engines or not stream_engine_ids:
             raise PolicyError(f"shape has empty engines/stream_engine_ids: {d!r}")
         name = str(d.get("name") or "+".join(sorted(engines)))
+        # Strict: bool() would make every non-empty string truthy, so
+        # `fallback_to_on_demand: "false"` would silently authorise paid
+        # instances. A cost control must fail closed and loudly.
+        fallback_raw = d.get("fallback_to_on_demand", False)
+        if not isinstance(fallback_raw, bool):
+            raise PolicyError(
+                f"shape '{name}': fallback_to_on_demand must be a YAML boolean "
+                f"(true/false), got {fallback_raw!r}; refusing to infer intent "
+                "for a setting that launches paid instances"
+            )
         try:
             policy = cls(
                 name=name,
@@ -169,7 +179,7 @@ class ShapePolicy:
                     str(t)
                     for t in d.get("gpu_type_preference", DEFAULT_GPU_TYPE_PREFERENCE)
                 ),
-                fallback_to_on_demand=bool(d.get("fallback_to_on_demand", False)),
+                fallback_to_on_demand=fallback_raw,
                 max_on_demand=int(d.get("max_on_demand", 1)),
             )
         except (TypeError, ValueError) as exc:
@@ -422,6 +432,7 @@ def decide(
     *,
     idle_since_s: float | None,
     blocked_ticks: int = 0,
+    on_demand_cooldown: bool = False,
 ) -> ScaleDecision:
     """Pure scaling decision — no I/O, no clock reads.
 
@@ -434,6 +445,11 @@ def decide(
     in Redis. On-demand headroom is NOT a parameter — it is derived from
     `fleet`, so a caller cannot pass a count inconsistent with the fleet
     it also passed.
+
+    on_demand_cooldown: True while a previously failed on-demand fallback is
+    still backing off. Suppresses only the escalation, so the tick falls
+    through to a spot launch — spot keeps being re-probed instead of the
+    shape pinning itself to a paid path that is also failing.
     """
     desired = desired_instances(policy, backlog.max_backlog)
 
@@ -463,6 +479,7 @@ def decide(
             policy.fallback_to_on_demand
             and blocked_ticks >= ON_DEMAND_FALLBACK_BLOCKED_TICKS
             and fleet.on_demand_total < policy.max_on_demand
+            and not on_demand_cooldown
         ):
             return _decision(
                 ScaleAction.LAUNCH_ON_DEMAND,

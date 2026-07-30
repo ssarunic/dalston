@@ -100,6 +100,38 @@ class TestParsePolicy:
                 }
             )
 
+    @pytest.mark.parametrize("value", ["false", "no", "off", "0", 0, 1, None])
+    def test_non_boolean_fallback_flag_rejected(self, value):
+        """bool("false") is True — a quoted YAML string must never authorise
+        paid instances. Cost controls fail closed and loudly."""
+        with pytest.raises(PolicyError, match="fallback_to_on_demand"):
+            parse_policy(
+                {
+                    "shapes": [
+                        {
+                            "engines": ["nemo"],
+                            "stream_engine_ids": ["nemo"],
+                            "fallback_to_on_demand": value,
+                        }
+                    ]
+                }
+            )
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_real_booleans_accepted(self, value):
+        shapes = parse_policy(
+            {
+                "shapes": [
+                    {
+                        "engines": ["nemo"],
+                        "stream_engine_ids": ["nemo"],
+                        "fallback_to_on_demand": value,
+                    }
+                ]
+            }
+        )
+        assert shapes[0].fallback_to_on_demand is value
+
     def test_zero_tasks_per_instance_rejected(self):
         with pytest.raises(PolicyError, match="tasks_per_instance"):
             parse_policy(
@@ -551,6 +583,34 @@ class TestOnDemandFallback:
             blocked_ticks=999,
         )
         assert d.action == ScaleAction.LAUNCH
+
+    def test_cooldown_after_failed_fallback_re_probes_spot(self):
+        """A failed paid fallback must not pin the shape to the paid path.
+
+        While the on-demand cooldown is set the tick falls back through to a
+        spot launch, so spot keeps being tested; otherwise an on-demand
+        outage would stop the shape launching anything at all.
+        """
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+            on_demand_cooldown=True,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_escalates_again_once_cooldown_expires(self):
+        d = decide(
+            make_policy(fallback_to_on_demand=True),
+            make_backlog(nemo=(41, 0)),
+            make_fleet(),
+            idle_since_s=None,
+            blocked_ticks=BLOCKED,
+            on_demand_cooldown=False,
+        )
+        assert d.action == ScaleAction.LAUNCH_ON_DEMAND
 
     def test_escalates_at_the_threshold(self):
         d = decide(
