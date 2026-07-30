@@ -120,4 +120,9 @@ describe('deriveStripState', () => {
     )
     expect(state).toEqual({ kind: 'nominal' })
   })
+
+  it('on-demand workers do not change the state (orthogonal badge)', () => {
+    const state = deriveStripState(makeView({ on_demand_live: 1, spot_live: 1 }))
+    expect(state).toEqual({ kind: 'nominal' })
+  })
 })

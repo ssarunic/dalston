@@ -27,3 +27,14 @@ shapes:
     # g4dn first: best spot availability in eu-west-2 AZs used by this
     # deployment (operator choice, 2026-07); g6/g5 only as capacity fallback
     gpu_type_preference: [g4dn.xlarge, g6.xlarge, g5.xlarge]
+
+    # M95.6 — opt-in paid fallback. When spot has been unavailable for 5
+    # consecutive ticks (~5 min) and backlog still needs capacity, launch
+    # one on-demand instance instead of waiting for jobs to time out.
+    # Default off: on-demand runs ~3x spot, so this is a cost decision.
+    # Deliberately NOT exposed in Settings -> Autoscale — enabling paid
+    # capacity should be a control-plane edit.
+    fallback_to_on_demand: false
+    # Cap on simultaneous on-demand workers (live + booting). The account
+    # has 1 on-demand G-family instance of quota in eu-west-2.
+    max_on_demand: 1
