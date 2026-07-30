@@ -301,3 +301,130 @@ class TestBootTimeoutValidation:
                     ]
                 }
             )
+
+
+# ---------------------------------------------------------------------------
+# M95: fleet lifecycle split + tick snapshot contract
+# ---------------------------------------------------------------------------
+
+from dalston_autoscale import (  # noqa: E402
+    AUTOSCALE_TICK_SCHEMA_VERSION,
+    AutoscaleTickSnapshot,
+    BlockedInfo,
+    PolicyEcho,
+)
+
+
+class TestFleetSnapshotLifecycle:
+    def test_defaults_count_everything_as_on_demand(self):
+        """Unknown lifecycle fails safe: it counts against the paid cap."""
+        fleet = FleetSnapshot(live_instance_ids=("i-1", "i-2"))
+        assert fleet.spot_live == 0
+        assert fleet.on_demand_live == 2
+        assert fleet.on_demand_total == 2
+
+    def test_spot_subsets_split_the_counts(self):
+        fleet = FleetSnapshot(
+            live_instance_ids=("i-1", "i-2", "i-3"),
+            pending_instance_ids=("i-4", "i-5"),
+            spot_live_instance_ids=("i-1", "i-2"),
+            spot_pending_instance_ids=("i-4",),
+        )
+        assert fleet.spot_live == 2
+        assert fleet.on_demand_live == 1
+        assert fleet.on_demand_pending == 1
+        assert fleet.on_demand_total == 2
+
+    def test_all_spot_fleet_has_zero_on_demand(self):
+        fleet = FleetSnapshot(
+            live_instance_ids=("i-1",),
+            spot_live_instance_ids=("i-1",),
+        )
+        assert fleet.on_demand_total == 0
+
+
+def _make_snapshot(**overrides) -> AutoscaleTickSnapshot:
+    policy = make_policy()
+    decision = decide(
+        policy,
+        make_backlog(nemo=(41, 0)),
+        make_fleet(live=2),
+        idle_since_s=None,
+    )
+    base = {
+        "ts": "2026-07-30T12:04:00+00:00",
+        "decision": decision,
+        "applied": "at desired capacity",
+        "spot_live": 2,
+        "on_demand_live": 0,
+        "policy": PolicyEcho.from_policy(policy),
+        "blocked": None,
+        "idle_since_s": None,
+    }
+    base.update(overrides)
+    return AutoscaleTickSnapshot(**base)
+
+
+class TestAutoscaleTickSnapshot:
+    def test_decision_fields_survive_untouched(self):
+        d = _make_snapshot().to_dict()
+        assert d["shape"] == "nemo+pyannote"
+        assert d["max_backlog"] == 41
+        assert d["desired"] == 3
+        assert d["live"] == 2
+        assert d["per_engine"]["nemo"] == {"lag": 41, "in_flight": 0}
+
+    def test_snapshot_contract_fields(self):
+        d = _make_snapshot().to_dict()
+        assert d["schema_version"] == AUTOSCALE_TICK_SCHEMA_VERSION
+        assert d["ts"] == "2026-07-30T12:04:00+00:00"
+        assert d["applied"] == "at desired capacity"
+        assert d["spot_live"] == 2
+        assert d["on_demand_live"] == 0
+        assert d["blocked"] is None
+        assert d["idle_since_s"] is None
+        assert d["policy"] == {
+            "tasks_per_instance": 20,
+            "min_instances": 0,
+            "max_instances": 5,
+            "scale_down_after_s": 2100,
+            "overrides_applied": [],
+            "override_error": None,
+        }
+
+    def test_stuck_pending_omitted_when_empty(self):
+        assert "stuck_pending" not in _make_snapshot().to_dict()
+        d = _make_snapshot(stuck_pending=("i-stuck",)).to_dict()
+        assert d["stuck_pending"] == ["i-stuck"]
+
+    def test_blocked_state_serialized(self):
+        blocked = BlockedInfo(
+            kind="spot_quota",
+            since="2026-07-30T11:58:00+00:00",
+            consecutive_ticks=6,
+            detail="MaxSpotInstanceCountExceeded",
+        )
+        d = _make_snapshot(blocked=blocked).to_dict()
+        assert d["blocked"] == {
+            "kind": "spot_quota",
+            "since": "2026-07-30T11:58:00+00:00",
+            "consecutive_ticks": 6,
+            "detail": "MaxSpotInstanceCountExceeded",
+        }
+
+    def test_json_round_trip(self):
+        import json as _json
+
+        parsed = _json.loads(_json.dumps(_make_snapshot().to_dict()))
+        assert parsed["schema_version"] == AUTOSCALE_TICK_SCHEMA_VERSION
+
+
+class TestPolicyEcho:
+    def test_from_policy_echoes_effective_values(self):
+        echo = PolicyEcho.from_policy(
+            make_policy(tasks_per_instance=10),
+            overrides_applied=("tasks_per_instance",),
+            override_error=None,
+        )
+        assert echo.tasks_per_instance == 10
+        assert echo.to_dict()["overrides_applied"] == ["tasks_per_instance"]

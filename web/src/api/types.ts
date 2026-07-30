@@ -346,8 +346,48 @@ export interface NodeView {
   boot_timeout_s: number | null
 }
 
+// M95: autoscaler visibility
+export interface AutoscalerPolicyEcho {
+  tasks_per_instance: number | null
+  min_instances: number | null
+  max_instances: number | null
+  scale_down_after_s: number | null
+  overrides_applied: string[]
+  override_error: string | null
+}
+
+export interface AutoscalerBlockedInfo {
+  kind: 'spot_quota' | 'spot_capacity' | string
+  since: string
+  consecutive_ticks: number
+  detail: string | null
+}
+
+/** One autoscaled shape's latest tick snapshot. Decision fields are null
+ * when the snapshot is stale, corrupt, or from a newer schema. */
+export interface AutoscalerShapeView {
+  shape: string
+  stale: boolean
+  last_tick_at: string | null
+  ts: string | null
+  action: string | null
+  applied: string | null
+  desired: number | null
+  live: number | null
+  pending: number | null
+  spot_live: number | null
+  on_demand_live: number | null
+  max_backlog: number | null
+  per_engine: Record<string, { lag: number; in_flight: number }>
+  idle_since_s: number | null
+  policy: AutoscalerPolicyEcho | null
+  blocked: AutoscalerBlockedInfo | null
+  earliest_wait_deadline_at: string | null
+}
+
 export interface NodesResponse {
   nodes: NodeView[]
+  autoscaler: AutoscalerShapeView[]
 }
 
 // Webhook types

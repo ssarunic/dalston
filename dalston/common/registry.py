@@ -45,6 +45,36 @@ UNIFIED_EVENTS_CHANNEL = "dalston:engine:events"
 # (infra/scripts/dalston-aws keeps a mirrored literal — it deliberately has
 # no dalston-package dependency). Read by the gateway's /api/console/nodes.
 AUTOSCALE_PENDING_KEY_PREFIX = "dalston:autoscale:pending:"
+# M95: per-tick decision snapshots, the persistent configured-shapes marker,
+# sustained spot-failure state, and the settings-overrides hash. Same
+# mirrored-literal convention as above.
+AUTOSCALE_TICK_KEY_PREFIX = "dalston:autoscale:tick:"
+AUTOSCALE_SHAPES_KEY = "dalston:autoscale:shapes"
+AUTOSCALE_BLOCKED_KEY_PREFIX = "dalston:autoscale:blocked:"
+AUTOSCALE_OVERRIDES_KEY = "dalston:autoscale:overrides"
+AUTOSCALE_TICK_SCHEMA_VERSION = 1
+# Gateway-side staleness threshold for tick snapshots (3 ticks); distinct
+# from the control plane's 3600s Redis TTL, which exists so a stale
+# snapshot stays renderable as "not reporting" instead of vanishing.
+AUTOSCALE_TICK_STALE_THRESHOLD_S = 180
+
+
+def is_autoscale_tick_stale(ts_iso: str | None, now: datetime) -> bool:
+    """Shared staleness predicate for autoscale tick snapshots (M95).
+
+    Single owner on purpose: both the /api/console/nodes view and the
+    settings effective-value enrichment call this, so the definition of
+    "stale" cannot drift between the two surfaces. Unparseable or missing
+    timestamps are stale.
+    """
+    if not ts_iso:
+        return True
+    try:
+        ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (now - ts).total_seconds() >= AUTOSCALE_TICK_STALE_THRESHOLD_S
+
 
 # Heartbeat configuration
 HEARTBEAT_TTL = 60  # seconds
