@@ -21,10 +21,11 @@ from dalston.common.redis import (
 )
 from dalston.common.s3 import ensure_bucket_exists
 from dalston.config import Settings, get_settings
-from dalston.db.session import DEFAULT_TENANT_ID, engine, init_db
+from dalston.db.session import DEFAULT_TENANT_ID, async_session, engine, init_db
 from dalston.gateway.api.auth import router as auth_router
 from dalston.gateway.api.console import router as console_router
 from dalston.gateway.api.v1 import router as v1_router
+from dalston.gateway.dependencies import set_autoscale_overrides_mirror
 from dalston.gateway.middleware import setup_exception_handlers
 from dalston.gateway.middleware.correlation import CorrelationIdMiddleware
 from dalston.gateway.middleware.metrics import MetricsMiddleware
@@ -32,6 +33,9 @@ from dalston.gateway.middleware.security_error_handler import (
     SecurityErrorHandlerMiddleware,
 )
 from dalston.gateway.services.auth import AuthService, Scope
+from dalston.gateway.services.autoscale_overrides_mirror import (
+    AutoscaleOverridesMirror,
+)
 from dalston.orchestrator.session_coordinator import SessionCoordinator
 
 # Configure structured logging
@@ -48,6 +52,10 @@ dalston.metrics.init_session_router_metrics()
 
 # Global session coordinator instance (initialized in lifespan).
 session_router: SessionCoordinator | None = None
+
+# M95: Postgres->Redis mirror for autoscale settings overrides
+# (initialized in lifespan, distributed mode only).
+autoscale_overrides_mirror: AutoscaleOverridesMirror | None = None
 
 
 def _should_eager_init_db(settings: Settings) -> bool:
@@ -71,7 +79,6 @@ async def _ensure_admin_key_exists() -> None:
     This provides a seamless first-run experience by auto-creating
     an admin key and printing it to the console.
     """
-    from dalston.db.session import async_session
 
     settings = get_settings()
     if settings.runtime_mode == "lite":
@@ -240,6 +247,14 @@ async def lifespan(app: FastAPI):
         session_router = SessionCoordinator(redis_url=settings.redis_url)
         await session_router.start()
 
+        # M95: keep the autoscale overrides hash converged with Postgres.
+        global autoscale_overrides_mirror
+        autoscale_overrides_mirror = AutoscaleOverridesMirror(
+            redis=await get_redis(), session_factory=async_session
+        )
+        await autoscale_overrides_mirror.start()
+        set_autoscale_overrides_mirror(autoscale_overrides_mirror)
+
     # Auto-bootstrap admin key if no keys exist
     await _ensure_admin_key_exists()
 
@@ -253,6 +268,11 @@ async def lifespan(app: FastAPI):
     # Stop session coordinator
     if session_router:
         await session_router.stop()
+
+    # Stop autoscale overrides mirror
+    if autoscale_overrides_mirror:
+        await autoscale_overrides_mirror.stop()
+        set_autoscale_overrides_mirror(None)
 
     # Close Redis provider
     if settings.runtime_mode == "distributed":

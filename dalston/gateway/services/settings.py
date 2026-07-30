@@ -47,6 +47,11 @@ class SettingDefinition:
     max_value: int | float | None = None
     options: list[str] | None = None
     option_labels: list[str] | None = None  # Human-readable labels for select options
+    # M95: nullable settings inherit from an external source when unset.
+    # Unset means NO database row — PATCH null deletes the row; a
+    # {"v": null} row must never be stored (an absent row and a null row
+    # would be two distinct "unset" states with different resolution).
+    nullable: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,11 @@ class NamespaceInfo:
     label: str
     description: str
     editable: bool = True
+    # M95: namespaces whose effective values live outside Postgres (e.g.
+    # the autoscale policy on the control plane). Used by the console
+    # layer to look up the matching ExternalInheritanceSource — this
+    # service itself never branches on it and stays Redis-free.
+    has_external_inheritance: bool = False
 
 
 NAMESPACES: list[NamespaceInfo] = [
@@ -85,6 +95,15 @@ NAMESPACES: list[NamespaceInfo] = [
         label="System",
         description="Infrastructure configuration (read-only)",
         editable=False,
+    ),
+    NamespaceInfo(
+        namespace="autoscale",
+        label="Autoscale",
+        description=(
+            "GPU autoscaler thresholds (applies to all shapes; unset values "
+            "inherit the control-plane policy file)"
+        ),
+        has_external_inheritance=True,
     ),
 ]
 
@@ -219,6 +238,61 @@ SETTING_DEFINITIONS: list[SettingDefinition] = [
         min_value=1,
         max_value=3650,
     ),
+    # --- autoscale (M95: nullable, unset = inherit the control-plane YAML) ---
+    SettingDefinition(
+        namespace="autoscale",
+        key="tasks_per_instance",
+        label="Tasks per instance",
+        description=(
+            "Queue backlog served per GPU instance — 1-20 queued tasks run "
+            "one instance, 21 starts a second, and so on"
+        ),
+        value_type="int",
+        default_value=None,
+        env_var="",
+        min_value=1,
+        max_value=500,
+        nullable=True,
+    ),
+    SettingDefinition(
+        namespace="autoscale",
+        key="min_instances",
+        label="Minimum instances",
+        description=(
+            "Set to 1 to keep a warm worker and avoid ~5 min cold starts. "
+            "0 scales to zero when idle."
+        ),
+        value_type="int",
+        default_value=None,
+        env_var="",
+        min_value=0,
+        max_value=10,
+        nullable=True,
+    ),
+    SettingDefinition(
+        namespace="autoscale",
+        key="max_instances",
+        label="Maximum instances",
+        description="Hard cap on simultaneous GPU instances per shape",
+        value_type="int",
+        default_value=None,
+        env_var="",
+        min_value=1,
+        max_value=10,
+        nullable=True,
+    ),
+    SettingDefinition(
+        namespace="autoscale",
+        key="scale_down_after_s",
+        label="Scale-down idle time (seconds)",
+        description="How long the fleet must be fully idle before terminating",
+        value_type="int",
+        default_value=None,
+        env_var="",
+        min_value=60,
+        max_value=86400,
+        nullable=True,
+    ),
 ]
 
 # Lookup maps for fast access
@@ -251,7 +325,14 @@ _ENV_TO_SETTINGS_FIELD: dict[str, str] = {
 
 @dataclass
 class ResolvedSetting:
-    """A setting with its resolved value and metadata."""
+    """A setting with its resolved value and metadata.
+
+    M95: for namespaces with external inheritance, effective_value /
+    effective_known / override_error start as mirrors of the Postgres
+    resolution and are overwritten by the console-layer enrichment pass
+    (ExternalInheritanceSource). For every other namespace they are
+    exact mirrors of value — a safe no-op.
+    """
 
     key: str
     label: str
@@ -265,6 +346,10 @@ class ResolvedSetting:
     max_value: int | float | None = None
     options: list[str] | None = None
     option_labels: list[str] | None = None
+    nullable: bool = False
+    effective_value: Any = None
+    effective_known: bool = True
+    override_error: str | None = None
 
 
 @dataclass
@@ -425,9 +510,15 @@ class SettingsService:
         overrides: dict[str, Any],
     ) -> ResolvedSetting:
         """Resolve a single setting to its effective value."""
-        env_default = self._get_env_default(defn)
         is_overridden = defn.key in overrides
-        value = overrides[defn.key] if is_overridden else env_default
+        if defn.nullable:
+            # Nullable settings have no env-var tier: unset means "inherit
+            # from the external source", represented as None here.
+            env_default = None
+            value = overrides[defn.key] if is_overridden else None
+        else:
+            env_default = self._get_env_default(defn)
+            value = overrides[defn.key] if is_overridden else env_default
 
         return ResolvedSetting(
             key=defn.key,
@@ -442,6 +533,10 @@ class SettingsService:
             max_value=defn.max_value,
             options=defn.options,
             option_labels=defn.option_labels,
+            nullable=defn.nullable,
+            effective_value=value,
+            effective_known=True,
+            override_error=None,
         )
 
     # ------------------------------------------------------------------
@@ -559,6 +654,7 @@ class SettingsService:
         # Upsert each setting
         old_values: dict[str, Any] = {}
         for key, value in updates.items():
+            defn = _DEFINITION_MAP[(namespace, key)]
             # Fetch existing row
             query = select(SettingModel).where(
                 and_(
@@ -572,6 +668,19 @@ class SettingsService:
             result = await db.execute(query)
             existing = result.scalar_one_or_none()
 
+            if defn.nullable and value is None:
+                # M95: null unsets the override — delete the row. Never
+                # store {"v": null}: absent-row is the single "unset"
+                # representation.
+                if existing:
+                    old_values[key] = (
+                        existing.value.get("v")
+                        if isinstance(existing.value, dict)
+                        else existing.value
+                    )
+                    await db.delete(existing)
+                continue
+
             if existing:
                 old_values[key] = (
                     existing.value.get("v")
@@ -581,7 +690,6 @@ class SettingsService:
                 existing.value = {"v": value}
                 existing.updated_by = updated_by
             else:
-                defn = _DEFINITION_MAP[(namespace, key)]
                 old_values[key] = self._get_env_default(defn)
                 db.add(
                     SettingModel(
@@ -647,6 +755,21 @@ class SettingsService:
         ns = await self.get_namespace(db, namespace, tenant_id)
         assert ns is not None
         return NamespaceUpdateResult(namespace_settings=ns, old_values=old_values)
+
+    async def get_raw_overrides(
+        self,
+        db: AsyncSession,
+        namespace: str,
+        tenant_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        """Explicit DB override rows for a namespace (key -> value).
+
+        Public wrapper for the overrides mirror (M95) — only rows that
+        exist in Postgres, no env/default fallback. Served from the same
+        5s cache as resolution; the 60s reconcile loop tolerates that.
+        """
+        overrides, _ = await self._fetch_namespace_rows(db, namespace, tenant_id)
+        return dict(overrides)
 
     async def get_effective_value(
         self,
@@ -727,6 +850,12 @@ class SettingsService:
 
         Raises ValueError with a descriptive message on failure.
         """
+        if value is None:
+            # M95: null is valid only for nullable definitions, where it
+            # means "delete the override row and inherit".
+            if not defn.nullable:
+                raise ValueError(f"{defn.key}: expected a value, got null")
+            return
         if defn.value_type == "int":
             if not isinstance(value, int) or isinstance(value, bool):
                 raise ValueError(
@@ -758,6 +887,22 @@ class SettingsService:
         elif defn.value_type == "select":
             if defn.options and value not in defn.options:
                 raise ValueError(f"{defn.key}: must be one of {defn.options}")
+
+
+def compute_pending_overrides(settings: list[ResolvedSetting]) -> list[str]:
+    """Keys whose override has not yet been picked up by the external
+    consumer (M95): overridden, external source is reporting, no rejection
+    recorded, but the echoed effective value still differs. Rejected
+    overrides are excluded — they surface via the override_error banner.
+    """
+    return [
+        s.key
+        for s in settings
+        if s.is_overridden
+        and s.effective_known
+        and s.override_error is None
+        and s.effective_value != s.value
+    ]
 
 
 class ConflictError(Exception):

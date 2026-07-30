@@ -428,3 +428,95 @@ class TestPolicyEcho:
         )
         assert echo.tasks_per_instance == 10
         assert echo.to_dict()["overrides_applied"] == ["tasks_per_instance"]
+
+
+# ---------------------------------------------------------------------------
+# M95.5: settings overrides layered onto the YAML policy
+# ---------------------------------------------------------------------------
+
+from dalston_autoscale import OVERRIDE_KEYS, apply_overrides  # noqa: E402
+
+
+class TestApplyOverrides:
+    def test_no_overrides_returns_policy_unchanged(self):
+        policy = make_policy()
+        effective, applied, error = apply_overrides(policy, {})
+        assert effective is policy
+        assert applied == ()
+        assert error is None
+
+    def test_valid_override_applied_and_named(self):
+        effective, applied, error = apply_overrides(
+            make_policy(), {"tasks_per_instance": "10"}
+        )
+        assert effective.tasks_per_instance == 10
+        assert applied == ("tasks_per_instance",)
+        assert error is None
+
+    def test_untouched_fields_keep_yaml_values(self):
+        policy = make_policy(max_instances=3, boot_timeout_s=1800)
+        effective, _, _ = apply_overrides(policy, {"tasks_per_instance": "10"})
+        assert effective.max_instances == 3
+        assert effective.boot_timeout_s == 1800
+        assert effective.gpu_type_preference == policy.gpu_type_preference
+        assert effective.name == policy.name
+
+    def test_unknown_hash_fields_ignored(self):
+        effective, applied, error = apply_overrides(
+            make_policy(), {"nonsense": "5", "fallback_to_on_demand": "true"}
+        )
+        assert applied == ()
+        assert error is None
+        assert effective.tasks_per_instance == 20
+
+    def test_cost_fields_are_not_overridable(self):
+        """YAML-only by design — enabling paid fallback must not be a
+        console knob."""
+        assert "fallback_to_on_demand" not in OVERRIDE_KEYS
+        assert "max_on_demand" not in OVERRIDE_KEYS
+
+    def test_invalid_combination_discards_all_overrides(self):
+        """min > max across YAML/override boundary: discard everything,
+        never partially apply, keep scaling on the YAML."""
+        policy = make_policy(max_instances=3)
+        effective, applied, error = apply_overrides(
+            policy, {"min_instances": "4", "tasks_per_instance": "10"}
+        )
+        assert effective is policy
+        assert applied == ()
+        assert error is not None
+        assert "min_instances" in error
+        # the valid sibling override was discarded too
+        assert effective.tasks_per_instance == 20
+
+    def test_non_numeric_override_is_reported_not_raised(self):
+        policy = make_policy()
+        effective, applied, error = apply_overrides(
+            policy, {"tasks_per_instance": "not-a-number"}
+        )
+        assert effective is policy
+        assert applied == ()
+        assert error is not None
+
+    def test_out_of_range_override_rejected(self):
+        policy = make_policy()
+        effective, applied, error = apply_overrides(policy, {"tasks_per_instance": "0"})
+        assert effective is policy
+        assert error is not None
+
+    def test_multiple_valid_overrides_all_applied(self):
+        effective, applied, error = apply_overrides(
+            make_policy(),
+            {"tasks_per_instance": "10", "min_instances": "1", "max_instances": "3"},
+        )
+        assert error is None
+        assert set(applied) == {"tasks_per_instance", "min_instances", "max_instances"}
+        assert (effective.tasks_per_instance, effective.min_instances) == (10, 1)
+        assert effective.max_instances == 3
+
+    def test_override_changes_desired_instances(self):
+        """The whole point: a console change alters scaling this tick."""
+        base = make_policy()
+        effective, _, _ = apply_overrides(base, {"tasks_per_instance": "10"})
+        assert desired_instances(base, 41) == 3
+        assert desired_instances(effective, 41) == 5
