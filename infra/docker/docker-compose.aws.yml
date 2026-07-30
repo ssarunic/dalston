@@ -37,6 +37,11 @@ services:
   redis:
     volumes:
       - /data/redis:/data
+    # Loopback binding for host-local consumers (the M91 autoscaler tick
+    # reads queue lag via redis://localhost:6379). Tailnet access for GPU
+    # workers comes from the base mapping via DALSTON_BIND_IP.
+    ports:
+      - "127.0.0.1:6379:6379"
 
   stt-prepare:
     environment:
