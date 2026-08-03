@@ -1,5 +1,5 @@
 import ky, { type KyInstance } from 'ky'
-import { QUERY_RETRY_COUNT, REQUEST_TIMEOUT_MS } from '@/lib/queryTimings'
+import { QUERY_RETRY_COUNT, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS } from '@/lib/queryTimings'
 import type {
   APIKeyCreatedResponse,
   APIKeyListResponse,
@@ -200,7 +200,12 @@ export const apiClient = {
       formData.append('pii_redaction_mode', request.pii_redaction_mode)
     }
 
-    return currentClient.post('v1/audio/transcriptions', { body: formData }).json<CreateJobResponse>()
+    // Job creation carries the whole payload: either the client's file upload or
+    // a server-side fetch of audio_url. Both are transfer-bound, so they get the
+    // upload budget rather than the default request timeout.
+    return currentClient
+      .post('v1/audio/transcriptions', { body: formData, timeout: UPLOAD_TIMEOUT_MS })
+      .json<CreateJobResponse>()
   },
 
   // Tasks (admin required)

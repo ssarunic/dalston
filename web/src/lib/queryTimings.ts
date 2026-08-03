@@ -34,3 +34,15 @@ export const QUERY_RETRY_NONE = false
 
 /** Default request timeout (30 seconds) */
 export const REQUEST_TIMEOUT_MS = 30000
+
+/**
+ * Timeout for file-upload requests (30 minutes).
+ *
+ * Uploads are bounded by the client's uplink, not by server latency, so the
+ * default 30s budget fails any non-trivial file on a slow link — a 17 MB
+ * upload over a ~1.7 Mbps uplink takes ~85s and would abort mid-transfer.
+ * The native ingest path accepts files up to 3 GB, so this only has to be
+ * generous enough that the console isn't the limiting factor; genuinely huge
+ * files should use the audio-URL path, where the server does the download.
+ */
+export const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000
