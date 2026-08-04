@@ -281,9 +281,15 @@ class SileroTorchModel:
             audio = audio.reshape(-1)
 
         tensor = torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32))
-        out = self._module(tensor, sample_rate)
-        # .item() rather than float(): the module returns a grad-tracking
-        # tensor, and float() on one emits "Converting a tensor with
+        # no_grad matters here, not just for speed: the module is recurrent
+        # and stateful, so without it every realtime window allocates
+        # autograd metadata and the graph can be retained through the
+        # carried state for the life of the stream. Silero's own
+        # VADIterator wraps inference the same way.
+        with torch.no_grad():
+            out = self._module(tensor, sample_rate)
+        # .item() rather than float(): the module returns a tensor, and
+        # float() on a grad-tracking one emits "Converting a tensor with
         # requires_grad=True to a scalar may lead to unexpected behavior".
         return float(out.item())
 
@@ -341,9 +347,14 @@ def load_silero_model() -> SileroModel:
     2. ``onnxruntime`` via :func:`load_silero_session` — for images that
        ship ONNX but no torch (``base-onnx``, ``base-engine``).
 
-    Both serialisations are the same fp32 v5.1.2 weights, so the choice
-    does not change scores; it only avoids forcing a second inference
-    runtime into an image that already has one.
+    The two backends are only equivalent when the image's ``silero-vad``
+    pin and its baked ONNX file come from the *same* Silero release.
+    They are genuinely different weights otherwise — ``silero_vad.onnx``
+    has the same byte size at v5.1.2 and v6.2.1 but a different sha256,
+    and the ``.jit`` differs in both — so a mismatched image silently
+    changes speech probabilities and endpointing depending on which
+    backend wins. Image Dockerfiles must move the pin and the baked ONNX
+    URL together; see ``docker/Dockerfile.base-*``.
 
     Returns:
         A backend satisfying :class:`SileroModel`.

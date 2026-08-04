@@ -246,28 +246,76 @@ class _FakeTensor:
         return self._value
 
 
-class _FakeSileroModule:
-    """Stand-in for the TorchScript module from ``load_silero_vad()``."""
+class _NoGradTracker:
+    """Tracks whether code is currently inside a ``torch.no_grad()`` block."""
 
-    def __init__(self, prob: float = 0.42) -> None:
+    def __init__(self) -> None:
+        self.depth = 0
+        self.entered = 0
+
+
+class _FakeNoGrad:
+    """Context manager stand-in for ``torch.no_grad()``."""
+
+    def __init__(self, tracker: _NoGradTracker) -> None:
+        self._tracker = tracker
+
+    def __enter__(self) -> _FakeNoGrad:
+        self._tracker.depth += 1
+        self._tracker.entered += 1
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        self._tracker.depth -= 1
+        return False
+
+
+class _FakeSileroModule:
+    """Stand-in for the TorchScript module from ``load_silero_vad()``.
+
+    Records the no-grad depth at call time so tests can assert inference
+    actually ran inside ``torch.no_grad()``. The real module is recurrent
+    and stateful, so running it with autograd live accumulates graph
+    history across a realtime stream.
+    """
+
+    def __init__(
+        self, prob: float = 0.42, tracker: _NoGradTracker | None = None
+    ) -> None:
         self.calls: list[tuple[object, int]] = []
         self.reset_count = 0
+        self.no_grad_depth_at_call: list[int] = []
         self._prob = prob
+        self._tracker = tracker
 
     def __call__(self, tensor: object, sample_rate: int) -> _FakeTensor:
         self.calls.append((tensor, sample_rate))
+        if self._tracker is not None:
+            self.no_grad_depth_at_call.append(self._tracker.depth)
         return _FakeTensor(self._prob)
 
     def reset_states(self) -> None:
         self.reset_count += 1
 
 
-class _FakeTorch:
-    """Minimal ``torch`` surface used by :class:`SileroTorchModel`."""
+def _make_fake_torch(tracker: _NoGradTracker | None = None):
+    """Build a minimal ``torch`` stand-in for :class:`SileroTorchModel`."""
+    resolved = tracker if tracker is not None else _NoGradTracker()
 
-    @staticmethod
-    def from_numpy(array: np.ndarray) -> np.ndarray:
-        return array
+    class _FakeTorch:
+        @staticmethod
+        def from_numpy(array: np.ndarray) -> np.ndarray:
+            return array
+
+        @staticmethod
+        def no_grad() -> _FakeNoGrad:
+            return _FakeNoGrad(resolved)
+
+    return _FakeTorch
+
+
+#: Default stand-in for tests that don't care about no-grad bookkeeping.
+_FakeTorch = _make_fake_torch()
 
 
 def _patch_torch_backend(module: _FakeSileroModule):
@@ -320,6 +368,24 @@ class TestSileroTorchModel:
             model(np.zeros(WINDOW_SAMPLES_8K, dtype=np.float32), 8000)
 
         assert module.calls[0][1] == 8000
+
+    def test_inference_runs_inside_no_grad(self) -> None:
+        """Autograd must be off: the module is recurrent, so a live graph
+        would be retained through carried state for the whole stream."""
+        tracker = _NoGradTracker()
+        module = _FakeSileroModule(tracker=tracker)
+        model = SileroTorchModel(module)
+        fake_torch = _make_fake_torch(tracker)
+
+        with patch.dict("sys.modules", {"torch": fake_torch}):
+            model(np.zeros(WINDOW_SAMPLES_16K, dtype=np.float32), 16000)
+
+        assert tracker.entered == 1, "torch.no_grad() was never entered"
+        assert module.no_grad_depth_at_call == [1], (
+            "model was invoked outside the no_grad block"
+        )
+        # And the block must be exited again, not leaked.
+        assert tracker.depth == 0
 
     def test_reset_states_delegates_to_module(self) -> None:
         module = _FakeSileroModule()

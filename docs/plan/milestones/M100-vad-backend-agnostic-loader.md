@@ -19,7 +19,7 @@
 | Scenario | Current | After M100 |
 | -------- | ------- | ---------- |
 | Realtime session on a NeMo worker | Dies ~1s after connect: `onnxruntime is required for Silero VAD but not installed` (fixed in PR #349 by adding onnxruntime) | Works using the torch JIT model already bundled in the `silero-vad` wheel |
-| Realtime engine added to `base-pytorch` or `base-pyannote` | Fails identically — neither image ships `onnxruntime` | Works, no image change needed |
+| Realtime engine added to `base-pytorch` or `base-pyannote` | Fails identically — neither image ships `onnxruntime` | Works, once each image installs the `silero-vad` package (see 100.5) |
 | Realtime engine on `base-onnx` / `base-engine` | Works via onnxruntime | Unchanged — still uses onnxruntime |
 | `base-nemo` image contents | Carries `onnxruntime-gpu` (~200–400 MB CUDA runtime) solely for VAD, plus a build-time GitHub download of `silero_vad.onnx` | Neither needed; torch is already present and the wheel bundles `silero_vad.jit` |
 
@@ -196,6 +196,64 @@ Do **not** touch `base-onnx` or `base-engine` — they have no torch and must ke
 - Both backends satisfy the same protocol (parametrised interface test)
 
 Use monkeypatched import failures rather than requiring both runtimes in CI. The existing test suite runs without torch or onnxruntime installed, so these must not become import-gated.
+
+---
+
+### 100.5: Give the torch images a usable backend
+
+**Files modified:**
+
+- `docker/Dockerfile.base-pytorch` — install the `silero-vad` package
+- `docker/Dockerfile.base-pyannote` — install the `silero-vad` package
+
+**Deliverables:**
+
+A backend-agnostic loader does not help an image that has *neither*
+backend. Discovered during review of 100.1:
+
+- `base-pytorch` bakes the ONNX **file** and sets
+  `DALSTON_SILERO_VAD_ONNX`, but installs neither `silero-vad` nor
+  `onnxruntime` — so the baked file is inert and both loader branches
+  fail. This image hosts `faster-whisper` and `hf-asr`, both
+  realtime-capable, so the gap is live rather than theoretical.
+- `base-pyannote` has no VAD provisioning whatsoever.
+
+Both get `silero-vad` (~8 MB, pure Python, TorchScript weights bundled)
+rather than `onnxruntime` (~200–400 MB with CUDA), since both images
+already have torch.
+
+---
+
+### 100.6: Align Silero package pins with baked ONNX artifacts
+
+**Files modified:**
+
+- `docker/Dockerfile.base-*` — one Silero release across the pin and the baked URL
+- `dalston/engine_sdk/silero_vad.py` — `_SILERO_VAD_ONNX_URL`
+
+**Deliverables:**
+
+The two backends are only equivalent when an image's `silero-vad` pin
+and its baked ONNX come from the same release. Today they do not:
+
+| Location | Version |
+| -------- | ------- |
+| Every `Dockerfile.base-*` baked ONNX URL | v5.1.2 |
+| `_SILERO_VAD_ONNX_URL` runtime fallback | v5.1.2 |
+| `Dockerfile.base-nemo` package pin | `>=5.1` (unbounded) |
+| `engines/stt-transcribe/nemo/requirements.txt` | `>=6.2.1` |
+
+Verified the artifacts genuinely differ across releases — the ONNX has
+identical byte size but a different sha256 (`2623a295…` v5.1.2 vs
+`1a153a22…` v6.2.1), and the `.jit` differs in size and hash. The
+installed `.jit` in a running NeMo container is 2,272,526 bytes = v6.2.1,
+so that image already runs v6 on the torch path while pointing
+`DALSTON_SILERO_VAD_ONNX` at v5.1.2.
+
+Consequence: backend selection currently changes the VAD model, and
+therefore speech probabilities and endpointing. Pick one release, move
+every pin and baked URL to it together, and note the coupling so they
+cannot drift again.
 
 ---
 

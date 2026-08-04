@@ -52,6 +52,13 @@ RUN mkdir -p /models/silero-vad \
     && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 
+# The baked file above is inert on its own: this image has torch but no
+# onnxruntime, so nothing here could read it. The silero-vad package
+# carries the TorchScript weights (~8 MB, pure Python), which is what
+# load_silero_model() uses on a torch image. Without it, realtime VAD on
+# the faster-whisper and hf-asr engines raises at session start.
+RUN pip install --no-cache-dir --break-system-packages "silero-vad>=5.1"
+
 # Model cache
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch
