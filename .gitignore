@@ -9,6 +9,14 @@ __pycache__/
 dist/
 build/
 
+# Dependency lock — deliberately untracked.
+# Nothing consumes it: images build from pyproject (`pip install -e ".[gateway]"`)
+# and per-engine requirements.txt; CI uses `uv pip install -e` / `uv run --no-sync`,
+# neither of which reads a lockfile. Reproducibility comes from the `==` pins in
+# pyproject.toml. Tracking it only produced drift, since Dependabot bumps the pins
+# without re-locking. Re-track it only alongside `uv sync --frozen` in CI.
+uv.lock
+
 # Virtual environments
 .venv/
 .venv312/
