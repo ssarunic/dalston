@@ -49,9 +49,16 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
-# Pinned Silero VAD ONNX model URL (v5.1.2) for reproducible builds.
+# Pinned Silero VAD ONNX model URL for reproducible builds.
+#
+# M100.6: this tag must match the ``silero-vad`` pin in every
+# ``docker/Dockerfile.base-*``. The two backends load different files —
+# the package's bundled TorchScript weights vs this ONNX export — and
+# they are only the same model when both come from one release. Move
+# them together or backend selection silently changes VAD behaviour.
+_SILERO_VAD_VERSION = "v6.2.1"
 _SILERO_VAD_ONNX_URL = (
-    "https://github.com/snakers4/silero-vad/raw/v5.1.2"
+    f"https://github.com/snakers4/silero-vad/raw/{_SILERO_VAD_VERSION}"
     "/src/silero_vad/data/silero_vad.onnx"
 )
 

@@ -53,7 +53,7 @@ has reset_states: True
 
 So the torch path needs zero new dependencies on any torch-based image, and exposes `reset_states()` — the exact streaming primitive `SileroOnnxModel` hand-rolls around the ONNX graph's explicit hidden-state inputs.
 
-Accuracy is not a factor. `silero_vad.jit` (2,272,526 bytes) and `silero_vad.onnx` (2,327,524 bytes) are the same fp32 v5.1.2 weights in two serializations; differences are export-level numerical noise against a 0.5 threshold. The fp16 (`silero_vad_half.onnx`) and 16 kHz-only variants **would** differ and are deliberately not used.
+Accuracy is not a factor **provided both artifacts come from the same Silero release** — `silero_vad.jit` and `silero_vad.onnx` are then one model in two serialisations, differing only by export-level numerical noise against a 0.5 threshold. They were *not* aligned when this milestone was written; see 100.6. The fp16 (`silero_vad_half.onnx`) and 16 kHz-only variants **would** differ regardless and are deliberately not used.
 
 ---
 
@@ -236,12 +236,13 @@ already have torch.
 The two backends are only equivalent when an image's `silero-vad` pin
 and its baked ONNX come from the same release. Today they do not:
 
-| Location | Version |
-| -------- | ------- |
-| Every `Dockerfile.base-*` baked ONNX URL | v5.1.2 |
-| `_SILERO_VAD_ONNX_URL` runtime fallback | v5.1.2 |
-| `Dockerfile.base-nemo` package pin | `>=5.1` (unbounded) |
-| `engines/stt-transcribe/nemo/requirements.txt` | `>=6.2.1` |
+| Location | Was | Now |
+| -------- | --- | --- |
+| Baked ONNX URL — 4 base images + `riva`, `vllm-asr` | v5.1.2 | **v6.2.1** |
+| `_SILERO_VAD_ONNX_URL` runtime fallback | v5.1.2 | **v6.2.1** |
+| `Dockerfile.base-nemo` package pin | `>=5.1` (unbounded) | **`>=6.2.1`** |
+| `Dockerfile.base-pytorch` / `base-pyannote` pin | absent (100.5) | **`>=6.2.1`** |
+| `engines/stt-transcribe/nemo/requirements.txt` | `>=6.2.1` | unchanged |
 
 Verified the artifacts genuinely differ across releases — the ONNX has
 identical byte size but a different sha256 (`2623a295…` v5.1.2 vs
@@ -250,10 +251,19 @@ installed `.jit` in a running NeMo container is 2,272,526 bytes = v6.2.1,
 so that image already runs v6 on the torch path while pointing
 `DALSTON_SILERO_VAD_ONNX` at v5.1.2.
 
-Consequence: backend selection currently changes the VAD model, and
-therefore speech probabilities and endpointing. Pick one release, move
-every pin and baked URL to it together, and note the coupling so they
-cannot drift again.
+Consequence: backend selection changed the VAD model, and therefore
+speech probabilities and endpointing.
+
+Standardised on **v6.2.1** — the release `engines/stt-transcribe/nemo/
+requirements.txt` already required and that its container already ran on
+the torch path. Aligning down to v5.1.2 would have contradicted that
+existing pin. The coupling is now noted at `_SILERO_VAD_VERSION` and
+beside each Dockerfile pin so the two cannot drift apart again.
+
+**Behavioural note:** images previously resolving to the v5.1.2 ONNX
+(`base-onnx`, `base-engine`, `riva`, `vllm-asr`) move to v6.2.1 weights.
+VAD probabilities and endpoint timing shift slightly; worth a listen test
+on a realtime session before wide rollout.
 
 ---
 

@@ -59,7 +59,7 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
 # landing here would raise at session start. The silero-vad package
 # carries the TorchScript weights (~8 MB, pure Python) and is what
 # load_silero_model() selects on a torch image; no onnxruntime needed.
-RUN pip install --no-cache-dir --break-system-packages "silero-vad>=5.1"
+RUN pip install --no-cache-dir --break-system-packages "silero-vad>=6.2.1"
 
 # Model cache
 ENV HF_HOME=/models/huggingface
