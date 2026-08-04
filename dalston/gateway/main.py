@@ -382,6 +382,14 @@ if _console_dir:
     # Capture in local variable for type narrowing in closure
     console_dir = _console_dir
 
+    # index.html must be revalidated on every load. It is the only unhashed
+    # entry point: it names the content-hashed bundle the browser then loads.
+    # Without an explicit Cache-Control, browsers fall back to heuristic
+    # freshness (~10% of the response's age), so a days-old index.html is
+    # treated as fresh for hours — the browser keeps serving the previous
+    # bundle from cache after a deploy and never learns a new one exists.
+    _NO_CACHE = "no-cache, must-revalidate"
+
     # Serve index.html for all /console routes (SPA fallback)
     @app.get("/console/{path:path}", include_in_schema=False)
     @app.get("/console", include_in_schema=False)
@@ -392,8 +400,12 @@ if _console_dir:
         if path:
             static_file = (console_dir / path).resolve()
             if static_file.is_relative_to(console_dir) and static_file.is_file():
-                return FileResponse(static_file)
+                # Unhashed siblings (vite.svg, favicons) get the same treatment:
+                # their names are stable, so a stale copy would also persist.
+                return FileResponse(static_file, headers={"Cache-Control": _NO_CACHE})
         # Otherwise serve index.html for SPA routing
-        return FileResponse(console_dir / "index.html")
+        return FileResponse(
+            console_dir / "index.html", headers={"Cache-Control": _NO_CACHE}
+        )
 else:
     logger.warning("Web console not found. Run 'npm run build' in web/ directory.")

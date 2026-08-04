@@ -1876,6 +1876,8 @@ docker run -d --name {container} --gpus all --network host --restart unless-stop
   -e DALSTON_DEPLOY_ENV=aws \\
   -e DALSTON_HOST_HOSTNAME="$HOST_HOSTNAME" \\
   -e DALSTON_WORKER_ID="$DALSTON_WORKER_ID" \\
+  -e DALSTON_WORKER_PORT=9000 \\
+  -e DALSTON_WORKER_ENDPOINT="ws://$TS_IP:9000" \\
   -e REDIS_URL="redis://${{CTRL_PLANE_HOST}}:6379" \\
   -e DALSTON_S3_BUCKET="$S3_BUCKET" \\
   -e DALSTON_S3_REGION="$AWS_REGION" \\
@@ -2246,6 +2248,29 @@ fi
 {rm_line}
 
 HOST_HOSTNAME=$(hostname)
+
+# Tailscale IP for the realtime engine's advertised WebSocket endpoint.
+# Engines run with --network host, so socket.gethostname() inside the
+# container returns the EC2 private DNS name (ip-172-31-x-y). The gateway
+# on the control plane cannot route to that — the two boxes share a network
+# only via Tailscale. Without this override the realtime SDK registers
+# ws://<ec2-private-dns>:9000 and every session dies with "timed out during
+# opening handshake"; batch is unaffected because it pulls from Redis and
+# never takes an inbound connection. Mirrors dalston-bind-ip.sh on the
+# control plane. Recomputed on every boot — the IP changes on relaunch.
+TS_IP=""
+for i in $(seq 1 45); do
+  TS_IP=$(tailscale ip -4 2>/dev/null | head -1) || true
+  [ -n "$TS_IP" ] && break
+  sleep 2
+done
+if [ -z "$TS_IP" ]; then
+  echo "WARNING: tailscale IP unavailable; realtime endpoint falls back to" >&2
+  echo "  $HOST_HOSTNAME, which the control plane cannot reach. Realtime" >&2
+  echo "  sessions will fail until this worker is restarted with Tailscale up." >&2
+  TS_IP="$HOST_HOSTNAME"
+fi
+echo "TS_IP=$TS_IP"
 
 # Fetch the EC2 instance ID via IMDSv2 and use it as DALSTON_WORKER_ID.
 # This makes every replica register with a unique worker ID even when
