@@ -59,7 +59,7 @@ ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
 # carries the TorchScript weights (~8 MB, pure Python), which is what
 # load_silero_model() uses on a torch image. Without it, realtime VAD on
 # the faster-whisper and hf-asr engines raises at session start.
-RUN pip install --no-cache-dir --break-system-packages "silero-vad>=6.2.1"
+RUN pip install --no-cache-dir --break-system-packages "silero-vad==6.2.1"
 
 # Model cache
 ENV HF_HOME=/models/huggingface

@@ -115,7 +115,12 @@ def get_silero_onnx_path() -> Path:
 
     cache_dir = Path(os.environ.get("DALSTON_MODEL_CACHE", _DEFAULT_CACHE_DIR))
     cache_dir.mkdir(parents=True, exist_ok=True)
-    model_path = cache_dir / "silero_vad.onnx"
+    # Version the filename. Every Silero release ships this artifact under
+    # the same name, so an unversioned cache entry would shadow a URL bump
+    # forever: a host that cached v5.1.2 would keep serving v5 weights on
+    # the ONNX path while the package path ran v6.2.1 — exactly the
+    # backend skew M100.6 set out to remove.
+    model_path = cache_dir / f"silero_vad-{_SILERO_VAD_VERSION}.onnx"
 
     if model_path.is_file():
         return model_path

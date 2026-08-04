@@ -265,6 +265,23 @@ beside each Dockerfile pin so the two cannot drift apart again.
 VAD probabilities and endpoint timing shift slightly; worth a listen test
 on a realtime session before wide rollout.
 
+Two ways the alignment could still have been defeated, both closed:
+
+- **Stale caches.** `get_silero_onnx_path()` wrote an *unversioned*
+  `silero_vad.onnx` into the cache directory and returned it without
+  checking anything. A host that had cached v5.1.2 would ignore the URL
+  bump forever and keep serving v5 on the ONNX path. The cache filename
+  now carries the release.
+- **Floor pins.** `>=6.2.1` lets a routine rebuild pull a future release
+  while the baked ONNX stays put, recreating the mismatch. Every
+  declaration is now `==6.2.1`.
+
+`TestSileroVersionAlignment` enforces both: it scans every `Dockerfile*`
+and `requirements*.txt` under `docker/` and `engines/`, and fails if any
+baked URL disagrees with `_SILERO_VAD_VERSION` or any pin is not an exact
+match. Verified by deliberately loosening a pin and reverting a URL — each
+fails with the offending file named.
+
 ---
 
 ## Non-Goals

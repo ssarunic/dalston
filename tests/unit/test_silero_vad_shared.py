@@ -8,6 +8,7 @@ ORT session so the tests run without the real model file.
 from __future__ import annotations
 
 import builtins
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,8 @@ import numpy as np
 import pytest
 
 from dalston.engine_sdk.silero_vad import (
+    _SILERO_VAD_ONNX_URL,
+    _SILERO_VAD_VERSION,
     CONTEXT_SAMPLES_8K,
     CONTEXT_SAMPLES_16K,
     WINDOW_SAMPLES_8K,
@@ -185,7 +188,9 @@ class TestGetSileroOnnxPath:
     ) -> None:
         monkeypatch.delenv("DALSTON_SILERO_VAD_ONNX", raising=False)
         monkeypatch.setenv("DALSTON_MODEL_CACHE", str(tmp_path))
-        cache_file = tmp_path / "silero_vad.onnx"
+        # The cache filename carries the release, so only a matching-version
+        # entry may short-circuit the download (see M100.6).
+        cache_file = tmp_path / f"silero_vad-{_SILERO_VAD_VERSION}.onnx"
         cache_file.write_bytes(b"")
 
         with patch("urllib.request.urlretrieve") as mock_urlretrieve:
@@ -491,3 +496,98 @@ class TestBackendInterfaceParity:
 
         assert isinstance(onnx_prob, float)
         assert isinstance(torch_prob, float)
+
+
+class TestSileroVersionAlignment:
+    """M100.6: every Silero declaration must name one release.
+
+    The two backends load different artifacts — the pip package's
+    TorchScript weights vs the baked ONNX export — and are only the same
+    model when both come from the same tag. A drifting pin or a forgotten
+    URL silently changes speech probabilities and endpointing depending
+    on which backend a given image happens to select, which is precisely
+    the failure this milestone removed. These tests fail loudly rather
+    than let it creep back on a routine dependency bump.
+    """
+
+    #: Files declaring a baked ONNX URL or a silero-vad package version.
+    _SEARCH_ROOTS = ("docker", "engines")
+
+    @staticmethod
+    def _repo_root() -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    @classmethod
+    def _declaration_files(cls) -> list[Path]:
+        root = cls._repo_root()
+        files: list[Path] = []
+        for sub in cls._SEARCH_ROOTS:
+            base = root / sub
+            files.extend(p for p in base.rglob("Dockerfile*") if p.is_file())
+            files.extend(p for p in base.rglob("requirements*.txt") if p.is_file())
+        return files
+
+    def test_expected_version_constant_is_a_tag(self) -> None:
+        assert re.fullmatch(r"v\d+\.\d+\.\d+", _SILERO_VAD_VERSION), (
+            f"_SILERO_VAD_VERSION must be a vX.Y.Z tag, got {_SILERO_VAD_VERSION!r}"
+        )
+
+    def test_onnx_url_uses_the_version_constant(self) -> None:
+        assert f"/raw/{_SILERO_VAD_VERSION}/" in _SILERO_VAD_ONNX_URL
+
+    def test_all_baked_onnx_urls_match_the_constant(self) -> None:
+        pattern = re.compile(r"silero-vad/raw/(v[\d.]+)/")
+        mismatches: list[str] = []
+        found = 0
+        for path in self._declaration_files():
+            for tag in pattern.findall(path.read_text()):
+                found += 1
+                if tag != _SILERO_VAD_VERSION:
+                    mismatches.append(f"{path}: {tag}")
+
+        assert found, "no baked Silero ONNX URLs found — has the layout changed?"
+        assert not mismatches, (
+            "baked ONNX URL(s) disagree with "
+            f"_SILERO_VAD_VERSION={_SILERO_VAD_VERSION}: {mismatches}"
+        )
+
+    def test_all_package_pins_are_exact_and_match_the_constant(self) -> None:
+        # >= would let a routine rebuild pull a newer release while the
+        # baked ONNX stays put, recreating the mismatch.
+        pattern = re.compile(r"silero-vad\s*(==|>=|>|~=)\s*([\d.]+)")
+        expected = _SILERO_VAD_VERSION.lstrip("v")
+        problems: list[str] = []
+        found = 0
+        for path in self._declaration_files():
+            for operator, version in pattern.findall(path.read_text()):
+                found += 1
+                if operator != "==":
+                    problems.append(
+                        f"{path}: silero-vad{operator}{version} (not pinned)"
+                    )
+                elif version != expected:
+                    problems.append(
+                        f"{path}: silero-vad=={version} (expected {expected})"
+                    )
+
+        assert found, "no silero-vad package declarations found"
+        assert not problems, f"silero-vad pin problems: {problems}"
+
+    def test_cache_path_is_versioned(self, tmp_path: Path, monkeypatch) -> None:
+        """A stale unversioned cache entry must not shadow a URL bump."""
+        monkeypatch.delenv("DALSTON_SILERO_VAD_ONNX", raising=False)
+        monkeypatch.setenv("DALSTON_MODEL_CACHE", str(tmp_path))
+
+        # An old-style, unversioned cache file from a previous release.
+        (tmp_path / "silero_vad.onnx").write_bytes(b"stale v5 weights")
+
+        with patch("urllib.request.urlretrieve") as mock_urlretrieve:
+            mock_urlretrieve.side_effect = lambda url, dest: Path(dest).write_bytes(
+                b"fresh"
+            )
+            result = get_silero_onnx_path()
+
+        # It must NOT return the stale unversioned file.
+        assert result.name != "silero_vad.onnx"
+        assert _SILERO_VAD_VERSION in result.name
+        mock_urlretrieve.assert_called_once()
