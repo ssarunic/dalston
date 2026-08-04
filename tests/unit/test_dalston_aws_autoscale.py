@@ -496,21 +496,54 @@ class TestPublishPendingNodes:
 
 
 class TestShapesMarker:
-    def test_atomic_rewrite_from_policy(self, daws) -> None:
+    def test_atomic_rewrite_preserves_last_completed_tick(self, daws) -> None:
+        """Membership rewrite must not double as a liveness heartbeat.
+
+        The marker carries each shape's last COMPLETED tick, so a rewrite
+        preserves it; only _touch_shape_marker advances it. Stamping `now`
+        here would make a tick that dies later still read as fresh.
+        """
         r = MagicMock()
         pipe = MagicMock()
         r.pipeline.return_value = pipe
-        now = datetime.now(UTC)
+        r.hgetall.return_value = {"nemo+pyannote": "2026-07-30T09:00:00+00:00"}
 
-        daws._publish_shapes_marker(r, [_policy(daws)], now, dry_run=False)
+        daws._publish_shapes_marker(
+            r, [_policy(daws)], datetime.now(UTC), dry_run=False
+        )
 
         r.pipeline.assert_called_once_with(transaction=True)
         pipe.delete.assert_called_once_with("dalston:autoscale:shapes")
         pipe.hset.assert_called_once_with(
             "dalston:autoscale:shapes",
-            mapping={"nemo+pyannote": now.isoformat()},
+            mapping={"nemo+pyannote": "2026-07-30T09:00:00+00:00"},
         )
         pipe.execute.assert_called_once()
+
+    def test_new_shape_starts_with_no_timestamp(self, daws) -> None:
+        """Configured but not yet reporting — never 'fresh as of now'."""
+        r = MagicMock()
+        pipe = MagicMock()
+        r.pipeline.return_value = pipe
+        r.hgetall.return_value = {}
+
+        daws._publish_shapes_marker(
+            r, [_policy(daws)], datetime.now(UTC), dry_run=False
+        )
+
+        pipe.hset.assert_called_once_with(
+            "dalston:autoscale:shapes", mapping={"nemo+pyannote": ""}
+        )
+
+    def test_touch_advances_only_the_completed_shape(self, daws) -> None:
+        r = MagicMock()
+        now = datetime.now(UTC)
+
+        daws._touch_shape_marker(r, "nemo+pyannote", now, dry_run=False)
+
+        r.hset.assert_called_once_with(
+            "dalston:autoscale:shapes", "nemo+pyannote", now.isoformat()
+        )
 
     def test_empty_shapes_still_deletes_but_skips_hset(self, daws) -> None:
         r = MagicMock()
@@ -817,26 +850,25 @@ class TestOnDemandLaunchRouting:
 
         assert launch.call_args[1]["use_spot"] is True
 
-    def test_on_demand_launch_failure_still_records_blocked(
-        self, daws, monkeypatch
-    ) -> None:
-        import dalston_autoscale as das
+    def _fail_on_demand(self, daws, monkeypatch, exc):
+        """Run one LAUNCH_ON_DEMAND tick whose launch raises `exc`."""
 
         @contextmanager
         def fake_lock():
             yield
 
         monkeypatch.setattr(daws, "_launch_lock", fake_lock)
-        monkeypatch.setattr(
-            daws,
-            "_autoscale_launch",
-            MagicMock(side_effect=daws.SpotCapacityError("no capacity anywhere")),
-        )
-        monkeypatch.setattr(daws, "audit", MagicMock())
-        write = MagicMock()
-        monkeypatch.setattr(daws, "_write_blocked_state", write)
+        monkeypatch.setattr(daws, "_autoscale_launch", MagicMock(side_effect=exc))
+        audit = MagicMock()
+        monkeypatch.setattr(daws, "audit", audit)
+        blocked = MagicMock()
+        cooldown = MagicMock()
+        monkeypatch.setattr(daws, "_write_blocked_state", blocked)
+        monkeypatch.setattr(daws, "_write_on_demand_cooldown", cooldown)
 
-        daws._apply_decision(
+        import dalston_autoscale as das
+
+        result = daws._apply_decision(
             MagicMock(),
             _ctx(daws),
             _policy(daws),
@@ -845,7 +877,39 @@ class TestOnDemandLaunchRouting:
             {},
             datetime.now(UTC),
         )
-        assert write.called
+        return result, audit, blocked, cooldown
+
+    def test_on_demand_capacity_failure_backs_off_without_blocking_spot(
+        self, daws, monkeypatch
+    ) -> None:
+        """A failed paid fallback must never extend the spot blocked streak.
+
+        Writing it there would pin blocked_ticks above the fallback
+        threshold, so every later tick would retry on-demand and spot would
+        never be probed again.
+        """
+        result, audit, blocked, cooldown = self._fail_on_demand(
+            daws, monkeypatch, daws.OnDemandCapacityError("no on-demand capacity")
+        )
+
+        assert not blocked.called
+        assert cooldown.called
+        assert "re-probing spot" in result
+        assert audit.call_args[0][0] == "autoscale.on_demand_capacity_error"
+
+    def test_on_demand_quota_failure_is_caught_not_raised(
+        self, daws, monkeypatch
+    ) -> None:
+        """VcpuLimitExceeded used to escape as a raw ClientError and abort the
+        whole tick before its snapshot was written."""
+        result, audit, blocked, cooldown = self._fail_on_demand(
+            daws, monkeypatch, daws.OnDemandQuotaError("on-demand limit reached")
+        )
+
+        assert not blocked.called
+        assert cooldown.called
+        assert "at quota" in result
+        assert audit.call_args[0][0] == "autoscale.on_demand_quota_reached"
 
 
 class TestTerminatePrefersOnDemand:

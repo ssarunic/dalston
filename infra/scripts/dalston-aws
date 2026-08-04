@@ -559,6 +559,11 @@ def get_default_vpc(region: str) -> str:
 
 _NON_RETRYABLE_AWS_CODES = frozenset({"VcpuLimitExceeded", "InstanceLimitExceeded"})
 
+# RunInstances error codes meaning "account on-demand limit reached". Kept
+# separate from _NON_RETRYABLE_AWS_CODES (a retry-policy concern) so adding a
+# code there for retry reasons cannot silently reclassify launch failures.
+_ON_DEMAND_QUOTA_CODES = frozenset({"VcpuLimitExceeded", "InstanceLimitExceeded"})
+
 
 def retry_aws(func, *args, max_retries: int = 4, **kwargs):
     delay = 2
@@ -1351,8 +1356,14 @@ def _autoscale_deprovision_remote() -> None:
     log(
         "Note: Settings -> Autoscale overrides remain in Postgres and the "
         "gateway's reconcile loop will repopulate dalston:autoscale:overrides "
-        "within a minute. Reset that namespace in the console for a fully "
-        "clean state."
+        "within a minute. The console section is now hidden (it renders off "
+        "the shapes marker this just deleted), so reset them over the API — "
+        "it is not gated on the marker:\n"
+        '  curl -X POST -H "Authorization: Bearer $DALSTON_API_KEY" \\\n'
+        "    http://dalston-control-plane:8000/api/console/settings/autoscale/reset\n"
+        "Doing this BEFORE deprovisioning keeps the console UI available for "
+        "the reset; re-provisioning without it silently reapplies the old "
+        "override values."
     )
 
 
@@ -2625,6 +2636,16 @@ def launch_instance(
                     f"(search 'All G and VT Spot Instance Requests'). "
                     f"Or retry with --no-spot for on-demand pricing."
                 ) from e
+            if code in _ON_DEMAND_QUOTA_CODES:
+                # On-demand equivalent of the above. Typed so the autoscaler's
+                # paid fallback backs off instead of aborting the whole tick
+                # on a raw ClientError.
+                raise OnDemandQuotaError(
+                    f"AWS on-demand instance limit reached for {instance_type} "
+                    f"({code}). Request a quota increase at: "
+                    f"https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas "
+                    f"(search 'Running On-Demand G and VT instances')."
+                ) from e
             raise
 
     raise RuntimeError(f"Failed to launch {instance_type} in any AZ.")
@@ -2887,17 +2908,41 @@ TAG_MANAGED_BY = "dalston:managed-by"
 ROLE_GPU_WORKER = "gpu-worker"
 
 
-class SpotCapacityError(RuntimeError):
+class CapacityError(RuntimeError):
+    """No configured GPU type could be launched in any AZ right now.
+
+    Transient: capacity may return in another AZ, GPU type, or minute.
+    """
+
+
+class SpotCapacityError(CapacityError):
     """No configured GPU type has spot capacity in any AZ right now."""
 
 
-class SpotQuotaError(RuntimeError):
-    """Account spot-instance quota (e.g. 'All G and VT Spot Requests') reached.
+class OnDemandCapacityError(CapacityError):
+    """No configured GPU type has on-demand capacity in any AZ right now."""
 
-    Distinct from :class:`SpotCapacityError`: capacity may free up in another
+
+class QuotaError(RuntimeError):
+    """Account instance quota reached for the attempted launch mode.
+
+    Distinct from :class:`CapacityError`: capacity may free up in another
     AZ or GPU type, but quota is account-wide and shared across the whole
     G family — walking the preference list cannot help. Callers should stop
-    launching and let the backlog drain at current capacity.
+    launching in that mode and let the backlog drain at current capacity.
+    """
+
+
+class SpotQuotaError(QuotaError):
+    """Spot quota (e.g. 'All G and VT Spot Instance Requests') reached."""
+
+
+class OnDemandQuotaError(QuotaError):
+    """On-demand quota (e.g. 'Running On-Demand G and VT instances') reached.
+
+    Its own class because the paid fallback must back off independently of
+    spot: treating this as a spot failure would pin the blocked streak above
+    the fallback threshold and stop spot from ever being retried.
     """
 
 
@@ -2982,7 +3027,7 @@ def launch_gpu_worker(
                 extra_tags=fleet_tags(engines, managed_by),
                 shutdown_behavior="terminate",
             )
-        except SpotQuotaError:
+        except QuotaError:
             # Quota is account-wide and shared across the G family — trying
             # the next preference type cannot succeed. Fail fast; the caller
             # drains the backlog at current capacity and retries next tick.
@@ -2992,8 +3037,10 @@ def launch_gpu_worker(
             warn(f"No capacity for {gpu_type}, trying next preference...")
             continue
         return instance_id, gpu_type
-    raise SpotCapacityError(
-        f"No spot capacity for any of {gpu_type_preference} in {region}: {last_err}"
+    mode = "spot" if use_spot else "on-demand"
+    exc_cls = SpotCapacityError if use_spot else OnDemandCapacityError
+    raise exc_cls(
+        f"No {mode} capacity for any of {gpu_type_preference} in {region}: {last_err}"
     )
 
 
@@ -3223,6 +3270,11 @@ AUTOSCALE_TICK_TTL_S = 3600
 AUTOSCALE_SHAPES_KEY = "dalston:autoscale:shapes"
 AUTOSCALE_BLOCKED_KEY_PREFIX = "dalston:autoscale:blocked:"
 AUTOSCALE_BLOCKED_TTL_S = 3600
+# Backoff after a failed on-demand fallback. Self-expiring: while it is set
+# the tick keeps re-probing spot (the fallback branch is suppressed, not the
+# launch), so a paid-capacity outage never stops spot from being retried.
+AUTOSCALE_ON_DEMAND_COOLDOWN_PREFIX = "dalston:autoscale:ondemand-cooldown:"
+ON_DEMAND_RETRY_BACKOFF_S = 600
 # Settings-overrides hash written by the gateway (M95.4); read in the tick
 # starting M95.5.
 AUTOSCALE_OVERRIDES_KEY = "dalston:autoscale:overrides"
@@ -3390,17 +3442,32 @@ def _publish_shapes_marker(
 ) -> None:
     """Atomically rewrite the configured-shapes marker from the policy (M95).
 
-    The marker mirrors the current policy — it never accumulates history —
-    so a shape removed from the YAML disappears from the console within one
-    tick. No TTL: the gateway uses this to tell "autoscaler configured but
-    silent" from "no autoscaler"; explicit deprovisioning deletes it.
+    Membership only. The marker mirrors the current policy — it never
+    accumulates history — so a shape removed from the YAML disappears from
+    the console within one tick. No TTL: the gateway uses this to tell
+    "autoscaler configured but silent" from "no autoscaler"; explicit
+    deprovisioning deletes it.
+
+    Each field carries the shape's last COMPLETED tick, so existing values
+    are preserved here and advanced only by :func:`_touch_shape_marker`
+    after that shape's snapshot is published. Refreshing the timestamp up
+    front would make a tick that dies later (a raw AWS error mid-loop) still
+    report as fresh, and the console would show a wedged autoscaler as
+    healthy. A newly configured shape starts empty: configured, not yet
+    reporting.
     """
     key = _marker_key(dry_run=dry_run)
+    previous = r.hgetall(key) or {}
     pipe = r.pipeline(transaction=True)
     pipe.delete(key)
     if shapes:
-        pipe.hset(key, mapping={s.name: now.isoformat() for s in shapes})
+        pipe.hset(key, mapping={s.name: previous.get(s.name, "") for s in shapes})
     pipe.execute()
+
+
+def _touch_shape_marker(r: Any, shape: str, now: datetime, *, dry_run: bool) -> None:
+    """Record a completed tick for one shape (liveness, not membership)."""
+    r.hset(_marker_key(dry_run=dry_run), shape, now.isoformat())
 
 
 def _read_blocked_state(r: Any, shape: str, *, dry_run: bool) -> BlockedInfo | None:
@@ -3446,6 +3513,25 @@ def _write_blocked_state(
 
 def _clear_blocked_state(r: Any, shape: str, *, dry_run: bool) -> None:
     r.delete(_shape_key(AUTOSCALE_BLOCKED_KEY_PREFIX, shape, dry_run=dry_run))
+
+
+def _write_on_demand_cooldown(
+    r: Any, shape: str, detail: str, *, dry_run: bool
+) -> None:
+    """Back off the paid fallback after an on-demand launch failure.
+
+    Deliberately NOT the spot blocked streak: recording an on-demand failure
+    there would keep blocked_ticks above the fallback threshold, so every
+    later tick would retry on-demand and spot would never be tested again.
+    """
+    key = _shape_key(AUTOSCALE_ON_DEMAND_COOLDOWN_PREFIX, shape, dry_run=dry_run)
+    r.set(key, detail, ex=ON_DEMAND_RETRY_BACKOFF_S)
+
+
+def _on_demand_cooling_down(r: Any, shape: str, *, dry_run: bool) -> bool:
+    """True while a failed on-demand fallback is still backing off."""
+    key = _shape_key(AUTOSCALE_ON_DEMAND_COOLDOWN_PREFIX, shape, dry_run=dry_run)
+    return bool(r.exists(key))
 
 
 def _write_tick_snapshot(r: Any, shape: str, snapshot: dict, *, dry_run: bool) -> None:
@@ -3639,6 +3725,52 @@ def _autoscale_terminate(
     return f"terminated {instance_id}"
 
 
+def _record_launch_failure(
+    r: Any,
+    policy: ShapePolicy,
+    exc: Exception,
+    now: datetime,
+    *,
+    use_spot: bool,
+) -> str:
+    """Route a failed launch to the cross-tick state for its launch mode.
+
+    Spot failures build the streak that eventually escalates to the paid
+    fallback. On-demand failures instead start their own cooldown: the
+    fallback backs off while the following ticks keep re-probing spot, so a
+    paid-capacity or paid-quota outage can never wedge the shape into
+    retrying on-demand forever.
+    """
+    quota = isinstance(exc, QuotaError)
+    if use_spot:
+        kind = "spot_quota" if quota else "spot_capacity"
+        # Audit event names are a stable interface (log queries, dashboards);
+        # they do not track the internal `kind` strings.
+        event = (
+            "autoscale.spot_quota_reached" if quota else "autoscale.spot_capacity_error"
+        )
+        audit(event, shape=policy.name, error=str(exc))
+        _write_blocked_state(r, policy.name, kind, str(exc), now, dry_run=False)
+        if quota:
+            return (
+                "at account spot quota; backlog drains at current capacity "
+                f"(quota frees when a worker terminates): {exc}"
+            )
+        return f"no spot capacity: {exc}"
+    event = (
+        "autoscale.on_demand_quota_reached"
+        if quota
+        else "autoscale.on_demand_capacity_error"
+    )
+    audit(event, shape=policy.name, error=str(exc))
+    _write_on_demand_cooldown(r, policy.name, str(exc), dry_run=False)
+    return (
+        f"on-demand fallback failed ({'at quota' if quota else 'no capacity'}); "
+        f"backing off {ON_DEMAND_RETRY_BACKOFF_S // 60} min, re-probing spot "
+        f"meanwhile: {exc}"
+    )
+
+
 def _apply_decision(
     r: Any,
     ctx: AutoscaleContext,
@@ -3653,27 +3785,14 @@ def _apply_decision(
         try:
             with _launch_lock():
                 msg = _autoscale_launch(r, ctx, policy, use_spot=use_spot)
+            # A launch in either mode ends the spot streak; a successful paid
+            # fallback also clears the way for spot to be tried first again.
             _clear_blocked_state(r, policy.name, dry_run=False)
             return msg
-        # launch_gpu_worker raises the Spot* classes on both paths (the
-        # names predate the on-demand fallback); handling is identical.
-        except SpotQuotaError as e:
-            audit("autoscale.spot_quota_reached", shape=policy.name, error=str(e))
-            _write_blocked_state(
-                r, policy.name, "spot_quota", str(e), now, dry_run=False
-            )
-            return (
-                "at account spot quota; backlog drains at current capacity "
-                f"(quota frees when a worker terminates): {e}"
-            )
-        except SpotCapacityError as e:
-            audit("autoscale.spot_capacity_error", shape=policy.name, error=str(e))
-            _write_blocked_state(
-                r, policy.name, "spot_capacity", str(e), now, dry_run=False
-            )
-            return f"no spot capacity: {e}"
+        except (QuotaError, CapacityError) as e:
+            return _record_launch_failure(r, policy, e, now, use_spot=use_spot)
         except LaunchLockHeldError:
-            # Not a spot failure — leave any blocked streak untouched.
+            # Not a launch failure — leave any blocked streak untouched.
             return "launch lock held (manual launch in progress?); skipping tick"
     # Any tick that needs no launch ends the blocked streak.
     _clear_blocked_state(r, policy.name, dry_run=False)
@@ -3827,6 +3946,9 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             fleet,
             idle_since_s=idle_s,
             blocked_ticks=blocked_before.consecutive_ticks if blocked_before else 0,
+            on_demand_cooldown=_on_demand_cooling_down(
+                r, policy.name, dry_run=args.dry_run
+            ),
         )
         # Reap workers stuck mid-boot before anything else: they hold the
         # single-flight slot, so no scale action is meaningful this tick.
@@ -3861,6 +3983,9 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             stuck_pending=tuple(stuck) if stuck else (),
         )
         _write_tick_snapshot(r, policy.name, snapshot.to_dict(), dry_run=args.dry_run)
+        # Liveness last: this shape completed a full tick. A shape that threw
+        # earlier keeps its previous timestamp and reads as stale.
+        _touch_shape_marker(r, policy.name, now, dry_run=args.dry_run)
         results.append(snapshot.to_dict())
     print(json.dumps(results, indent=2, default=str))
 

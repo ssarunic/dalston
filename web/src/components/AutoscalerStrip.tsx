@@ -61,7 +61,9 @@ function StatusLine({ view, state, nowMs }: { view: AutoscalerShapeView; state: 
           : null
       return (
         <p className="text-sm text-red-400">
-          {S.autoscalerStrip.spotQuota(state.maxBacklog)}{' '}
+          {state.blockedKind === 'spot_capacity'
+            ? S.autoscalerStrip.spotCapacity(state.maxBacklog)
+            : S.autoscalerStrip.spotQuota(state.maxBacklog)}{' '}
           {deadlineS !== null
             ? S.autoscalerStrip.criticalDeadline(formatDurationShort(deadlineS))
             : nowMs !== null
@@ -90,6 +92,10 @@ function StatusLine({ view, state, nowMs }: { view: AutoscalerShapeView; state: 
       }
       return <p className="text-sm text-muted-foreground">{S.autoscalerStrip.cooldownStarting}</p>
     }
+    case 'warmFloor':
+      return (
+        <p className="text-sm text-muted-foreground">{S.autoscalerStrip.warmFloor(state.live)}</p>
+      )
     case 'idle':
       return (
         <p className="text-sm text-muted-foreground">{S.autoscalerStrip.idle(state.maxInstances)}</p>

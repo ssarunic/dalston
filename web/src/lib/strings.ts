@@ -334,6 +334,8 @@ const autoscalerStrip = {
   cooldownTerminating: (count: number, inTime: string) =>
     `idle · terminating ${count} in ${inTime}`,
   cooldownStarting: 'idle · cooldown running',
+  warmFloor: (live: number) =>
+    `idle · holding ${live} at the always-on minimum`,
   spotQuota: (backlog: number) =>
     `At spot quota — backlog ${backlog}, retrying every minute. Quota frees when a worker terminates.`,
   spotCapacity: (backlog: number) =>
