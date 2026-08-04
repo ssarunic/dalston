@@ -136,6 +136,17 @@ export function RealtimeLive() {
       if (anySupportsVocab) {
         return { supported: null, text: 'Vocabulary support depends on the engine selected' }
       }
+      // Boosting may still exist for batch jobs — say so rather than implying
+      // the engines lack the capability entirely.
+      const anySupportsBatchVocab = enginesData.realtime_engines.some(
+        (w) => w.vocabulary_support?.batch
+      )
+      if (anySupportsBatchVocab) {
+        return {
+          supported: false,
+          text: 'Not available in realtime — supported for batch jobs',
+        }
+      }
       return { supported: false, text: 'No available engines support vocabulary boosting' }
     }
 
@@ -164,6 +175,17 @@ export function RealtimeLive() {
         ? method.replace('_', ' ')
         : null
       return { supported: true, text: methodLabel ? `Via ${methodLabel}` : null }
+    }
+    // Realtime boosting is unavailable, but the engine may still support it for
+    // batch (e.g. NeMo does GPU phrase boosting in batch only). Distinguish the
+    // two so the hint doesn't claim a capability is missing when it merely is
+    // not wired up for streaming.
+    const batchVocabWorker = workersForRuntime.find((w) => w.vocabulary_support?.batch)
+    if (batchVocabWorker) {
+      return {
+        supported: false,
+        text: 'Not available in realtime — supported for batch jobs',
+      }
     }
     return { supported: false, text: 'This model does not support vocabulary boosting' }
   }, [model, enginesData, registryData])
