@@ -7,6 +7,7 @@ ORT session so the tests run without the real model file.
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,9 +20,28 @@ from dalston.engine_sdk.silero_vad import (
     WINDOW_SAMPLES_8K,
     WINDOW_SAMPLES_16K,
     SileroOnnxModel,
+    SileroTorchModel,
     get_silero_onnx_path,
+    load_silero_model,
     load_silero_session,
 )
+
+
+def _block_import(*names: str):
+    """Patch ``__import__`` so importing any of ``names`` raises ImportError.
+
+    The VAD loaders choose a backend by attempting imports, so simulating
+    a missing runtime is the only way to exercise the fallback paths on a
+    machine that has neither torch nor onnxruntime installed.
+    """
+    real_import = builtins.__import__
+
+    def _fake_import(name: str, *args, **kwargs):
+        if name in names:
+            raise ImportError(f"{name} not installed in this test")
+        return real_import(name, *args, **kwargs)
+
+    return patch("builtins.__import__", side_effect=_fake_import)
 
 
 class _FakeOrtSession:
@@ -204,17 +224,204 @@ class TestLoadSileroSession:
         baked = tmp_path / "silero.onnx"
         baked.write_bytes(b"")
 
-        real_import = (
-            __builtins__["__import__"]
-            if isinstance(__builtins__, dict)
-            else __builtins__.__import__
-        )
-
-        def _fake_import(name: str, *args, **kwargs):
-            if name == "onnxruntime":
-                raise ImportError("onnxruntime not installed in this test")
-            return real_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=_fake_import):
+        with _block_import("onnxruntime"):
             with pytest.raises(RuntimeError, match="onnxruntime is required"):
                 load_silero_session(baked)
+
+
+class _FakeTensor:
+    """Stand-in for the tensor the TorchScript module returns.
+
+    Deliberately does **not** implement ``__float__``. Silero's module
+    returns a grad-tracking tensor, and calling ``float()`` on one emits
+    ``UserWarning: Converting a tensor with requires_grad=True to a
+    scalar``. Omitting ``__float__`` here means the wrapper must go
+    through ``.item()`` or these tests fail with ``TypeError``.
+    """
+
+    def __init__(self, value: float) -> None:
+        self._value = value
+
+    def item(self) -> float:
+        return self._value
+
+
+class _FakeSileroModule:
+    """Stand-in for the TorchScript module from ``load_silero_vad()``."""
+
+    def __init__(self, prob: float = 0.42) -> None:
+        self.calls: list[tuple[object, int]] = []
+        self.reset_count = 0
+        self._prob = prob
+
+    def __call__(self, tensor: object, sample_rate: int) -> _FakeTensor:
+        self.calls.append((tensor, sample_rate))
+        return _FakeTensor(self._prob)
+
+    def reset_states(self) -> None:
+        self.reset_count += 1
+
+
+class _FakeTorch:
+    """Minimal ``torch`` surface used by :class:`SileroTorchModel`."""
+
+    @staticmethod
+    def from_numpy(array: np.ndarray) -> np.ndarray:
+        return array
+
+
+def _patch_torch_backend(module: _FakeSileroModule):
+    """Patch ``torch`` + ``silero_vad`` into sys.modules for the torch path."""
+    fake_pkg = type(
+        "_FakeSileroVadPkg", (), {"load_silero_vad": staticmethod(lambda: module)}
+    )
+    return patch.dict("sys.modules", {"torch": _FakeTorch, "silero_vad": fake_pkg})
+
+
+class TestSileroTorchModel:
+    def test_returns_plain_float_probability(self) -> None:
+        module = _FakeSileroModule(prob=0.75)
+        model = SileroTorchModel(module)
+
+        with patch.dict("sys.modules", {"torch": _FakeTorch}):
+            prob = model(np.zeros(WINDOW_SAMPLES_16K, dtype=np.float32), 16000)
+
+        assert isinstance(prob, float)
+        assert prob == pytest.approx(0.75)
+        assert module.calls[0][1] == 16000
+
+    def test_accepts_singleton_batch_for_onnx_parity(self) -> None:
+        """The ONNX wrapper accepts (batch, window); collapse batch of 1."""
+        module = _FakeSileroModule()
+        model = SileroTorchModel(module)
+        audio = np.zeros((1, WINDOW_SAMPLES_16K), dtype=np.float32)
+
+        with patch.dict("sys.modules", {"torch": _FakeTorch}):
+            prob = model(audio, 16000)
+
+        assert isinstance(prob, float)
+        # Must be flattened to 1-D, not passed through as (1, N).
+        assert np.asarray(module.calls[0][0]).ndim == 1
+
+    def test_rejects_real_batches_rather_than_scoring_first_row(self) -> None:
+        module = _FakeSileroModule()
+        model = SileroTorchModel(module)
+        audio = np.zeros((3, WINDOW_SAMPLES_16K), dtype=np.float32)
+
+        with patch.dict("sys.modules", {"torch": _FakeTorch}):
+            with pytest.raises(ValueError, match="batch size 1"):
+                model(audio, 16000)
+
+    def test_supports_8k_window(self) -> None:
+        module = _FakeSileroModule()
+        model = SileroTorchModel(module)
+
+        with patch.dict("sys.modules", {"torch": _FakeTorch}):
+            model(np.zeros(WINDOW_SAMPLES_8K, dtype=np.float32), 8000)
+
+        assert module.calls[0][1] == 8000
+
+    def test_reset_states_delegates_to_module(self) -> None:
+        module = _FakeSileroModule()
+        model = SileroTorchModel(module)
+
+        model.reset_states()
+
+        assert module.reset_count == 1
+
+    def test_reset_states_ignores_batch_size_without_raising(self) -> None:
+        """batch_size exists for ONNX parity; it cannot be honoured here."""
+        module = _FakeSileroModule()
+        model = SileroTorchModel(module)
+
+        model.reset_states(batch_size=4)
+
+        assert module.reset_count == 1
+
+
+class TestLoadSileroModel:
+    def test_prefers_torch_when_available(self) -> None:
+        module = _FakeSileroModule()
+
+        with _patch_torch_backend(module):
+            model = load_silero_model()
+
+        assert isinstance(model, SileroTorchModel)
+
+    @pytest.mark.parametrize(
+        "blocked",
+        [
+            # silero_vad absent: torch-based image without the VAD package.
+            "silero_vad",
+            # torch absent: base-onnx / base-engine ship onnxruntime only.
+            "torch",
+        ],
+    )
+    def test_falls_back_to_onnx_when_torch_path_unavailable(self, blocked: str) -> None:
+        fake_session = _FakeOrtSession()
+
+        with _block_import(blocked):
+            with patch(
+                "dalston.engine_sdk.silero_vad.load_silero_session",
+                return_value=fake_session,
+            ):
+                model = load_silero_model()
+
+        assert isinstance(model, SileroOnnxModel)
+
+    def test_falls_back_to_onnx_when_torch_model_load_fails(self) -> None:
+        """Package present but broken is logged, then ONNX is tried."""
+        fake_session = _FakeOrtSession()
+
+        def _boom() -> None:
+            raise RuntimeError("corrupt weights")
+
+        fake_pkg = type(
+            "_BrokenSileroVadPkg", (), {"load_silero_vad": staticmethod(_boom)}
+        )
+
+        with patch.dict("sys.modules", {"torch": _FakeTorch, "silero_vad": fake_pkg}):
+            with patch(
+                "dalston.engine_sdk.silero_vad.load_silero_session",
+                return_value=fake_session,
+            ):
+                model = load_silero_model()
+
+        assert isinstance(model, SileroOnnxModel)
+
+    def test_raises_naming_both_backends_when_neither_available(self) -> None:
+        with _block_import("torch", "silero_vad", "onnxruntime"):
+            with pytest.raises(RuntimeError) as exc_info:
+                load_silero_model()
+
+        message = str(exc_info.value)
+        # Operators need to know both remedies, not just whichever was tried last.
+        assert "silero-vad" in message
+        assert "onnxruntime" in message
+
+
+class TestBackendInterfaceParity:
+    """Both backends must satisfy the SileroModel protocol identically."""
+
+    def test_both_expose_the_same_call_surface(self) -> None:
+        torch_model = SileroTorchModel(_FakeSileroModule())
+        onnx_model = SileroOnnxModel(_FakeOrtSession())
+
+        for model in (torch_model, onnx_model):
+            assert callable(model)
+            assert callable(model.reset_states)
+            # reset_states must accept the batch_size kwarg on both.
+            model.reset_states(batch_size=1)
+
+    def test_both_return_float_for_the_same_input(self) -> None:
+        audio = np.zeros(WINDOW_SAMPLES_16K, dtype=np.float32)
+
+        onnx_model = SileroOnnxModel(_FakeOrtSession())
+        onnx_prob = onnx_model(audio, 16000)
+
+        torch_model = SileroTorchModel(_FakeSileroModule())
+        with patch.dict("sys.modules", {"torch": _FakeTorch}):
+            torch_prob = torch_model(audio, 16000)
+
+        assert isinstance(onnx_prob, float)
+        assert isinstance(torch_prob, float)

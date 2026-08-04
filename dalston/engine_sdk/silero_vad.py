@@ -1,8 +1,11 @@
-"""Shared Silero VAD v5 ONNX loader and inference wrapper.
+"""Shared Silero VAD v5 loaders and inference wrappers.
 
 Centralises the bits that realtime streaming VAD and the batch
 long-audio chunker both need:
 
+- :func:`load_silero_model` picks a backend from whatever the image
+  already ships — TorchScript first, ONNX second — and is what callers
+  should use unless they specifically need one runtime.
 - :func:`get_silero_onnx_path` resolves the ONNX model file path,
   honouring ``DALSTON_SILERO_VAD_ONNX`` (for images that bake the
   weights), a local cache directory, and a one-shot GitHub download as
@@ -13,6 +16,13 @@ long-audio chunker both need:
   state + context window that Silero v5 requires across successive
   chunk calls. Supports 8 kHz and 16 kHz input and resets cleanly when
   the caller switches streams via :meth:`reset_states`.
+- :class:`SileroTorchModel` is the TorchScript equivalent, presenting the
+  same :class:`SileroModel` interface.
+
+Neither ``torch`` nor ``onnxruntime`` is imported at module scope: this
+module is imported on images that have only one of them (``base-onnx``
+ships ONNX without torch; ``base-nemo`` ships torch). Both imports live
+inside the functions that need them.
 
 Callers:
 
@@ -28,7 +38,7 @@ from __future__ import annotations
 import os
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
 
@@ -54,6 +64,23 @@ WINDOW_SAMPLES_8K = 256
 # Silero v5 context window per sample rate (prepended to each frame).
 CONTEXT_SAMPLES_16K = 64
 CONTEXT_SAMPLES_8K = 32
+
+
+class SileroModel(Protocol):
+    """Interface shared by the ONNX and TorchScript VAD backends.
+
+    Both :class:`SileroOnnxModel` and :class:`SileroTorchModel` satisfy
+    this structurally, so callers can hold either without caring which
+    runtime the image happens to ship.
+    """
+
+    def __call__(self, audio: np.ndarray, sample_rate: int) -> float:
+        """Return speech probability in [0.0, 1.0] for one audio window."""
+        ...
+
+    def reset_states(self, batch_size: int = 1) -> None:
+        """Reset recurrent state before feeding a new audio stream."""
+        ...
 
 
 def get_silero_onnx_path() -> Path:
@@ -208,3 +235,135 @@ class SileroOnnxModel:
         self._context = np.zeros(0, dtype=np.float32)
         self._last_sr = 0
         self._last_batch_size = 0
+
+
+class SileroTorchModel:
+    """Silero VAD v5 via the TorchScript model bundled in the silero-vad wheel.
+
+    Presents the same interface as :class:`SileroOnnxModel`. Unlike the
+    ONNX graph — which exposes its recurrent state as explicit inputs and
+    outputs, forcing the caller to thread hidden state and the context
+    window across calls — the TorchScript module owns that state
+    internally. So this wrapper only adapts numpy <-> torch and
+    normalises the return type.
+    """
+
+    def __init__(self, module: Any) -> None:
+        self._module = module
+
+    def __call__(self, audio: np.ndarray, sample_rate: int) -> float:
+        """Return speech probability for a single audio window.
+
+        Args:
+            audio: 1-D float32 array of ``window_size`` samples
+                   (512 @ 16 kHz, 256 @ 8 kHz). A ``(1, window_size)``
+                   array is accepted for parity with the ONNX wrapper.
+            sample_rate: 16000 or 8000.
+
+        Returns:
+            Speech probability in [0.0, 1.0].
+
+        Raises:
+            ValueError: if given a batch of more than one window.
+        """
+        import numpy as np
+        import torch
+
+        if audio.ndim > 1:
+            # The ONNX wrapper accepts (batch, window); the TorchScript
+            # module takes a single 1-D window. Collapse a singleton batch
+            # rather than silently scoring only the first row.
+            if audio.shape[0] != 1:
+                raise ValueError(
+                    "SileroTorchModel supports batch size 1, got "
+                    f"{audio.shape[0]}. Use SileroOnnxModel for batched input."
+                )
+            audio = audio.reshape(-1)
+
+        tensor = torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32))
+        out = self._module(tensor, sample_rate)
+        # .item() rather than float(): the module returns a grad-tracking
+        # tensor, and float() on one emits "Converting a tensor with
+        # requires_grad=True to a scalar may lead to unexpected behavior".
+        return float(out.item())
+
+    def reset_states(self, batch_size: int = 1) -> None:
+        """Reset recurrent state for a new audio stream.
+
+        ``batch_size`` exists only for parity with
+        :class:`SileroOnnxModel`. The TorchScript module manages state
+        internally for a single stream, so anything other than 1 cannot
+        be honoured — log it rather than pretend it was applied.
+        """
+        if batch_size != 1:
+            logger.debug(
+                "silero_torch_batch_size_ignored",
+                batch_size=batch_size,
+                message="TorchScript Silero backend supports a single stream",
+            )
+        self._module.reset_states()
+
+
+def _try_load_torch_model() -> SileroTorchModel | None:
+    """Load the TorchScript Silero model, or *None* if unavailable.
+
+    Returns *None* — rather than raising — when torch or the
+    ``silero_vad`` package is missing, so :func:`load_silero_model` can
+    fall through to ONNX. A package that is present but fails to load is
+    a real problem worth surfacing, so it is logged before falling back.
+    """
+    try:
+        import torch  # noqa: F401
+        from silero_vad import load_silero_vad
+    except ImportError:
+        return None
+
+    try:
+        # Defaults to the bundled TorchScript weights (onnx=False), which
+        # ship inside the wheel — no download, works fully offline.
+        module = load_silero_vad()
+    except Exception as exc:
+        logger.warning("silero_vad_torch_load_failed", error=str(exc)[:200])
+        return None
+
+    logger.info("silero_vad_loaded", backend="silero_vad_pkg")
+    return SileroTorchModel(module)
+
+
+def load_silero_model() -> SileroModel:
+    """Load a Silero VAD v5 model on whichever runtime is available.
+
+    Resolution order (first success wins):
+
+    1. ``silero_vad`` pip package TorchScript model — preferred on
+       torch-based images (``base-nemo``, ``base-pytorch``,
+       ``base-pyannote``). Offline: the wheel bundles ``silero_vad.jit``.
+    2. ``onnxruntime`` via :func:`load_silero_session` — for images that
+       ship ONNX but no torch (``base-onnx``, ``base-engine``).
+
+    Both serialisations are the same fp32 v5.1.2 weights, so the choice
+    does not change scores; it only avoids forcing a second inference
+    runtime into an image that already has one.
+
+    Returns:
+        A backend satisfying :class:`SileroModel`.
+
+    Raises:
+        RuntimeError: if neither backend is available, naming both
+            install options.
+    """
+    torch_model = _try_load_torch_model()
+    if torch_model is not None:
+        return torch_model
+
+    try:
+        session = load_silero_session()
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "No Silero VAD backend available. Install either PyTorch plus "
+            "the silero-vad package (pip install torch silero-vad) or "
+            "onnxruntime (pip install onnxruntime / onnxruntime-gpu)."
+        ) from exc
+
+    logger.info("silero_vad_loaded", backend="onnxruntime")
+    return SileroOnnxModel(session)
