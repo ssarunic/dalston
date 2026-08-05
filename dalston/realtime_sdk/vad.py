@@ -1,12 +1,13 @@
-"""Voice Activity Detection using Silero VAD (ONNX Runtime).
+"""Voice Activity Detection using Silero VAD.
 
 Provides speech detection and endpoint detection for streaming audio,
 determining when to trigger ASR transcription.
 
-Uses ONNX Runtime for Silero VAD inference, eliminating the PyTorch
-dependency. The low-level ONNX session wrapper lives in
-``dalston.engine_sdk.silero_vad`` and is shared with the batch VAD
-chunker.
+The backend is whichever inference runtime the engine image already
+ships: the TorchScript model on torch-based images, ONNX Runtime
+otherwise. Selection lives in :func:`dalston.engine_sdk.silero_vad.
+load_silero_model`, shared with the batch VAD chunker, so realtime does
+not force a second runtime into an image that already has one.
 """
 
 from __future__ import annotations
@@ -24,13 +25,19 @@ from dalston.common.audio_defaults import (
     DEFAULT_SAMPLE_RATE,
     DEFAULT_VAD_THRESHOLD,
 )
-from dalston.engine_sdk.silero_vad import SileroOnnxModel, load_silero_session
+from dalston.engine_sdk.silero_vad import (
+    SileroModel,
+    SileroOnnxModel,
+    load_silero_model,
+)
 
 logger = structlog.get_logger()
 
 # Legacy aliases — the class + loader now live in engine_sdk.silero_vad.
 # Realtime code historically referenced ``_SileroOnnxModel``; keeping the
 # alias avoids churn for external callers that may have imported it.
+# Note this is no longer necessarily the backend in use — see
+# :func:`load_silero_model`.
 _SileroOnnxModel = SileroOnnxModel
 
 
@@ -88,8 +95,9 @@ class VADProcessor:
     The processor maintains a lookback buffer to capture the beginning
     of speech that might be cut off by chunk boundaries.
 
-    Uses the ONNX Runtime backend for Silero VAD inference (no PyTorch
-    dependency required).
+    The Silero backend is selected at load time from whichever inference
+    runtime the image ships — see
+    :func:`dalston.engine_sdk.silero_vad.load_silero_model`.
 
     Example:
         vad = VADProcessor()
@@ -117,7 +125,7 @@ class VADProcessor:
             config: VAD configuration. Uses defaults if not provided.
         """
         self.config = config or VADConfig()
-        self._model: _SileroOnnxModel | None = None
+        self._model: SileroModel | None = None
         self._state = VADState.SILENCE
         self._speech_buffer: list[np.ndarray] = []
         self._lookback_buffer: list[np.ndarray] = []
@@ -125,18 +133,21 @@ class VADProcessor:
         self._speech_duration: float = 0.0
 
     def _load_model(self) -> None:
-        """Load Silero VAD ONNX model lazily."""
+        """Load the Silero VAD model lazily, on whichever backend is available.
+
+        A realtime session with no VAD backend must fail loudly rather
+        than silently degrade to "everything is speech", so a total
+        failure is logged and re-raised.
+        """
         if self._model is not None:
             return
 
         try:
-            session = load_silero_session()
+            # Logs which backend it picked.
+            self._model = load_silero_model()
         except RuntimeError as e:
             logger.error("silero_vad_load_failed", error=str(e))
             raise
-
-        self._model = SileroOnnxModel(session)
-        logger.info("silero_vad_loaded", backend="onnxruntime")
 
     def _get_speech_prob(self, audio: np.ndarray) -> float:
         """Get speech probability for audio chunk.

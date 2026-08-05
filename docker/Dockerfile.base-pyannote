@@ -54,6 +54,13 @@ RUN if [ "$DEVICE" = "cuda" ]; then \
             "huggingface_hub>=1.0.0"; \
     fi
 
+# Silero VAD — this image previously shipped no VAD provisioning at all
+# (no package, no baked ONNX, no onnxruntime), so a realtime engine
+# landing here would raise at session start. The silero-vad package
+# carries the TorchScript weights (~8 MB, pure Python) and is what
+# load_silero_model() selects on a torch image; no onnxruntime needed.
+RUN pip install --no-cache-dir --break-system-packages "silero-vad==6.2.1"
+
 # Model cache
 ENV HF_HOME=/models/huggingface
 ENV TORCH_HOME=/models/torch

@@ -57,10 +57,19 @@ RUN pip install --no-cache-dir --break-system-packages \
 # Keeping both means the batch chunker works fully offline whether the
 # worker reaches the pip package first or falls through to the ONNX
 # file via DALSTON_SILERO_VAD_ONNX.
+#
+# M100.6: the URL tag and the pin below must stay on the SAME release,
+# and the pin is exact for that reason. The two backends load different
+# artifacts (the package's TorchScript weights vs this ONNX export) and
+# are only the same model when both come from one tag — v5.1.2 and
+# v6.2.1 differ in both, despite the ONNX having an identical byte size.
+# Mismatch silently changes speech probabilities and endpointing
+# depending on which backend wins. tests/unit/test_silero_vad_shared.py
+# enforces the alignment.
 RUN mkdir -p /models/silero-vad \
-    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://github.com/snakers4/silero-vad/raw/v6.2.1/src/silero_vad/data/silero_vad.onnx', '/models/silero-vad/silero_vad.onnx')"
 ENV DALSTON_SILERO_VAD_ONNX=/models/silero-vad/silero_vad.onnx
-RUN pip install --no-cache-dir --break-system-packages "silero-vad>=5.1"
+RUN pip install --no-cache-dir --break-system-packages "silero-vad==6.2.1"
 
 # Model cache
 ENV HF_HOME=/models/huggingface
