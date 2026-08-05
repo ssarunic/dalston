@@ -25,6 +25,16 @@ services:
     # Tailscale IP via DALSTON_BIND_IP (written to .env.aws at boot).
     ports:
       - "127.0.0.1:8000:8000"
+      # In-VPC path for the "thestill" app (spec #66), which reaches the
+      # gateway over the VPC rather than the tailnet. Ingress is granted
+      # security-group-to-security-group on 8000 with no CIDR ranges, so
+      # this never widens exposure beyond that one peer group — and never
+      # reaches the public ENI.
+      #
+      # Defaults to 127.0.0.2 (loopback) so deployments that do not set
+      # DALSTON_VPC_IP bind nothing new. Set it to the instance's private
+      # IP in .env.aws to enable the path.
+      - "${DALSTON_VPC_IP:-127.0.0.2}:8000:8000"
 
   orchestrator:
     environment:
