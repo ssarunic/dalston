@@ -202,6 +202,10 @@ class EngineRunner:
 
         # Register with unified engine registry
         self._unified_writer = UnifiedRegistryWriter(self.redis_url)
+        # Kept so the heartbeat can rewrite it. A missing `interfaces` on a
+        # re-created key silently defaults to ["batch"], which is right here
+        # by luck but wrong for a unified engine (M101).
+        self._interfaces = list(interfaces)
         self._unified_writer.register(
             EngineRecord(
                 instance=self.instance,
@@ -477,6 +481,7 @@ class EngineRunner:
                             loaded_model=loaded_model,
                             engine_id=self.engine_id,
                             stage=self._stage,
+                            interfaces=getattr(self, "_interfaces", None),
                             hostname=self._node.hostname,
                             node_id=self._node.node_id,
                             deploy_env=self._node.deploy_env,

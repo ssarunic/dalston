@@ -561,9 +561,16 @@ async def get_engines(
                     interfaces=["batch", "realtime"],
                 )
             )
-    except Exception:
-        # Session router may not be available
-        pass
+    except Exception as exc:
+        # Session router may not be available. Degrade to an empty list
+        # rather than failing the page — but log it: an empty list renders
+        # identically to "no workers are running", so swallowing this
+        # silently hid a registry quarantine bug in production (M101).
+        logger.warning(
+            "console_realtime_workers_unavailable",
+            error=str(exc)[:200],
+            error_type=type(exc).__name__,
+        )
 
     # Add offline entries for realtime engines in catalog with no running workers
     for entry in catalog.get_all_engines():

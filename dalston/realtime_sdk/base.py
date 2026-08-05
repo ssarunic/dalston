@@ -156,6 +156,9 @@ class RealtimeEngine(ABC):
 
         self._sessions: dict[str, SessionHandler] = {}
         self._unified_registry: UnifiedEngineRegistry | None = None
+        #: Record written at registration; the heartbeat rewrites its
+        #: identifying fields so a re-created key stays valid (M101).
+        self._engine_record: EngineRecord | None = None
         self._running = False
         self._node: NodeIdentity | None = None
         self._server = None
@@ -429,28 +432,31 @@ class RealtimeEngine(ABC):
         )
         self._unified_registry = UnifiedEngineRegistry(unified_redis)
         vocab_support = self.get_vocabulary_support()
-        await self._unified_registry.register(
-            EngineRecord(
-                instance=self.instance,
-                engine_id=capabilities.engine_id,
-                stage="transcribe",
-                status="ready",
-                interfaces=["realtime"],
-                capacity=self.max_sessions,
-                endpoint=self._worker_endpoint,
-                models_loaded=self.get_models(),
-                capabilities=capabilities,
-                supports_word_timestamps=capabilities.supports_word_timestamps,
-                includes_diarization=capabilities.includes_diarization,
-                vocabulary_support=vocab_support,
-                hostname=self._node.hostname,
-                node_id=self._node.node_id,
-                deploy_env=self._node.deploy_env,
-                aws_az=self._node.region,
-                aws_instance_type=self._node.instance_type,
-                gpu_memory_total=gpu_total,
-            )
+        # Kept so the heartbeat can rewrite the identifying fields from the
+        # same source of truth rather than re-deriving them (M101) — the
+        # key carries a TTL, and anything the heartbeat omits is lost for
+        # good if that TTL ever lapses.
+        self._engine_record = EngineRecord(
+            instance=self.instance,
+            engine_id=capabilities.engine_id,
+            stage="transcribe",
+            status="ready",
+            interfaces=["realtime"],
+            capacity=self.max_sessions,
+            endpoint=self._worker_endpoint,
+            models_loaded=self.get_models(),
+            capabilities=capabilities,
+            supports_word_timestamps=capabilities.supports_word_timestamps,
+            includes_diarization=capabilities.includes_diarization,
+            vocabulary_support=vocab_support,
+            hostname=self._node.hostname,
+            node_id=self._node.node_id,
+            deploy_env=self._node.deploy_env,
+            aws_az=self._node.region,
+            aws_instance_type=self._node.instance_type,
+            gpu_memory_total=gpu_total,
         )
+        await self._unified_registry.register(self._engine_record)
         logger.info("engine_registered", instance=self.instance)
 
         self._running = True
@@ -541,12 +547,24 @@ class RealtimeEngine(ABC):
 
                 if self._unified_registry:
                     try:
+                        # Identifying fields go on every heartbeat: the key
+                        # has a TTL, and if it lapses the next heartbeat
+                        # re-creates it from scratch. Anything omitted here
+                        # is gone permanently — without engine_id the record
+                        # is dropped outright, and without interfaces it
+                        # comes back mis-typed as batch (M101).
+                        rec = self._engine_record
                         await self._unified_registry.heartbeat(
                             self.instance,
                             status=status,
                             active_realtime=active,
                             models_loaded=loaded_models,
                             gpu_memory_used=gpu_mem,
+                            engine_id=rec.engine_id if rec else None,
+                            stage=rec.stage if rec else None,
+                            interfaces=list(rec.interfaces) if rec else None,
+                            endpoint=rec.endpoint if rec else None,
+                            capacity=rec.capacity if rec else None,
                             hostname=self._node.hostname,
                             node_id=self._node.node_id,
                             deploy_env=self._node.deploy_env,
