@@ -51,7 +51,7 @@ capabilities:
   word_timestamps: true
   punctuation: true
   capitalization: true
-  native_streaming: false
+  native_streaming: true
   max_audio_duration: 7200
 
 hardware:
