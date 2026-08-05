@@ -408,19 +408,44 @@ class UnifiedEngineRegistry:
         loaded_model: str | None = None,
         models_loaded: list[str] | None = None,
         gpu_memory_used: str | None = None,
+        engine_id: str | None = None,
+        stage: str | None = None,
+        interfaces: list[str] | None = None,
+        endpoint: str | None = None,
+        capacity: int | None = None,
         hostname: str | None = None,
         node_id: str | None = None,
         deploy_env: str | None = None,
     ) -> None:
         """Update heartbeat and dynamic fields.
 
-        Only updates fields that are provided (not None). Node identity
-        fields are static but included so re-created keys survive expiry.
+        Only updates fields that are provided (not None).
+
+        The identifying fields — ``instance``, ``engine_id``, ``stage``,
+        ``interfaces``, ``endpoint``, ``capacity`` — are static, but are
+        written on **every** heartbeat because the instance key carries a
+        TTL. If it ever lapses (one slow heartbeat under GPU load is
+        enough) the next heartbeat re-creates it from scratch, and
+        whatever this method omits is gone for good: the heartbeat keeps
+        refreshing the truncated key, so the record never heals without
+        an engine restart.
+
+        Omitting ``engine_id`` made :func:`_mapping_to_record` drop the
+        record entirely, which removed realtime workers from the registry
+        and — because the autoscaler then counted the instance as pending
+        rather than live — got healthy instances reaped at
+        ``boot_timeout_s``. Omitting ``interfaces`` is subtler: the record
+        survives but defaults to ``["batch"]``, so a realtime engine comes
+        back mis-typed and still invisible. See M101.
+
+        Signature matches the sync :meth:`UnifiedRegistryWriter.heartbeat`
+        so the two cannot drift apart again.
         """
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
 
-        mapping: dict[str, str] = {"last_heartbeat": now}
+        # Always present, so a re-created key is never anonymous.
+        mapping: dict[str, str] = {"last_heartbeat": now, "instance": instance}
 
         if status is not None:
             mapping["status"] = status
@@ -434,6 +459,16 @@ class UnifiedEngineRegistry:
             mapping["models_loaded"] = json.dumps(models_loaded)
         if gpu_memory_used is not None:
             mapping["gpu_memory_used"] = gpu_memory_used
+        if engine_id is not None:
+            mapping["engine_id"] = engine_id
+        if stage is not None:
+            mapping["stage"] = stage
+        if interfaces is not None:
+            mapping["interfaces"] = json.dumps(interfaces)
+        if endpoint is not None:
+            mapping["endpoint"] = endpoint
+        if capacity is not None:
+            mapping["capacity"] = str(capacity)
         if hostname is not None:
             mapping["hostname"] = hostname
         if node_id is not None:
@@ -646,6 +681,9 @@ class UnifiedRegistryWriter:
         gpu_memory_used: str | None = None,
         engine_id: str | None = None,
         stage: str | None = None,
+        interfaces: list[str] | None = None,
+        endpoint: str | None = None,
+        capacity: int | None = None,
         hostname: str | None = None,
         node_id: str | None = None,
         deploy_env: str | None = None,
@@ -655,16 +693,24 @@ class UnifiedRegistryWriter:
         Signature matches the async ``UnifiedEngineRegistry.heartbeat``
         so both batch and realtime runners can report the same fields.
 
-        engine_id, stage, and node identity fields are written on every
-        heartbeat so that if the Redis key expires and is re-created by
-        the heartbeat, the critical static fields are always present
-        (preventing silent quarantine by _mapping_to_record).
+        The identifying fields are written on every heartbeat so that if
+        the Redis key expires and is re-created by the heartbeat, they
+        are always present (preventing silent quarantine by
+        _mapping_to_record).
+
+        ``interfaces`` is included for the same reason (M101). Batch
+        engines previously survived re-creation only because
+        _mapping_to_record defaults a missing value to ``["batch"]`` —
+        luck rather than design, and wrong for a unified engine
+        advertising ``["batch", "realtime"]``, which would silently lose
+        its realtime half.
         """
         r = self._get_redis()
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
         now = datetime.now(UTC).isoformat()
 
-        mapping: dict[str, str] = {"last_heartbeat": now}
+        # Always present, so a re-created key is never anonymous.
+        mapping: dict[str, str] = {"last_heartbeat": now, "instance": instance}
         if status is not None:
             mapping["status"] = status
         if active_batch is not None:
@@ -681,6 +727,12 @@ class UnifiedRegistryWriter:
             mapping["engine_id"] = engine_id
         if stage is not None:
             mapping["stage"] = stage
+        if interfaces is not None:
+            mapping["interfaces"] = json.dumps(interfaces)
+        if endpoint is not None:
+            mapping["endpoint"] = endpoint
+        if capacity is not None:
+            mapping["capacity"] = str(capacity)
         if hostname is not None:
             mapping["hostname"] = hostname
         if node_id is not None:
