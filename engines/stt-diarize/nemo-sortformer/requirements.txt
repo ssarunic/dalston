@@ -1,7 +1,7 @@
 # NeMo Sortformer Diarization Engine Dependencies
 
 # NeMo toolkit for ASR/diarization models (includes SortformerEncLabelModel)
-nemo_toolkit[asr]>=2.7.3,<2.8.0
+nemo_toolkit[asr]>=3.0.0,<3.1.0
 
 # Audio processing
 soundfile>=0.14.0
