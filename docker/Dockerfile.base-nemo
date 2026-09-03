@@ -1,7 +1,7 @@
 # Base image for NeMo-based engines
 #
-# Contains: PyTorch + nemo_toolkit[asr] 2.7 + common audio deps
-# Rebuild: only when NeMo version changes (rare)
+# Contains: PyTorch 2.13 (pinned) + nemo_toolkit[asr] 2.7 + common audio deps
+# Rebuild: only when NeMo or torch version changes (rare)
 #
 # Used by: nemo transcribe, nemo-msdd, nemo-sortformer
 #
@@ -35,10 +35,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# PyTorch — CPU wheels for CPU builds, system CUDA for GPU builds
+# PyTorch — CPU wheels for CPU builds, PyPI (CUDA 13 pip libs) for GPU builds.
+#
+# Pinned on purpose. NeMo only declares torch>=2.6, so an unpinned build
+# resolves whatever torch shipped that week (2.13 on 2026-08-05, 2.14 on
+# 2026-09-03) and every image rebuild silently changes the GPU stack that
+# production pulls at boot. 2.13.0 + torchaudio 2.11.0 is the pair in the
+# last validated image. Bump deliberately and re-run the L4 VRAM
+# calibration before shipping (the L4 numbers move with the torch build).
+ARG TORCH_VERSION=2.13.0
+ARG TORCHAUDIO_VERSION=2.11.0
 RUN if [ "$DEVICE" = "cpu" ]; then \
         pip install --no-cache-dir --break-system-packages \
-            torch torchaudio --index-url https://download.pytorch.org/whl/cpu; \
+            "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" \
+            --index-url https://download.pytorch.org/whl/cpu; \
+    else \
+        pip install --no-cache-dir --break-system-packages \
+            "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}"; \
     fi
 
 # NeMo toolkit (the heavy part — ~2GB with all ASR deps)
