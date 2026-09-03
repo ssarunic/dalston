@@ -2453,6 +2453,23 @@ def get_latest_ami(region: str) -> str:
     return images[-1]["ImageId"]
 
 
+def get_root_device_name(region: str, ami_id: str) -> str:
+    """Return the AMI's root device name (e.g. ``/dev/xvda`` for AL2023,
+    ``/dev/sda1`` for the Ubuntu DLAMI).
+
+    A BlockDeviceMappings entry only *resizes* the root volume when its
+    DeviceName equals the AMI's RootDeviceName. Any other name creates an
+    additional volume alongside the AMI's default root — which is how GPU
+    workers ended up with a 75 GB unencrypted root plus an idle 100 GB
+    encrypted volume (2026-09-03).
+    """
+    resp = ec2_client(region).describe_images(ImageIds=[ami_id])
+    images = resp.get("Images", [])
+    if not images or not images[0].get("RootDeviceName"):
+        die(f"Cannot determine root device name for AMI {ami_id}")
+    return images[0]["RootDeviceName"]
+
+
 def get_gpu_ami(region: str) -> str:
     """Get the Deep Learning Base AMI with NVIDIA drivers pre-installed."""
     ssm = boto3.client("ssm", region_name=region)
@@ -2505,6 +2522,7 @@ def launch_instance(
     ec2 = ec2_client(region)
     if ami_id is None:
         ami_id = get_latest_ami(region)
+    root_device_name = get_root_device_name(region, ami_id)
     vpc_id = get_default_vpc(region)
 
     resp = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
@@ -2580,7 +2598,10 @@ def launch_instance(
             "MaxCount": 1,
             "BlockDeviceMappings": [
                 {
-                    "DeviceName": "/dev/xvda",
+                    # Must match the AMI's own root device name, or EC2
+                    # keeps the AMI's root (75 GB, unencrypted for the
+                    # DLAMI) and attaches this as an extra, unused volume.
+                    "DeviceName": root_device_name,
                     "Ebs": {
                         "VolumeSize": ROOT_VOLUME_SIZE,
                         "VolumeType": "gp3",
