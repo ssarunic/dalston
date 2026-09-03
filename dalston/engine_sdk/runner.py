@@ -74,6 +74,9 @@ class EngineRunner:
 
     # Configuration
     STREAM_POLL_TIMEOUT = 30  # seconds
+    # Socket read timeout = STREAM_POLL_TIMEOUT + margin; see redis_client.
+    SOCKET_TIMEOUT_MARGIN = 5  # seconds
+    SOCKET_CONNECT_TIMEOUT = 5  # seconds
     TEMP_DIR_PREFIX = "dalston_task_"
     HEARTBEAT_INTERVAL = 10  # seconds between heartbeats
     HEARTBEAT_TTL = 60  # auto-expire heartbeat if engine crashes
@@ -151,6 +154,14 @@ class EngineRunner:
             self._redis = redis.from_url(
                 self.redis_url,
                 decode_responses=True,
+                # redis-py 8 defaults socket_timeout to 5 s (it was None in
+                # 7.x). The task poll is an XREADGROUP that BLOCKs for
+                # STREAM_POLL_TIMEOUT, so a shorter read timeout fires on
+                # every idle poll and floods the log with
+                # "Timeout reading from socket". The read timeout must
+                # outlast the longest blocking call.
+                socket_timeout=self.STREAM_POLL_TIMEOUT + self.SOCKET_TIMEOUT_MARGIN,
+                socket_connect_timeout=self.SOCKET_CONNECT_TIMEOUT,
             )
         return self._redis
 
