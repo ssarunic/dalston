@@ -1,6 +1,8 @@
 # NeMo MSDD Diarization Engine Dependencies
 
-# NeMo toolkit for ASR/diarization models
+# NeMo toolkit for ASR/diarization models. Pinned to 2.7.x on purpose:
+# NeMo 3.0 removed msdd_models.NeuralDiarizer. Must match the
+# dalston/base-nemo-2.7 variant this engine's Dockerfile builds from.
 nemo_toolkit[asr]>=2.7.3,<2.8.0
 
 # Audio processing

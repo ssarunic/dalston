@@ -1,13 +1,17 @@
 # Base image for NeMo-based engines
 #
-# Contains: PyTorch 2.13 (pinned) + nemo_toolkit[asr] 2.7 + common audio deps
+# Contains: PyTorch 2.12 (pinned) + nemo_toolkit[asr] 3.0 + common audio deps
 # Rebuild: only when NeMo or torch version changes (rare)
 #
-# Used by: nemo transcribe, nemo-msdd, nemo-sortformer
+# Used by: nemo transcribe, nemo-sortformer (NeMo 3.0, the default)
+#          nemo-msdd via the dalston/base-nemo-2.7 variant (see build-bases):
+#          MSDD's NeuralDiarizer was removed in NeMo 3.0.
 #
 # Build from repo root:
 #   CPU:  docker build -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
 #   GPU:  docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
+#   2.7:  docker build --build-arg NEMO_SPEC=">=2.7.3,<2.8.0" --build-arg TORCH_VERSION=2.13.0 \
+#             -f docker/Dockerfile.base-nemo -t dalston/base-nemo-2.7:latest .
 
 ARG DEVICE=cpu
 
@@ -40,10 +44,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Pinned on purpose. NeMo only declares torch>=2.6, so an unpinned build
 # resolves whatever torch shipped that week (2.13 on 2026-08-05, 2.14 on
 # 2026-09-03) and every image rebuild silently changes the GPU stack that
-# production pulls at boot. 2.13.0 + torchaudio 2.11.0 is the pair in the
-# last validated image. Bump deliberately and re-run the L4 VRAM
-# calibration before shipping (the L4 numbers move with the torch build).
-ARG TORCH_VERSION=2.13.0
+# production pulls at boot. 2.12.0 is the torch NeMo 3.0 itself pins in its
+# cu12/cu13 extras (torch==2.12.0+cu126 / +cu132); the plain PyPI 2.12.0
+# wheel ships the CUDA 13 pip libraries. Bump deliberately and re-run the
+# L4 VRAM calibration before shipping (the L4 numbers move with the torch
+# build).
+ARG TORCH_VERSION=2.12.0
 ARG TORCHAUDIO_VERSION=2.11.0
 RUN if [ "$DEVICE" = "cpu" ]; then \
         pip install --no-cache-dir --break-system-packages \
@@ -54,9 +60,18 @@ RUN if [ "$DEVICE" = "cpu" ]; then \
             "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}"; \
     fi
 
-# NeMo toolkit (the heavy part — ~2GB with all ASR deps)
+# NeMo toolkit (the heavy part — ~2GB with all ASR deps).
+# 3.0 is the speech-only NeMo (LLM/VLM/NLP collections moved out). It drops
+# the protobuf~=5.29 and transformers~=4.57 pins 2.7.x carried, and removes
+# the MSDD NeuralDiarizer (nemo-msdd was retired with this bump; Sortformer
+# is its successor). The cache-aware streaming API the realtime path uses
+# (conformer_stream_step / CacheAwareStreamingAudioBuffer) is unchanged.
+#
+# NEMO_SPEC exists only so nemo-msdd can keep a 2.7.x base until it is
+# retired; every other consumer uses the default.
+ARG NEMO_SPEC=">=3.0.0,<3.1.0"
 RUN pip install --no-cache-dir --break-system-packages \
-    "nemo_toolkit[asr]>=2.7.0,<2.8.0"
+    "nemo_toolkit[asr]${NEMO_SPEC}"
 
 # Common audio processing deps
 RUN pip install --no-cache-dir --break-system-packages \
