@@ -1,11 +1,11 @@
 # Unified NeMo Engine Dependencies (batch + realtime)
 
-# Pin NeMo to a stable 2.7.x line for cache-aware RNNT streaming.
-nemo_toolkit[asr]>=2.7.3,<2.8.0
-
-# Align key transitive deps with NeMo 2.7 ASR metadata.
-lhotse>=1.33.0
-transformers>=4.57.6,<4.58.0
+# NeMo 3.0.x — the speech-only toolkit. Must match docker/Dockerfile.base-nemo;
+# this line only re-asserts the range in the final pip layer. 3.0 leaves
+# transformers and protobuf unpinned (2.7.x pinned transformers~=4.57 and
+# protobuf~=5.29, which is what blocked GHSA-xrqw-3rrv-vx5w and the
+# googleapis-common-protos conflict).
+nemo_toolkit[asr]>=3.0.0,<3.1.0
 
 # Audio processing
 numpy>=2.4.6,<3.0.0
@@ -20,12 +20,3 @@ torchaudio
 # requests that exceed DALSTON_NEMO_MAX_CHUNK_S. Small pure-Python
 # package (~8 MB) with the JIT and ONNX weights embedded.
 silero-vad==6.2.1
-
-# googleapis-common-protos >=1.75.1 (2026-08-06) requires protobuf>=6.33.5,
-# but nemo_toolkit 2.7.x pins protobuf~=5.29.5. The OTLP gRPC exporter pulls
-# googleapis-common-protos in via the dalston[engine-sdk] layer, and this
-# file is the last pip layer, so the pin has to live here to keep the final
-# image consistent (otherwise `import dalston.telemetry` crashes with a
-# protobuf gencode/runtime VersionError). Drop when NeMo 3.x lands — it has
-# no protobuf pin.
-googleapis-common-protos<1.75.1

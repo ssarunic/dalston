@@ -9,7 +9,11 @@
 # Build from repo root:
 #   docker compose build stt-diarize-nemo-msdd
 
-FROM dalston/base-nemo:latest
+# NeMo 3.0 removed msdd_models.NeuralDiarizer, so this engine stays on the
+# 2.7.x base variant (built by `make build-bases` as dalston/base-nemo-2.7).
+# It is the only consumer of that image; retiring nemo-msdd (Sortformer is
+# the successor) removes the variant too.
+FROM dalston/base-nemo-2.7:latest
 
 ARG SKIP_MODEL_DOWNLOAD=false
 

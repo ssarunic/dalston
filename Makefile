@@ -141,6 +141,8 @@ build-bases:
 	docker build -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
 	docker build -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
 	docker build -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
+	# NeMo 2.7 variant: only nemo-msdd uses it (NeuralDiarizer was removed in NeMo 3.0)
+	docker build --build-arg NEMO_SPEC=">=2.7.3,<2.8.0" --build-arg TORCH_VERSION=2.13.0 -f docker/Dockerfile.base-nemo -t dalston/base-nemo-2.7:latest .
 
 # Build all base images (GPU/CUDA — for AWS deployment)
 build-bases-gpu:
@@ -149,6 +151,7 @@ build-bases-gpu:
 	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pyannote -t dalston/base-pyannote:latest .
 	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-pytorch -t dalston/base-pytorch:latest .
 	docker build --build-arg DEVICE=cuda -f docker/Dockerfile.base-nemo -t dalston/base-nemo:latest .
+	docker build --build-arg DEVICE=cuda --build-arg NEMO_SPEC=">=2.7.3,<2.8.0" --build-arg TORCH_VERSION=2.13.0 -f docker/Dockerfile.base-nemo -t dalston/base-nemo-2.7:latest .
 
 # Build all engine images (CPU — default)
 build-cpu: build-bases
