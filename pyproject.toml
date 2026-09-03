@@ -5,7 +5,7 @@ description = "Modular, self-hosted audio transcription server"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "pydantic==2.13.4",
-    "pydantic-settings==2.14.2",  # GHSA: NestedSecretsSettingsSource symlink traversal
+    "pydantic-settings==2.15.0",  # GHSA: NestedSecretsSettingsSource symlink traversal
     "structlog>=24.0.0",
     # OpenTelemetry core (M19 distributed tracing)
     # Pinned: OTel core 1.X.Y must match instrumentation 0.(X+21)bY exactly.
@@ -122,7 +122,7 @@ dev = [
     # Pinned OpenAI SDK for M61 contract suite
     "openai==2.48.0",
     # Pinned ElevenLabs SDK for M62 contract suite
-    "elevenlabs==2.59.0",
+    "elevenlabs==2.63.0",
 ]
 
 [build-system]
