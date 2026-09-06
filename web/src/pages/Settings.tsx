@@ -111,6 +111,7 @@ function SettingField({
   const display = setting.nullable ? deriveNullableDisplay(setting) : null
   const inputId = `setting-${setting.key}`
   const errorId = `${inputId}-error`
+  const descId = `${inputId}-desc`
   const hasError = error !== null
   const inheritPlaceholder =
     display?.kind === 'inherited-known'
@@ -132,7 +133,7 @@ function SettingField({
             type="button"
             role="switch"
             aria-checked={value === true}
-            aria-label={setting.description}
+            aria-label={setting.label}
             onClick={() => onChange(setting.key, !value)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors touch-manipulation ${
               value ? 'bg-primary' : 'bg-muted'
@@ -158,7 +159,7 @@ function SettingField({
           value={String(value)}
           onChange={(e) => onChange(setting.key, e.target.value)}
           aria-invalid={hasError}
-          aria-describedby={hasError ? errorId : undefined}
+          aria-describedby={hasError ? `${descId} ${errorId}` : descId}
           className={`${hasError ? errorInputClasses : normalInputClasses} w-auto min-w-[120px]`}
         >
           {setting.options?.map((opt, idx) => (
@@ -193,7 +194,7 @@ function SettingField({
         max={setting.max_value ?? undefined}
         step={setting.value_type === 'float' ? 'any' : '1'}
         aria-invalid={hasError}
-        aria-describedby={hasError ? errorId : undefined}
+        aria-describedby={hasError ? `${descId} ${errorId}` : descId}
         className={`${hasError ? errorInputClasses : normalInputClasses} ${
           setting.nullable ? 'w-64' : 'w-24'
         }`}
@@ -221,8 +222,8 @@ function SettingField({
     <div className="grid grid-cols-1 md:grid-cols-[2fr_3fr] gap-2 md:gap-x-6 md:items-start">
       {/* Label */}
       <div className="flex items-center gap-2 md:py-2">
-        <label htmlFor={inputId} className="text-sm text-muted-foreground">
-          {setting.description}
+        <label htmlFor={inputId} className="text-sm text-foreground">
+          {setting.label}
         </label>
         {isOverridden && (
           <span className="inline-block h-2 w-2 rounded-full bg-primary shrink-0" title={S.settings.modified} aria-label="Setting modified" />
@@ -248,6 +249,9 @@ function SettingField({
             <span className="text-xs text-amber-500">{S.settings.pendingNotPickedUp}</span>
           )}
         </div>
+        <p id={descId} className="text-xs text-muted-foreground">
+          {setting.description}
+        </p>
         <p className="text-xs text-muted-foreground/70 break-all">
           {descriptionParts.join(' · ')}
         </p>
