@@ -1245,6 +1245,13 @@ async def get_job_audio(
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     storage: StorageService = Depends(get_storage_service),
+    download: bool = Query(
+        False,
+        description=(
+            "Sign a Content-Disposition: attachment header into the URL so "
+            "browsers save the file instead of playing it inline."
+        ),
+    ),
 ) -> AudioUrlResponse:
     """Get presigned URL for original job audio.
 
@@ -1318,6 +1325,9 @@ async def get_job_audio(
         url = await storage.generate_presigned_url(
             key,
             expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
+            content_disposition=(
+                storage.attachment_disposition(str(job_id), key) if download else None
+            ),
         )
         return AudioUrlResponse(
             url=url,
@@ -1357,6 +1367,13 @@ async def get_job_audio_redacted(
     settings: Settings = Depends(get_settings),
     jobs_service: JobsService = Depends(get_jobs_service),
     storage: StorageService = Depends(get_storage_service),
+    download: bool = Query(
+        False,
+        description=(
+            "Sign a Content-Disposition: attachment header into the URL so "
+            "browsers save the file instead of playing it inline."
+        ),
+    ),
 ) -> AudioUrlResponse:
     """Get presigned URL for PII-redacted job audio.
 
@@ -1476,6 +1493,11 @@ async def get_job_audio_redacted(
         url = await storage.generate_presigned_url(
             key,
             expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
+            content_disposition=(
+                storage.attachment_disposition(f"{job_id}-redacted", key)
+                if download
+                else None
+            ),
         )
         return AudioUrlResponse(
             url=url,

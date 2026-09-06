@@ -65,14 +65,17 @@ export function RealtimeSessionDetail() {
     }
   }, [fetchAudioUrl])
 
-  const resolveAudioDownloadUrl = useCallback(async (variant: 'original' | 'redacted') => {
-    void variant
-    const data = await fetchAudioUrl()
-    if (data) {
-      setAudioUrlData(data)
-    }
-    return data?.url ?? null
-  }, [fetchAudioUrl])
+  // Download URLs are signed with Content-Disposition: attachment, so they are
+  // separate from the inline playback URL and are always fetched fresh.
+  const resolveAudioDownloadUrl = useCallback(
+    async (variant: 'original' | 'redacted') => {
+      void variant
+      if (!sessionId || !canAccessAudio) return null
+      const { url } = await apiClient.getSessionAudioUrl(sessionId, { download: true })
+      return url
+    },
+    [sessionId, canAccessAudio]
+  )
 
   // Fetch audio URL for sessions with stored audio
   useEffect(() => {

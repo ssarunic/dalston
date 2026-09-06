@@ -211,9 +211,6 @@ function FailureDetailsCard({ error }: { error: string }) {
   )
 }
 
-/** URLs are typically valid for 1 hour; refresh if older than 50 minutes */
-const URL_MAX_AGE_MS = 50 * 60 * 1000
-
 function MetadataCard({
   icon: Icon,
   label,
@@ -453,30 +450,23 @@ export function JobDetail() {
     }
   }, [fetchAudioUrls])
 
+  // Download URLs are signed with Content-Disposition: attachment, so they are
+  // separate from the inline playback URLs and are always fetched fresh.
   const resolveAudioDownloadUrl = useCallback(
     async (variant: 'original' | 'redacted') => {
-      // Reuse cached URL if still valid (less than 50 minutes old)
-      if (
-        audioUrlData &&
-        audioUrlData.forJobId === currentJobId &&
-        Date.now() - audioUrlData.fetchedAt < URL_MAX_AGE_MS
-      ) {
-        if (variant === 'redacted') {
-          return audioUrlData.redactedUrl ?? audioUrlData.originalUrl
+      if (!currentJobId || !canAccessAudio) return null
+      if (variant === 'redacted' && hasRedactedAudio) {
+        try {
+          const { url } = await apiClient.getJobRedactedAudioUrl(currentJobId, { download: true })
+          return url
+        } catch {
+          // Redacted audio unavailable; fall back to the original.
         }
-        return audioUrlData.originalUrl
       }
-
-      // Fetch fresh URLs
-      const urls = await fetchAudioUrls()
-      if (!urls) return null
-      setAudioUrlData(urls)
-      if (variant === 'redacted') {
-        return urls.redactedUrl ?? urls.originalUrl
-      }
-      return urls.originalUrl
+      const { url } = await apiClient.getJobAudioUrl(currentJobId, { download: true })
+      return url
     },
-    [fetchAudioUrls, audioUrlData, currentJobId]
+    [currentJobId, canAccessAudio, hasRedactedAudio]
   )
 
   // Fetch audio URLs for terminal jobs with non-purged audio

@@ -370,36 +370,20 @@ export function AudioPlayer({
         : activeSrc
       if (!resolved) return
 
-      // Fetch as blob for consistent download behavior across browsers
-      // This avoids opening new tabs and ensures the file actually downloads
-      const response = await fetch(resolved)
-      if (!response.ok) throw new Error('Failed to fetch audio')
-      const blob = await response.blob()
-      const blobUrl = URL.createObjectURL(blob)
-
-      // Extract filename from URL or use default
-      let filename = 'audio'
-      try {
-        const urlPath = new URL(resolved).pathname
-        const pathFilename = urlPath.split('/').pop()
-        if (pathFilename && pathFilename.includes('.')) {
-          filename = pathFilename
-        } else {
-          // Add extension based on blob type
-          const ext = blob.type.split('/')[1] || 'mp3'
-          filename = `audio.${ext}`
-        }
-      } catch {
-        filename = 'audio.mp3'
-      }
-
+      // Send the browser straight to the presigned URL rather than fetching it
+      // into a blob. The audio lives on a different origin (S3) with no CORS
+      // policy, so fetch() is blocked, whereas a plain navigation is not. The
+      // resolved download URL carries Content-Disposition: attachment, which
+      // is what makes the browser save the file instead of playing it inline.
+      // The `download` attribute only takes effect for same-origin URLs; it is
+      // kept as a hint for that case.
       const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = filename
+      a.href = resolved
+      a.download = ''
+      a.rel = 'noopener'
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(blobUrl)
     } catch (err) {
       console.error('Failed to download audio:', err)
     } finally {
