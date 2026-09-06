@@ -22,36 +22,13 @@ import { AudioLevelMeter } from '@/components/AudioLevelMeter'
 import { BackButton } from '@/components/BackButton'
 import { LiveTranscript } from '@/components/LiveTranscript'
 import { S } from '@/lib/strings'
+import { AUTO_LANGUAGE, buildLanguageOptions, unionModelLanguages } from '@/lib/languages'
 import { useLiveSession } from '@/contexts/LiveSessionContext'
 import { useEngines } from '@/hooks/useEngines'
 import { useRealtimeStatus } from '@/hooks/useRealtimeStatus'
 import { useModelRegistry } from '@/hooks/useModelRegistry'
 import { useAudioDevices } from '@/hooks/useAudioDevices'
 import type { LiveSessionConfig } from '@/api/types'
-
-const LANGUAGES = [
-  { value: 'auto', label: 'Auto-detect' },
-  { value: 'en', label: 'English' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'fr', label: 'French' },
-  { value: 'de', label: 'German' },
-  { value: 'it', label: 'Italian' },
-  { value: 'pt', label: 'Portuguese' },
-  { value: 'nl', label: 'Dutch' },
-  { value: 'ja', label: 'Japanese' },
-  { value: 'ko', label: 'Korean' },
-  { value: 'zh', label: 'Chinese' },
-  { value: 'ru', label: 'Russian' },
-  { value: 'ar', label: 'Arabic' },
-  { value: 'hi', label: 'Hindi' },
-  { value: 'pl', label: 'Polish' },
-  { value: 'uk', label: 'Ukrainian' },
-  { value: 'sv', label: 'Swedish' },
-  { value: 'da', label: 'Danish' },
-  { value: 'fi', label: 'Finnish' },
-  { value: 'no', label: 'Norwegian' },
-  { value: 'tr', label: 'Turkish' },
-]
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -62,7 +39,7 @@ function formatDuration(seconds: number): string {
 export function RealtimeLive() {
   const navigate = useNavigate()
   const [showSettings, setShowSettings] = useState(false)
-  const [language, setLanguage] = useState('auto')
+  const [language, setLanguage] = useState(AUTO_LANGUAGE)
   const [model, setModel] = useState('')
   const [vocabularyText, setVocabularyText] = useState('')
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
@@ -106,9 +83,27 @@ export function RealtimeLive() {
       .map((m) => ({
         id: m.id,                // Full registry ID (e.g. "Systran/faster-whisper-tiny")
         label: m.name || m.loaded_model_id,  // Display name
+        languages: m.languages,
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [registryData, rtRuntimes])
+
+  // Language options come from the selected model's registry entry. With no
+  // model selected the gateway auto-selects by language, so offer the union
+  // of every servable model's languages.
+  const languageOptions = useMemo(() => {
+    if (!model) {
+      return buildLanguageOptions(unionModelLanguages(availableModels))
+    }
+    const selectedModel = availableModels.find((m) => m.id === model)
+    return buildLanguageOptions(selectedModel?.languages)
+  }, [model, availableModels])
+
+  // If the pick isn't offered by the (newly) selected model, fall back to
+  // auto-detect rather than sending a language the gateway will reject.
+  const effectiveLanguage = languageOptions.some((opt) => opt.value === language)
+    ? language
+    : AUTO_LANGUAGE
 
   // Also track currently loaded models for display hints
   const loadedModels = useMemo(() => {
@@ -206,7 +201,7 @@ export function RealtimeLive() {
       .filter((term) => term.length > 0)
 
     const config: LiveSessionConfig = {
-      language,
+      language: effectiveLanguage,
       model,
       enableVad: true,
       interimResults: true,
@@ -255,12 +250,12 @@ export function RealtimeLive() {
                 <label className="text-xs text-muted-foreground mb-1 block">
                   {S.realtimeLive.languageLabel}
                 </label>
-                <Select value={language} onValueChange={setLanguage}>
+                <Select value={effectiveLanguage} onValueChange={setLanguage}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {LANGUAGES.map((lang) => (
+                    {languageOptions.map((lang) => (
                       <SelectItem key={lang.value} value={lang.value}>
                         {lang.label}
                       </SelectItem>

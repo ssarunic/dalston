@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router'
-import { S } from '@/lib/strings'
+import { buildLanguageOptions, unionModelLanguages } from '@/lib/languages'
 import { Upload, Link, AlertCircle, ChevronDown, ChevronUp, X, Info } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -25,89 +25,6 @@ import type {
 } from '@/api/types'
 
 type SourceType = 'file' | 'url'
-
-// Language code to display name mapping
-const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
-  it: 'Italian',
-  pt: 'Portuguese',
-  nl: 'Dutch',
-  ja: 'Japanese',
-  ko: 'Korean',
-  zh: 'Chinese',
-  ar: 'Arabic',
-  ru: 'Russian',
-  hi: 'Hindi',
-  pl: 'Polish',
-  tr: 'Turkish',
-  vi: 'Vietnamese',
-  th: 'Thai',
-  cs: 'Czech',
-  ro: 'Romanian',
-  hu: 'Hungarian',
-  el: 'Greek',
-  da: 'Danish',
-  fi: 'Finnish',
-  no: 'Norwegian',
-  sv: 'Swedish',
-  he: 'Hebrew',
-  id: 'Indonesian',
-  ms: 'Malay',
-  uk: 'Ukrainian',
-  bg: 'Bulgarian',
-  ca: 'Catalan',
-  hr: 'Croatian',
-  sk: 'Slovak',
-  sl: 'Slovenian',
-  sr: 'Serbian',
-  lt: 'Lithuanian',
-  lv: 'Latvian',
-  et: 'Estonian',
-  ta: 'Tamil',
-  te: 'Telugu',
-  bn: 'Bengali',
-  mr: 'Marathi',
-  gu: 'Gujarati',
-  kn: 'Kannada',
-  ml: 'Malayalam',
-  pa: 'Punjabi',
-  ur: 'Urdu',
-  fa: 'Persian',
-  sw: 'Swahili',
-  tl: 'Tagalog',
-  af: 'Afrikaans',
-  cy: 'Welsh',
-  gl: 'Galician',
-  eu: 'Basque',
-  is: 'Icelandic',
-  mt: 'Maltese',
-  ga: 'Irish',
-  sq: 'Albanian',
-  mk: 'Macedonian',
-  bs: 'Bosnian',
-  az: 'Azerbaijani',
-  kk: 'Kazakh',
-  uz: 'Uzbek',
-  mn: 'Mongolian',
-  ne: 'Nepali',
-  si: 'Sinhala',
-  km: 'Khmer',
-  lo: 'Lao',
-  my: 'Burmese',
-  ka: 'Georgian',
-  am: 'Amharic',
-  yo: 'Yoruba',
-  zu: 'Zulu',
-  jv: 'Javanese',
-  su: 'Sundanese',
-}
-
-function getLanguageLabel(code: string): string {
-  return S.newJob.languages[code] || LANGUAGE_NAMES[code] || code.toUpperCase()
-}
 
 const SPEAKER_DETECTION_OPTIONS: { value: SpeakerDetection; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -251,28 +168,11 @@ export function NewJob() {
 
   // Compute available languages based on selected model
   const languageOptions = useMemo(() => {
-    let languages: string[] = []
-
-    if (model !== 'auto' && availableModels.length > 0) {
-      const selectedModel = availableModels.find((m) => m.id === model)
-      if (selectedModel?.languages && selectedModel.languages.length > 0) {
-        languages = selectedModel.languages
-      }
+    if (model === 'auto') {
+      return buildLanguageOptions(unionModelLanguages(availableModels))
     }
-
-    // No model selected or model is multilingual — show common languages
-    if (languages.includes('*') || languages.length === 0) {
-      languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi']
-    }
-
-    // Sort and map to options
-    return [
-      { value: 'auto', label: 'Auto-detect' },
-      ...languages
-        .filter((l) => l !== '*')
-        .sort((a, b) => getLanguageLabel(a).localeCompare(getLanguageLabel(b)))
-        .map((code) => ({ value: code, label: getLanguageLabel(code) })),
-    ]
+    const selectedModel = availableModels.find((m) => m.id === model)
+    return buildLanguageOptions(selectedModel?.languages)
   }, [model, availableModels])
 
   // Compute available diarizer engines from capabilities

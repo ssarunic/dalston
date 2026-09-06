@@ -178,40 +178,7 @@ const batchJobs = {
 } as const
 
 const newJob = {
-  // Language names stay close to the form — they're domain-specific constants
-  // rather than UI chrome, but centralizing avoids duplication.
-  languages: {
-    en: 'English',
-    es: 'Spanish',
-    fr: 'French',
-    de: 'German',
-    it: 'Italian',
-    pt: 'Portuguese',
-    nl: 'Dutch',
-    pl: 'Polish',
-    ru: 'Russian',
-    ja: 'Japanese',
-    ko: 'Korean',
-    zh: 'Chinese',
-    ar: 'Arabic',
-    hi: 'Hindi',
-    tr: 'Turkish',
-    sv: 'Swedish',
-    da: 'Danish',
-    fi: 'Finnish',
-    no: 'Norwegian',
-    uk: 'Ukrainian',
-    cs: 'Czech',
-    el: 'Greek',
-    he: 'Hebrew',
-    hu: 'Hungarian',
-    ro: 'Romanian',
-    th: 'Thai',
-    vi: 'Vietnamese',
-    id: 'Indonesian',
-    ms: 'Malay',
-    ca: 'Catalan',
-  } as Record<string, string>,
+  // Language names live in '@/lib/languages'.
 } as const
 
 const jobDetail = {
