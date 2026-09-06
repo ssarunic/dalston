@@ -2,7 +2,8 @@
 
 import json
 import mimetypes
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
@@ -139,13 +140,18 @@ class StorageService:
         return await self.artifact_store.has_prefix(prefix)
 
     async def generate_presigned_url(
-        self, key: str, expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS
+        self,
+        key: str,
+        expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS,
+        content_disposition: str | None = None,
     ) -> str:
         """Generate a presigned URL for downloading an S3 object.
 
         Args:
             key: S3 object key
             expires_in: URL expiration time in seconds (default 1 hour)
+            content_disposition: Optional Content-Disposition header S3 should
+                return for this URL (see ``attachment_disposition``)
 
         Returns:
             Presigned URL for GET request
@@ -154,6 +160,7 @@ class StorageService:
             bucket=self.bucket,
             key=key,
             expires_in=expires_in,
+            content_disposition=content_disposition,
         )
 
     def parse_s3_uri(self, s3_uri: str) -> tuple[str, str]:
@@ -180,6 +187,7 @@ class StorageService:
         s3_uri: str,
         expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS,
         require_expected_bucket: bool = True,
+        content_disposition: str | None = None,
     ) -> str:
         """Generate a presigned URL directly from an s3:// URI.
 
@@ -187,6 +195,8 @@ class StorageService:
             s3_uri: S3 URI in format s3://bucket/key
             expires_in: URL expiration time in seconds (default 1 hour)
             require_expected_bucket: If True, validates bucket matches configured bucket
+            content_disposition: Optional Content-Disposition header S3 should
+                return for this URL (see ``attachment_disposition``)
 
         Returns:
             Presigned URL for GET request
@@ -197,7 +207,9 @@ class StorageService:
         bucket, key = self.parse_s3_uri(s3_uri)
         if require_expected_bucket and bucket != self.bucket:
             raise ValueError(f"Bucket mismatch: expected {self.bucket}, got {bucket}")
-        return await self.generate_presigned_url_for_bucket(bucket, key, expires_in)
+        return await self.generate_presigned_url_for_bucket(
+            bucket, key, expires_in, content_disposition=content_disposition
+        )
 
     async def generate_presigned_url_for_bucket(
         self,
@@ -205,6 +217,7 @@ class StorageService:
         key: str,
         expires_in: int = S3_PRESIGNED_URL_EXPIRY_SECONDS,
         endpoint_url_override: str | None = None,
+        content_disposition: str | None = None,
     ) -> str:
         """Generate a presigned URL for downloading an S3 object in a bucket.
 
@@ -213,19 +226,42 @@ class StorageService:
             key: S3 object key
             expires_in: URL expiration time in seconds
             endpoint_url_override: Optional endpoint to use for URL signing
+            content_disposition: Optional Content-Disposition header S3 should
+                return for this URL. Signed into the URL as
+                ``response-content-disposition`` so the browser can be sent to
+                the URL directly (no CORS fetch needed) and still get a file
+                download instead of inline playback.
 
         Returns:
             Presigned URL for GET request
         """
         presign_endpoint = endpoint_url_override or self.resolve_presign_endpoint()
+        params: dict[str, str] = {"Bucket": bucket, "Key": key}
+        if content_disposition:
+            params["ResponseContentDisposition"] = content_disposition
         async with get_s3_client(
             self.settings, endpoint_url_override=presign_endpoint
         ) as s3:
             return await s3.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": bucket, "Key": key},
+                Params=params,
                 ExpiresIn=expires_in,
             )
+
+    @staticmethod
+    def attachment_disposition(stem: str, key: str) -> str:
+        """Build a ``Content-Disposition: attachment`` value for a download.
+
+        The filename is ``<stem><ext>`` where ``ext`` is taken from the S3 key
+        so the saved file keeps its real container format. ``stem`` is reduced
+        to a conservative ASCII set so the header never needs quoting rules
+        beyond the plain ``filename=`` form.
+        """
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or "audio"
+        ext = PurePosixPath(key).suffix.lower()
+        if not re.fullmatch(r"\.[a-z0-9]{1,8}", ext):
+            ext = ""
+        return f'attachment; filename="{safe_stem}{ext}"'
 
     def resolve_presign_endpoint(self) -> str | None:
         """Resolve endpoint used for presigned URLs.

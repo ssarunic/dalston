@@ -266,13 +266,22 @@ export const apiClient = {
     return authenticatedDownload(url, filename)
   },
 
-  // Job audio URL (returns presigned S3 URL for download)
-  getJobAudioUrl: (jobId: string) =>
-    currentClient.get(`v1/audio/transcriptions/${jobId}/audio`).json<AudioUrlResponse>(),
+  // Job audio URL (presigned S3 URL). With `download`, the URL carries a
+  // Content-Disposition: attachment so the browser saves the file when sent to it directly.
+  getJobAudioUrl: (jobId: string, opts?: { download?: boolean }) =>
+    currentClient
+      .get(`v1/audio/transcriptions/${jobId}/audio`, {
+        searchParams: opts?.download ? { download: 'true' } : undefined,
+      })
+      .json<AudioUrlResponse>(),
 
-  // Job redacted audio URL (returns presigned S3 URL for PII-redacted audio)
-  getJobRedactedAudioUrl: (jobId: string) =>
-    currentClient.get(`v1/audio/transcriptions/${jobId}/audio/redacted`).json<AudioUrlResponse>(),
+  // Job redacted audio URL (presigned S3 URL for PII-redacted audio)
+  getJobRedactedAudioUrl: (jobId: string, opts?: { download?: boolean }) =>
+    currentClient
+      .get(`v1/audio/transcriptions/${jobId}/audio/redacted`, {
+        searchParams: opts?.download ? { download: 'true' } : undefined,
+      })
+      .json<AudioUrlResponse>(),
 
   // Auth validation
   validateKey: async (apiKey: string): Promise<{ valid: boolean; isAdmin: boolean }> => {
@@ -363,8 +372,12 @@ export const apiClient = {
   getSessionTranscript: (sessionId: string) =>
     currentClient.get(`v1/realtime/sessions/${sessionId}/transcript`).json<SessionTranscript>(),
 
-  getSessionAudioUrl: (sessionId: string) =>
-    currentClient.get(`v1/realtime/sessions/${sessionId}/audio`).json<{ url: string; expires_in: number }>(),
+  getSessionAudioUrl: (sessionId: string, opts?: { download?: boolean }) =>
+    currentClient
+      .get(`v1/realtime/sessions/${sessionId}/audio`, {
+        searchParams: opts?.download ? { download: 'true' } : undefined,
+      })
+      .json<{ url: string; expires_in: number }>(),
 
   deleteRealtimeSession: (sessionId: string) =>
     currentClient.delete(`v1/realtime/sessions/${sessionId}`).json<{ deleted: boolean; session_id: string }>(),

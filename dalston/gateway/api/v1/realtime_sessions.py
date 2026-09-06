@@ -493,6 +493,13 @@ async def get_session_audio(
     security_manager: Annotated[SecurityManager, Depends(get_security_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: StorageService = Depends(get_storage_service),
+    download: bool = Query(
+        False,
+        description=(
+            "Sign a Content-Disposition: attachment header into the URL so "
+            "browsers save the file instead of playing it inline."
+        ),
+    ),
 ):
     """Get presigned URL for session audio."""
     settings = get_settings()
@@ -522,10 +529,15 @@ async def get_session_audio(
 
     # Generate presigned URL from S3 URI
     try:
+        content_disposition = None
+        if download:
+            _, key = storage.parse_s3_uri(session.audio_uri)
+            content_disposition = storage.attachment_disposition(session_id, key)
         url = await storage.generate_presigned_url_from_uri(
             session.audio_uri,
             expires_in=S3_PRESIGNED_URL_EXPIRY_SECONDS,
             require_expected_bucket=False,  # Realtime sessions may use different buckets
+            content_disposition=content_disposition,
         )
         return {"url": url, "expires_in": S3_PRESIGNED_URL_EXPIRY_SECONDS}
     except ValueError:
