@@ -120,7 +120,7 @@ dev = [
     # OpenTelemetry test utilities (M19)
     "opentelemetry-test-utils==0.65b0",
     # Pinned OpenAI SDK for M61 contract suite
-    "openai==2.48.0",
+    "openai==3.8.0",
     # Pinned ElevenLabs SDK for M62 contract suite
     "elevenlabs==2.66.0",
 ]
