@@ -18,4 +18,4 @@ omegaconf>=2.3.1
 # image consistent (otherwise `import dalston.telemetry` crashes with a
 # protobuf gencode/runtime VersionError). Drop when NeMo 3.x lands — it has
 # no protobuf pin.
-googleapis-common-protos<1.75.1
+googleapis-common-protos<1.75.4
