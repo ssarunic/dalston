@@ -70,9 +70,11 @@ from botocore.exceptions import ClientError, WaiterError
 # that execute it from elsewhere (e.g. systemd with an absolute path).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dalston_autoscale import (  # noqa: E402
+    BOOT_FAILURE_TRIP_THRESHOLD,
     AutoscaleTickSnapshot,
     BacklogSnapshot,
     BlockedInfo,
+    BootFailureInfo,
     EngineBacklog,
     FleetSnapshot,
     PolicyEcho,
@@ -80,6 +82,8 @@ from dalston_autoscale import (  # noqa: E402
     ScaleAction,
     ShapePolicy,
     apply_overrides,
+    boot_backoff_remaining_s,
+    boot_failures_recovered,
     decide,
     parse_policy,
 )
@@ -1309,7 +1313,8 @@ docker compose -f /data/dalston/docker-compose.yml exec -T redis sh -c '
   redis-cli DEL dalston:autoscale:shapes dalston:autoscale:shapes:dryrun \
     dalston:autoscale:overrides >/dev/null 2>&1
   for pat in "dalston:autoscale:tick:*" "dalston:autoscale:blocked:*" \\
-             "dalston:autoscale:state:*" "dalston:autoscale:pending:*"; do
+             "dalston:autoscale:state:*" "dalston:autoscale:pending:*" \\
+             "dalston:autoscale:bootfail:*"; do
     redis-cli --scan --pattern "$pat" | while read -r k; do
       [ -n "$k" ] && redis-cli DEL "$k" >/dev/null 2>&1
     done
@@ -3291,6 +3296,13 @@ AUTOSCALE_TICK_TTL_S = 3600
 AUTOSCALE_SHAPES_KEY = "dalston:autoscale:shapes"
 AUTOSCALE_BLOCKED_KEY_PREFIX = "dalston:autoscale:blocked:"
 AUTOSCALE_BLOCKED_TTL_S = 3600
+# M103 boot circuit breaker: consecutive reaped boots per shape. Its own
+# key (not blocked:*) because the blocked tick streak feeds the on-demand
+# fallback, which must not fire on boot failures. Cleared when a worker
+# launched after the last failure boots live, or by --reset-boot-failures.
+# The TTL is a backstop only: a day-old streak is no longer evidence.
+AUTOSCALE_BOOT_FAILURES_KEY_PREFIX = "dalston:autoscale:bootfail:"
+AUTOSCALE_BOOT_FAILURES_TTL_S = 24 * 3600
 # Backoff after a failed on-demand fallback. Self-expiring: while it is set
 # the tick keeps re-probing spot (the fallback branch is suppressed, not the
 # launch), so a paid-capacity outage never stops spot from being retried.
@@ -3536,6 +3548,64 @@ def _clear_blocked_state(r: Any, shape: str, *, dry_run: bool) -> None:
     r.delete(_shape_key(AUTOSCALE_BLOCKED_KEY_PREFIX, shape, dry_run=dry_run))
 
 
+def _read_boot_failures(r: Any, shape: str, *, dry_run: bool) -> BootFailureInfo | None:
+    """Read the shape's consecutive-boot-failure streak (M103), if any."""
+    data = r.hgetall(
+        _shape_key(AUTOSCALE_BOOT_FAILURES_KEY_PREFIX, shape, dry_run=dry_run)
+    )
+    if not data:
+        return None
+    try:
+        ids = tuple(i for i in data.get("instance_ids", "").split(",") if i)
+        return BootFailureInfo(
+            count=int(data["count"]),
+            since=data["since"],
+            last_instance_id=data.get("last_instance_id", ""),
+            last_failure_at=data["last_failure_at"],
+            instance_ids=ids,
+        )
+    except (KeyError, ValueError):
+        return None
+
+
+def _record_boot_failure(
+    r: Any, shape: str, instance_id: str, now: datetime, *, dry_run: bool
+) -> BootFailureInfo:
+    """Count one reaped boot toward the shape's streak (M103).
+
+    Idempotent per instance across the whole streak: dry-run never
+    terminates, so the same stuck workers are reported every tick and must
+    not inflate the count or restart the backoff.
+    """
+    existing = _read_boot_failures(r, shape, dry_run=dry_run)
+    if existing and instance_id in existing.instance_ids:
+        return existing
+    info = BootFailureInfo(
+        count=existing.count + 1 if existing else 1,
+        since=existing.since if existing else now.isoformat(),
+        last_instance_id=instance_id,
+        last_failure_at=now.isoformat(),
+        instance_ids=(*(existing.instance_ids if existing else ()), instance_id),
+    )
+    key = _shape_key(AUTOSCALE_BOOT_FAILURES_KEY_PREFIX, shape, dry_run=dry_run)
+    r.hset(
+        key,
+        mapping={
+            "count": str(info.count),
+            "since": info.since,
+            "last_instance_id": info.last_instance_id,
+            "last_failure_at": info.last_failure_at,
+            "instance_ids": ",".join(info.instance_ids),
+        },
+    )
+    r.expire(key, AUTOSCALE_BOOT_FAILURES_TTL_S)
+    return info
+
+
+def _clear_boot_failures(r: Any, shape: str, *, dry_run: bool) -> None:
+    r.delete(_shape_key(AUTOSCALE_BOOT_FAILURES_KEY_PREFIX, shape, dry_run=dry_run))
+
+
 def _write_on_demand_cooldown(
     r: Any, shape: str, detail: str, *, dry_run: bool
 ) -> None:
@@ -3640,6 +3710,10 @@ def _reap_stuck_pending(
         if age_s >= policy.boot_timeout_s:
             stuck.append(iid)
     if dry_run:
+        # Observation mode still tracks the streak (shadow key, deduped per
+        # instance) so a dry-run tick shows the breaker it would have tripped.
+        for iid in stuck:
+            _record_boot_failure(r, policy.name, iid, now, dry_run=True)
         return stuck, []
     reaped = []
     for iid in stuck:
@@ -3653,10 +3727,36 @@ def _reap_stuck_pending(
             warn(f"Failed to reap {iid}: {e}")
             continue
         reaped.append(iid)
+        # The shadow card would otherwise linger for AUTOSCALE_PENDING_TTL_S
+        # showing a "booting" worker that no longer exists.
+        r.delete(f"{AUTOSCALE_PENDING_KEY_PREFIX}{iid}")
         audit("autoscale.boot_timeout", shape=policy.name, gpu_instance=iid)
         _publish_autoscale_event(
             r, "autoscaler.boot_timeout", shape=policy.name, instance_id=iid
         )
+        info = _record_boot_failure(r, policy.name, iid, now, dry_run=False)
+        if info.count == BOOT_FAILURE_TRIP_THRESHOLD:
+            warn(
+                f"Boot circuit OPEN for shape '{policy.name}': {info.count} "
+                f"consecutive boot failures since {info.since}. Launches back "
+                "off exponentially until a worker boots live; inspect the "
+                "instance console log (ec2 get-console-output), fix the cause, "
+                "then 'dalston-aws autoscale --reset-boot-failures'."
+            )
+            audit(
+                "autoscale.boot_circuit_open",
+                shape=policy.name,
+                failures=info.count,
+                since=info.since,
+            )
+            _publish_autoscale_event(
+                r,
+                "autoscaler.boot_circuit_open",
+                shape=policy.name,
+                failures=info.count,
+                since=info.since,
+                last_instance_id=iid,
+            )
     return stuck, reaped
 
 
@@ -3907,6 +4007,40 @@ def _autoscale_provision_remote(*, dry_run: bool = False) -> None:
         log("Enable actuation later with: dalston-aws autoscale --provision")
 
 
+def _snapshot_blocked(
+    r: Any, policy: ShapePolicy, now: datetime, *, dry_run: bool
+) -> BlockedInfo | None:
+    """The `blocked` field for this tick's snapshot (M95 contract).
+
+    An open boot breaker (M103) takes precedence over a spot streak: it is
+    what actually stops the next launch, and the console's warning/critical
+    strip states key off this field. Read after the reaper ran so a trip
+    this tick shows this tick.
+    """
+    info = _read_boot_failures(r, policy.name, dry_run=dry_run)
+    remaining = boot_backoff_remaining_s(policy, info, now)
+    if info and remaining > 0:
+        return BlockedInfo(
+            kind="boot_failure",
+            since=info.since,
+            consecutive_ticks=info.count,
+            detail=(
+                f"{info.count} consecutive boot failures; last {info.last_instance_id} "
+                f"at {info.last_failure_at}; next launch in {remaining / 60:.0f}m"
+            ),
+        )
+    return _read_blocked_state(r, policy.name, dry_run=dry_run)
+
+
+def _reset_boot_failures(r: Any, shapes: list[ShapePolicy]) -> None:
+    """Operator override for the M103 breaker after fixing the boot cause."""
+    for policy in shapes:
+        for dry_run in (False, True):
+            _clear_boot_failures(r, policy.name, dry_run=dry_run)
+        audit("autoscale.boot_failures_reset", shape=policy.name)
+        log(f"Boot-failure streak cleared for shape '{policy.name}'")
+
+
 def cmd_autoscale(args: argparse.Namespace) -> None:
     if args.provision:
         _autoscale_provision_remote(dry_run=args.dry_run)
@@ -3935,6 +4069,9 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
         die(f"Bad autoscale policy {policy_path}: {e}")
 
     r = redis.Redis.from_url(ctx.redis_url, decode_responses=True, socket_timeout=10)
+    if args.reset_boot_failures:
+        _reset_boot_failures(r, shapes)
+        return
     now = datetime.now(UTC)
     # Marker rewrite is independent of per-shape outcomes: written right
     # after the policy parses so a mid-loop exception can never skip it.
@@ -3961,6 +4098,19 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
         idle_now = backlog.all_idle and fleet.total > 0
         idle_s = _update_idle_state(r, policy, idle_now, dry_run=args.dry_run, now=now)
         blocked_before = _read_blocked_state(r, policy.name, dry_run=args.dry_run)
+        # M103: a worker launched after the last boot failure that is now
+        # live proves the boot path works again — close the breaker.
+        boot_info = _read_boot_failures(r, policy.name, dry_run=args.dry_run)
+        if boot_info and boot_failures_recovered(
+            boot_info, (launch_times.get(iid) for iid in fleet.live_instance_ids)
+        ):
+            _clear_boot_failures(r, policy.name, dry_run=args.dry_run)
+            audit(
+                "autoscale.boot_circuit_closed",
+                shape=policy.name,
+                failures=boot_info.count,
+            )
+            boot_info = None
         decision = decide(
             policy,
             backlog,
@@ -3970,6 +4120,8 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
             on_demand_cooldown=_on_demand_cooling_down(
                 r, policy.name, dry_run=args.dry_run
             ),
+            boot_failures=boot_info.count if boot_info else 0,
+            boot_backoff_remaining_s=boot_backoff_remaining_s(policy, boot_info, now),
         )
         # Reap workers stuck mid-boot before anything else: they hold the
         # single-flight slot, so no scale action is meaningful this tick.
@@ -3999,9 +4151,10 @@ def cmd_autoscale(args: argparse.Namespace) -> None:
                 overrides_applied=overrides_applied,
                 override_error=override_error,
             ),
-            blocked=_read_blocked_state(r, policy.name, dry_run=args.dry_run),
+            blocked=_snapshot_blocked(r, policy, now, dry_run=args.dry_run),
             idle_since_s=idle_s,
             stuck_pending=tuple(stuck) if stuck else (),
+            boot_failures=_read_boot_failures(r, policy.name, dry_run=args.dry_run),
         )
         _write_tick_snapshot(r, policy.name, snapshot.to_dict(), dry_run=args.dry_run)
         # Liveness last: this shape completed a full tick. A shape that threw
@@ -6038,6 +6191,18 @@ def build_parser() -> argparse.ArgumentParser:
             "in place. Settings -> Autoscale overrides live in Postgres and "
             "are repopulated by the gateway within a minute — reset that "
             "namespace in the console too for a fully clean state"
+        ),
+    )
+    p_autoscale.add_argument(
+        "--reset-boot-failures",
+        action="store_true",
+        help=(
+            "Close the M103 boot circuit breaker for every shape in the policy "
+            "(run ON the control plane, e.g. via 'dalston-aws ssh'): clears the "
+            "consecutive-boot-failure streak so the next tick may launch "
+            "immediately instead of waiting out the backoff. Use after fixing "
+            "the boot cause (expired Tailscale key, bad image, bad AMI). A worker "
+            "that boots live clears it automatically"
         ),
     )
     p_autoscale.set_defaults(func=cmd_autoscale)

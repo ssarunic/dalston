@@ -44,6 +44,12 @@ function FormulaLine({ view }: { view: AutoscalerShapeView }) {
   )
 }
 
+function blockedMessage(blockedKind: string, maxBacklog: number, failures: number | null) {
+  if (blockedKind === 'boot_failure') return S.autoscalerStrip.bootFailure(failures ?? 0, maxBacklog)
+  if (blockedKind === 'spot_capacity') return S.autoscalerStrip.spotCapacity(maxBacklog)
+  return S.autoscalerStrip.spotQuota(maxBacklog)
+}
+
 function StatusLine({ view, state, nowMs }: { view: AutoscalerShapeView; state: StripState; nowMs: number | null }) {
   switch (state.kind) {
     case 'stale':
@@ -61,13 +67,13 @@ function StatusLine({ view, state, nowMs }: { view: AutoscalerShapeView; state: 
           : null
       return (
         <p className="text-sm text-red-400">
-          {state.blockedKind === 'spot_capacity'
-            ? S.autoscalerStrip.spotCapacity(state.maxBacklog)
-            : S.autoscalerStrip.spotQuota(state.maxBacklog)}{' '}
+          {blockedMessage(state.blockedKind, state.maxBacklog, view.blocked?.consecutive_ticks ?? null)}{' '}
           {deadlineS !== null
             ? S.autoscalerStrip.criticalDeadline(formatDurationShort(deadlineS))
             : nowMs !== null
-              ? S.autoscalerStrip.criticalBlockedFor(formatElapsed(state.blockedSince, nowMs))
+              ? state.blockedKind === 'boot_failure'
+                ? S.autoscalerStrip.criticalPausedFor(formatElapsed(state.blockedSince, nowMs))
+                : S.autoscalerStrip.criticalBlockedFor(formatElapsed(state.blockedSince, nowMs))
               : null}
         </p>
       )
@@ -75,9 +81,7 @@ function StatusLine({ view, state, nowMs }: { view: AutoscalerShapeView; state: 
     case 'warning':
       return (
         <p className="text-sm text-amber-500">
-          {state.blockedKind === 'spot_capacity'
-            ? S.autoscalerStrip.spotCapacity(state.maxBacklog)
-            : S.autoscalerStrip.spotQuota(state.maxBacklog)}
+          {blockedMessage(state.blockedKind, state.maxBacklog, view.blocked?.consecutive_ticks ?? null)}
         </p>
       )
     case 'cooldown': {

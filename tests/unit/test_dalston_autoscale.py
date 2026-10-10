@@ -758,3 +758,221 @@ class TestFallbackPolicyParsing:
         assert applied == ("tasks_per_instance",)
         assert effective.fallback_to_on_demand is True
         assert effective.max_on_demand == 2
+
+
+# ---------------------------------------------------------------------------
+# M103 boot circuit breaker
+# ---------------------------------------------------------------------------
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+from dalston_autoscale import (  # noqa: E402
+    BOOT_FAILURE_BACKOFF_CAP_S,
+    BOOT_FAILURE_TRIP_THRESHOLD,
+    BootFailureInfo,
+    boot_backoff_remaining_s,
+    boot_failure_backoff_s,
+    boot_failures_recovered,
+)
+
+_T0 = datetime(2026, 9, 15, 15, 0, tzinfo=UTC)
+
+
+def _boot_info(
+    count: int, last_at: datetime = _T0, iid: str = "i-last"
+) -> BootFailureInfo:
+    return BootFailureInfo(
+        count=count,
+        since=(last_at - timedelta(hours=1)).isoformat(),
+        last_instance_id=iid,
+        last_failure_at=last_at.isoformat(),
+    )
+
+
+def _backlog(n: int) -> BacklogSnapshot:
+    return BacklogSnapshot(
+        (EngineBacklog("nemo", n, 0), EngineBacklog("pyannote-4.0", n, 0))
+    )
+
+
+class TestBootFailureBackoffSchedule:
+    def test_below_threshold_no_backoff(self):
+        policy = make_policy()
+        for count in range(BOOT_FAILURE_TRIP_THRESHOLD):
+            assert boot_failure_backoff_s(policy, count) == 0
+
+    def test_doubles_from_boot_timeout_at_threshold(self):
+        policy = make_policy(boot_timeout_s=1800)
+        t = BOOT_FAILURE_TRIP_THRESHOLD
+        assert boot_failure_backoff_s(policy, t) == 1800
+        assert boot_failure_backoff_s(policy, t + 1) == 3600
+        assert boot_failure_backoff_s(policy, t + 2) == 7200
+
+    def test_capped(self):
+        policy = make_policy(boot_timeout_s=1800)
+        assert boot_failure_backoff_s(policy, 40) == BOOT_FAILURE_BACKOFF_CAP_S
+
+    def test_scales_with_boot_timeout(self):
+        # A shape that legitimately boots slowly waits proportionally longer.
+        assert boot_failure_backoff_s(make_policy(boot_timeout_s=600), 2) == 600
+
+
+class TestBootBackoffRemaining:
+    def test_none_is_closed(self):
+        assert boot_backoff_remaining_s(make_policy(), None, _T0) == 0.0
+
+    def test_single_failure_is_closed(self):
+        assert boot_backoff_remaining_s(make_policy(), _boot_info(1), _T0) == 0.0
+
+    def test_counts_down_from_last_failure(self):
+        policy = make_policy(boot_timeout_s=1800)
+        info = _boot_info(2)  # backoff 1800s from _T0
+        assert boot_backoff_remaining_s(policy, info, _T0) == 1800.0
+        assert (
+            boot_backoff_remaining_s(policy, info, _T0 + timedelta(seconds=600))
+            == 1200.0
+        )
+        assert (
+            boot_backoff_remaining_s(policy, info, _T0 + timedelta(seconds=1800)) == 0.0
+        )
+        assert boot_backoff_remaining_s(policy, info, _T0 + timedelta(hours=9)) == 0.0
+
+    def test_corrupt_timestamp_fails_open(self):
+        info = BootFailureInfo(
+            count=5, since="x", last_instance_id="i", last_failure_at="not-a-date"
+        )
+        assert boot_backoff_remaining_s(make_policy(), info, _T0) == 0.0
+
+
+class TestBootFailuresRecovered:
+    def test_live_worker_launched_after_failure_recovers(self):
+        assert boot_failures_recovered(_boot_info(3), [_T0 + timedelta(minutes=2)])
+
+    def test_worker_live_since_before_the_streak_does_not(self):
+        # Partial failure (old worker fine, new boots broken) must not keep
+        # resetting the counter — that is the loop the breaker exists for.
+        assert not boot_failures_recovered(_boot_info(3), [_T0 - timedelta(hours=3)])
+
+    def test_no_live_workers(self):
+        assert not boot_failures_recovered(_boot_info(3), [])
+        assert not boot_failures_recovered(_boot_info(3), [None])
+
+    def test_corrupt_timestamp_fails_open(self):
+        info = BootFailureInfo(
+            count=3, since="x", last_instance_id="i", last_failure_at="?"
+        )
+        assert boot_failures_recovered(info, [])
+
+
+class TestDecideWithBreaker:
+    def _launch_wanted(self):
+        return make_policy(), _backlog(5), FleetSnapshot()
+
+    def test_open_breaker_holds_launch(self):
+        policy, backlog, fleet = self._launch_wanted()
+        d = decide(
+            policy,
+            backlog,
+            fleet,
+            idle_since_s=None,
+            boot_failures=3,
+            boot_backoff_remaining_s=900.0,
+        )
+        assert d.action == ScaleAction.NONE
+        assert "boot circuit open" in d.reason
+        assert "3 consecutive boot failures" in d.reason
+        assert "15m" in d.reason
+
+    def test_closed_breaker_launches_even_with_history(self):
+        policy, backlog, fleet = self._launch_wanted()
+        d = decide(
+            policy,
+            backlog,
+            fleet,
+            idle_since_s=None,
+            boot_failures=3,
+            boot_backoff_remaining_s=0.0,
+        )
+        assert d.action == ScaleAction.LAUNCH
+
+    def test_single_flight_reported_before_breaker(self):
+        policy = make_policy()
+        # backlog wants 2 instances; one is still booting
+        fleet = FleetSnapshot(pending_instance_ids=("i-booting",))
+        d = decide(
+            policy,
+            _backlog(25),
+            fleet,
+            idle_since_s=None,
+            boot_failures=3,
+            boot_backoff_remaining_s=900.0,
+        )
+        assert d.action == ScaleAction.NONE
+        assert "single-flight" in d.reason
+
+    def test_breaker_blocks_on_demand_fallback_too(self):
+        # Paid capacity does not fix a boot that never registers.
+        policy = make_policy(fallback_to_on_demand=True, max_on_demand=1)
+        d = decide(
+            policy,
+            _backlog(5),
+            FleetSnapshot(),
+            idle_since_s=None,
+            blocked_ticks=10,
+            boot_failures=2,
+            boot_backoff_remaining_s=60.0,
+        )
+        assert d.action == ScaleAction.NONE
+        assert "boot circuit open" in d.reason
+
+    def test_breaker_irrelevant_when_no_launch_needed(self):
+        policy = make_policy()
+        fleet = FleetSnapshot(live_instance_ids=("i-live",))
+        d = decide(
+            policy,
+            _backlog(0),
+            fleet,
+            idle_since_s=99999.0,
+            boot_failures=5,
+            boot_backoff_remaining_s=3600.0,
+        )
+        assert d.action == ScaleAction.TERMINATE
+
+
+class TestBootFailureSnapshotContract:
+    def _snapshot(self, **overrides) -> AutoscaleTickSnapshot:
+        policy = make_policy()
+        decision = decide(policy, _backlog(5), FleetSnapshot(), idle_since_s=None)
+        base = {
+            "ts": _T0.isoformat(),
+            "decision": decision,
+            "applied": "no action",
+            "spot_live": 0,
+            "on_demand_live": 0,
+            "policy": PolicyEcho.from_policy(policy),
+            "blocked": None,
+            "idle_since_s": None,
+        }
+        base.update(overrides)
+        return AutoscaleTickSnapshot(**base)
+
+    def test_boot_failures_null_by_default(self):
+        assert self._snapshot().to_dict()["boot_failures"] is None
+
+    def test_boot_failures_serialized(self):
+        d = self._snapshot(boot_failures=_boot_info(2)).to_dict()
+        assert d["boot_failures"] == {
+            "count": 2,
+            "since": (_T0 - timedelta(hours=1)).isoformat(),
+            "last_instance_id": "i-last",
+            "last_failure_at": _T0.isoformat(),
+            "instance_ids": [],
+        }
+
+    def test_boot_failure_is_a_valid_blocked_kind(self):
+        blocked = BlockedInfo(
+            kind="boot_failure", since=_T0.isoformat(), consecutive_ticks=2, detail="d"
+        )
+        d = self._snapshot(blocked=blocked).to_dict()
+        assert d["blocked"]["kind"] == "boot_failure"
+        assert d["blocked"]["consecutive_ticks"] == 2

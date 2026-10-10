@@ -16,12 +16,17 @@ Semantics (see docs/plan/milestones/M91-queue-based-gpu-autoscaling.md):
   further launches (single-flight)
 - scale-down only when every engine in the shape is idle (lag == 0 and
   in-flight == 0) sustained for the cooldown; the caller tracks idle_since
+- boot circuit breaker (M103): consecutive reaped boots back launches off
+  exponentially (boot_timeout_s doubling per failure, capped) instead of
+  relaunching every tick; a worker that boots live closes the breaker
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -371,7 +376,10 @@ class BlockedInfo:
     when blocked tracking matters.
     """
 
-    kind: Literal["spot_quota", "spot_capacity"]
+    # "boot_failure" (M103) is synthesised into the tick snapshot only —
+    # never written to the blocked Redis key, whose tick streak drives the
+    # on-demand fallback (paid capacity does not fix a boot that wedges).
+    kind: Literal["spot_quota", "spot_capacity", "boot_failure"]
     since: str  # ISO timestamp of the first failed tick in this streak
     consecutive_ticks: int
     detail: str
@@ -383,6 +391,104 @@ class BlockedInfo:
             "consecutive_ticks": self.consecutive_ticks,
             "detail": self.detail,
         }
+
+
+# M103 boot circuit breaker. A reaped boot (pending > boot_timeout_s with no
+# registration) costs a full boot_timeout_s of GPU billing and, on its own,
+# tells the autoscaler nothing — the next tick relaunches into the same
+# failure. 2026-09-12: an expired Tailscale auth key produced ~70 identical
+# launch/reap cycles over three days before anyone noticed. One failure is
+# tolerated (nvme-prep boot race, spot reclaim mid-boot); from the second
+# the shape backs off, doubling per failure up to the cap.
+BOOT_FAILURE_TRIP_THRESHOLD = 2
+BOOT_FAILURE_BACKOFF_CAP_S = 6 * 3600
+
+
+@dataclass(frozen=True)
+class BootFailureInfo:
+    """Consecutive-boot-failure streak for a shape (M103), Redis-held
+    between ticks in dalston:autoscale:bootfail:<shape>."""
+
+    count: int
+    since: str  # ISO timestamp of the first failure in this streak
+    last_instance_id: str
+    last_failure_at: str  # ISO timestamp of the most recent failure
+    # Every instance already counted in this streak. The dedupe key: dry-run
+    # never terminates, so the same stuck workers are reported every tick —
+    # remembering only the latest id would re-count two alternating workers
+    # (2, 4, 6, ...) and restart the backoff each tick.
+    instance_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "count": self.count,
+            "since": self.since,
+            "last_instance_id": self.last_instance_id,
+            "last_failure_at": self.last_failure_at,
+            "instance_ids": list(self.instance_ids),
+        }
+
+
+def boot_failure_backoff_s(policy: ShapePolicy, count: int) -> int:
+    """Seconds to hold launches after `count` consecutive boot failures.
+
+    0 below the trip threshold. From the threshold: boot_timeout_s, then
+    doubling per further failure, capped. Derived from boot_timeout_s so a
+    shape that legitimately needs a long boot also waits proportionally.
+    """
+    if count < BOOT_FAILURE_TRIP_THRESHOLD:
+        return 0
+    return min(
+        BOOT_FAILURE_BACKOFF_CAP_S,
+        policy.boot_timeout_s * 2 ** (count - BOOT_FAILURE_TRIP_THRESHOLD),
+    )
+
+
+def boot_backoff_remaining_s(
+    policy: ShapePolicy, info: BootFailureInfo | None, now: datetime
+) -> float:
+    """Seconds until the breaker lets the next launch through (0 = closed).
+
+    `now` is passed in, not read: this stays a pure function of its inputs.
+    A malformed timestamp fails open (0) — a corrupt counter must never
+    pin a shape shut.
+    """
+    if info is None:
+        return 0.0
+    backoff = boot_failure_backoff_s(policy, info.count)
+    if backoff <= 0:
+        return 0.0
+    try:
+        last = datetime.fromisoformat(info.last_failure_at)
+    except ValueError:
+        return 0.0
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=now.tzinfo)
+    return max(0.0, backoff - (now - last).total_seconds())
+
+
+def boot_failures_recovered(
+    info: BootFailureInfo, live_launch_times: Iterable[datetime | None]
+) -> bool:
+    """True once a worker launched AFTER the last failure has booted live.
+
+    Only a post-failure boot proves the boot path is fixed. A worker that
+    was already live before the streak began (partial failure: old AMI
+    fine, new AMI broken) must not keep resetting the counter — that is
+    exactly the case where the loop would otherwise never trip.
+    """
+    try:
+        last = datetime.fromisoformat(info.last_failure_at)
+    except ValueError:
+        return True  # corrupt state: fail open, clear it
+    for launched in live_launch_times:
+        if launched is None:
+            continue
+        if launched.tzinfo is None and last.tzinfo is not None:
+            launched = launched.replace(tzinfo=last.tzinfo)
+        if launched > last:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -401,6 +507,7 @@ class AutoscaleTickSnapshot:
     blocked: BlockedInfo | None
     idle_since_s: float | None
     stuck_pending: tuple[str, ...] = ()
+    boot_failures: BootFailureInfo | None = None
     schema_version: int = AUTOSCALE_TICK_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -414,6 +521,7 @@ class AutoscaleTickSnapshot:
             idle_since_s=self.idle_since_s,
             policy=self.policy.to_dict(),
             blocked=self.blocked.to_dict() if self.blocked else None,
+            boot_failures=self.boot_failures.to_dict() if self.boot_failures else None,
         )
         if self.stuck_pending:
             d["stuck_pending"] = list(self.stuck_pending)
@@ -433,6 +541,8 @@ def decide(
     idle_since_s: float | None,
     blocked_ticks: int = 0,
     on_demand_cooldown: bool = False,
+    boot_failures: int = 0,
+    boot_backoff_remaining_s: float = 0.0,
 ) -> ScaleDecision:
     """Pure scaling decision — no I/O, no clock reads.
 
@@ -450,6 +560,12 @@ def decide(
     still backing off. Suppresses only the escalation, so the tick falls
     through to a spot launch — spot keeps being re-probed instead of the
     shape pinning itself to a paid path that is also failing.
+
+    boot_failures / boot_backoff_remaining_s (M103): the consecutive reaped
+    boots for this shape and how long the breaker still holds launches
+    (see boot_backoff_remaining_s). While open, no launch of either kind —
+    on-demand capacity does not fix a boot that never registers, and a
+    paid worker reaped after boot_timeout_s is the most expensive failure.
     """
     desired = desired_instances(policy, backlog.max_backlog)
 
@@ -470,6 +586,12 @@ def decide(
             return _decision(
                 ScaleAction.NONE,
                 f"single-flight: {fleet.pending} instance(s) still booting",
+            )
+        if boot_backoff_remaining_s > 0:
+            return _decision(
+                ScaleAction.NONE,
+                f"boot circuit open: {boot_failures} consecutive boot failures; "
+                f"next launch in {boot_backoff_remaining_s / 60:.0f}m",
             )
         # M95.6: spot has failed for long enough that waiting is worse than
         # paying. on_demand_total counts booting workers too — a fallback

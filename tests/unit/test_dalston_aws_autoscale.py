@@ -251,9 +251,11 @@ class TestReapStuckPending:
         monkeypatch.setattr(daws, "terminate_gpu_worker", term)
         monkeypatch.setattr(daws, "_publish_autoscale_event", publish)
         monkeypatch.setattr(daws, "audit", audit)
+        r = MagicMock()
+        r.hgetall.return_value = {}  # no prior boot-failure streak (M103)
 
         stuck, reaped = daws._reap_stuck_pending(
-            MagicMock(),
+            r,
             _ctx(daws),
             _policy(daws),
             self._fleet(daws, ["i-old-auto", "i-new-auto", "i-old-manual"]),
@@ -1032,3 +1034,311 @@ class TestDeprovision:
         """/data (and Redis) survives terminate->relaunch."""
         snippet = daws._autoscale_redis_cleanup_snippet()
         assert "dalston:autoscale:shapes" in snippet
+
+
+class _FakeRedis:
+    """Minimal dict-backed hash store for multi-tick streak tests."""
+
+    def __init__(self) -> None:
+        self.hashes: dict[str, dict[str, str]] = {}
+
+    def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    def hset(self, key, mapping):
+        self.hashes.setdefault(key, {}).update(mapping)
+
+    def expire(self, key, ttl):
+        pass
+
+    def delete(self, *keys):
+        for k in keys:
+            self.hashes.pop(k, None)
+
+
+class TestBootFailureState:
+    """M103: the streak lives in its own key (not blocked:*) and is deduped
+    per instance so dry-run's un-reaped stuck workers cannot inflate it."""
+
+    KEY = "dalston:autoscale:bootfail:nemo+pyannote"
+
+    def test_first_failure_starts_streak(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        now = datetime.now(UTC)
+
+        info = daws._record_boot_failure(r, "nemo+pyannote", "i-1", now, dry_run=False)
+
+        assert info.count == 1 and info.last_instance_id == "i-1"
+        assert r.hset.call_args[0][0] == self.KEY
+        mapping = r.hset.call_args[1]["mapping"]
+        assert mapping["count"] == "1"
+        assert mapping["since"] == mapping["last_failure_at"] == now.isoformat()
+        r.expire.assert_called_once_with(self.KEY, daws.AUTOSCALE_BOOT_FAILURES_TTL_S)
+
+    def test_new_instance_increments_and_preserves_since(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "count": "1",
+            "since": "2026-09-12T21:34:00+00:00",
+            "last_instance_id": "i-1",
+            "last_failure_at": "2026-09-12T22:04:00+00:00",
+        }
+        now = datetime.now(UTC)
+
+        info = daws._record_boot_failure(r, "nemo+pyannote", "i-2", now, dry_run=False)
+
+        assert info.count == 2
+        mapping = r.hset.call_args[1]["mapping"]
+        assert mapping["count"] == "2"
+        assert mapping["since"] == "2026-09-12T21:34:00+00:00"
+        assert mapping["last_failure_at"] == now.isoformat()
+
+    def test_same_instance_is_deduped(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "count": "1",
+            "since": "s",
+            "last_instance_id": "i-1",
+            "last_failure_at": "2026-09-12T22:04:00+00:00",
+            "instance_ids": "i-1",
+        }
+
+        info = daws._record_boot_failure(
+            r, "nemo+pyannote", "i-1", datetime.now(UTC), dry_run=False
+        )
+
+        assert info.count == 1
+        assert not r.hset.called
+
+    def test_earlier_instance_in_streak_is_deduped_too(self, daws) -> None:
+        # Not just the most recent id: any instance already counted.
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "count": "2",
+            "since": "s",
+            "last_instance_id": "i-2",
+            "last_failure_at": "2026-09-12T22:04:00+00:00",
+            "instance_ids": "i-1,i-2",
+        }
+
+        info = daws._record_boot_failure(
+            r, "nemo+pyannote", "i-1", datetime.now(UTC), dry_run=False
+        )
+
+        assert info.count == 2 and not r.hset.called
+
+    def test_repeated_dry_run_ticks_with_two_stuck_workers_count_once_each(
+        self, daws, monkeypatch
+    ) -> None:
+        """Regression: with only last_instance_id remembered, two stuck
+        workers reported every tick alternated past the dedupe and the
+        streak read 2, 4, 6, ... while the backoff restarted each tick."""
+        r = _FakeRedis()
+        monkeypatch.setattr(daws, "terminate_gpu_worker", MagicMock())
+        now = datetime.now(UTC)
+        import dalston_autoscale as das
+
+        fleet = das.FleetSnapshot(pending_instance_ids=("i-a", "i-b"))
+        managed = {"i-a": "autoscaler", "i-b": "autoscaler"}
+        launched = {k: now - timedelta(seconds=3600) for k in managed}
+        for tick in range(3):
+            tick_now = now + timedelta(minutes=tick)
+            daws._reap_stuck_pending(
+                r,
+                _ctx(daws),
+                _policy(daws),
+                fleet,
+                managed,
+                launched,
+                tick_now,
+                dry_run=True,
+            )
+            info = daws._read_boot_failures(r, "nemo+pyannote", dry_run=True)
+            assert info is not None
+            assert info.count == 2, f"tick {tick}: count {info.count}"
+            assert set(info.instance_ids) == {"i-a", "i-b"}
+        # last_failure_at must not creep forward on deduped ticks, or the
+        # backoff never elapses
+        assert info.last_failure_at == now.isoformat()
+
+    def test_dry_run_uses_shadow_key(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        daws._record_boot_failure(r, "s", "i-1", datetime.now(UTC), dry_run=True)
+        assert r.hset.call_args[0][0] == "dalston:autoscale:bootfail:dryrun:s"
+
+    def test_read_round_trip_and_malformed(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "count": "3",
+            "since": "s",
+            "last_instance_id": "i-3",
+            "last_failure_at": "t",
+        }
+        info = daws._read_boot_failures(r, "s", dry_run=False)
+        assert info is not None and info.count == 3 and info.last_instance_id == "i-3"
+
+        r.hgetall.return_value = {"count": "NaN", "since": "s", "last_failure_at": "t"}
+        assert daws._read_boot_failures(r, "s", dry_run=False) is None
+        r.hgetall.return_value = {}
+        assert daws._read_boot_failures(r, "s", dry_run=False) is None
+
+    def test_clear_deletes_key(self, daws) -> None:
+        r = MagicMock()
+        daws._clear_boot_failures(r, "nemo+pyannote", dry_run=False)
+        r.delete.assert_called_once_with(self.KEY)
+
+    def test_reset_clears_live_and_dry_run_for_every_shape(
+        self, daws, monkeypatch
+    ) -> None:
+        r = MagicMock()
+        monkeypatch.setattr(daws, "audit", MagicMock())
+        monkeypatch.setattr(daws, "log", MagicMock())
+        daws._reset_boot_failures(r, [_policy(daws), _policy(daws, name="other")])
+        deleted = {c[0][0] for c in r.delete.call_args_list}
+        assert deleted == {
+            "dalston:autoscale:bootfail:nemo+pyannote",
+            "dalston:autoscale:bootfail:dryrun:nemo+pyannote",
+            "dalston:autoscale:bootfail:other",
+            "dalston:autoscale:bootfail:dryrun:other",
+        }
+
+
+class TestReaperFeedsBreaker:
+    def _fleet(self, pending):
+        import dalston_autoscale as das
+
+        return das.FleetSnapshot(pending_instance_ids=tuple(pending))
+
+    def _reap(self, daws, r, *, dry_run=False):
+        now = datetime.now(UTC)
+        return daws._reap_stuck_pending(
+            r,
+            _ctx(daws),
+            _policy(daws),
+            self._fleet(["i-old-auto"]),
+            {"i-old-auto": "autoscaler"},
+            {"i-old-auto": now - timedelta(seconds=3600)},
+            now,
+            dry_run=dry_run,
+        )
+
+    def test_reap_records_failure_and_drops_shadow_card(
+        self, daws, monkeypatch
+    ) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        monkeypatch.setattr(daws, "terminate_gpu_worker", MagicMock())
+        monkeypatch.setattr(daws, "_publish_autoscale_event", MagicMock())
+        monkeypatch.setattr(daws, "audit", MagicMock())
+
+        _, reaped = self._reap(daws, r)
+
+        assert reaped == ["i-old-auto"]
+        r.delete.assert_any_call("dalston:autoscale:pending:i-old-auto")
+        mapping = r.hset.call_args[1]["mapping"]
+        assert mapping["count"] == "1" and mapping["last_instance_id"] == "i-old-auto"
+
+    def test_second_reap_opens_circuit_and_announces(self, daws, monkeypatch) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {
+            "count": "1",
+            "since": "2026-09-12T21:34:00+00:00",
+            "last_instance_id": "i-previous",
+            "last_failure_at": "2026-09-12T22:04:00+00:00",
+        }
+        publish = MagicMock()
+        audit = MagicMock()
+        monkeypatch.setattr(daws, "terminate_gpu_worker", MagicMock())
+        monkeypatch.setattr(daws, "_publish_autoscale_event", publish)
+        monkeypatch.setattr(daws, "audit", audit)
+
+        self._reap(daws, r)
+
+        assert daws.BOOT_FAILURE_TRIP_THRESHOLD == 2
+        assert [c[0][0] for c in audit.call_args_list] == [
+            "autoscale.boot_timeout",
+            "autoscale.boot_circuit_open",
+        ]
+        assert [c[0][1] for c in publish.call_args_list] == [
+            "autoscaler.boot_timeout",
+            "autoscaler.boot_circuit_open",
+        ]
+        assert publish.call_args_list[1][1]["failures"] == 2
+
+    def test_failed_terminate_does_not_count(self, daws, monkeypatch) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        err = ClientError(
+            {"Error": {"Code": "X", "Message": "boom"}}, "TerminateInstances"
+        )
+        monkeypatch.setattr(daws, "terminate_gpu_worker", MagicMock(side_effect=err))
+
+        _, reaped = self._reap(daws, r)
+
+        assert reaped == [] and not r.hset.called and not r.delete.called
+
+    def test_dry_run_tracks_shadow_streak_without_terminating(
+        self, daws, monkeypatch
+    ) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        term = MagicMock()
+        monkeypatch.setattr(daws, "terminate_gpu_worker", term)
+
+        stuck, reaped = self._reap(daws, r, dry_run=True)
+
+        assert stuck == ["i-old-auto"] and reaped == [] and not term.called
+        assert (
+            r.hset.call_args[0][0] == "dalston:autoscale:bootfail:dryrun:nemo+pyannote"
+        )
+
+
+class TestSnapshotBlocked:
+    def test_open_breaker_wins_over_spot_streak(self, daws) -> None:
+        now = datetime.now(UTC)
+        r = MagicMock()
+
+        def hgetall(key):
+            if key.startswith("dalston:autoscale:bootfail:"):
+                return {
+                    "count": "2",
+                    "since": (now - timedelta(hours=1)).isoformat(),
+                    "last_instance_id": "i-2",
+                    "last_failure_at": (now - timedelta(minutes=5)).isoformat(),
+                }
+            return {"kind": "spot_quota", "since": "s", "ticks": "9", "detail": "q"}
+
+        r.hgetall.side_effect = hgetall
+        blocked = daws._snapshot_blocked(r, _policy(daws), now, dry_run=False)
+
+        assert blocked is not None and blocked.kind == "boot_failure"
+        assert blocked.consecutive_ticks == 2
+        assert "next launch in 25m" in blocked.detail
+
+    def test_closed_breaker_falls_through_to_spot_streak(self, daws) -> None:
+        now = datetime.now(UTC)
+        r = MagicMock()
+
+        def hgetall(key):
+            if key.startswith("dalston:autoscale:bootfail:"):
+                return {
+                    "count": "1",
+                    "since": "s",
+                    "last_instance_id": "i-1",
+                    "last_failure_at": now.isoformat(),
+                }
+            return {"kind": "spot_quota", "since": "s", "ticks": "9", "detail": "q"}
+
+        r.hgetall.side_effect = hgetall
+        blocked = daws._snapshot_blocked(r, _policy(daws), now, dry_run=False)
+        assert blocked is not None and blocked.kind == "spot_quota"
+
+    def test_nothing_blocked(self, daws) -> None:
+        r = MagicMock()
+        r.hgetall.return_value = {}
+        assert (
+            daws._snapshot_blocked(r, _policy(daws), datetime.now(UTC), dry_run=False)
+            is None
+        )

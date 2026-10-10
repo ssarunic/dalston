@@ -71,6 +71,12 @@ describe('deriveStripState', () => {
     })
   })
 
+  it('critical: an open boot circuit breaker (M103) with nothing live', () => {
+    const bootBlocked = { ...blocked, kind: 'boot_failure', consecutive_ticks: 3 }
+    const state = deriveStripState(makeView({ blocked: bootBlocked, live: 0, max_backlog: 5 }))
+    expect(state).toMatchObject({ kind: 'critical', blockedKind: 'boot_failure', maxBacklog: 5 })
+  })
+
   it('warning: blocked but capacity still serving', () => {
     const state = deriveStripState(makeView({ blocked, live: 1, max_backlog: 41 }))
     expect(state).toEqual({ kind: 'warning', blockedKind: 'spot_quota', maxBacklog: 41 })
