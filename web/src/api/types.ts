@@ -357,7 +357,8 @@ export interface AutoscalerPolicyEcho {
 }
 
 export interface AutoscalerBlockedInfo {
-  kind: 'spot_quota' | 'spot_capacity' | string
+  /** M103 'boot_failure': consecutive_ticks carries the boot-failure count */
+  kind: 'spot_quota' | 'spot_capacity' | 'boot_failure' | string
   since: string
   consecutive_ticks: number
   detail: string | null

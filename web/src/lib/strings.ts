@@ -307,8 +307,13 @@ const autoscalerStrip = {
     `At spot quota — backlog ${backlog}, retrying every minute. Quota frees when a worker terminates.`,
   spotCapacity: (backlog: number) =>
     `No spot capacity — backlog ${backlog}, retrying every minute.`,
+  // M103: reaped boots (pending > boot_timeout_s, never registered) open a
+  // breaker that backs launches off instead of relaunching every tick.
+  bootFailure: (failures: number, backlog: number) =>
+    `${failures} consecutive boot failures — launches paused, backlog ${backlog}. Check the worker console log, fix the cause, then run dalston-aws autoscale --reset-boot-failures.`,
   criticalDeadline: (inTime: string) => `Earliest waiting task may fail in ~${inTime}`,
   criticalBlockedFor: (forTime: string) => `Spot launching blocked for ${forTime}`,
+  criticalPausedFor: (forTime: string) => `Launches paused for ${forTime}`,
   stale: 'Autoscaler not reporting — check dalston-autoscale.timer',
   staleSince: (since: string) =>
     `Autoscaler not reporting since ${since} — check dalston-autoscale.timer`,
