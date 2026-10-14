@@ -42,12 +42,52 @@ class InvalidAudioError(AudioProbeError):
     pass
 
 
+_KNOWN_EXTENSIONS = ("mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "aiff")
+
+_WMA_HEADER = b"\x30\x26\xb2\x75\x8e\x66\xcf\x11\xa6\xd9\x00\xaa\x00\x62\xce\x6c"
+
+
+def sniff_audio_format(data: bytes) -> str | None:
+    """Detect the container format from magic bytes, or None if unrecognised.
+
+    Content beats filename: hosts like Simplecast serve transcoded MP3 with a
+    Content-Disposition naming the creator's original ``.wav`` upload.
+    """
+    header = data[:12]
+    if header.startswith(b"ID3"):
+        return "mp3"
+    if header.startswith(b"RIFF") and header[8:12] == b"WAVE":
+        return "wav"
+    if header.startswith(b"fLaC"):
+        return "flac"
+    if header.startswith(b"OggS"):
+        return "ogg"
+    if header[4:8] == b"ftyp":
+        return "m4a"
+    if header.startswith(b"FORM") and header[8:12] in (b"AIFF", b"AIFC"):
+        return "aiff"
+    if data[:16] == _WMA_HEADER:
+        return "wma"
+    if len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0:
+        # MPEG frame sync: layer bits 00 mean ADTS AAC, anything else is MP1/2/3
+        return "aac" if header[1] & 0x06 == 0 else "mp3"
+    return None
+
+
+def _filename_format(filename: str | None) -> str | None:
+    if filename and "." in filename:
+        ext = filename.rsplit(".", 1)[-1].lower()
+        if ext in _KNOWN_EXTENSIONS:
+            return ext
+    return None
+
+
 def probe_audio(data: bytes, filename: str | None = None) -> AudioMetadata:
     """Probe audio data to extract metadata.
 
     Args:
         data: Raw audio file bytes
-        filename: Original filename (helps with format detection)
+        filename: Original filename (fallback when content sniffing fails)
 
     Returns:
         AudioMetadata with format, duration, sample_rate, channels
@@ -56,8 +96,13 @@ def probe_audio(data: bytes, filename: str | None = None) -> AudioMetadata:
         InvalidAudioError: If file is not valid audio or unsupported
         AudioProbeError: If probing fails unexpectedly
     """
+    sniffed_format = sniff_audio_format(data)
+    # TinyTag picks its parser from the filename extension before looking at
+    # content, so hand it a name matching the sniffed format.
+    probe_filename = f"audio.{sniffed_format}" if sniffed_format else filename
+
     try:
-        tag = TinyTag.get(file_obj=BytesIO(data), filename=filename)
+        tag = TinyTag.get(file_obj=BytesIO(data), filename=probe_filename)
     except TinyTagException as e:
         raise InvalidAudioError(
             f"Unable to read audio file: {e}. "
@@ -102,12 +147,7 @@ def probe_audio(data: bytes, filename: str | None = None) -> AudioMetadata:
     # Get bit depth (may be None for lossy formats like MP3)
     bit_depth = tag.bitdepth
 
-    # Determine format from filename or fallback
-    audio_format = "unknown"
-    if filename:
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext in ("mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "aiff"):
-            audio_format = ext
+    audio_format = sniffed_format or _filename_format(filename) or "unknown"
 
     logger.info(
         "audio_probed",
