@@ -6,16 +6,52 @@ permissions:
   contents: write
   pull-requests: write
 
+# `gh pr merge --auto` waits for the checks that the `main` ruleset marks as
+# required. It needs "Allow auto-merge" enabled in repo settings, and a ruleset
+# requiring the CI checks — without one, --auto merges immediately.
+#
+# Merges made with GITHUB_TOKEN do not trigger push workflows, so auto-merged
+# updates don't rebuild GHCR images; the next human merge does.
+
 jobs:
   auto-merge:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Fetch Dependabot metadata
         id: meta
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Checked from the changed files, not the metadata `directory`, so
+      # multi-directory grouped PRs are covered too.
+      - name: Check for engine changes
+        id: scope
+        run: |
+          if gh pr diff "$PR_URL" --name-only | grep -q '^engines/'; then
+            echo "engines=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "engines=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Engine updates rebuild images that GPU workers pull at boot, and
+      # Docker base bumps change the runtime — both stay manual.
+      - name: Auto-merge minor/patch version updates
+        if: >
+          steps.meta.outputs.ghsa-id == '' &&
+          steps.meta.outputs.update-type != 'version-update:semver-major' &&
+          steps.meta.outputs.package-ecosystem != 'docker' &&
+          steps.scope.outputs.engines == 'false'
+        run: gh pr merge --squash --auto "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auto-merge eligible security updates
         if: >
