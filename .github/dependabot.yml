@@ -62,78 +62,38 @@ updates:
       - dependencies
       - python
 
-  # Engine dependencies
+  # Engine dependencies — one monthly PR across all engines. Merging anything
+  # under engines/ rebuilds GHCR :latest, which GPU workers pull at boot, so
+  # these are reviewed by hand (dependabot-auto-merge.yml skips /engines).
+  # riva and vllm-asr stay separate: their ignore rules would wrongly block
+  # protobuf/numpy updates in the other engines.
   - package-ecosystem: pip
-    directory: "/engines/stt-transcribe/faster-whisper"
+    directories:
+      - "/engines/stt-align/phoneme-align"
+      - "/engines/stt-combo/whisper-align-pyannote"
+      - "/engines/stt-detect/pii-presidio"
+      - "/engines/stt-diarize/nemo-msdd"
+      - "/engines/stt-diarize/nemo-sortformer"
+      - "/engines/stt-diarize/pyannote-4.0"
+      - "/engines/stt-merge/final-merger"
+      - "/engines/stt-prepare/audio-prepare"
+      - "/engines/stt-redact/audio-redactor"
+      - "/engines/stt-transcribe/faster-whisper"
+      - "/engines/stt-transcribe/hf-asr"
+      - "/engines/stt-transcribe/hf-asr-align-pyannote"
+      - "/engines/stt-transcribe/nemo"
+      - "/engines/stt-transcribe/onnx"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
+      interval: monthly
     groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-transcribe/onnx"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-transcribe/hf-asr"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-transcribe/nemo"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    # nemo_toolkit[asr]==2.7.3 strict-requires transformers>=4.57.0,<4.58.dev0.
-    # Any transformers bump beyond 4.57.x is unsatisfiable until nemo-toolkit
-    # itself moves. See PR #218 (regression revert).
+      engines:
+        patterns:
+          - "*"
     ignore:
-      - dependency-name: "transformers"
-        versions: [">=4.58.0"]
+      # silero-vad is pinned in lockstep across docker/Dockerfile.base-* and
+      # engine requirements (tests/unit/test_silero_vad_shared.py). A
+      # single-file bump always fails CI; bump it everywhere by hand.
+      - dependency-name: "silero-vad"
     reviewers:
       - sasasarunic
     labels:
@@ -144,14 +104,11 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/riva"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
+      interval: monthly
     groups:
       all:
-        update-types:
-          - major
-          - minor
-          - patch
+        patterns:
+          - "*"
     # nvidia-riva-client 2.25.1 (latest) pins protobuf==6.33.5 EXACTLY.
     # Any bump (even patch within 6.33.x) breaks resolution. Ignore all
     # protobuf updates until a newer riva-client ships.
@@ -167,181 +124,16 @@ updates:
   - package-ecosystem: pip
     directory: "/engines/stt-transcribe/vllm-asr"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
+      interval: monthly
     groups:
       all:
-        update-types:
-          - major
-          - minor
-          - patch
+        patterns:
+          - "*"
     # vllm[audio] 0.20.x requires numpy>=1.25,<2.4. Bumping numpy to 2.4+
     # is unsatisfiable until vllm releases a numpy-2.4-compatible build.
     ignore:
       - dependency-name: "numpy"
         versions: [">=2.4"]
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-align/phoneme-align"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-diarize/pyannote-4.0"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-diarize/nemo-msdd"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-diarize/nemo-sortformer"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-detect/pii-presidio"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-redact/audio-redactor"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-merge/final-merger"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-prepare/audio-prepare"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - python
-      - engines
-
-  - package-ecosystem: pip
-    directory: "/engines/stt-combo/whisper-align-pyannote"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      all:
-        update-types:
-          - major
-          - minor
-          - patch
     reviewers:
       - sasasarunic
     labels:
@@ -393,165 +185,31 @@ updates:
       - dependencies
       - docker
 
-  # Engine Dockerfiles
+  # Engine Dockerfiles — one monthly PR across all engines
   - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/faster-whisper"
+    directories:
+      - "/engines/stt-align/phoneme-align"
+      - "/engines/stt-combo/whisper-align-pyannote"
+      - "/engines/stt-detect/pii-presidio"
+      - "/engines/stt-diarize/nemo-msdd"
+      - "/engines/stt-diarize/nemo-sortformer"
+      - "/engines/stt-diarize/pyannote-4.0"
+      - "/engines/stt-merge/final-merger"
+      - "/engines/stt-prepare/audio-prepare"
+      - "/engines/stt-redact/audio-redactor"
+      - "/engines/stt-transcribe/faster-whisper"
+      - "/engines/stt-transcribe/hf-asr"
+      - "/engines/stt-transcribe/hf-asr-align-pyannote"
+      - "/engines/stt-transcribe/nemo"
+      - "/engines/stt-transcribe/onnx"
+      - "/engines/stt-transcribe/riva"
+      - "/engines/stt-transcribe/vllm-asr"
     schedule:
       interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/onnx"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/hf-asr"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/nemo"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/riva"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-transcribe/vllm-asr"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-align/phoneme-align"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-diarize/pyannote-4.0"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-diarize/nemo-msdd"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-diarize/nemo-sortformer"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-detect/pii-presidio"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-redact/audio-redactor"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-merge/final-merger"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-prepare/audio-prepare"
-    schedule:
-      interval: monthly
-    reviewers:
-      - sasasarunic
-    labels:
-      - dependencies
-      - docker
-      - engines
-
-  - package-ecosystem: docker
-    directory: "/engines/stt-combo/whisper-align-pyannote"
-    schedule:
-      interval: monthly
+    groups:
+      engine-images:
+        patterns:
+          - "*"
     reviewers:
       - sasasarunic
     labels:
