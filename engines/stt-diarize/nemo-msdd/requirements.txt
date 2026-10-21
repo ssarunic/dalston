@@ -3,13 +3,13 @@
 # NeMo toolkit for ASR/diarization models. Pinned to 2.7.x on purpose:
 # NeMo 3.0 removed msdd_models.NeuralDiarizer. Must match the
 # dalston/base-nemo-2.7 variant this engine's Dockerfile builds from.
-nemo_toolkit[asr]>=2.7.3,<2.8.0
+nemo_toolkit[asr]>=3.0.0,<3.1.0
 
 # Audio processing
 soundfile>=0.14.0
 
 # Diarization-specific (explicit for clarity, pulled by nemo)
-omegaconf>=2.3.1
+omegaconf>=2.4.0
 
 # googleapis-common-protos >=1.75.1 (2026-08-06) requires protobuf>=6.33.5,
 # but nemo_toolkit 2.7.x pins protobuf~=5.29.5. The OTLP gRPC exporter pulls
@@ -18,4 +18,4 @@ omegaconf>=2.3.1
 # image consistent (otherwise `import dalston.telemetry` crashes with a
 # protobuf gencode/runtime VersionError). Drop when NeMo 3.x lands — it has
 # no protobuf pin.
-googleapis-common-protos<1.75.4
+googleapis-common-protos<1.75.6
