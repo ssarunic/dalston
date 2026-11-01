@@ -6,7 +6,7 @@
 # Build from repo root:
 #   docker build -f docker/Dockerfile.base-engine -t dalston/base-engine:latest .
 
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 WORKDIR /opt/dalston
 
