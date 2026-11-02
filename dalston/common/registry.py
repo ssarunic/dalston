@@ -550,6 +550,17 @@ class UnifiedEngineRegistry:
         await self._redis.hset(instance_key, mapping=mapping)
         await self._redis.expire(instance_key, HEARTBEAT_TTL)
 
+        # The index sets must heal too. While the key is lapsed the
+        # orchestrator reconciler drops the instance from the instance set,
+        # and only register() ever added it, so a worker that outlived a
+        # long gap (a Mac worker's lid closing) stayed invisible to get_all()
+        # until restarted. SADD is idempotent.
+        await self._redis.sadd(UNIFIED_INSTANCE_SET_KEY, instance)
+        if engine_id is not None:
+            await self._redis.sadd(f"{UNIFIED_RUNTIME_SET_PREFIX}{engine_id}", instance)
+        if stage is not None:
+            await self._redis.sadd(f"{UNIFIED_STAGE_SET_PREFIX}{stage}", instance)
+
     async def deregister(self, instance: str) -> None:
         """Remove engine from unified registry."""
         instance_key = f"{UNIFIED_INSTANCE_KEY_PREFIX}{instance}"
@@ -822,6 +833,13 @@ class UnifiedRegistryWriter:
 
         r.hset(instance_key, mapping=mapping)
         r.expire(instance_key, HEARTBEAT_TTL)
+
+        # Re-index on every beat; see UnifiedEngineRegistry.heartbeat.
+        r.sadd(UNIFIED_INSTANCE_SET_KEY, instance)
+        if engine_id is not None:
+            r.sadd(f"{UNIFIED_RUNTIME_SET_PREFIX}{engine_id}", instance)
+        if stage is not None:
+            r.sadd(f"{UNIFIED_STAGE_SET_PREFIX}{stage}", instance)
 
     def deregister(self, instance: str) -> None:
         """Remove engine from unified registry (sync)."""

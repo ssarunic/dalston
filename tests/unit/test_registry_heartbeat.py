@@ -23,6 +23,9 @@ import pytest
 
 from dalston.common.registry import (
     UNIFIED_INSTANCE_KEY_PREFIX,
+    UNIFIED_INSTANCE_SET_KEY,
+    UNIFIED_RUNTIME_SET_PREFIX,
+    UNIFIED_STAGE_SET_PREFIX,
     EngineRecord,
     UnifiedEngineRegistry,
     UnifiedRegistryWriter,
@@ -71,6 +74,17 @@ class _FakeRedis:
         """Simulate the TTL lapsing — the key vanishes entirely."""
         self.hashes.pop(key, None)
         self.ttls.pop(key, None)
+
+    def reap(self, instance: str) -> None:
+        """Simulate the orchestrator reconciler finding the lapsed key.
+
+        ``_cleanup_stale_engine_entries`` drops the instance from the
+        instance set only (test_spot_recovery pins that).
+        """
+        self.sets.get(UNIFIED_INSTANCE_SET_KEY, set()).discard(instance)
+
+    def indexed_in(self, instance: str) -> set[str]:
+        return {key for key, members in self.sets.items() if instance in members}
 
     # -- sync surface -------------------------------------------------
     def hset(self, key, mapping=None, **_):  # noqa: ANN001
@@ -265,6 +279,62 @@ class TestSyncHeartbeatSurvivesExpiry:
         assert restored is not None
         assert restored.supports_interface("realtime") is True
         assert restored.supports_interface("batch") is True
+
+
+class TestHeartbeatReindexesAfterReap:
+    """A worker that outlives its key must come back into get_all().
+
+    Seen on the M104 Mac worker: the lid closed for four minutes, the key
+    lapsed, the reconciler reaped the instance from the instance set, and
+    the heartbeat re-created the key but not the set membership, so
+    /v1/engines showed a live worker as not running until a restart.
+    """
+
+    _ALL_SETS = {
+        UNIFIED_INSTANCE_SET_KEY,
+        f"{UNIFIED_RUNTIME_SET_PREFIX}nemo",
+        f"{UNIFIED_STAGE_SET_PREFIX}transcribe",
+    }
+
+    @pytest.mark.asyncio
+    async def test_async_heartbeat_restores_index_sets(self) -> None:
+        backing = _FakeRedis()
+        reg = UnifiedEngineRegistry(_AsyncFakeRedis(backing))
+        rec = _realtime_record()
+
+        await reg.register(rec)
+        backing.expire_key(_key(rec.instance))
+        backing.reap(rec.instance)
+        assert UNIFIED_INSTANCE_SET_KEY not in backing.indexed_in(rec.instance)
+
+        await reg.heartbeat(
+            rec.instance,
+            engine_id=rec.engine_id,
+            stage=rec.stage,
+            interfaces=list(rec.interfaces),
+        )
+
+        assert backing.indexed_in(rec.instance) == self._ALL_SETS
+
+    def test_sync_heartbeat_restores_index_sets(self) -> None:
+        backing = _FakeRedis()
+        writer = UnifiedRegistryWriter("redis://unused")
+        writer._redis = backing  # type: ignore[attr-defined]
+        rec = _batch_record()
+
+        writer.register(rec)
+        backing.expire_key(_key(rec.instance))
+        backing.reap(rec.instance)
+
+        writer.heartbeat(
+            rec.instance,
+            status="idle",
+            engine_id=rec.engine_id,
+            stage=rec.stage,
+            interfaces=list(rec.interfaces),
+        )
+
+        assert backing.indexed_in(rec.instance) == self._ALL_SETS
 
 
 class TestWriterParity:
