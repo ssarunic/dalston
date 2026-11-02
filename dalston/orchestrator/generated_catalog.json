@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-28T12:50:41.872214+00:00",
+  "generated_at": "2026-11-02T13:45:42.593859+00:00",
   "schema_version": "3.0",
-  "engine_count": 14,
+  "engine_count": 16,
   "engines": {
     "phoneme-align": {
       "id": "phoneme-align",
@@ -13,6 +13,7 @@
       "image": "dalston/stt-align-phoneme-align:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "align"
@@ -50,6 +51,7 @@
       "image": "dalston/stt-None-whisper-align-pyannote:1.1.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe",
@@ -87,6 +89,7 @@
       "image": "dalston/stt-pii_detect-pii-presidio:2.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "pii_detect"
@@ -112,6 +115,42 @@
         "warm_start_latency_ms": 100
       }
     },
+    "fluidaudio-pyannote": {
+      "id": "fluidaudio-pyannote",
+      "name": "FluidAudio pyannote (Core ML, Neural Engine)",
+      "version": "1.0.0",
+      "stage": "diarize",
+      "type": null,
+      "description": "Thin adapter for fluidaudio-server, a Swift sidecar that runs the pyannote\ncommunity-1 speaker diarization pipeline (with VBx clustering) as Core ML\nmodels on the Apple Neural Engine via FluidAudio. The adapter does no\ninference: it pulls tasks from Redis, fetches audio from S3, POSTs it to\nthe server over loopback and converts the speaker segments into a\nDiarizationResponse.\n\nShares the server process with the fluidaudio transcribe adapter; the\nserver serializes Neural Engine work across both.",
+      "image": "dalston/stt-diarize-fluidaudio-pyannote:1.0.0",
+      "execution_profile": "container",
+      "on_demand": false,
+      "deployment": "external",
+      "capabilities": {
+        "stages": [
+          "diarize"
+        ],
+        "supports_word_timestamps": false,
+        "supports_native_streaming": false,
+        "supports_language_forcing": true,
+        "max_audio_duration": 7200,
+        "max_concurrency": 1
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": null,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "1G"
+      },
+      "performance": {
+        "rtf_gpu": 0.3,
+        "rtf_cpu": 0.3,
+        "warm_start_latency_ms": null
+      }
+    },
     "nemo-msdd": {
       "id": "nemo-msdd",
       "name": "NeMo MSDD Speaker Diarization",
@@ -122,6 +161,7 @@
       "image": "dalston/stt-diarize-nemo-msdd:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "diarize"
@@ -160,6 +200,7 @@
       "image": "dalston/stt-diarize-nemo-sortformer:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "diarize"
@@ -198,6 +239,7 @@
       "image": "dalston/stt-diarize-pyannote-4.0:1.0.0",
       "execution_profile": "container",
       "on_demand": true,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "diarize"
@@ -235,6 +277,7 @@
       "image": "dalston/stt-prepare-audio-prepare:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "prepare"
@@ -270,6 +313,7 @@
       "image": "dalston/stt-audio_redact-audio-redactor:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "audio_redact"
@@ -305,6 +349,7 @@
       "image": "dalston/stt-transcribe-faster-whisper:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -333,6 +378,42 @@
         "warm_start_latency_ms": 30
       }
     },
+    "fluidaudio": {
+      "id": "fluidaudio",
+      "name": "FluidAudio Parakeet (Core ML, Neural Engine)",
+      "version": "1.0.0",
+      "stage": "transcribe",
+      "type": null,
+      "description": "Thin adapter for fluidaudio-server, a Swift sidecar that runs NVIDIA\nParakeet TDT 0.6B v3 and Parakeet Ultra as Core ML models on the Apple\nNeural Engine via FluidAudio. The adapter does no inference: it pulls\ntasks from Redis, fetches audio from S3, POSTs it to the server over\nloopback and converts the word timings into a Dalston Transcript.\n\nSegments are synthesised from words on sentence-ending punctuation\n(dalston.engine_sdk.segments), the same rule the ONNX Parakeet engine uses.",
+      "image": "dalston/stt-transcribe-fluidaudio:1.0.0",
+      "execution_profile": "container",
+      "on_demand": false,
+      "deployment": "external",
+      "capabilities": {
+        "stages": [
+          "transcribe"
+        ],
+        "supports_word_timestamps": true,
+        "supports_native_streaming": false,
+        "supports_language_forcing": true,
+        "max_audio_duration": 7200,
+        "max_concurrency": 1
+      },
+      "hardware": {
+        "gpu_required": false,
+        "gpu_optional": false,
+        "min_vram_gb": null,
+        "recommended_gpu": null,
+        "supports_cpu": true,
+        "min_ram_gb": 8,
+        "memory": "1G"
+      },
+      "performance": {
+        "rtf_gpu": 0.3,
+        "rtf_cpu": 0.3,
+        "warm_start_latency_ms": null
+      }
+    },
     "hf-asr": {
       "id": "hf-asr",
       "name": "HuggingFace ASR Realtime",
@@ -343,6 +424,7 @@
       "image": "dalston/stt-transcribe-hf-asr:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -381,6 +463,7 @@
       "image": "dalston/stt-transcribe-nemo:1.0.0",
       "execution_profile": "container",
       "on_demand": true,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -419,6 +502,7 @@
       "image": "dalston/stt-transcribe-onnx:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -457,6 +541,7 @@
       "image": "dalston/stt-transcribe-riva:1.1.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"
@@ -492,6 +577,7 @@
       "image": "dalston/stt-transcribe-vllm-asr:1.0.0",
       "execution_profile": "container",
       "on_demand": false,
+      "deployment": "compose",
       "capabilities": {
         "stages": [
           "transcribe"

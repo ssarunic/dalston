@@ -70,11 +70,28 @@ function DeployBadge({ node }: { node: NodeView }) {
       </Badge>
     )
   }
+  // M104: a Mac on the tailnet running the FluidAudio worker
+  // (DALSTON_DEPLOY_ENV=mac). Anything else is a local dev box.
+  if (node.deploy_env === 'mac') {
+    return (
+      <Badge variant="default" className="text-xs">
+        {S.infrastructure.mac}
+      </Badge>
+    )
+  }
   return (
     <Badge variant="secondary" className="text-xs">
       {S.infrastructure.localDev}
     </Badge>
   )
+}
+
+// Sort order for node cards: cloud capacity first, then attached Macs,
+// then whatever is running on a developer's machine.
+function deployEnvRank(env: string): number {
+  if (env === 'aws') return 0
+  if (env === 'mac') return 1
+  return 2
 }
 
 function interfaceLabel(interfaces: string[]): string {
@@ -276,11 +293,11 @@ export function Infrastructure() {
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
           {[...data.nodes]
             .sort((a, b) => {
-              // Booting shadows first, then AWS, then by earliest pipeline
-              // stage, then hostname
+              // Booting shadows first, then AWS, then Mac workers, then local
+              // dev, then by earliest pipeline stage, then hostname
               const bootCmp = (a.state === 'booting' ? 0 : 1) - (b.state === 'booting' ? 0 : 1)
               if (bootCmp !== 0) return bootCmp
-              const envCmp = (a.deploy_env === 'aws' ? 0 : 1) - (b.deploy_env === 'aws' ? 0 : 1)
+              const envCmp = deployEnvRank(a.deploy_env) - deployEnvRank(b.deploy_env)
               if (envCmp !== 0) return envCmp
               const stageA = Math.min(...a.engines.map((e) => stageRank(e.stage)), 99)
               const stageB = Math.min(...b.engines.map((e) => stageRank(e.stage)), 99)

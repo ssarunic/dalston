@@ -65,6 +65,11 @@
       "enum": ["inproc", "venv", "container"],
       "description": "Runtime isolation profile. Defaults to 'container' when omitted."
     },
+    "deployment": {
+      "type": "string",
+      "enum": ["compose", "external"],
+      "description": "How the engine is deployed. 'compose' (default) means a docker-compose service exists and the catalog<->compose contract check applies. 'external' means the engine runs outside the compose stack (e.g. a Mac worker next to a native inference server): it stays in the generated catalog but is exempt from the compose check and is never on_demand (M104)."
+    },
     "container": {
       "$ref": "#/$defs/container"
     },

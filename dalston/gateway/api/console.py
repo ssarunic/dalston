@@ -39,9 +39,10 @@ from dalston.common.registry import (
     UNIFIED_INSTANCE_SET_KEY,
     _parse_datetime,
     _parse_json_list,
+    get_stream_backlog,
     is_autoscale_tick_stale,
 )
-from dalston.common.streams_types import CONSUMER_GROUP, WAITING_ENGINE_TASKS_KEY
+from dalston.common.streams_types import WAITING_ENGINE_TASKS_KEY
 from dalston.common.utils import compute_duration_ms, compute_interval_union_ms
 from dalston.db.models import TaskModel
 from dalston.db.session import DEFAULT_TENANT_ID
@@ -75,30 +76,13 @@ router = APIRouter(prefix="/api/console", tags=["console"])
 
 
 async def _get_stream_backlog(redis: Redis, stream_key: str) -> int:
-    """Return undelivered message count (group lag) for an engine stream."""
-    try:
-        groups = await redis.xinfo_groups(stream_key)
-    except Exception:
-        return 0
+    """Undelivered message count (group lag) for an engine stream.
 
-    for group in groups:
-        name = group.get("name")
-        if isinstance(name, bytes):
-            name = name.decode()
-        if name != CONSUMER_GROUP:
-            continue
-
-        lag = group.get("lag")
-        if lag is None:
-            return 0
-        if isinstance(lag, bytes):
-            lag = lag.decode()
-        try:
-            return max(0, int(lag))
-        except (TypeError, ValueError):
-            return 0
-
-    return 0
+    Waiting work only: the board shows what is queued, not what an engine
+    is busy with. The M105 capacity check uses the same helper with
+    ``include_pending=True``.
+    """
+    return await get_stream_backlog(redis, stream_key, include_pending=False)
 
 
 # Dashboard models

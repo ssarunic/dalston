@@ -1,0 +1,10 @@
+# FluidAudio transcribe adapter (M104)
+#
+# The adapter does no inference; it only needs the engine SDK plus an HTTP
+# client for the fluidaudio-server sidecar. Install on the Mac with:
+#   pip install -e ".[engine-sdk]" -r engines/stt-transcribe/fluidaudio/requirements.txt
+httpx>=0.26.0
+# EngineRunner probes each task's audio with soundfile before calling the
+# adapter (ensure_audio_format). Without it every file, even prepare-stage
+# 16 kHz mono WAV, falls through to an ffmpeg re-encode.
+soundfile>=0.14.0

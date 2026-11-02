@@ -1,0 +1,41 @@
+# Model catalog entry for FluidInference/speaker-diarization-coreml
+# M104: Core ML build of pyannote community-1 (+ VBx) for the FluidAudio Mac worker
+
+schema_version: "1.1"
+id: fluidaudio/speaker-diarization
+engine_id: fluidaudio-pyannote
+# source and loaded_model_id are the SAME string on purpose; see
+# fluidaudio-parakeet-tdt-0.6b-v3.yaml.
+source: FluidInference/speaker-diarization-coreml
+loaded_model_id: FluidInference/speaker-diarization-coreml
+
+name: pyannote community-1 speaker diarization (Core ML, FluidAudio)
+size_gb: 0.2
+stage: diarize
+
+description: |
+  pyannote speaker-diarization-community-1 with VBx clustering, converted to
+  Core ML by FluidInference and run on the Apple Neural Engine by
+  fluidaudio-server. Offline (whole-file) diarization with an optional
+  speaker-count hint.
+
+  Pulling this model into S3 only marks it ready for routing; the Mac
+  server fetches and compiles the same repo itself on first use.
+
+languages: null
+
+capabilities:
+  word_timestamps: false
+  punctuation: false
+  capitalization: false
+  native_streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  # Pessimistic placeholders until measured on the Neural Engine (M104.5).
+  rtf_gpu: 0.3
+  rtf_cpu: 0.3

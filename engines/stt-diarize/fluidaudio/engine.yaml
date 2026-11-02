@@ -1,0 +1,55 @@
+schema_version: "1.1"
+id: stt-diarize-fluidaudio
+engine_id: fluidaudio-pyannote
+stage: diarize
+mode: batch
+# M104: runs only on an Apple Silicon Mac next to fluidaudio-server; see the
+# transcribe adapter's engine.yaml for what "external" means.
+deployment: external
+name: FluidAudio pyannote (Core ML, Neural Engine)
+version: 1.0.0
+description: |
+  Thin adapter for fluidaudio-server, a Swift sidecar that runs the pyannote
+  community-1 speaker diarization pipeline (with VBx clustering) as Core ML
+  models on the Apple Neural Engine via FluidAudio. The adapter does no
+  inference: it pulls tasks from Redis, fetches audio from S3, POSTs it to
+  the server over loopback and converts the speaker segments into a
+  DiarizationResponse.
+
+  Shares the server process with the fluidaudio transcribe adapter; the
+  server serializes Neural Engine work across both.
+
+container:
+  gpu: none
+  memory: 1G
+
+capabilities:
+  native_streaming: false
+  word_timestamps: false
+  max_concurrency: 1
+  # To confirm in M104.5 measurement; FluidAudio's offline diarizer streams
+  # from disk, so the adapter does not chunk.
+  max_audio_duration: 7200
+
+input:
+  audio_formats:
+    - wav
+    - pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/diarize
+  port: 9100
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  # Pessimistic placeholders until measured (M104.5).
+  rtf_gpu: 0.3
+  rtf_cpu: 0.3

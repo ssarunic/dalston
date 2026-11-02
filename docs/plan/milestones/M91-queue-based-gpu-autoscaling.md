@@ -172,6 +172,8 @@ Per tick (all pure reads until the final action):
 3. **Desired**: `clamp(ceil(max_e backlog_e / tasks_per_instance), min_instances, max_instances)`.
 4. **Act**: launch one, or drain-and-terminate one, or nothing. One action per tick per shape (the 60s timer provides natural debounce).
 
+> **M105 (External-Engine-First Routing).** A live `deployment: external` engine (the M104 Mac worker) is not in any shape and never triggers a launch. Instead the selector routes auto-routed tasks to it first while its own stream is under `DALSTON_EXTERNAL_ENGINE_QUEUE_CAPACITY` tasks, and only the overflow lands on this shape's streams. Keep that setting equal to `tasks_per_instance` so the external engine counts as exactly one instance in front of the fleet. See [M105](M105-external-engine-first-routing.md).
+
 ```yaml
 # policy config (control plane, provisioned by --autoscale)
 shapes:

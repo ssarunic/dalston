@@ -280,6 +280,7 @@ const infrastructure = {
   gpu: 'GPU',
   gpuMemory: 'GPU Memory',
   localDev: 'Local dev',
+  mac: 'Mac · Neural Engine',
   aws: 'AWS',
   cpuOnly: 'CPU only',
   booting: 'Booting',

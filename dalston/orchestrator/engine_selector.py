@@ -27,6 +27,8 @@ from dalston.common.model_selection_keys import (
     MODEL_PARAM_TRANSCRIBE,
 )
 from dalston.common.registry import EngineRecord, UnifiedEngineRegistry
+from dalston.common.streams_types import STREAM_PREFIX
+from dalston.config import get_settings
 from dalston.db.models import ModelRegistryModel
 from dalston.engine_sdk.types import EngineCapabilities
 from dalston.orchestrator.catalog import CatalogEntry, EngineCatalog
@@ -450,6 +452,68 @@ def _rank_and_select(
     )
 
 
+def _is_external(catalog: EngineCatalog, engine_id: str) -> bool:
+    """True for ``deployment: external`` engines (M104), e.g. the Mac worker."""
+    entry = catalog.get_engine(engine_id)
+    return entry is not None and entry.deployment == "external"
+
+
+async def _apply_external_first(
+    stage: str,
+    capable: list[EngineRecord],
+    requirements: dict,
+    registry: UnifiedEngineRegistry,
+    catalog: EngineCatalog,
+) -> tuple[list[EngineRecord], list[EngineRecord], str | None]:
+    """M105: prefer live external engines while their queue is under capacity.
+
+    An external engine (the M104 Mac worker) cannot be launched by the
+    autoscaler, so the selector treats it as one always-on instance: it
+    takes auto-routed tasks first, even over a faster GPU engine, until
+    its own stream holds ``external_engine_queue_capacity`` tasks (queued
+    plus in flight). Beyond that it is dropped from the candidates so the
+    task lands on a GPU stream, where the M91 autoscaler counts it.
+
+    Returns ``(preferred, remaining, reason)``: external engines under
+    capacity in rank order, the non-external capable engines, and the
+    selection reason for the first preferred engine (``None`` if none).
+    """
+    externals = [e for e in capable if _is_external(catalog, e.engine_id)]
+    if not externals:
+        return [], capable, None
+
+    capacity = get_settings().external_engine_queue_capacity
+    ranked_externals = (
+        externals
+        if len(externals) == 1
+        else _rank_capable_engines(externals, requirements)
+    )
+    preferred: list[EngineRecord] = []
+    reason: str | None = None
+    for engine in ranked_externals:
+        # Every batch engine consumes dalston:stream:{engine_id}; the record's
+        # stream_name says the same thing but can be missing on a key the
+        # heartbeat re-created, so never let that read as an empty queue.
+        stream_key = engine.stream_name or f"{STREAM_PREFIX}{engine.engine_id}"
+        backlog = await registry.get_stream_backlog(stream_key)
+        if backlog < capacity:
+            preferred.append(engine)
+            if reason is None:
+                reason = f"external engine under capacity ({backlog}/{capacity})"
+            continue
+        logger.info(
+            "external_engine_overflow",
+            engine_id=engine.engine_id,
+            stage=stage,
+            backlog=backlog,
+            capacity=capacity,
+        )
+
+    external_ids = {id(e) for e in externals}
+    remaining = [e for e in capable if id(e) not in external_ids]
+    return preferred, remaining, reason
+
+
 def _catalog_on_demand_fallback(
     stage: str,
     catalog_alts: list[CatalogEntry],
@@ -690,9 +754,16 @@ async def select_engine(
         )
     ]
 
-    # 4. No capable engine. M91: fall back to catalog capabilities for
+    # 4. M105: a live external engine (the M104 Mac worker) goes first while
+    # its own queue is under capacity; at capacity it is dropped so the task
+    # overflows to a GPU stream where the M91 autoscaler counts it.
+    preferred, capable, preferred_reason = await _apply_external_first(
+        stage, capable, requirements, registry, catalog
+    )
+
+    # 5. No capable engine. M91: fall back to catalog capabilities for
     # on_demand-flagged engines (scale-to-zero) before failing the job.
-    if not capable:
+    if not capable and not preferred:
         catalog_alts = catalog.find_engines(stage, requirements)
         fallback = _catalog_on_demand_fallback(stage, catalog_alts)
         if fallback is not None:
@@ -704,15 +775,21 @@ async def select_engine(
             catalog_alternatives=catalog_alts,
         )
 
-    # 5. Select engine (single match or ranked), then resolve loaded_model_id if needed.
-    ranked_capable = (
-        capable if len(capable) == 1 else _rank_capable_engines(capable, requirements)
-    )
-    ranked_reason = (
-        "only capable engine"
-        if len(capable) == 1
-        else _rank_and_select(capable, requirements).selection_reason
-    )
+    # 6. Select engine (external-first, then single match or ranked), then
+    # resolve loaded_model_id if needed.
+    if not capable:
+        others_ranked: list[EngineRecord] = []
+    elif len(capable) == 1:
+        others_ranked = capable
+    else:
+        others_ranked = _rank_capable_engines(capable, requirements)
+    ranked_capable = preferred + others_ranked
+    if preferred_reason is not None:
+        ranked_reason = preferred_reason
+    elif len(capable) == 1:
+        ranked_reason = "only capable engine"
+    else:
+        ranked_reason = _rank_and_select(capable, requirements).selection_reason
     auto_model_id: str | None = None
     engine = ranked_capable[0]
     selection_reason = ranked_reason

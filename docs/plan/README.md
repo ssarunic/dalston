@@ -46,10 +46,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M57.1](milestones/M57-1-lite-sqlite-migration-track-clean-cut.md) | Lite SQLite Migration Track and Schema Compatibility (Clean-Cut) | 2026-03-08 |
 | [M59](milestones/M59-runtime-isolation-profiles-clean-cut.md) | Runtime Isolation Profiles (In-Proc / Venv / Container, Clean-Cut) | 2026-03-09 |
 
-### In Progress (8)
+### In Progress (10)
 
 | # | Milestone | Notes |
 |---|-----------|-------|
+| [M104](milestones/M104-fluidaudio-mac-worker.md) | FluidAudio Mac Worker | Code complete (Swift sidecar, two adapters, `deployment: external`, launchd install, guide); pending verification on an Apple Silicon Mac and RTF measurement |
+| [M105](milestones/M105-external-engine-first-routing.md) | External-Engine-First Routing | Implemented: one selector rule + `DALSTON_EXTERNAL_ENGINE_QUEUE_CAPACITY`; verified locally, AWS spot-launch check pending |
 | [M6](milestones/M06-realtime-mvp.md) | Real-Time MVP | `realtime_sdk/`, `session_router/`, `engines/realtime/` |
 | [M7](milestones/M07-hybrid-mode.md) | Hybrid Mode | `enhance_on_end` parameter implemented |
 | [M8](milestones/M08-elevenlabs-compat.md) | ElevenLabs Compat | `gateway/api/v1/speech_to_text.py` |
@@ -162,6 +164,8 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization | 12-16 | Core Complete (engine migration → M52) |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner command and no-compat cleanup before remaining stage refactors | 5-7 | Complete |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events; remove infinite replay legacy behavior | 3-5 | Complete |
+| [M104](milestones/M104-fluidaudio-mac-worker.md) | FluidAudio Mac Worker | Mac on the tailnet as a batch worker; Core ML Parakeet + pyannote via Swift sidecar, Riva-style adapters | 5-7 | Implemented (pending Mac verification) |
+| [M105](milestones/M105-external-engine-first-routing.md) | External-Engine-First Routing | Auto-routed tasks go to a live external engine while its queue is under capacity; overflow lands on GPU streams so M91 scales as usual | 1-2 | Implemented (AWS check pending) |
 
 ## Model Management Milestones
 

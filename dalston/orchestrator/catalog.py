@@ -34,6 +34,7 @@ DEFAULT_CATALOG_PATH = Path(__file__).parent / "generated_catalog.json"
 ExecutionProfile = Literal["inproc", "venv", "container"]
 DEFAULT_EXECUTION_PROFILE: ExecutionProfile = "container"
 _VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
+_VALID_DEPLOYMENTS = frozenset({"compose", "external"})
 
 
 @dataclass
@@ -53,6 +54,10 @@ class CatalogEntry:
     capabilities: EngineCapabilities
     execution_profile: ExecutionProfile = DEFAULT_EXECUTION_PROFILE
     on_demand: bool = False
+    #: M104: "compose" (a docker-compose service exists) or "external" (the
+    #: engine runs outside the compose stack, e.g. a Mac worker). External
+    #: engines are never on_demand: nothing in the control plane can launch them.
+    deployment: str = "compose"
 
 
 class EngineCatalog:
@@ -201,12 +206,25 @@ class EngineCatalog:
                 f"on_demand must be a boolean, got {type(on_demand).__name__}"
             )
 
+        deployment = engine_data.get("deployment", "compose")
+        if deployment not in _VALID_DEPLOYMENTS:
+            valid = ", ".join(sorted(_VALID_DEPLOYMENTS))
+            raise ValueError(
+                f"deployment must be one of {{{valid}}}, got {deployment!r}"
+            )
+        if deployment == "external":
+            # M104: no autoscaler can launch an external engine, so a pinned
+            # model on a sleeping Mac must fail fast (runtime_unavailable)
+            # rather than be enqueued against capacity that never arrives.
+            on_demand = False
+
         return CatalogEntry(
             engine_id=engine_id,
             image=engine_data.get("image", f"dalston/{engine_id}:latest"),
             execution_profile=execution_profile,
             capabilities=capabilities,
             on_demand=on_demand,
+            deployment=deployment,
         )
 
     # =========================================================================

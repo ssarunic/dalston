@@ -22,6 +22,7 @@ internals, schema specs, etc.), see [`docs/specs/`](../specs/).
 - **[11-single-engine-tailscale-mode.md](11-single-engine-tailscale-mode.md)** — `dalston-aws engine up` walkthrough
 - **[12-engine-presets-catalog.md](12-engine-presets-catalog.md)** — the six presets, side by side
 - **[13-spot-interruptions-recovery.md](13-spot-interruptions-recovery.md)** — what happens when AWS reclaims
+- **[14-mac-neural-engine-worker.md](14-mac-neural-engine-worker.md)** — an Apple Silicon Mac as a batch worker (FluidAudio, Core ML)
 
 ## Whole-system mode (control plane)
 

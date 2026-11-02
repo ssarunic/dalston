@@ -196,6 +196,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    external_engine_queue_capacity: int = Field(
+        default=20,
+        ge=1,
+        alias="DALSTON_EXTERNAL_ENGINE_QUEUE_CAPACITY",
+        description=(
+            "M105: tasks an external engine (deployment: external, e.g. the "
+            "M104 Mac worker) may have queued or in flight before auto-routing "
+            "overflows to other engines. Keep equal to the autoscale policy's "
+            "tasks_per_instance so the external engine counts as exactly one "
+            "instance in front of the GPU fleet."
+        ),
+    )
+
     # Audio URL Download
     audio_url_max_size_gb: float = Field(
         default=3.0,

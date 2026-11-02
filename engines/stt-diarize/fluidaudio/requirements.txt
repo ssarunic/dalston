@@ -1,0 +1,11 @@
+# FluidAudio diarize adapter (M104)
+#
+# No inference here; the engine SDK plus an HTTP client for the
+# fluidaudio-server sidecar. numpy is pulled in by
+# dalston.engine_sdk.diarize_chunking (overlap_stats_from_turns), which the
+# engine-sdk extra does not list. Install on the Mac with:
+#   pip install -e ".[engine-sdk]" -r engines/stt-diarize/fluidaudio/requirements.txt
+httpx>=0.26.0
+numpy>=1.24.0
+# Same audio-format probe as the transcribe adapter; see its requirements.
+soundfile>=0.14.0

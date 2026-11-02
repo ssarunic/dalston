@@ -1030,3 +1030,213 @@ class TestOnDemandFallback:
             )
 
         assert exc_info.value.code == "runtime_unavailable"
+
+
+# =============================================================================
+# M105: external-engine-first routing
+# =============================================================================
+
+
+def _make_external_entry(engine_id: str = "fluidaudio") -> CatalogEntry:
+    return CatalogEntry(
+        engine_id=engine_id,
+        image="",
+        capabilities=make_capabilities(engine_id=engine_id, rtf_gpu=0.3),
+        deployment="external",
+    )
+
+
+class TestExternalEngineFirst:
+    """One rule: a live external engine is preferred while its own stream is
+    under capacity; at capacity it is dropped so the task overflows."""
+
+    @pytest.fixture
+    def capacity(self, monkeypatch):
+        """Set the capacity read by the selector; returns a setter."""
+
+        def _set(value: int) -> None:
+            monkeypatch.setattr(
+                "dalston.orchestrator.engine_selector.get_settings",
+                lambda: SimpleNamespace(external_engine_queue_capacity=value),
+            )
+
+        _set(20)
+        return _set
+
+    @pytest.fixture
+    def catalog(self):
+        gpu = make_catalog_entry("nemo", on_demand=True, rtf_gpu=0.05)
+        entries = {"fluidaudio": _make_external_entry(), "nemo": gpu}
+        catalog = MagicMock(spec=EngineCatalog)
+        catalog.get_engine.side_effect = entries.get
+        catalog.find_engines.return_value = [gpu]
+        return catalog
+
+    @pytest.fixture
+    def registry(self):
+        registry = AsyncMock()
+        registry.get_stream_backlog.return_value = 0
+        return registry
+
+    @staticmethod
+    def _mac(**kw) -> EngineRecord:
+        return make_engine_state(
+            "fluidaudio",
+            capabilities=make_capabilities("fluidaudio", rtf_gpu=0.3),
+            **kw,
+        )
+
+    @staticmethod
+    def _gpu() -> EngineRecord:
+        return make_engine_state(
+            "nemo", capabilities=make_capabilities("nemo", rtf_gpu=0.05)
+        )
+
+    @pytest.mark.asyncio
+    async def test_external_under_capacity_selected_when_alone(
+        self, registry, catalog, capacity
+    ):
+        registry.get_by_stage.return_value = [self._mac()]
+        registry.get_stream_backlog.return_value = 3
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "fluidaudio"
+        assert result.on_demand is False
+        assert result.selection_reason == "external engine under capacity (3/20)"
+        registry.get_stream_backlog.assert_awaited_once_with(
+            "dalston:stream:fluidaudio"
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_stream_name_falls_back_to_conventional_key(
+        self, registry, catalog, capacity
+    ):
+        """A heartbeat-recreated record has no stream_name (M101); the queue
+        must still be read, at dalston:stream:{engine_id}."""
+        mac = self._mac()
+        mac.stream_name = None
+        registry.get_by_stage.return_value = [mac, self._gpu()]
+        registry.get_stream_backlog.return_value = 20
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "nemo"
+        registry.get_stream_backlog.assert_awaited_once_with(
+            "dalston:stream:fluidaudio"
+        )
+
+    @pytest.mark.asyncio
+    async def test_external_beats_faster_live_gpu_while_under_capacity(
+        self, registry, catalog, capacity
+    ):
+        registry.get_by_stage.return_value = [self._gpu(), self._mac()]
+        registry.get_stream_backlog.return_value = 19
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "fluidaudio"
+        assert "under capacity (19/20)" in result.selection_reason
+
+    @pytest.mark.asyncio
+    async def test_external_at_capacity_overflows_to_on_demand_fallback(
+        self, registry, catalog, capacity
+    ):
+        registry.get_by_stage.return_value = [self._mac()]
+        registry.get_stream_backlog.return_value = 20
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        # Nothing else live: M91 catalog fallback puts the task on the GPU stream
+        assert result.engine_id == "nemo"
+        assert result.on_demand is True
+
+    @pytest.mark.asyncio
+    async def test_external_at_capacity_yields_to_live_gpu(
+        self, registry, catalog, capacity
+    ):
+        registry.get_by_stage.return_value = [self._mac(), self._gpu()]
+        registry.get_stream_backlog.return_value = 25
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "nemo"
+        assert result.on_demand is False
+        assert "external" not in result.selection_reason
+
+    @pytest.mark.asyncio
+    async def test_in_flight_counts_toward_capacity(self, registry, catalog, capacity):
+        capacity(1)
+        registry.get_by_stage.return_value = [self._mac(), self._gpu()]
+        registry.get_stream_backlog.return_value = 1  # one task in flight, none waiting
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "nemo"
+
+    @pytest.mark.asyncio
+    async def test_offline_external_is_not_consulted(self, registry, catalog, capacity):
+        registry.get_by_stage.return_value = [
+            self._mac(is_available=False),
+            self._gpu(),
+        ]
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "nemo"
+        registry.get_stream_backlog.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_external_engines_means_no_backlog_read(
+        self, registry, catalog, capacity
+    ):
+        registry.get_by_stage.return_value = [self._gpu()]
+
+        result = await select_engine("transcribe", {}, registry, catalog)
+
+        assert result.engine_id == "nemo"
+        registry.get_stream_backlog.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pinned_external_engine_ignores_capacity(
+        self, registry, catalog, capacity
+    ):
+        mac = self._mac()
+        registry.get_engine.return_value = mac
+        registry.get_stream_backlog.return_value = 50
+
+        result = await select_engine(
+            "transcribe", {}, registry, catalog, user_preference="fluidaudio"
+        )
+
+        assert result.engine_id == "fluidaudio"
+        assert result.selection_reason == "user preference"
+        registry.get_stream_backlog.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_external_without_ready_model_falls_back_to_next_engine(
+        self, registry, catalog, capacity, monkeypatch
+    ):
+        """Model-backed stages still need a ready model row on the external
+        engine; without one the existing fallback-to-next-engine applies."""
+        registry.get_by_stage.return_value = [self._mac(), self._gpu()]
+        registry.get_stream_backlog.return_value = 0
+        ready_on = {"nemo": SimpleNamespace(source="nvidia/x", loaded_model_id="x")}
+
+        async def _find(engine_id, stage, requirements, db):
+            return ready_on.get(engine_id)
+
+        monkeypatch.setattr(
+            "dalston.orchestrator.engine_selector._find_best_downloaded_model", _find
+        )
+        monkeypatch.setattr(
+            "dalston.orchestrator.engine_selector._resolve_loaded_model_id",
+            lambda model, stage: model.loaded_model_id,
+        )
+
+        result = await select_engine(
+            "transcribe", {}, registry, catalog, db=AsyncMock()
+        )
+
+        assert result.engine_id == "nemo"
+        assert "fallback to engine_id with ready model" in result.selection_reason

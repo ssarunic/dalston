@@ -20,7 +20,8 @@ Do you need a GPU?
 └── Yes
     ├── Just for this session? ──────────► 3. Single-engine Tailscale mode
     ├── Need a durable API + GPU? ───────► 4. Split mode
-    └── Need many GPUs / multi-engine? ──► 5. Split + multiple engine workers
+    ├── Need many GPUs / multi-engine? ──► 5. Split + multiple engine workers
+    └── Have an Apple Silicon Mac? ──────► 6. Split + Mac Neural Engine worker
 ```
 
 ---
@@ -116,17 +117,38 @@ to engines based on capability, model, and current load — see
 
 ---
 
+## 6. Split + Mac Neural Engine worker
+
+**You get:** the full control plane plus an Apple Silicon Mac on your
+tailnet as a batch worker. Parakeet and pyannote run as Core ML models on
+the Neural Engine via FluidAudio; no CUDA, no torch, no Docker on the Mac.
+**You give up:** realtime on the Mac, autoscaling, and any guarantee while
+the lid is closed.
+
+```bash
+# on the Mac, from a checkout of this repo
+bash engines/stt-transcribe/fluidaudio/mac/install.sh
+# then pull the three fluidaudio/* models on the Models page
+```
+
+When this is right: you already run a control plane (AWS or `make dev`) and
+have a Mac that sits idle; batch jobs can wait for it; you want zero
+marginal cost per hour of audio.
+Walkthrough: [14-mac-neural-engine-worker.md](14-mac-neural-engine-worker.md).
+
+---
+
 ## Cross-cutting decisions
 
 These apply to every path:
 
 ### CPU vs GPU model choice
 
-| | CPU OK | GPU only |
-|---|---|---|
-| transcribe | onnx, faster-whisper, hf-asr, hf-asr-align-pyannote | nemo, vllm-asr |
-| diarize | pyannote (slow), hf-asr-align-pyannote | — |
-| align, prepare, redact | yes | — |
+| | CPU OK | GPU only | Apple Neural Engine (Mac worker) |
+|---|---|---|---|
+| transcribe | onnx, faster-whisper, hf-asr, hf-asr-align-pyannote | nemo, vllm-asr | fluidaudio (Parakeet v3 / Ultra) |
+| diarize | pyannote (slow), hf-asr-align-pyannote | — | fluidaudio-pyannote |
+| align, prepare, redact | yes | — | — |
 
 ### Spot vs on-demand
 

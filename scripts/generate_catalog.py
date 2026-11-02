@@ -28,6 +28,9 @@ from pathlib import Path
 import yaml
 
 VALID_EXECUTION_PROFILES = frozenset({"inproc", "venv", "container"})
+# M104: "compose" engines have a docker-compose service; "external" engines run
+# outside the compose stack (e.g. a Mac worker) and skip the compose check.
+VALID_DEPLOYMENTS = frozenset({"compose", "external"})
 
 
 def find_engine_id_yamls(engines_dir: Path) -> list[Path]:
@@ -108,6 +111,20 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
             f"Invalid on_demand {on_demand!r} in {yaml_path}; expected a boolean"
         )
 
+    deployment = data.get("deployment", "compose")
+    if deployment not in VALID_DEPLOYMENTS:
+        valid = ", ".join(sorted(VALID_DEPLOYMENTS))
+        raise ValueError(
+            f"Invalid deployment {deployment!r} in {yaml_path}; "
+            f"expected one of {{{valid}}}"
+        )
+    # M104: an external engine runs outside the compose stack and nothing in
+    # the control plane can launch it, so it is never scale-to-zero-safe.
+    if deployment == "external" and on_demand:
+        raise ValueError(
+            f"{yaml_path}: deployment: external cannot be combined with on_demand: true"
+        )
+
     entry = {
         "id": engine_id,
         "engine_id": engine_file_id,  # Engine file ID for capability routing
@@ -116,6 +133,7 @@ def transform_engine_id_to_entry(data: dict, yaml_path: Path) -> dict:
         "stage": stage,
         "execution_profile": execution_profile,
         "on_demand": on_demand,
+        "deployment": deployment,
         "description": data.get("description", "").strip(),
         "image": derive_image_name(engine_id, stage, version),
         "capabilities": {
@@ -179,6 +197,7 @@ def generate_catalog(engines_dir: Path) -> dict:
                 "image": entry["image"],
                 "execution_profile": entry["execution_profile"],
                 "on_demand": entry["on_demand"],
+                "deployment": entry["deployment"],
                 "capabilities": entry["capabilities"],
                 "hardware": entry["hardware"],
                 "performance": entry["performance"],

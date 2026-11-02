@@ -1,0 +1,62 @@
+schema_version: "1.1"
+id: stt-transcribe-fluidaudio
+engine_id: fluidaudio
+stage: transcribe
+mode: batch
+# M104: runs only on an Apple Silicon Mac next to fluidaudio-server; there is
+# no docker-compose service. "external" keeps the engine in the generated
+# catalog (so /v1/engines, the console and scheduler timeouts see it) while
+# exempting it from the catalog<->compose contract check. Never on_demand:
+# nothing in the control plane can launch a Mac.
+deployment: external
+name: FluidAudio Parakeet (Core ML, Neural Engine)
+version: 1.0.0
+description: |
+  Thin adapter for fluidaudio-server, a Swift sidecar that runs NVIDIA
+  Parakeet TDT 0.6B v3 and Parakeet Ultra as Core ML models on the Apple
+  Neural Engine via FluidAudio. The adapter does no inference: it pulls
+  tasks from Redis, fetches audio from S3, POSTs it to the server over
+  loopback and converts the word timings into a Dalston Transcript.
+
+  Segments are synthesised from words on sentence-ending punctuation
+  (dalston.engine_sdk.segments), the same rule the ONNX Parakeet engine uses.
+
+container:
+  gpu: none
+  memory: 1G
+
+capabilities:
+  native_streaming: false
+  word_timestamps: true
+  includes_diarization: false
+  max_concurrency: 1
+  # To confirm in M104.5 measurement; FluidAudio streams long files from
+  # disk, so the adapter does not opt into base-class VAD chunking.
+  max_audio_duration: 7200
+
+input:
+  audio_formats:
+    - wav
+    - pcm_s16le
+  sample_rate: 16000
+  channels: 1
+
+interface:
+  protocol: dalston-native
+  health: /health
+  capabilities: /v1/capabilities
+  submit: /v1/transcribe
+  port: 9100
+
+hardware:
+  # The adapter is CPU-only; the Neural Engine is the server's concern.
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  # Deliberately pessimistic placeholders. The selector ranks word-timestamp
+  # engines by rtf_gpu (lower wins) from the catalog, so an optimistic guess
+  # would make the Mac out-rank every GPU worker for auto-routed jobs.
+  # Replace with measured Neural Engine numbers (M104.5).
+  rtf_gpu: 0.3
+  rtf_cpu: 0.3

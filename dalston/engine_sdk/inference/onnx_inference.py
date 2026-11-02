@@ -24,6 +24,7 @@ import structlog
 import dalston.metrics
 import dalston.telemetry
 from dalston.engine_sdk.managers import OnnxModelManager
+from dalston.engine_sdk.segments import is_sentence_ending, words_to_segments
 
 logger = structlog.get_logger()
 
@@ -524,7 +525,7 @@ class OnnxInference:
     @staticmethod
     def _is_sentence_ending(word_text: str) -> bool:
         """Check if a word ends with sentence-ending punctuation."""
-        return word_text.rstrip().endswith((".", "?", "!", "。", "？", "！"))
+        return is_sentence_ending(word_text)
 
     def _tokens_to_words(
         self,
@@ -580,41 +581,17 @@ class OnnxInference:
     def _words_to_segments(
         self, all_words: list[OnnxWordResult], full_text: str
     ) -> list[OnnxSegmentResult]:
-        """Group words into segments based on sentence boundaries."""
-        if not all_words:
-            if full_text:
-                return [OnnxSegmentResult(start=0.0, end=0.0, text=full_text)]
-            return []
-
-        segments: list[OnnxSegmentResult] = []
-        current_words: list[OnnxWordResult] = []
-
-        for word in all_words:
-            current_words.append(word)
-            if self._is_sentence_ending(word.word):
-                seg_text = " ".join(w.word for w in current_words)
-                segments.append(
-                    OnnxSegmentResult(
-                        start=current_words[0].start,
-                        end=current_words[-1].end,
-                        text=seg_text,
-                        words=current_words.copy(),
-                    )
-                )
-                current_words = []
-
-        if current_words:
-            seg_text = " ".join(w.word for w in current_words)
-            segments.append(
-                OnnxSegmentResult(
-                    start=current_words[0].start,
-                    end=current_words[-1].end,
-                    text=seg_text,
-                    words=current_words,
-                )
-            )
-
-        return segments
+        """Group words into segments on sentence boundaries (shared SDK rule)."""
+        return words_to_segments(
+            all_words,
+            word_text=lambda w: w.word,
+            word_start=lambda w: w.start,
+            word_end=lambda w: w.end,
+            make_segment=lambda start, end, text, words: OnnxSegmentResult(
+                start=start, end=end, text=text, words=words
+            ),
+            full_text=full_text,
+        )
 
     # -- Lifecycle -----------------------------------------------------------
 
