@@ -583,7 +583,7 @@ class RealtimeEngine(ABC):
             return
 
         if is_port_in_use(self.metrics_port):
-            logger.info(
+            logger.warning(
                 "metrics_server_skipped_port_in_use",
                 port=self.metrics_port,
             )
