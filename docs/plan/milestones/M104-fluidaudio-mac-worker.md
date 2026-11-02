@@ -427,9 +427,11 @@ curl -s -X POST http://dalston-control-plane:8000/v1/audio/transcriptions \
 # then poll /v1/audio/transcriptions/{id}; PASS: status completed, speakers > 0,
 # and the job's task list shows engine_id fluidaudio and fluidaudio-pyannote
 
-# Engine schema still validates; regenerated catalog is unchanged (local_only engines are skipped)
+# Engine schema validates; the committed catalog already contains both external engines
 python -m dalston.tools.validate_engine --all
 python scripts/generate_catalog.py && git diff --exit-code dalston/orchestrator/generated_catalog.json
+jq '.engines[] | select(.engine_id|startswith("fluidaudio")) | {engine_id, deployment, on_demand}' \
+  dalston/orchestrator/generated_catalog.json     # PASS: two entries, deployment "external", on_demand false
 ```
 
 ---
