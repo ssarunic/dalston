@@ -59,11 +59,12 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M18](milestones/M18-unified-structured-logging.md) | Unified Structured Logging | `dalston/logging.py` |
 | [M24](milestones/M24-realtime-session-persistence.md) | Realtime Session Persistence | Audio/transcript S3 storage working; session resume pending |
 
-### Not Started (4)
+### Not Started (5)
 
 | # | Milestone | Goal |
 |---|-----------|------|
 | [M9](milestones/M09-enrichment.md) | Enrichment | Emotions, events, LLM cleanup |
+| [M104](milestones/M104-fluidaudio-mac-worker.md) | FluidAudio Mac Worker | Apple Silicon Mac as a batch worker: Parakeet + pyannote on the Neural Engine via a Swift sidecar and torch-free Python adapters |
 | [M58](milestones/M58-lite-pipeline-expansion-capability-parity.md) | Lite Pipeline Expansion and Capability Parity (Clean-Cut) | Expand lite-mode profiles/features with explicit capability matrix and deterministic unsupported-feature behavior |
 | [M60](milestones/M60-one-line-distribution-packaging-clean-cut.md) | One-Line Distribution and Packaging (Clean-Cut) | Cross-platform distribution channels and install/release pipeline for zero-config onboarding |
 | [M78](milestones/M78-infrastructure-topology-view.md) | Infrastructure Topology View | Node-level view showing engine co-location, instance counts, and local vs AWS environment |
@@ -162,6 +163,7 @@ Within each slice, we follow a **skeleton → stub → capability** pattern:
 | [M51](milestones/M51-engine-runtime-context-refactor.md) | Engine Runtime Context Refactor | Stateless URI-free engine contract with runner-side artifact materialization | 12-16 | Core Complete (engine migration → M52) |
 | [M52](milestones/M52-engine-sdk-local-runner-dx-clean-cut.md) | Engine SDK Local Runner DX (Clean-Cut) | File-based local runner command and no-compat cleanup before remaining stage refactors | 5-7 | Complete |
 | [M54](milestones/M54-event-dlq-poison-pill-isolation-clean-cut.md) | Event DLQ and Poison-Pill Isolation (Clean-Cut) | Delivery-count retry ceiling + DLQ quarantine for durable orchestrator events; remove infinite replay legacy behavior | 3-5 | Complete |
+| [M104](milestones/M104-fluidaudio-mac-worker.md) | FluidAudio Mac Worker | Mac on the tailnet as a batch worker; Core ML Parakeet + pyannote via Swift sidecar, Riva-style adapters | 5-7 | Not Started |
 
 ## Model Management Milestones
 
