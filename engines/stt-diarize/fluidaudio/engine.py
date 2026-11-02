@@ -10,8 +10,12 @@ Environment variables:
         (default: http://127.0.0.1:9200)
     DALSTON_FLUIDAUDIO_TIMEOUT_S: Per-request inference timeout
         (default: 7200)
-    DALSTON_DEFAULT_MODEL: Diarization model when a task does not pin one
-        (default: FluidInference/speaker-diarization-coreml)
+    DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S: How long to wait for the server's
+        /health before registering with the control plane (default: 1800)
+
+``DALSTON_DEFAULT_MODEL`` is deliberately not read: the shared worker.env
+sets it to the transcription model, and the server serves exactly one
+diarizer, so a task that pins no model gets that one.
 
 Run on the Mac:
     python engines/stt-diarize/fluidaudio/engine.py
@@ -32,7 +36,11 @@ from dalston.engine_sdk import (
     TaskResponse,
 )
 from dalston.engine_sdk.diarize_chunking import overlap_stats_from_turns
-from dalston.engine_sdk.sidecar_http import SidecarError, SidecarHTTPClient
+from dalston.engine_sdk.sidecar_http import (
+    DEFAULT_STARTUP_TIMEOUT_S,
+    SidecarError,
+    SidecarHTTPClient,
+)
 
 #: FluidAudio Hugging Face repo id for the pyannote community-1 Core ML
 #: bundle; the server's model key and the ``source`` / ``loaded_model_id``
@@ -52,6 +60,15 @@ def make_client() -> SidecarHTTPClient:
     )
 
 
+def startup_timeout_s() -> float:
+    """Seconds to wait for the server before registering (see module doc)."""
+    return float(
+        os.environ.get(
+            "DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S", str(DEFAULT_STARTUP_TIMEOUT_S)
+        )
+    )
+
+
 class FluidAudioDiarizeEngine(Engine):
     """Speaker diarization via fluidaudio-server (Core ML pyannote)."""
 
@@ -60,14 +77,11 @@ class FluidAudioDiarizeEngine(Engine):
     def __init__(self, client: SidecarHTTPClient | None = None) -> None:
         super().__init__()
         self._client = client if client is not None else make_client()
-        self._default_model = os.environ.get(
-            "DALSTON_DEFAULT_MODEL", SPEAKER_DIARIZATION_REPO
-        )
         self.logger.info(
             "engine_init",
             engine_id=self.engine_id,
             server_url=self._client.base_url,
-            default_model=self._default_model,
+            default_model=SPEAKER_DIARIZATION_REPO,
         )
 
     def create_http_server(self, port: int = 9100):  # type: ignore[override]  # covariant return
@@ -82,7 +96,7 @@ class FluidAudioDiarizeEngine(Engine):
         if audio_path is None:
             raise ValueError("audio_path is required for diarization")
         params = task_request.get_diarize_params()
-        model = params.loaded_model_id or self._default_model
+        model = params.loaded_model_id or SPEAKER_DIARIZATION_REPO
 
         warnings: list[str] = []
         if params.exclusive:
@@ -148,7 +162,16 @@ class FluidAudioDiarizeEngine(Engine):
             warnings=warnings,
         )
 
-    # -- Health / capabilities ------------------------------------------------
+    # -- Lifecycle / health / capabilities -------------------------------------
+
+    def run(self) -> None:
+        """Wait for the server, then start the batch loop.
+
+        See the transcribe adapter: registering before the server answers
+        routes jobs into connection errors while it is still loading.
+        """
+        self._client.wait_until_ready(timeout_s=startup_timeout_s())
+        super().run()
 
     def health_check(self) -> dict[str, Any]:
         server = self._client.health()

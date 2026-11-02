@@ -50,6 +50,9 @@ fi
 [ "$(uname -s)" = "Darwin" ] || die "this installer is for macOS"
 [ "$(uname -m)" = "arm64" ] || die "FluidAudio needs Apple Silicon (arm64); this Mac is $(uname -m)"
 command -v swift >/dev/null 2>&1 || die "swift not found: install Xcode command line tools (xcode-select --install)"
+# The engine SDK re-encodes any task audio that is not already 16 kHz mono
+# PCM through ffmpeg; the launchd agents look for it in /opt/homebrew/bin.
+command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
 command -v tailscale >/dev/null 2>&1 || warn "tailscale CLI not found; the worker must reach the control plane over the tailnet"
 
 PYTHON="${PYTHON:-}"

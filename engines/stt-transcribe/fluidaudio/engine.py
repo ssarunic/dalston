@@ -10,6 +10,9 @@ Environment variables:
         (default: http://127.0.0.1:9200)
     DALSTON_FLUIDAUDIO_TIMEOUT_S: Per-request inference timeout
         (default: 7200)
+    DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S: How long to wait for the server's
+        /health before registering with the control plane. A cold server
+        downloads and compiles Core ML models first (default: 1800)
     DALSTON_DEFAULT_MODEL: Model used when a task does not pin one. For the
         transcribe stage the orchestrator passes the registry model's
         ``source``, i.e. the FluidAudio Hugging Face repo id, so this is one
@@ -23,7 +26,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dalston.common.pipeline_types import (
     Transcript,
@@ -37,7 +40,11 @@ from dalston.engine_sdk import (
 )
 from dalston.engine_sdk.base_transcribe import BaseBatchTranscribeEngine
 from dalston.engine_sdk.segments import words_to_segments
-from dalston.engine_sdk.sidecar_http import SidecarError, SidecarHTTPClient
+from dalston.engine_sdk.sidecar_http import (
+    DEFAULT_STARTUP_TIMEOUT_S,
+    SidecarError,
+    SidecarHTTPClient,
+)
 
 #: FluidAudio Hugging Face repo ids. These are the model keys the server
 #: understands and the ``source`` / ``loaded_model_id`` of the matching
@@ -68,6 +75,15 @@ def make_client() -> SidecarHTTPClient:
     )
 
 
+def startup_timeout_s() -> float:
+    """Seconds to wait for the server before registering (see module doc)."""
+    return float(
+        os.environ.get(
+            "DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S", str(DEFAULT_STARTUP_TIMEOUT_S)
+        )
+    )
+
+
 class FluidAudioBatchEngine(BaseBatchTranscribeEngine):
     """Batch transcription via fluidaudio-server (Core ML Parakeet)."""
 
@@ -94,24 +110,28 @@ class FluidAudioBatchEngine(BaseBatchTranscribeEngine):
             raise ValueError("audio_path is required for transcription")
         params = task_request.get_transcribe_params()
         model = params.loaded_model_id or self._default_model
+        # "auto" means detect, which the server cannot do; send nothing.
+        requested_language = (
+            params.language if params.language and params.language != "auto" else None
+        )
 
         self.logger.info(
             "transcribing",
             audio_path=str(audio_path),
             model=model,
-            language=params.language,
+            language=requested_language,
         )
         self._set_runtime_state(loaded_model=model, status="processing")
         try:
             result = self._client.post_audio(
                 "/v1/transcribe",
                 Path(audio_path),
-                fields={"model": model, "language": params.language},
+                fields={"model": model, "language": requested_language},
             )
         finally:
             self._set_runtime_state(loaded_model=model, status="idle")
 
-        return self._to_transcript(result, requested_language=params.language)
+        return self._to_transcript(result, requested_language=requested_language)
 
     def _to_transcript(
         self, result: dict[str, Any], *, requested_language: str | None
@@ -127,9 +147,18 @@ class FluidAudioBatchEngine(BaseBatchTranscribeEngine):
             for w in result.get("words", [])
         ]
 
+        # Parakeet does not identify the language, so the server reports
+        # none. With no explicit request, say "und" (ISO 639 undetermined)
+        # with no provenance rather than fabricate a code, as the ONNX and
+        # NeMo engines do (M92 review R3).
         detected = result.get("language")
-        language = str(detected or requested_language or "en")
-        language_source: Any = "detected" if detected else "requested"
+        language_source: Literal["requested", "detected"] | None
+        if detected:
+            language, language_source = str(detected), "detected"
+        elif requested_language:
+            language, language_source = requested_language, "requested"
+        else:
+            language, language_source = "und", None
 
         segments: list[TranscriptSegment] = words_to_segments(
             words,
@@ -164,7 +193,18 @@ class FluidAudioBatchEngine(BaseBatchTranscribeEngine):
             warnings=list(result.get("warnings", [])),
         )
 
-    # -- Health / capabilities ------------------------------------------------
+    # -- Lifecycle / health / capabilities -------------------------------------
+
+    def run(self) -> None:
+        """Wait for the server, then start the batch loop.
+
+        The runner registers and consumes tasks as soon as it starts and
+        heartbeats without consulting ``health_check``, so registering
+        before the server answers would route jobs into connection errors
+        while it is still compiling models.
+        """
+        self._client.wait_until_ready(timeout_s=startup_timeout_s())
+        super().run()
 
     def health_check(self) -> dict[str, Any]:
         server = self._client.health()

@@ -7,3 +7,5 @@
 #   pip install -e ".[engine-sdk]" -r engines/stt-diarize/fluidaudio/requirements.txt
 httpx>=0.26.0
 numpy>=1.24.0
+# Same audio-format probe as the transcribe adapter; see its requirements.
+soundfile>=0.14.0

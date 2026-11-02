@@ -71,11 +71,16 @@ class FakeServer:
         }
         self.status_code = 200
         self.health_ok = True
+        #: Number of /health probes that answer "starting" before "ok".
+        self.health_probes_until_ready = 0
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
         if path == "/health":
+            if self.health_probes_until_ready > 0:
+                self.health_probes_until_ready -= 1
+                return httpx.Response(503, json={"status": "starting"})
             if not self.health_ok:
                 return httpx.Response(503, json={"status": "starting"})
             return httpx.Response(
@@ -120,6 +125,17 @@ class FakeServer:
 @pytest.fixture
 def server() -> FakeServer:
     return FakeServer()
+
+
+def _fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``wait_until_ready`` poll every millisecond instead of 5 s."""
+    original = SidecarHTTPClient.wait_until_ready
+
+    def fast(self: SidecarHTTPClient, **kw: Any) -> dict[str, Any]:
+        kw.setdefault("poll_s", 0.001)
+        return original(self, **kw)
+
+    monkeypatch.setattr(SidecarHTTPClient, "wait_until_ready", fast)
 
 
 @pytest.fixture
@@ -189,10 +205,39 @@ class TestFluidAudioBatchEngine:
     ) -> None:
         engine = transcribe_mod.FluidAudioBatchEngine(client=server.client())
         req = TaskRequest(task_id="t", job_id="j", stage="transcribe", audio_path=audio)
-        engine.transcribe_audio(req, MagicMock())
+        transcript = engine.transcribe_audio(req, MagicMock())
         assert server.last_form()["model"] == transcribe_mod.PARAKEET_V3_REPO
         # language omitted entirely when not requested
         assert "language" not in server.last_form()
+        # ... and not fabricated in the result either (M92 review R3)
+        assert transcript.language == "und"
+        assert transcript.language_source is None
+
+    def test_explicit_language_is_reported_as_requested(
+        self, server: FakeServer, audio: Path
+    ) -> None:
+        engine = transcribe_mod.FluidAudioBatchEngine(client=server.client())
+        req = TaskRequest(
+            task_id="t", job_id="j", stage="transcribe",
+            config={"language": "de"}, audio_path=audio,
+        )  # fmt: skip
+        transcript = engine.transcribe_audio(req, MagicMock())
+        assert transcript.language == "de"
+        assert transcript.language_source == "requested"
+        assert all(seg.language == "de" for seg in transcript.segments)
+
+    def test_auto_language_is_undetermined_and_not_forwarded(
+        self, server: FakeServer, audio: Path
+    ) -> None:
+        engine = transcribe_mod.FluidAudioBatchEngine(client=server.client())
+        req = TaskRequest(
+            task_id="t", job_id="j", stage="transcribe",
+            config={"language": "auto"}, audio_path=audio,
+        )  # fmt: skip
+        transcript = engine.transcribe_audio(req, MagicMock())
+        assert "language" not in server.last_form()
+        assert transcript.language == "und"
+        assert transcript.language_source is None
 
     def test_detected_language_wins_over_requested(
         self, server: FakeServer, audio: Path
@@ -205,6 +250,7 @@ class TestFluidAudioBatchEngine:
         )  # fmt: skip
         transcript = engine.transcribe_audio(req, MagicMock())
         assert transcript.language == "hr"
+        assert transcript.language_source == "detected"
 
     def test_no_words_yields_single_segment(
         self, server: FakeServer, audio: Path
@@ -275,6 +321,47 @@ class TestFluidAudioBatchEngine:
             transcribe_mod.ASR_MODELS
         )
 
+    def test_run_waits_for_server_before_starting_runner(
+        self, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The runner must not register while the server is still loading."""
+        server.health_probes_until_ready = 3
+        _fast_poll(monkeypatch)
+        engine = transcribe_mod.FluidAudioBatchEngine(client=server.client())
+        started: list[str] = []
+        monkeypatch.setattr(
+            transcribe_mod.BaseBatchTranscribeEngine, "run",
+            lambda self: started.append("runner"),
+        )  # fmt: skip
+
+        engine.run()
+
+        health_probes = [r for r in server.requests if r.url.path == "/health"]
+        assert len(health_probes) == 4  # 3 x starting, then ok
+        assert started == ["runner"]
+
+    def test_run_gives_up_when_server_never_answers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(_: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("refused")
+
+        client = SidecarHTTPClient(
+            "http://down.test", transport=httpx.MockTransport(down)
+        )
+        monkeypatch.setenv("DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S", "0.01")
+        engine = transcribe_mod.FluidAudioBatchEngine(client=client)
+        runner_started = False
+
+        def fake_run(self: Any) -> None:
+            nonlocal runner_started
+            runner_started = True
+
+        monkeypatch.setattr(transcribe_mod.BaseBatchTranscribeEngine, "run", fake_run)
+        with pytest.raises(SidecarError, match="not ready"):
+            engine.run()
+        assert runner_started is False
+
 
 # -- Diarize adapter -----------------------------------------------------------
 
@@ -343,6 +430,34 @@ class TestFluidAudioDiarizeEngine:
         assert caps.model_variants == [diarize_mod.SPEAKER_DIARIZATION_REPO]
         assert caps.supports_word_timestamps is False
 
+    def test_shared_default_model_env_does_not_leak_into_diarizer(
+        self, server: FakeServer, audio: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """worker.env sets DALSTON_DEFAULT_MODEL to the Parakeet repo for the
+        transcribe adapter; the diarizer must keep its own model."""
+        monkeypatch.setenv("DALSTON_DEFAULT_MODEL", transcribe_mod.PARAKEET_V3_REPO)
+        engine = diarize_mod.FluidAudioDiarizeEngine(client=server.client())
+        req = TaskRequest(task_id="t", job_id="j", stage="diarize", audio_path=audio)
+        engine.process(req, MagicMock())
+        assert server.last_form()["model"] == diarize_mod.SPEAKER_DIARIZATION_REPO
+
+    def test_run_waits_for_server_before_starting_runner(
+        self, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server.health_probes_until_ready = 2
+        _fast_poll(monkeypatch)
+        engine = diarize_mod.FluidAudioDiarizeEngine(client=server.client())
+        started: list[str] = []
+        monkeypatch.setattr(
+            diarize_mod.Engine, "run", lambda self: started.append("runner")
+        )
+
+        engine.run()
+
+        health_probes = [r for r in server.requests if r.url.path == "/health"]
+        assert len(health_probes) == 3
+        assert started == ["runner"]
+
 
 # -- Sidecar client ------------------------------------------------------------
 
@@ -374,6 +489,33 @@ class TestSidecarHTTPClient:
         )
         assert client.base_url == "http://10.0.0.5:9300"
         assert client.timeout_s == 42.0
+
+    def test_wait_until_ready_returns_health_doc(self) -> None:
+        calls = 0
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                return httpx.Response(503, json={"status": "starting"})
+            return httpx.Response(200, json={"status": "ok", "asr_loaded": "m"})
+
+        client = SidecarHTTPClient(
+            "http://x.test", transport=httpx.MockTransport(handler)
+        )
+        doc = client.wait_until_ready(timeout_s=5, poll_s=0.001)
+        assert doc["asr_loaded"] == "m"
+        assert calls == 3
+
+    def test_wait_until_ready_times_out(self) -> None:
+        client = SidecarHTTPClient(
+            "http://x.test",
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(503, json={"status": "starting"})
+            ),
+        )
+        with pytest.raises(SidecarError, match="not ready after"):
+            client.wait_until_ready(timeout_s=0.01, poll_s=0.001)
 
     def test_none_fields_are_omitted(self, tmp_path: Path) -> None:
         seen: list[bytes] = []

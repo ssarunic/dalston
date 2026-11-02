@@ -15,6 +15,7 @@ It knows nothing about any particular sidecar's routes or payloads.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,12 @@ DEFAULT_INFERENCE_TIMEOUT_S = 7200.0
 #: Health and capabilities probes must come back quickly or the heartbeat
 #: thread stalls behind them.
 PROBE_TIMEOUT_S = 5.0
+
+#: How long an adapter waits for its sidecar to come up before giving up.
+#: A cold start can download and compile models, so this is generous;
+#: the process supervisor restarts the adapter if it is exceeded.
+DEFAULT_STARTUP_TIMEOUT_S = 1800.0
+STARTUP_POLL_S = 5.0
 
 
 class SidecarError(RuntimeError):
@@ -107,6 +114,45 @@ class SidecarHTTPClient:
                 "url": self.base_url,
                 "error": str(exc),
             }
+
+    def wait_until_ready(
+        self,
+        *,
+        timeout_s: float = DEFAULT_STARTUP_TIMEOUT_S,
+        poll_s: float = STARTUP_POLL_S,
+        path: str = "/health",
+        ready_status: str = "ok",
+    ) -> dict[str, Any]:
+        """Block until ``path`` reports ``ready_status``; return that document.
+
+        Adapters call this before registering with the control plane so a
+        sidecar that is still loading models does not get routed work it
+        cannot take.  Raises ``SidecarError`` once ``timeout_s`` elapses.
+        """
+        deadline = time.monotonic() + timeout_s
+        attempt = 0
+        while True:
+            attempt += 1
+            doc = self.health(path)
+            if doc.get("status") == ready_status:
+                logger.info(
+                    "sidecar_ready", url=self.base_url, attempts=attempt, health=doc
+                )
+                return doc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SidecarError(
+                    f"{self.base_url}{path} not ready after {timeout_s:.0f}s: "
+                    f"{doc.get('status')!r}"
+                )
+            logger.info(
+                "sidecar_not_ready",
+                url=self.base_url,
+                status=doc.get("status"),
+                attempt=attempt,
+                remaining_s=round(remaining),
+            )
+            time.sleep(min(poll_s, remaining))
 
     # -- Inference -----------------------------------------------------------
 

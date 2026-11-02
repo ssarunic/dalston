@@ -52,4 +52,6 @@ export DALSTON_HOST_HOSTNAME="${DALSTON_HOST_HOSTNAME:-$(hostname -s)}"
 export DALSTON_DEPLOY_ENV="${DALSTON_DEPLOY_ENV:-mac}"
 
 cd "$REPO_DIR/$ENGINE_DIR_REL"
-exec "$VENV/bin/python" engine.py
+# Full path on purpose: `ps` then shows which adapter this is, and
+# `pkill -f stt-transcribe/fluidaudio/engine.py` targets just one of them.
+exec "$VENV/bin/python" "$REPO_DIR/$ENGINE_DIR_REL/engine.py"

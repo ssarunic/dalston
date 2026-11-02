@@ -12,7 +12,9 @@ let package = Package(
     platforms: [
         // FluidAudio's offline diarizer and Parakeet v3 need macOS 14+;
         // 15 matches dalston-mobile's deployment target.
-        .macOS(.v15),
+        // String form: `.v15` needs swift-tools-version 6.0, and 5.10 is kept
+        // so the package stays in Swift 5 language mode.
+        .macOS("15.0"),
     ],
     dependencies: [
         // Core ML models on the Neural Engine. Pre-1.0, so pinned exactly.

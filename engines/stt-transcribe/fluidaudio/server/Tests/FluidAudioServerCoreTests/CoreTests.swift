@@ -19,7 +19,8 @@ import Testing
     }
 
     @Test func emptyInputStaysEmpty() {
-        #expect(Conversions.renumber([]).isEmpty)
+        let raw: [(speaker: String, start: Double, end: Double)] = []
+        #expect(Conversions.renumber(raw).isEmpty)
     }
 }
 
