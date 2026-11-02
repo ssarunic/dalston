@@ -496,6 +496,7 @@ class EngineRunner:
                             hostname=self._node.hostname,
                             node_id=self._node.node_id,
                             deploy_env=self._node.deploy_env,
+                            stream_name=self.stream_key,
                             gpu_memory_used=get_gpu_memory_used(),
                         )
                     except Exception as e:

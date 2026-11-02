@@ -24,7 +24,9 @@ off when they do not.
 ## Prerequisites
 
 - Apple Silicon Mac, macOS 15 or newer, Xcode command line tools
-  (`xcode-select --install`), Python 3.11+ (`brew install python@3.12`).
+  (`xcode-select --install`), Python 3.11+ (`brew install python@3.12`),
+  ffmpeg (`brew install ffmpeg`; the engine SDK re-encodes any task audio
+  that is not already 16 kHz mono PCM through it).
 - Tailscale on the Mac, joined to the same tailnet as the control plane.
   `tailscale ping dalston-control-plane` must answer.
 - The control plane's Redis and object store reachable from the tailnet.
@@ -64,8 +66,11 @@ Run the installer again. It renders three launchd agents into
 | `com.dalston.fluidaudio-diarize` | the `fluidaudio-pyannote` adapter, metrics on 9101 |
 
 Logs: `~/Library/Logs/dalston/fluidaudio-*.log`. The server's first start
-downloads and compiles the Core ML models (a few minutes); the adapters
-report `unhealthy` until `/health` answers.
+downloads and compiles the Core ML models (a few minutes). The adapters poll
+`/health` and only register with the control plane once it answers `ok`, so
+nothing is routed to the Mac while the server is still loading; they give
+up after `DALSTON_FLUIDAUDIO_STARTUP_TIMEOUT_S` (default 30 minutes) and
+launchd restarts them.
 
 ## Make the models routable
 
@@ -123,10 +128,13 @@ Be clear-eyed about what a laptop is:
   queues them for an autoscaler that does not exist.
 - **Auto-routed jobs go elsewhere.** The selector only considers healthy
   engines.
-- **When both are online**, the selector ranks word-timestamp engines by the
-  catalog `rtf_gpu`. The FluidAudio entries ship with a deliberately
-  pessimistic 0.3 so GPU workers win by default; replace it with measured
-  numbers once you have them (spec step 104.5).
+- **When both are online, the Mac goes first** (M105). Auto-routed tasks
+  land on it while its stream holds fewer than
+  `DALSTON_EXTERNAL_ENGINE_QUEUE_CAPACITY` tasks (default 20; keep it equal
+  to the autoscale policy's `tasks_per_instance`). Overflow goes to the GPU
+  streams, where the autoscaler counts it and launches spot. The Mac is
+  therefore one always-on instance in front of the fleet. Pinned models
+  bypass the rule.
 - `caffeinate -i` stops idle sleep, not lid-close sleep. Run the Mac with
   the lid open or `sudo pmset -a disablesleep 1`, and stop the agents before
   travelling.

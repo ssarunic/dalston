@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from dalston.engine_sdk.types import EngineCapabilities
 
 from dalston.common.pipeline_types import VocabularySupport
+from dalston.common.streams_types import CONSUMER_GROUP
 
 logger = structlog.get_logger()
 
@@ -350,6 +351,71 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
 
 
+async def get_stream_backlog(
+    redis: Any, stream_key: str, *, include_pending: bool = True
+) -> int:
+    """Tasks on an engine stream: undelivered (group lag), plus in flight.
+
+    ``include_pending=True`` adds the consumer group's PEL (delivered, not
+    yet acked), which is what "occupying the engine" means for the M105
+    external-engine capacity check. The console queue board passes
+    ``False`` because it shows what is *waiting*, not what an engine is
+    busy with. Keep the two readings distinct.
+
+    A missing stream or group means nothing was ever enqueued: 0. Redis
+    reports ``lag`` as nil when entries newer than the group's
+    last-delivered-id have been XDELed (cancelled jobs); the count becomes
+    incomputable and ``nil or 0`` would read as an empty queue while real
+    tasks wait. Fall back to counting the entries that still exist after
+    last-delivered-id, as the M91 autoscaler does. Any other Redis error
+    reads as 0 so callers never fail on a diagnostic.
+    """
+    try:
+        groups = await redis.xinfo_groups(stream_key)
+    except Exception as exc:
+        if "no such key" not in str(exc).lower():
+            logger.warning(
+                "stream_backlog_read_failed", stream=stream_key, error=str(exc)
+            )
+        return 0
+
+    for group in groups:
+        name = group.get("name")
+        if isinstance(name, bytes):
+            name = name.decode()
+        if name != CONSUMER_GROUP:
+            continue
+
+        raw_lag = group.get("lag")
+        if raw_lag is None:
+            last = group.get("last-delivered-id") or "0-0"
+            if isinstance(last, bytes):
+                last = last.decode()
+            # Exclusive range after last-delivered-id, capped: callers need
+            # magnitude, not exactness beyond 500.
+            entries = await redis.xrange(stream_key, min=f"({last}", max="+", count=500)
+            lag = len(entries)
+        else:
+            if isinstance(raw_lag, bytes):
+                raw_lag = raw_lag.decode()
+            try:
+                lag = max(0, int(raw_lag))
+            except (TypeError, ValueError):
+                lag = 0
+
+        pending = 0
+        if include_pending:
+            raw_pending = group.get("pending")
+            if isinstance(raw_pending, bytes):
+                raw_pending = raw_pending.decode()
+            try:
+                pending = max(0, int(raw_pending or 0))
+            except (TypeError, ValueError):
+                pending = 0
+        return lag + pending
+    return 0
+
+
 class UnifiedEngineRegistry:
     """Async server-side registry for reading unified engine state.
 
@@ -416,6 +482,7 @@ class UnifiedEngineRegistry:
         hostname: str | None = None,
         node_id: str | None = None,
         deploy_env: str | None = None,
+        stream_name: str | None = None,
     ) -> None:
         """Update heartbeat and dynamic fields.
 
@@ -475,6 +542,10 @@ class UnifiedEngineRegistry:
             mapping["node_id"] = node_id
         if deploy_env is not None:
             mapping["deploy_env"] = deploy_env
+        # M105: the selector reads this engine's queue through stream_name;
+        # like the fields above it must survive key re-creation.
+        if stream_name is not None:
+            mapping["stream_name"] = stream_name
 
         await self._redis.hset(instance_key, mapping=mapping)
         await self._redis.expire(instance_key, HEARTBEAT_TTL)
@@ -622,6 +693,10 @@ class UnifiedEngineRegistry:
                 return inst
         return instances[0]
 
+    async def get_stream_backlog(self, stream_key: str) -> int:
+        """Undelivered plus in-flight tasks on ``stream_key`` (M105)."""
+        return await get_stream_backlog(self._redis, stream_key)
+
     async def is_engine_available(self, engine_id: str) -> bool:
         """Check if a engine_id has at least one healthy instance."""
         instances = await self.get_by_engine_id(engine_id)
@@ -687,6 +762,7 @@ class UnifiedRegistryWriter:
         hostname: str | None = None,
         node_id: str | None = None,
         deploy_env: str | None = None,
+        stream_name: str | None = None,
     ) -> None:
         """Update heartbeat (sync).
 
@@ -739,6 +815,10 @@ class UnifiedRegistryWriter:
             mapping["node_id"] = node_id
         if deploy_env is not None:
             mapping["deploy_env"] = deploy_env
+        # M105: the selector reads this engine's queue through stream_name;
+        # like the fields above it must survive key re-creation.
+        if stream_name is not None:
+            mapping["stream_name"] = stream_name
 
         r.hset(instance_key, mapping=mapping)
         r.expire(instance_key, HEARTBEAT_TTL)
