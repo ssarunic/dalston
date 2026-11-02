@@ -98,6 +98,10 @@ def main() -> int:
         if not engine_id:
             continue
 
+        # M104: external engines run outside the compose stack by design.
+        if entry.get("deployment") == "external":
+            continue
+
         if entry.get("type") == "realtime":
             if engine_id not in realtime_ids:
                 missing.append(f"realtime:{engine_id}")

@@ -1,0 +1,66 @@
+# Model catalog entry for FluidInference/parakeet-tdt-0.6b-v3-coreml
+# M104: Core ML build of Parakeet TDT 0.6B v3 for the FluidAudio Mac worker
+
+schema_version: "1.1"
+id: fluidaudio/parakeet-tdt-0.6b-v3
+engine_id: fluidaudio
+# source and loaded_model_id are the SAME string on purpose. Transcribe
+# tasks receive model.source (engine_selector._resolve_loaded_model_id),
+# and that is the key fluidaudio-server understands.
+source: FluidInference/parakeet-tdt-0.6b-v3-coreml
+loaded_model_id: FluidInference/parakeet-tdt-0.6b-v3-coreml
+
+name: NVIDIA Parakeet TDT 0.6B v3 (Core ML, FluidAudio)
+size_gb: 0.6
+stage: transcribe
+
+description: |
+  NVIDIA Parakeet TDT 0.6B v3 converted to Core ML by FluidInference and run
+  on the Apple Neural Engine by fluidaudio-server. 25 European languages,
+  punctuation and capitalization, word timings from token timestamps.
+
+  Pulling this model into S3 only marks it ready for routing; the Mac
+  server fetches and compiles the same repo itself on first use.
+
+languages:
+  - bg
+  - hr
+  - cs
+  - da
+  - nl
+  - en
+  - et
+  - fi
+  - fr
+  - de
+  - el
+  - hu
+  - it
+  - lv
+  - lt
+  - mt
+  - pl
+  - pt
+  - ro
+  - sk
+  - sl
+  - es
+  - sv
+  - ru
+  - uk
+
+capabilities:
+  word_timestamps: true
+  punctuation: true
+  capitalization: true
+  native_streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  # Pessimistic placeholders until measured on the Neural Engine (M104.5).
+  rtf_gpu: 0.3
+  rtf_cpu: 0.3

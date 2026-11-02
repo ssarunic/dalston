@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Dalston FluidAudio Mac worker (M104): the transcribe adapter (engine_id
+  fluidaudio). Rendered by install.sh. The adapter needs fluidaudio-server
+  on loopback; KeepAlive restarts it until the server answers.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dalston.fluidaudio-transcribe</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO_DIR__/engines/stt-transcribe/fluidaudio/mac/run-adapter.sh</string>
+    <string>transcribe</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DALSTON_HOME</key>
+    <string>__DALSTON_HOME__</string>
+    <key>DALSTON_REPO_DIR</key>
+    <string>__REPO_DIR__</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>__REPO_DIR__/engines/stt-transcribe/fluidaudio</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/fluidaudio-transcribe.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/fluidaudio-transcribe.log</string>
+</dict>
+</plist>

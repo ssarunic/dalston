@@ -1,0 +1,65 @@
+# Model catalog entry for FluidInference/parakeet-ultra-coreml
+# M104: Core ML build of Parakeet Ultra for the FluidAudio Mac worker
+
+schema_version: "1.1"
+id: fluidaudio/parakeet-ultra
+engine_id: fluidaudio
+# source and loaded_model_id are the SAME string on purpose; see
+# fluidaudio-parakeet-tdt-0.6b-v3.yaml.
+source: FluidInference/parakeet-ultra-coreml
+loaded_model_id: FluidInference/parakeet-ultra-coreml
+
+name: Parakeet Ultra (Core ML, FluidAudio)
+size_gb: 0.6
+stage: transcribe
+
+description: |
+  Moondream's post-training of Parakeet TDT 0.6B v3, converted to Core ML by
+  FluidInference and run on the Apple Neural Engine by fluidaudio-server.
+  Fewer errors than v3, especially outside English; same 25 languages.
+
+  Pulling this model into S3 only marks it ready for routing; the Mac
+  server fetches and compiles the same repo itself on first use.
+
+languages:
+  - bg
+  - hr
+  - cs
+  - da
+  - nl
+  - en
+  - et
+  - fi
+  - fr
+  - de
+  - el
+  - hu
+  - it
+  - lv
+  - lt
+  - mt
+  - pl
+  - pt
+  - ro
+  - sk
+  - sl
+  - es
+  - sv
+  - ru
+  - uk
+
+capabilities:
+  word_timestamps: true
+  punctuation: true
+  capitalization: true
+  native_streaming: false
+  max_audio_duration: 7200
+
+hardware:
+  supports_cpu: true
+  min_ram_gb: 8
+
+performance:
+  # Pessimistic placeholders until measured on the Neural Engine (M104.5).
+  rtf_gpu: 0.3
+  rtf_cpu: 0.3

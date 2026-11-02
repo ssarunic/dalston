@@ -6,7 +6,7 @@
 | **Duration**       | 5–7 days                                                                                                                             |
 | **Dependencies**   | M70 (Riva NIM Engine Integration — sidecar reference), M79 (Leaf Engine HTTP API), M78 (Infrastructure Topology View, node identity fields) |
 | **Deliverable**    | `fluidaudio-server` Swift executable, `fluidaudio` transcribe adapter, `fluidaudio-pyannote` diarize adapter, `deployment: external` catalog flag, model catalog entries, Mac worker install (launchd + env), operator guide |
-| **Status**         | Not Started                                                                                                                          |
+| **Status**         | Implemented — pending verification on an Apple Silicon Mac (Swift build, model download, end-to-end job, RTF measurement for 104.5) |
 
 ## User Story
 
