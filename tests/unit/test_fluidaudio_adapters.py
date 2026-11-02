@@ -252,6 +252,26 @@ class TestFluidAudioBatchEngine:
         assert transcript.language == "hr"
         assert transcript.language_source == "detected"
 
+    def test_unk_token_is_stripped_like_nemo(
+        self, server: FakeServer, audio: Path
+    ) -> None:
+        server.transcribe_response["text"] = "The S<unk>P. rose <unk> today."
+        server.transcribe_response["words"] = [
+            {"text": "The", "start": 0.1, "end": 0.3, "confidence": None},
+            {"text": "S<unk>P.", "start": 0.4, "end": 0.9, "confidence": None},
+            {"text": "rose", "start": 1.0, "end": 1.3, "confidence": None},
+            {"text": "<unk>", "start": 1.3, "end": 1.4, "confidence": None},
+            {"text": "today.", "start": 1.5, "end": 1.9, "confidence": None},
+        ]
+        engine = transcribe_mod.FluidAudioBatchEngine(client=server.client())
+        req = TaskRequest(task_id="t", job_id="j", stage="transcribe", audio_path=audio)
+        transcript = engine.transcribe_audio(req, MagicMock())
+
+        assert transcript.text == "The SP. rose today."
+        words = [w.text for s in transcript.segments for w in s.words or []]
+        assert words == ["The", "SP.", "rose", "today."]
+        assert "<unk>" not in " ".join(s.text for s in transcript.segments)
+
     def test_no_words_yields_single_segment(
         self, server: FakeServer, audio: Path
     ) -> None:

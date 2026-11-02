@@ -25,6 +25,7 @@ Run on the Mac:
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -56,6 +57,19 @@ ASR_MODELS: tuple[str, ...] = (PARAKEET_V3_REPO, PARAKEET_ULTRA_REPO)
 
 DEFAULT_SERVER_URL = "http://127.0.0.1:9200"
 ENGINE_VERSION = "1.0.0"
+
+#: FluidAudio's TDT decoder passes SentencePiece's unknown token through as
+#: text (``S&P`` comes back as ``S<unk>P.``); NeMo's decoder drops it. Strip
+#: it the same way rather than guess which character it stood for.
+UNK_TOKEN = "<unk>"
+_MULTI_SPACE = re.compile(r" {2,}")
+
+
+def _strip_unk(text: str) -> str:
+    if UNK_TOKEN not in text:
+        return text
+    return _MULTI_SPACE.sub(" ", text.replace(UNK_TOKEN, "")).strip()
+
 
 # Parakeet TDT 0.6B v3 languages (25 European). FluidAudio's Language only
 # filters tokens by script, so this is advisory, not forcing.
@@ -136,15 +150,16 @@ class FluidAudioBatchEngine(BaseBatchTranscribeEngine):
     def _to_transcript(
         self, result: dict[str, Any], *, requested_language: str | None
     ) -> Transcript:
-        text = str(result.get("text", "")).strip()
+        text = _strip_unk(str(result.get("text", "")).strip())
         words: list[TranscriptWord] = [
             self.build_word(
-                text=str(w["text"]),
+                text=word_text,
                 start=float(w["start"]),
                 end=float(w["end"]),
                 confidence=w.get("confidence"),
             )
             for w in result.get("words", [])
+            if (word_text := _strip_unk(str(w["text"])))
         ]
 
         # Parakeet does not identify the language, so the server reports
