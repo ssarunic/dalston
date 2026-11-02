@@ -38,6 +38,7 @@ remain documented with their engine or subsystem.
 | `DALSTON_ENGINE_UNAVAILABLE_BEHAVIOR` | `fail_fast` | Behavior when a required engine is not running. 'fail_fast': fail immediately with error (default). 'wait': queue task and wait for engine to start. |
 | `DALSTON_ENGINE_WAIT_TIMEOUT_SECONDS` | `300` | Maximum time to wait for an engine to start (only used when engine_unavailable_behavior='wait'). Task fails if engine doesn't pick it up within this timeout. |
 | `DALSTON_TASK_STALE_TIMEOUT_S` | `1800` | Wait timeout for tasks whose engine was selected on-demand with zero live instances (M91 scale-to-zero). Sized for several autoscaler ticks + spot launch + model cold boot; the job fails with an explicit 'no worker became available' error after this. |
+| `DALSTON_EXTERNAL_ENGINE_QUEUE_CAPACITY` | `20` | M105: tasks an external engine (deployment: external, e.g. the M104 Mac worker) may have queued or in flight before auto-routing overflows to other engines. Keep equal to the autoscale policy's tasks_per_instance so the external engine counts as exactly one instance in front of the GPU fleet. |
 | `DALSTON_AUDIO_URL_MAX_SIZE_GB` | `3.0` | Maximum audio file size for URL downloads in GB |
 | `DALSTON_AUDIO_URL_TIMEOUT_SECONDS` | `300` | Timeout for downloading audio from URLs in seconds |
 | `DALSTON_DEFAULT_MODEL` | `Systran/faster-whisper-base` | Default transcription model for OpenAI/ElevenLabs compatible APIs |
