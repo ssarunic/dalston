@@ -48,7 +48,7 @@ gateway = [
     "tinytag>=2.2.1",  # Audio metadata extraction (CVE-2026-33671: SYLT loop DoS)
     "huggingface_hub>=1.0.0",  # For HF card routing (M40.5)
     # OpenTelemetry auto-instrumentation (M19)
-    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-instrumentation-fastapi==0.66b2",
     "opentelemetry-instrumentation-redis==0.66b1",
     "opentelemetry-instrumentation-httpx==0.66b1",
     "opentelemetry-instrumentation-sqlalchemy==0.66b1",
