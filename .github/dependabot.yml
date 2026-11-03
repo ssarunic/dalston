@@ -200,6 +200,11 @@ updates:
     ignore:
       - dependency-name: "nvidia/cuda"
         update-types: ["version-update:semver-major"]
+      # Python minor bumps need every compiled dep (onnxruntime, the pinned
+      # +cu126 torch in base-pyannote, ...) to ship wheels first. Bump the
+      # python:*-slim tags by hand, all Dockerfiles together.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     reviewers:
       - sasasarunic
     labels:
@@ -231,6 +236,9 @@ updates:
       engine-images:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     reviewers:
       - sasasarunic
     labels:
