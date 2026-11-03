@@ -45,6 +45,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Free disk space
+        run: |
+          # torch+cu126 pip libs + pyannote need ~15GB of layer space; the
+          # 2026-11-03 build died with ENOSPC on a stock runner.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          docker system prune -af
+          df -h /
+
       - name: Build base-pyannote and engine
         run: |
           # Build base-pyannote first (engine depends on it)

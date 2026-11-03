@@ -35,21 +35,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # PyTorch + pyannote.audio (the heavy part — 2-3GB)
-# torch + torchcodec must match ABI (torchcodec 0.10 vs torch 2.11 gives
-# undefined c10::MessageLogger symbol). Pin the torch minor so rebuilds
-# can't silently mix; torchcodec from PyPI links against CUDA 13 NPP, use
-# PyTorch's own index for CUDA 12 compatible wheels.
+#
+# Pinned to exact +cu126 builds on purpose. pip picks the highest version
+# across ALL indexes, so a range like "torchaudio>=2.11,<2.12" with the
+# cu126 index as an extra index is a trap: on 2026-10-28 PyPI published
+# torchaudio 2.11.1 as a py3-none wheel built against CUDA 13 (2.11.1+cu132,
+# links libcudart.so.13). 2.11.1 outranks 2.11.0+cu126, so the next rebuild
+# shipped a CUDA-13 torchaudio on a CUDA-12 torch and every diarize task
+# died with "Could not load this library: .../_torchaudio.so". A "+cu126"
+# local version can only be satisfied by the PyTorch index, so PyPI can
+# never outrank it again. torch + torchcodec must also match ABI
+# (torchcodec 0.10 vs torch 2.11 gives undefined c10::MessageLogger).
+# Bump all three together, from the cu126 index only.
 RUN if [ "$DEVICE" = "cuda" ]; then \
         pip install --no-cache-dir --break-system-packages \
             --extra-index-url https://download.pytorch.org/whl/cu126 \
-            "torch>=2.11,<2.12" "torchaudio>=2.11,<2.12" \
-            "torchcodec>=0.11,<0.12" \
+            "torch==2.11.0+cu126" "torchaudio==2.11.0+cu126" \
+            "torchcodec==0.11.1+cu126" \
             "pyannote.audio>=4.0.0,<5.0.0" \
             "huggingface_hub>=1.0.0"; \
     else \
         pip install --no-cache-dir --break-system-packages \
-            "torch>=2.11,<2.12" "torchaudio>=2.11,<2.12" \
-            "torchcodec>=0.11,<0.12" \
+            "torch==2.11.0" "torchaudio==2.11.0" \
+            "torchcodec==0.11.1" \
             "pyannote.audio>=4.0.0,<5.0.0" \
             "huggingface_hub>=1.0.0"; \
     fi
