@@ -3,5 +3,5 @@ presidio-anonymizer>=2.2.366
 gliner>=0.2.29
 spacy>=3.8.18
 phonenumbers>=9.0.42
-pydantic>=2.14.1
+pydantic>=2.14.2
 structlog>=26.1.0
