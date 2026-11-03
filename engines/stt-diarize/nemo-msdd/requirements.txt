@@ -9,7 +9,7 @@ nemo_toolkit[asr]>=2.7.3,<2.8.0
 soundfile>=0.14.0
 
 # Diarization-specific (explicit for clarity, pulled by nemo)
-omegaconf>=2.3.1
+omegaconf>=2.4.0
 
 # googleapis-common-protos >=1.75.1 (2026-08-06) requires protobuf>=6.33.5,
 # but nemo_toolkit 2.7.x pins protobuf~=5.29.5. The OTLP gRPC exporter pulls
