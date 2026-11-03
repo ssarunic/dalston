@@ -110,11 +110,14 @@ updates:
           - "*"
     # NeMo 3.0 removed msdd_models.NeuralDiarizer, so this engine stays on
     # NeMo 2.7.x (dalston/base-nemo-2.7). 2.7 pins protobuf~=5.29.5, which
-    # caps googleapis-common-protos (see requirements.txt).
+    # caps googleapis-common-protos (see requirements.txt), and
+    # omegaconf<=2.3.
     ignore:
       - dependency-name: "nemo_toolkit"
         versions: [">=2.8"]
       - dependency-name: "googleapis-common-protos"
+      - dependency-name: "omegaconf"
+        versions: [">=2.4"]
     reviewers:
       - sasasarunic
     labels:
