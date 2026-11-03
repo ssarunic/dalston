@@ -65,14 +65,13 @@ updates:
   # Engine dependencies — one monthly PR across all engines. Merging anything
   # under engines/ rebuilds GHCR :latest, which GPU workers pull at boot, so
   # these are reviewed by hand (dependabot-auto-merge.yml skips /engines).
-  # riva and vllm-asr stay separate: their ignore rules would wrongly block
-  # protobuf/numpy updates in the other engines.
+  # riva, vllm-asr and nemo-msdd stay separate: their ignore rules would
+  # wrongly block protobuf/numpy/nemo updates in the other engines.
   - package-ecosystem: pip
     directories:
       - "/engines/stt-align/phoneme-align"
       - "/engines/stt-combo/whisper-align-pyannote"
       - "/engines/stt-detect/pii-presidio"
-      - "/engines/stt-diarize/nemo-msdd"
       - "/engines/stt-diarize/nemo-sortformer"
       - "/engines/stt-diarize/pyannote-4.0"
       - "/engines/stt-merge/final-merger"
@@ -94,6 +93,28 @@ updates:
       # engine requirements (tests/unit/test_silero_vad_shared.py). A
       # single-file bump always fails CI; bump it everywhere by hand.
       - dependency-name: "silero-vad"
+    reviewers:
+      - sasasarunic
+    labels:
+      - dependencies
+      - python
+      - engines
+
+  - package-ecosystem: pip
+    directory: "/engines/stt-diarize/nemo-msdd"
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        patterns:
+          - "*"
+    # NeMo 3.0 removed msdd_models.NeuralDiarizer, so this engine stays on
+    # NeMo 2.7.x (dalston/base-nemo-2.7). 2.7 pins protobuf~=5.29.5, which
+    # caps googleapis-common-protos (see requirements.txt).
+    ignore:
+      - dependency-name: "nemo_toolkit"
+        versions: [">=2.8"]
+      - dependency-name: "googleapis-common-protos"
     reviewers:
       - sasasarunic
     labels:
