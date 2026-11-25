@@ -2479,7 +2479,7 @@ def get_gpu_ami(region: str) -> str:
     """Get the Deep Learning Base AMI with NVIDIA drivers pre-installed."""
     ssm = boto3.client("ssm", region_name=region)
     resp = ssm.get_parameter(
-        Name="/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id"
+        Name="/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id"
     )
     return resp["Parameter"]["Value"]
 
