@@ -2350,6 +2350,19 @@ echo "Enabling SSM Agent..."
 snap install amazon-ssm-agent --classic 2>/dev/null || apt-get install -y amazon-ssm-agent 2>/dev/null || true
 systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null || systemctl enable --now amazon-ssm-agent 2>/dev/null || true
 
+# Freeze the NVIDIA driver/toolkit packages at the AMI's versions before any
+# patching. The Ubuntu 24.04 DLAMI pre-generates a CDI spec
+# (/var/run/cdi/nvidia.yaml) that names versioned driver libs; an apt upgrade
+# of e.g. libnvidia-fmdrv1 removes the old .so and the engine containers then
+# fail to restart ("failed to fulfil mount request: ...so.<old version>").
+# Driver updates arrive via new AMIs instead.
+NVIDIA_PKGS=$(dpkg-query -W -f='${{db:Status-Abbrev}} ${{Package}}\n' 2>/dev/null \
+  | awk '$1 == "ii" && $2 ~ /^(lib)?(nvidia|cuda|cudnn|nccl)/ {{print $2}}' || true)
+if [ -n "$NVIDIA_PKGS" ]; then
+  apt-mark hold $NVIDIA_PKGS >/dev/null
+  echo "Held $(echo "$NVIDIA_PKGS" | wc -l) NVIDIA/CUDA packages at AMI versions"
+fi
+
 # Daily security patching via systemd timer (4:00 AM UTC, staggered from control plane)
 cat > /etc/systemd/system/dalston-patch.service << 'PATCHSVCEOF'
 [Unit]
